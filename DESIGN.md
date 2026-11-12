@@ -414,7 +414,8 @@ that:
    LOD can swap a part for a simpler one, all from data that is already
    there.
 3. **The `.glb` remembers the parts.** It carries each part's name and
-   which triangles are its own (section 8).
+   which triangles are its own, and each assembly's name and the
+   triangles of every part inside it (section 8).
 
 ---
 
@@ -502,7 +503,7 @@ Mold writes a deliberately narrow kind of it:
 | Colours | `COLOR_0`: three decimal numbers per corner, linear. |
 | Triangles | A list of corner numbers, always 32-bit. Faces do not share corners with other faces. |
 | Material | One plain, matt material. No textures, no UVs. |
-| Extras | Under `extras.duck_mold`: the format version, the recipe's name, the palette (names and `#RRGGBB`), and the list of parts with the triangles each one owns. Other programs ignore this; Duck tools read it. |
+| Extras | Under `extras.duck_mold`: the format version, the recipe's name, the palette (names and `#RRGGBB`), the list of parts with the triangles each one owns, and the list of assemblies (parts made of parts) with the triangles of every part inside each. Other programs ignore this; Duck tools read it. (Assemblies were added after Phase 0, when Duck Forge wanted to recolour a whole arm; `docs/forge-handoff.md` describes both lists.) |
 | Not written | Cameras, lights, animations, skins, textures, a date, your folder names. |
 
 **Directions in the file.** glTF also says y is up and z is forward, but
@@ -669,9 +670,10 @@ its six parts shown here, to keep the example short):
 - Every palette colour is listed, with 0 triangles if nothing uses it.
   `unpainted_triangles` appears when some faces have no colour.
 - For an `.obj` or a Duck Mold `.glb` the report has the same fields. A
-  `.glb` gives its parts as a flat list; an `.obj` is one part, and the
-  report adds `materials`, the file's material names with their triangle
-  counts.
+  `.glb` gives its tree of parts back (names, assemblies and triangles;
+  not what each was made from or joined to); an `.obj` is one part, and
+  the report adds `materials`, the file's material names with their
+  triangle counts.
 
 When the recipe has mistakes:
 

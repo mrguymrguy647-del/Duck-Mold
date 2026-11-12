@@ -115,8 +115,10 @@ warns about it, but it is a trap. See "Decisions I'd revisit".
   instant for ordinary models (400 touching bricks: 0.01 s), but a
   cluster of high-detail parts all pushed into each other is slow (20
   spheres of 32 segments, all overlapping: 3.6 s).
-- Reading a `.glb` back gives the parts as a flat list, not a tree, and
-  cannot tell apart two palette colours that are the same colour.
+- Reading a `.glb` back gives the tree of parts (since the change below,
+  "After the Duck Forge session"), but not what each part was made from
+  or joined to, and cannot tell apart two palette colours that are the
+  same colour.
 
 **Limits of the proof that output is identical everywhere.** The design
 goes to some trouble for this (its own sine and cosine, a fixed colour
@@ -260,3 +262,35 @@ After those, in no fixed order: bones from socket joins (the names
 every part's place and sockets for this), mirror copies ("both arms in
 one line"), colour swap on `use`, removing hidden faces, and an MCP
 server over `tools.rs`, as Duck Echo has.
+
+## After the Duck Forge session
+
+Duck Forge now loads these models: `Mesh::load_glb` in its `src/glb.rs`,
+with `examples/turntable/` showing the robot. That session reported
+four things, and all four are changed here:
+
+1. **The reader could crash on a damaged file.** Two sizes read from
+   the file were added or multiplied without checks, so a file claiming
+   an enormous count overflowed (a panic in a debug build) instead of
+   being refused. Both readers, Duck Forge's and Duck Mold's own (for
+   `inspect`), now check them; tests feed them damaged files.
+2. **The handoff note's suggested first test failed as written.** It
+   measured from the origin, but the crate stands on y = 0, so its two
+   bottom triangles failed. The note now says to measure from the
+   crate's middle, and that the helper it named is private to Duck
+   Forge's own tests.
+3. **Assemblies have triangle ranges.** The `.glb` lists each part made
+   of parts (`assemblies`, under `extras.duck_mold`) with the triangles
+   of every part inside it, so a game can recolour a whole arm in one go.
+   `inspect` on a `.glb` now gives the tree of parts back, as it is for
+   the recipe. The golden files were regenerated for this: each `.glb`
+   gained its list (empty for the crate, table and tree), the reports
+   are unchanged, and the Khronos validator still reports nothing.
+4. **The reader has a version, and its two copies can be compared.**
+   It sits between two marker lines, which Duck Forge's `src/glb.rs`
+   holds byte for byte; `docs/forge-handoff.md` has the one-line check.
+   This is version 2.
+
+Also: a test that renamed a word inside a `.glb` did it through a text
+conversion that changes binary bytes, and passed only by luck; it now
+renames the bytes themselves.
