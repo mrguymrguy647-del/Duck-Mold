@@ -1,6 +1,7 @@
 # Builds and tests Duck Mold on Windows and Linux for every push and pull
 # request, checks the formatting, and runs clippy (Rust's checker for
-# common mistakes). A copy of Duck Quill's, plus the formatting check. A
+# common mistakes), with the preview window and without it. A copy of
+# Duck Quill's, plus the formatting check and the build without a window. A
 # red cross on GitHub means one of these steps failed: click it to see
 # which.
 name: CI
@@ -45,3 +46,9 @@ jobs:
         run: cargo test --workspace
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # The same without the preview window, the way a machine with no
+      # screen builds Duck Mold: everything else must still build and pass.
+      - name: Test without the window
+        run: cargo test --workspace --no-default-features
+      - name: Clippy without the window
+        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings

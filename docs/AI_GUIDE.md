@@ -22,6 +22,10 @@ duck-mold render lamp.toml            # draw it: lamp.png, four views on one she
 duck-mold inspect lamp.toml --sockets # also list every named socket: head.top, ...
 ```
 
+(`duck-mold preview lamp.toml` opens a window for a person to look
+around the model in, which builds it again on every save. It needs a
+screen and waits until the window is closed: as an agent, use `render`.)
+
 ```bash
 duck-mold export lamp.toml            # write lamp.glb next to the recipe
 ```

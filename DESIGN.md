@@ -550,13 +550,14 @@ Mold.
 ## 9. The commands
 
 The program is `duck-mold`. Three commands, plus help; Phase 1 adds
-`render`.
+`render` and `preview`.
 
 | Command | What it does |
 |---|---|
 | `duck-mold inspect <file> [--json] [--sockets]` | Checks and builds a recipe in memory and reports on it. Also takes an `.obj` mesh, or a `.glb` that Duck Mold wrote, to measure it as it is. Writes nothing. *(Phase 1:)* `--sockets` adds every named socket, where it is and the way it faces: the names a game can ask the `.glb` for. |
 | `duck-mold export <recipe> [-o <file.glb>] [--json]` | Builds the recipe and writes the `.glb` (default: next to the recipe, same name). Ends with a one-line summary; `--json` gives the full inspect report. |
 | `duck-mold render <file> [-o <file.png>] [--size N] [--json]` | *(Phase 1.)* Draws the model and writes a PNG: four views on one sheet (section 17, step 2). Takes what `inspect` takes. |
+| `duck-mold preview <file>` | *(Phase 1.)* Opens a window showing the model: drag to orbit, wheel to zoom, Escape to quit; builds it again when a file it reads is saved (section 17, step 7). |
 | `duck-mold guide` | Prints the agent guide, which is built into the program, so an agent with only the program can learn it. |
 | `duck-mold help`, `--help`, `--version` | Every command; `duck-mold <command> --help` for one. |
 
@@ -815,9 +816,10 @@ Duck-Mold/
     │   │   ├── inspect.rs     size, counts, ground, floating, overlapping
     │   │   └── tools.rs       what the commands do, for any front end
     │   └── tests/             one file of tests per step
-    ├── duck-mold-view/        (Phase 1) pictures: `render`, drawn by Duck Forge's CPU renderer
-    │   ├── src/render.rs      turn the model for each view, draw, lay out the sheet
-    │   └── tests/             each view sees what it says; same scale; same bytes
+    ├── duck-mold-view/        (Phase 1) pictures and the window, by Duck Forge
+    │   ├── src/render.rs      `render`: turn the model for each view, draw, lay out the sheet
+    │   ├── src/preview.rs     `preview`: a Duck Forge game that shows the model and watches its files
+    │   └── tests/             each view sees what it says; same bytes; the window, without a window
     └── duck-mold-cli/         the `duck-mold` program: commands, text and JSON output
         └── tests/             the program itself, and the golden-file tests
 ```
@@ -838,7 +840,7 @@ and every public item must have a comment, as in Duck Echo.
 | `toml` | core | Reads TOML and tells me where every field is, for line numbers. |
 | `serde`, `serde_json` | core | Writes JSON (reports, and the JSON block inside a `.glb`) and reads glTF. |
 | `clap` | cli | Reads the command line and writes `--help` from the same comments, so help can't drift from what the program does. Duck Echo uses it too. |
-| `duckforge` | view | *(Phase 1.)* Duck Forge itself, from GitHub, pinned to one commit on its `main`, with its window, graphics card and sound turned off: its CPU renderer draws `render`'s pictures. It brings `png` and `gif`. |
+| `duckforge` | view | *(Phase 1.)* Duck Forge itself, from GitHub, pinned to one commit on its `main`, with its graphics card and sound turned off: its CPU renderer draws `render`'s pictures and the preview, and its window (the `preview` feature, on by default) shows the preview. It brings `png` and `gif`, and with the window `winit` and `softbuffer`. |
 | `png` | view | *(Phase 1.)* Writes the pictures. The same library and version Duck Forge uses. |
 
 That is all. Things written here rather than imported, because each is
@@ -1182,8 +1184,8 @@ two pieces with their own positions), not by Duck Mold, so the import is
 tested on a file Duck Mold didn't write, and a recipe that uses it
 alongside a Duck Mold `.glb`.
 
-*As built:* `crates/duck-mold-core/src/gltf.rs`, about 600 lines with no
-new library, reads into the same mesh type as OBJ, which now carries
+*As built:* `crates/duck-mold-core/src/gltf.rs`, about 850 lines with
+its own tests and no new library, reads into the same mesh type as OBJ, which now carries
 each material's colour. The example is `examples/desk.toml`: a desk with
 `parts/lamp.gltf` (three materials, four pieces: a box with 16-bit
 corner numbers, one with 8-bit ones placed by a matrix, a shade as a
@@ -1226,6 +1228,21 @@ screenshot.
 
 It is tested without a window by Duck Forge's `Simulation`, which feeds
 it mouse drags, wheel turns and changed files and checks what it draws.
+
+*As built:* `crates/duck-mold-view/src/preview.rs`. The model is drawn
+in perspective (a 40° view), from the front right and a little above to
+start, lit from over the viewer's shoulder whichever way it is turned.
+Saving keeps the view where it was. Mistakes show in red and warnings in
+amber at the top, wrapped to fit, and are printed to the terminal too.
+`load` now lists every file it reads, the recipe first (palette files,
+recipes used as parts, meshes and a `.gltf`'s `.bin`), and those are
+what is watched. Built with `--no-default-features`, `duck-mold preview`
+says it was built without its window and suggests `render`; without a
+screen, it says so in one line. On Linux the window needs X11 and the
+`libxkbcommon-x11` library when it opens, which Duck Forge loads then:
+building needs neither. It was also tried for real on a virtual X
+screen: the robot drawn, a colour change saved and shown, a broken save
+shown in red over the last good model. CI builds and tests both ways.
 
 Phase 1 ends with `PHASE1_REPORT.md`: what works, known limits, what
 changed from this design, and what Phase 2 should start with.

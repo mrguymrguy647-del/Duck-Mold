@@ -68,6 +68,18 @@ pub struct Built {
 /// measure (an `.obj` mesh, a `.gltf` or `.glb`: a `.glb` that Duck Mold
 /// wrote comes back with its parts and palette).
 pub fn build(path: &Path) -> Result<Built, Failure> {
+    build_watching(path).0
+}
+
+/// [`build`], and every file it read, the file itself first, whether or
+/// not it built: what a window watches, to build again when one changes.
+pub fn build_watching(path: &Path) -> (Result<Built, Failure>, Vec<PathBuf>) {
+    let mut files = vec![path.to_path_buf()];
+    let built = build_noting(path, &mut files);
+    (built, files)
+}
+
+fn build_noting(path: &Path, files: &mut Vec<PathBuf>) -> Result<Built, Failure> {
     let source = display_path(path);
     let ending = path
         .extension()
@@ -78,6 +90,7 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
         "toml" | "json" => {
             let mut issues = Vec::new();
             let loaded = load(path, &mut issues).map_err(Failure::Usage)?;
+            files.clone_from(&loaded.files);
             match assemble(&loaded, &mut issues) {
                 Some(model) => Ok(Built {
                     model,
@@ -104,16 +117,19 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
             let mut issues = Vec::new();
             let beside = path.parent().unwrap_or(Path::new("."));
             match read_gltf(&bytes, &source, beside, &mut issues) {
-                Some(mesh) => Ok(Built {
-                    model: model_of_mesh(&mesh, path),
-                    source,
-                    warnings: Report::from_issues(issues).warnings,
-                    materials: mesh
-                        .material_counts()
-                        .into_iter()
-                        .map(|(name, triangles)| MaterialUse { name, triangles })
-                        .collect(),
-                }),
+                Some(mesh) => {
+                    files.extend(mesh.extra_files.iter().cloned());
+                    Ok(Built {
+                        model: model_of_mesh(&mesh, path),
+                        source,
+                        warnings: Report::from_issues(issues).warnings,
+                        materials: mesh
+                            .material_counts()
+                            .into_iter()
+                            .map(|(name, triangles)| MaterialUse { name, triangles })
+                            .collect(),
+                    })
+                }
                 None => Err(Failure::Invalid(Report::from_issues(issues))),
             }
         }

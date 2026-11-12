@@ -30,6 +30,8 @@ pub struct MeshFile {
     /// True for a `.glb` Duck Mold wrote: its materials are its palette
     /// colours, which join the model's palette as a recipe's do.
     pub from_duck_mold: bool,
+    /// Other files read for it: a `.gltf`'s `.bin`.
+    pub extra_files: Vec<std::path::PathBuf>,
 }
 
 /// The most mistakes reported for one mesh file. A damaged file can have

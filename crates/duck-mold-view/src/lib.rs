@@ -1,7 +1,11 @@
 //! Pictures of Duck Mold models, drawn by Duck Forge's CPU renderer.
 //!
-//! `duck-mold render` saves one PNG with four views of a model (front,
-//! right side, back and three-quarter), without opening a window. The
+//! `duck-mold render` ([`render`]) saves one PNG with four views of a
+//! model, without opening a window; `duck-mold preview` ([`preview`])
+//! shows it in a window, to orbit and zoom, and builds it again when the
+//! recipe is saved.
+//!
+//! `render`'s four views are front, right side, back and three-quarter. The
 //! drawing is Duck Forge's own CPU renderer, used as a library: the
 //! pictures show a model the way Duck Forge draws it.
 //!
@@ -16,6 +20,7 @@
 //! The library `duck-mold-core` knows nothing of this crate or of Duck
 //! Forge: pictures are an extra on top.
 
+pub mod preview;
 pub mod render;
 
 pub use render::{Rendered, Sheet, ViewPlace, render_file, render_sheet};

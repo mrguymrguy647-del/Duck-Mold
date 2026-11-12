@@ -89,6 +89,20 @@ without opening a window:
 
 ![The robot from the front, the right, the back and three-quarter](tests/golden/robot.png)
 
+6. Or look at it in a window, from every side:
+
+```bash
+target/release/duck-mold preview examples/robot.toml
+```
+
+Drag with the left mouse button to turn it, roll the wheel to come
+closer, Escape to quit. Leave the window open while you edit the recipe:
+every time you save, the model is built again. If the recipe has a
+mistake, the window says so in red and keeps showing the last version
+that built.
+
+![The preview window showing the robot](docs/preview.png)
+
 ## The commands
 
 | Command | What it does |
@@ -96,6 +110,7 @@ without opening a window:
 | `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
+| `duck-mold preview <file>` | Opens a window showing the model: drag to orbit, wheel to zoom, Escape to quit. It builds the model again whenever the recipe, or a file it uses, is saved. |
 | `duck-mold guide` | Prints the guide for AI agents. |
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
@@ -255,7 +270,7 @@ Duck-Mold/
     │   │   ├── inspect.rs     size, ground, floating and overlapping parts
     │   │   └── tools.rs       what the commands do, for any front end
     │   └── tests/             one file of tests per step
-    ├── duck-mold-view/        pictures (`render`), drawn by Duck Forge's CPU renderer
+    ├── duck-mold-view/        pictures (`render`) and the window (`preview`), by Duck Forge
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 
@@ -275,7 +290,17 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 All three must pass before a commit. GitHub runs them again, on Windows
 and on Linux, for every push and pull request
-(`.github/workflows/ci.yml`).
+(`.github/workflows/ci.yml`), with the preview window and without it.
+
+The preview window comes from Duck Forge (the `preview` feature, on by
+default). On Linux it uses X11 and needs the `libxkbcommon-x11` library
+when the window opens (most desktops have it; on Ubuntu or Debian,
+`sudo apt install libxkbcommon-x11-0`). For a machine with no screen,
+build without it; everything else works the same:
+
+```bash
+cargo build --release --no-default-features
+```
 
 The tests include **golden files**: `tests/golden/` holds the exact
 `.glb` and the exact report for each example, and the tests compare

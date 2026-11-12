@@ -27,6 +27,9 @@ pub struct Loaded {
     /// The model's palette: the recipe's own colours first, then any new
     /// names from the recipes it uses as parts.
     pub palette: Vec<PaletteColor>,
+    /// Every file that was read, the recipe itself first: what a window
+    /// watches, to build the model again when one is saved.
+    pub files: Vec<PathBuf>,
 }
 
 /// Reads the recipe at `path` and every file it names.
@@ -55,11 +58,13 @@ pub fn load(path: &Path, issues: &mut Vec<Issue>) -> Result<Loaded, Box<Issue>> 
         issues,
         palette: Vec::new(),
         open: Vec::new(),
+        files: vec![path.to_path_buf()],
     };
     let recipe = loader.recipe(&text, syntax, path, &display, true);
     Ok(Loaded {
         recipe,
         palette: loader.palette,
+        files: loader.files,
     })
 }
 
@@ -77,11 +82,13 @@ pub fn load_text(
         issues,
         palette: Vec::new(),
         open: Vec::new(),
+        files: Vec::new(),
     };
     let recipe = loader.recipe(text, syntax, &folder.join(display), display, true);
     Loaded {
         recipe,
         palette: loader.palette,
+        files: loader.files,
     }
 }
 
@@ -92,6 +99,8 @@ struct Loader<'a> {
     /// The recipe files being read right now, outermost first, to catch a
     /// file that uses itself.
     open: Vec<(PathBuf, String)>,
+    /// Every file read so far.
+    files: Vec<PathBuf>,
 }
 
 impl Loader<'_> {
@@ -225,6 +234,7 @@ impl Loader<'_> {
     /// Reads a file a recipe names. A file that can't be read is a
     /// mistake in the recipe, reported where the recipe names it.
     fn read(&mut self, path: &Path, written: &str, loc: &Loc) -> Option<String> {
+        self.files.push(path.to_path_buf());
         match std::fs::read_to_string(path) {
             Ok(text) => Some(text),
             Err(error) => {
@@ -305,6 +315,7 @@ impl Loader<'_> {
                 }
             }
             "glb" | "gltf" => {
+                self.files.push(path.clone());
                 let bytes = match std::fs::read(&path) {
                     Ok(bytes) => bytes,
                     Err(error) => {
@@ -321,6 +332,7 @@ impl Loader<'_> {
                 let beside = path.parent().unwrap_or(folder);
                 match read_gltf(&bytes, &shown, beside, self.issues) {
                     Some(mesh) => {
+                        self.files.extend(mesh.extra_files.iter().cloned());
                         // A model Duck Mold wrote brings its palette, as a
                         // recipe used as a part does.
                         if mesh.from_duck_mold {

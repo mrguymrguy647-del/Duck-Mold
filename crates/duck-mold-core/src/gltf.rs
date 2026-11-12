@@ -31,7 +31,7 @@
 //! materials are its palette colours.
 
 use std::collections::BTreeSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
@@ -59,9 +59,11 @@ pub fn read_gltf(
         file,
         folder,
         notes: BTreeSet::new(),
+        read: Vec::new(),
     };
     match reader.read(bytes) {
-        Ok(mesh) => {
+        Ok(mut mesh) => {
+            mesh.extra_files = reader.read;
             for note in reader.notes {
                 issues.push(Issue::warning(Code::Skipped, "", note).in_file(file));
             }
@@ -102,6 +104,8 @@ struct Reader<'a> {
     folder: &'a Path,
     /// What was left out, said once each.
     notes: BTreeSet<String>,
+    /// The other files read: a `.gltf`'s `.bin`.
+    read: Vec<PathBuf>,
 }
 
 /// A 4 x 4 matrix, row by row: turns, stretches and moves a point.
@@ -247,7 +251,7 @@ impl Reader<'_> {
 
     /// Every buffer's bytes: the `.glb`'s own block, a `.bin` file beside
     /// the `.gltf`, or base64 text inside it.
-    fn buffers(&self, json: &Value, bin: Option<&[u8]>) -> Result<Vec<Vec<u8>>, Refusal> {
+    fn buffers(&mut self, json: &Value, bin: Option<&[u8]>) -> Result<Vec<Vec<u8>>, Refusal> {
         let mut buffers = Vec::new();
         for (at, buffer) in list(&json["buffers"]).iter().enumerate() {
             let length = whole(&buffer["byteLength"])
@@ -272,6 +276,7 @@ impl Reader<'_> {
                 }
                 Some(uri) => {
                     let name = percent_decoded(uri);
+                    self.read.push(self.folder.join(&name));
                     std::fs::read(self.folder.join(&name)).map_err(|_| {
                         bad(format!(
                             "can't read \"{name}\", the file that holds its numbers: it must be in the same folder as the .gltf"

@@ -91,6 +91,16 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Open a window that shows the model: drag to orbit, roll the wheel
+    /// to zoom, Escape to quit.
+    ///
+    /// When the recipe, or a file it uses, is saved, the model is built
+    /// again. Mistakes are shown in the window, and the last good model
+    /// stays up. Needs a screen; on a machine without one, use render.
+    Preview {
+        /// A recipe (.toml or .json), or a mesh (.obj, .gltf or .glb).
+        file: PathBuf,
+    },
     /// Print the guide for AI agents: how to write recipes and use these
     /// commands, from scratch.
     Guide,
@@ -164,6 +174,13 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(failure) => fail(&failure, json),
+        },
+        Command::Preview { file } => match duck_mold_view::preview::run(&file) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                complain(&format!("error: {error}"));
+                ExitCode::from(2)
+            }
         },
         Command::Guide => {
             say(GUIDE.trim_end());

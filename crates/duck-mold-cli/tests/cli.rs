@@ -368,6 +368,26 @@ fn render_writes_nothing_for_a_bad_recipe_or_a_bad_size() {
 }
 
 #[test]
+fn preview_needs_a_file_that_is_there() {
+    // Only what fails before a window would open is tried here: a test
+    // machine may have a screen, and a window would wait to be closed.
+    let folder = folder("cli_preview");
+    let output = run(&folder, &["preview", "nowhere.toml"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: can't read \"nowhere.toml\": there is no such file\n"
+    );
+    let output = run(&folder, &["preview", "--help"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        stdout(&output).contains("drag to orbit"),
+        "{}",
+        stdout(&output)
+    );
+}
+
+#[test]
 fn warnings_do_not_change_the_exit_code() {
     let folder = folder("cli_warnings");
     std::fs::write(
@@ -454,6 +474,7 @@ fn help_and_version_explain_the_program() {
             "inspect",
             "export",
             "render",
+            "preview",
             "guide",
             "Exit codes: 0 it worked, 1 the recipe has errors, 2",
         ] {
