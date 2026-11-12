@@ -70,6 +70,10 @@ pub struct Inspection {
     pub floating: Vec<Floating>,
     /// The pairs of parts where one is inside the other.
     pub overlapping: Vec<Overlap>,
+    /// Every named socket, where it is: only with `--sockets`
+    /// ([`socket_report`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sockets: Vec<SocketReport>,
     /// Things that look like mistakes.
     pub warnings: Vec<Issue>,
     /// Always empty: a model that has errors is never inspected.
@@ -107,6 +111,32 @@ pub struct ColorUse {
     pub hex: String,
     /// How many triangles have it.
     pub triangles: usize,
+}
+
+/// One named socket, for `inspect --sockets`: the names a game can ask a
+/// `.glb` for.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SocketReport {
+    /// `top`, `head.top`, `left_arm/hand.bottom`.
+    pub name: String,
+    /// Where it is, in metres.
+    pub at: [f64; 3],
+    /// The way it faces, 1 long.
+    pub facing: [f64; 3],
+}
+
+/// Every named socket of the model ([`Model::named_sockets`]), as the
+/// `.glb` holds them.
+pub fn socket_report(model: &Model) -> Vec<SocketReport> {
+    model
+        .named_sockets()
+        .into_iter()
+        .map(|socket| SocketReport {
+            name: socket.name,
+            at: socket.at.to_array(),
+            facing: socket.facing.to_array(),
+        })
+        .collect()
 }
 
 /// One material of a mesh file and how many triangles have it.
@@ -267,12 +297,8 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
 
     let used = palette.iter().filter(|color| color.triangles > 0).count();
     let summary = format!(
-        "{}: {} x {} x {} m, {}, {}, {}, {}, {}, {}",
-        model.name,
-        length(size.x),
-        length(size.y),
-        length(size.z),
-        count(triangles, "triangle"),
+        "{}, {}, {}, {}, {}, {}",
+        headline(&model.name, size.to_array(), triangles),
         count(leaves.len(), "part"),
         count(used, "colour"),
         ground_words(&ground),
@@ -306,6 +332,7 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
             .collect(),
         floating,
         overlapping,
+        sockets: Vec::new(),
         warnings,
         errors: Vec::new(),
     }
@@ -369,6 +396,15 @@ fn length(metres: f64) -> String {
     }
 }
 
+/// The start of the summary: `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
+fn headline(name: &str, size: [f64; 3], triangles: usize) -> String {
+    let [x, y, z] = size.map(length);
+    format!(
+        "{name}: {x} x {y} x {z} m, {}",
+        count(triangles, "triangle")
+    )
+}
+
 /// `1 part`, `3 parts`.
 fn count(number: usize, word: &str) -> String {
     if number == 1 {
@@ -389,6 +425,13 @@ fn ground_words(ground: &Ground) -> String {
 }
 
 impl Inspection {
+    /// The start of [`Inspection::summary`]: the model's name, size and
+    /// triangle count, as `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
+    /// `render` writes it under its pictures.
+    pub fn headline(&self) -> String {
+        headline(&self.name, self.size, self.triangles)
+    }
+
     /// The report for people, a few aligned lines.
     pub fn to_text(&self) -> String {
         let mut out = String::new();
@@ -546,7 +589,48 @@ impl Inspection {
                 })
                 .collect(),
         );
+        if !self.sockets.is_empty() {
+            let name_width = self
+                .sockets
+                .iter()
+                .map(|socket| socket.name.chars().count())
+                .max()
+                .unwrap_or(0);
+            let rows: Vec<String> = self
+                .sockets
+                .iter()
+                .map(|socket| {
+                    let [x, y, z] = socket.at.map(length);
+                    format!(
+                        "{:<name_width$}   at {x}, {y}, {z}   facing {}",
+                        socket.name,
+                        direction_words(socket.facing)
+                    )
+                })
+                .collect();
+            list("sockets", rows);
+        }
         format!("{}  ({})\n{out}", self.name, self.source)
+    }
+}
+
+/// `up`, `left`... for a direction straight along one of them, otherwise
+/// its three numbers.
+fn direction_words(facing: [f64; 3]) -> String {
+    const WORDS: [(&str, [f64; 3]); 6] = [
+        ("up", [0.0, 1.0, 0.0]),
+        ("down", [0.0, -1.0, 0.0]),
+        ("left", [-1.0, 0.0, 0.0]),
+        ("right", [1.0, 0.0, 0.0]),
+        ("front", [0.0, 0.0, 1.0]),
+        ("back", [0.0, 0.0, -1.0]),
+    ];
+    match WORDS.iter().find(|(_, direction)| *direction == facing) {
+        Some((word, _)) => (*word).to_owned(),
+        None => {
+            let [x, y, z] = facing.map(|n| format!("{}", (n * 1000.0).round() / 1000.0 + 0.0));
+            format!("[{x}, {y}, {z}]")
+        }
     }
 }
 

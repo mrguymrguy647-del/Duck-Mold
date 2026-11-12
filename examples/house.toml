@@ -1,5 +1,5 @@
-# A small house: walls, a roof made of two wedges, a door, two windows
-# and a chimney. Everything is placed by sockets.
+# A small house: walls, a roof made of two wedges, a door, two windows,
+# a chimney and a skylight. Everything is placed by sockets.
 #
 #   duck-mold inspect examples/house.toml
 #
@@ -7,7 +7,7 @@
 
 version = 0
 name = "house"
-description = "A small house with a pitched roof and a chimney."
+description = "A small house with a pitched roof, a chimney and a skylight."
 
 [palette]
 wall  = "#E8D8B8"
@@ -37,6 +37,12 @@ size = [3, 1, 1.4]
 colors = { left = "wall", right = "wall" }
 attach = "back"
 to = "front_half.back"
+
+# Every wedge has a socket called `slope`: the middle of its slope,
+# facing straight out of it. The roof passes the front half's on, so
+# that something can be put on the roof from outside.
+[define.roof.sockets]
+skylight = { from = "front_half.slope" }
 
 # The walls, with a socket for everything that goes on them. A shift of
 # -1 up-and-down puts a socket on the bottom edge of its side.
@@ -101,3 +107,13 @@ to = "walls.chimney"
 
 [parts.sockets]
 foot = { on = "right", shift = [0, -1, 0] }
+
+# A skylight lies flat on the front of the roof: its bottom on the slope,
+# so it leans back with it.
+[[parts]]
+name = "skylight"
+shape = "box"
+size = [0.7, 0.05, 0.5]
+color = "glass"
+attach = "bottom"
+to = "roof.skylight"

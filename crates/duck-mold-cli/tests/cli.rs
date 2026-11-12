@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "rotate", "move", "scale", "mirror", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -230,6 +230,161 @@ fn export_writes_nothing_when_the_recipe_has_mistakes() {
     assert_eq!(output.status.code(), Some(1));
     assert!(!folder.join("bad.glb").exists());
     assert!(stderr(&output).ends_with("3 errors, 2 warnings. Nothing was built.\n"));
+}
+
+#[test]
+fn inspect_sockets_lists_every_named_socket() {
+    let folder = folder("cli_sockets");
+    let output = run(&folder, &["inspect", "tree.toml", "--sockets"]);
+    assert_eq!(output.status.code(), Some(0));
+    let text = stdout(&output);
+    let lines: Vec<&str> = text
+        .lines()
+        .skip_while(|line| !line.starts_with("  sockets"))
+        .collect();
+    // The model's seven, and seven for each of its two parts.
+    assert_eq!(lines.len(), 21, "{text}");
+    assert_eq!(
+        lines[0],
+        "  sockets      top             at 0.00, 2.80, 0.00   facing up"
+    );
+    // A cone's sides are on its slant, facing out of it.
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("leaves.left") && line.contains("facing [-0.916, 0.401, 0]")),
+        "{text}"
+    );
+
+    let report = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--sockets", "--json"],
+    ));
+    let sockets = report["sockets"].as_array().unwrap();
+    assert_eq!(sockets.len(), 21);
+    assert_eq!(sockets[7]["name"], "trunk.top");
+    assert_eq!(sockets[7]["facing"], serde_json::json!([0.0, 1.0, 0.0]));
+
+    // Without --sockets they aren't listed.
+    let report = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    assert!(report.get("sockets").is_none());
+}
+
+#[test]
+fn render_writes_a_png_next_to_the_recipe() {
+    let folder = folder("cli_render");
+    let output = run(&folder, &["render", "tree.toml"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let bytes = std::fs::read(folder.join("tree.png")).unwrap();
+    assert_eq!(&bytes[0..8], b"\x89PNG\r\n\x1a\n");
+    assert_eq!(
+        stdout(&output),
+        format!(
+            "wrote tree.png (513 x 536 pixels, {} bytes): tree: 1.40 x 2.80 x 1.40 m, 42 triangles, 2 parts, 2 colours, rests on the ground, nothing floating, nothing overlapping\n",
+            bytes.len()
+        )
+    );
+    assert_eq!(stderr(&output), "ok: no problems found\n");
+
+    // The same recipe gives the same picture, run after run.
+    let output = run(&folder, &["render", "tree.toml", "-o", "again.png"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(std::fs::read(folder.join("again.png")).unwrap(), bytes);
+
+    // A model file can be drawn too, as it is.
+    run(&folder, &["export", "tree.toml"]);
+    let output = run(&folder, &["render", "tree.glb", "--size", "128"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(stdout(&output).starts_with("wrote tree.png (257 x 269 pixels"));
+}
+
+#[test]
+fn render_json_says_where_each_view_is() {
+    let folder = folder("cli_render_json");
+    let output = run(
+        &folder,
+        &[
+            "render",
+            "tree.toml",
+            "-o",
+            "sheet.png",
+            "--size",
+            "200",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let report = json(&output);
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["output"], "sheet.png");
+    assert_eq!(report["width"], 401);
+    assert_eq!(report["triangles"], 42);
+    assert_eq!(
+        report["bytes"].as_u64().unwrap(),
+        std::fs::metadata(folder.join("sheet.png")).unwrap().len()
+    );
+    let views: Vec<(String, u64, u64)> = report["views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|view| {
+            assert_eq!(view["size"], 200);
+            (
+                view["name"].as_str().unwrap().to_owned(),
+                view["left"].as_u64().unwrap(),
+                view["top"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        views,
+        [
+            ("front".to_owned(), 0, 0),
+            ("right".to_owned(), 201, 0),
+            ("back".to_owned(), 0, 201),
+            ("three_quarter".to_owned(), 201, 201),
+        ]
+    );
+    assert_eq!(
+        report["views"][1]["from"],
+        serde_json::json!([1.0, 0.0, 0.0])
+    );
+}
+
+#[test]
+fn render_writes_nothing_for_a_bad_recipe_or_a_bad_size() {
+    let folder = folder("cli_render_bad");
+    let output = run(&folder, &["render", "bad.toml"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!folder.join("bad.png").exists());
+
+    let output = run(&folder, &["render", "tree.toml", "--size", "16"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!folder.join("tree.png").exists());
+    assert_eq!(
+        stderr(&output),
+        "error: size: --size 16 is too small for the views' names to fit. Did you mean \"--size 256\"? Allowed: 128 to 2048.\n"
+    );
+}
+
+#[test]
+fn preview_needs_a_file_that_is_there() {
+    // Only what fails before a window would open is tried here: a test
+    // machine may have a screen, and a window would wait to be closed.
+    let folder = folder("cli_preview");
+    let output = run(&folder, &["preview", "nowhere.toml"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: can't read \"nowhere.toml\": there is no such file\n"
+    );
+    let output = run(&folder, &["preview", "--help"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        stdout(&output).contains("drag to orbit"),
+        "{}",
+        stdout(&output)
+    );
 }
 
 #[test]
@@ -318,6 +473,8 @@ fn help_and_version_explain_the_program() {
         for expected in [
             "inspect",
             "export",
+            "render",
+            "preview",
             "guide",
             "Exit codes: 0 it worked, 1 the recipe has errors, 2",
         ] {
@@ -437,5 +594,5 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 24, "the guide's tables list 24 fields");
+    assert_eq!(checked, 25, "the guide's tables list 25 fields");
 }

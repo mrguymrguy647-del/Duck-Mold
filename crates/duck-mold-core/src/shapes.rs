@@ -65,6 +65,81 @@ impl Polygon {
             group: self.group,
         }
     }
+
+    /// Whether `point`, which is in the face's plane, is inside the face
+    /// or on its edge (allowing `near` for rounding). The face must bulge
+    /// nowhere inwards, as every face of the five shapes does.
+    fn contains(&self, point: Vec3, normal: Vec3, near: f64) -> bool {
+        (0..self.corners.len()).all(|at| {
+            let start = self.corners[at];
+            let edge = self.corners[(at + 1) % self.corners.len()] - start;
+            // How far the point is inside this edge, times the edge's
+            // length: negative outside.
+            edge.cross(point - start).dot(normal) >= -near * edge.length()
+        })
+    }
+}
+
+/// Where a line coming straight in from the box around a shape first
+/// touches the shape. See [`land`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Landing {
+    /// The line starts on the surface already: nothing moves.
+    Already,
+    /// It touches the surface at `at`, where the surface faces `facing`
+    /// (1 long). On an edge or a corner, `facing` is halfway between the
+    /// faces that meet there.
+    Touches {
+        /// Where.
+        at: Vec3,
+        /// The way the surface faces there.
+        facing: Vec3,
+    },
+    /// It passes beside the shape without touching it.
+    Misses,
+}
+
+/// Follows a line from `start` in the direction `inward` (1 long) to
+/// where it first touches one of `faces`.
+///
+/// This is how a socket on a side of a shape's box finds the shape's
+/// surface: from the side, straight in. `size` is about how big the
+/// shape is; points closer than a billionth of it count as touching, so
+/// rounding never decides.
+pub fn land(faces: &[Polygon], start: Vec3, inward: Vec3, size: f64) -> Landing {
+    let near = 1e-9 * size.max(1e-9);
+    // Every face the line goes through: how far along, and its normal.
+    let mut hits: Vec<(f64, Vec3)> = Vec::new();
+    for polygon in faces {
+        let Some(normal) = polygon.normal() else {
+            continue; // a face with no area
+        };
+        let towards = normal.dot(inward);
+        if towards.abs() < 1e-12 {
+            continue; // the line runs along the face, not through it
+        }
+        let along = normal.dot(polygon.corners[0] - start) / towards;
+        if along < -near {
+            continue; // behind the start
+        }
+        if polygon.contains(start + inward * along, normal, near) {
+            hits.push((along, normal));
+        }
+    }
+    let Some(first) = hits.iter().map(|&(along, _)| along).reduce(f64::min) else {
+        return Landing::Misses;
+    };
+    if first <= near {
+        return Landing::Already;
+    }
+    let sum = hits
+        .iter()
+        .filter(|&&(along, _)| along <= first + near)
+        .fold(Vec3::ZERO, |sum, &(_, normal)| sum + normal);
+    Landing::Touches {
+        at: start + inward * first,
+        facing: sum.normalized().unwrap_or(-inward),
+    }
 }
 
 /// The names of a shape's groups of faces, in the order [`build`] numbers

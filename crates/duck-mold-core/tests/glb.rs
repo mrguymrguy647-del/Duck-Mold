@@ -855,3 +855,165 @@ fn duck_mold_refuses_files_it_did_not_write() {
     let error = read_glb(&glb[..glb.len() - 100], "cut.glb").unwrap_err();
     assert!(error.message.contains("cut short"));
 }
+
+// ---- Phase 1, step 5: sockets in the file ----------------------------------
+
+/// The `.glb`'s sockets: name, where and facing, as written.
+fn file_sockets(glb: &[u8]) -> Vec<(String, [f64; 3], [f64; 3])> {
+    let three = |value: &serde_json::Value| -> [f64; 3] {
+        let list = value.as_array().unwrap();
+        [0, 1, 2].map(|at| list[at].as_f64().unwrap())
+    };
+    open(glb).json["extras"]["duck_mold"]["sockets"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|entry| {
+            (
+                entry["name"].as_str().unwrap().to_owned(),
+                three(&entry["at"]),
+                three(&entry["facing"]),
+            )
+        })
+        .collect()
+}
+
+#[test]
+fn every_named_socket_is_in_the_file_in_gltfs_directions() {
+    let model = built(ROBOT);
+    let glb = write_glb(&model);
+    let sockets = file_sockets(&glb);
+    let names: Vec<&str> = sockets.iter().map(|(name, _, _)| name.as_str()).collect();
+    // The model's own first, by bare name; then each part's, the seven
+    // built-in ones and then its own.
+    assert_eq!(
+        names[..9],
+        [
+            "top",
+            "bottom",
+            "left",
+            "right",
+            "front",
+            "back",
+            "center",
+            "body.top",
+            "body.bottom"
+        ]
+    );
+    for name in [
+        "body.neck",
+        "head.top",
+        "left_arm.shoulder",
+        "right_arm.shoulder",
+        "left_leg.bottom",
+    ] {
+        assert!(names.contains(&name), "{name} is missing from {names:?}");
+    }
+    // Every part's seven, and the five the body declares, and the arms'
+    // shoulders.
+    assert_eq!(sockets.len(), 7 + 6 * 7 + 5 + 2);
+
+    // In the file, x is negated, as for the corners.
+    let model_sockets = model.named_sockets();
+    for ((name, at, facing), socket) in sockets.iter().zip(&model_sockets) {
+        assert_eq!(*name, socket.name);
+        assert_eq!(*at, [-socket.at.x + 0.0, socket.at.y, socket.at.z]);
+        assert_eq!(
+            *facing,
+            [-socket.facing.x + 0.0, socket.facing.y, socket.facing.z]
+        );
+    }
+    let (_, at, facing) = &sockets[names
+        .iter()
+        .position(|n| *n == "left_arm.shoulder")
+        .unwrap()];
+    // The left arm is on the model's left, -x, which is +x in the file.
+    assert!(at[0] > 0.0, "{at:?}");
+    assert_eq!(*facing, [-1.0, 0.0, 0.0]);
+}
+
+#[test]
+fn unnamed_parts_have_no_sockets_in_the_file() {
+    let model = built(
+        "version = 0\n[[parts]]\nname = \"post\"\nshape = \"box\"\n[[parts]]\nshape = \"box\"\nmove = [2, 0, 0]\n[[parts]]\nmove = [4, 0, 0]\n[[parts.parts]]\nname = \"inside\"\nshape = \"box\"\n",
+    );
+    let names: Vec<String> = file_sockets(&write_glb(&model))
+        .into_iter()
+        .map(|(name, _, _)| name)
+        .collect();
+    assert!(names.contains(&"post.top".to_owned()));
+    assert!(names.iter().all(|name| !name.contains('#')), "{names:?}");
+    // The model's own seven and the post's seven: nothing from the
+    // unnamed part, nor from the part inside the unnamed assembly.
+    assert_eq!(names.len(), 14);
+}
+
+#[test]
+fn the_duck_forge_reader_finds_the_sockets_where_duck_mold_put_them() {
+    let model = built(ROBOT);
+    let read = forge::read_duck_mold_glb(&write_glb(&model)).unwrap();
+    let expected: Vec<(String, [f32; 3], [f32; 3])> = model
+        .named_sockets()
+        .into_iter()
+        .map(|socket| {
+            let f = |v: duck_mold_core::math::Vec3| [v.x as f32, v.y as f32, v.z as f32];
+            (socket.name, f(socket.at), f(socket.facing))
+        })
+        .collect();
+    let found: Vec<(String, [f32; 3], [f32; 3])> = read
+        .sockets
+        .iter()
+        .map(|socket| (socket.name.clone(), socket.at, socket.facing))
+        .collect();
+    assert_eq!(found, expected);
+    // The head's top is the top of the model, in the middle.
+    let top = read.sockets.iter().find(|s| s.name == "head.top").unwrap();
+    assert_eq!(top.facing, [0.0, 1.0, 0.0]);
+    let highest = read
+        .vertices
+        .iter()
+        .map(|v| v[1])
+        .fold(f32::NEG_INFINITY, f32::max);
+    assert_eq!(top.at[1], highest);
+}
+
+#[test]
+fn duck_mold_reads_the_sockets_back() {
+    let model = built(ROBOT);
+    let read = read_glb(&write_glb(&model), "robot.glb").unwrap();
+    assert_eq!(read.named_sockets(), model.named_sockets());
+    assert_eq!(write_glb(&read), write_glb(&model));
+}
+
+#[test]
+fn a_file_from_before_sockets_still_reads() {
+    let new = write_glb(&built(ROBOT));
+    let old = with_json(&new, |json| {
+        let mut value: serde_json::Value = serde_json::from_str(json).unwrap();
+        value["extras"]["duck_mold"]
+            .as_object_mut()
+            .unwrap()
+            .remove("sockets");
+        serde_json::to_string(&value).unwrap()
+    });
+    assert_eq!(forge::read_duck_mold_glb(&old).unwrap().sockets, Vec::new());
+    assert_eq!(
+        read_glb(&old, "old.glb").unwrap().named_sockets(),
+        Vec::new()
+    );
+}
+
+#[test]
+fn a_damaged_socket_is_refused_by_both_readers() {
+    let new = write_glb(&built(ROBOT));
+    let damaged = with_json(&new, |json| {
+        json.replacen("\"facing\":[0.0,1.0,0.0]", "\"facing\":[0.0,1.0]", 1)
+    });
+    assert_ne!(damaged, new, "the change was made");
+    assert_eq!(
+        forge::read_duck_mold_glb(&damaged).unwrap_err(),
+        "the socket \"top\" has no facing"
+    );
+    let issue = read_glb(&damaged, "damaged.glb").unwrap_err();
+    assert_eq!(issue.code, Code::BadMesh);
+}

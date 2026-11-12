@@ -27,12 +27,13 @@
 
 use std::collections::HashMap;
 
-// ==== Duck Mold's .glb reader, version 2 ====================================
+// ==== Duck Mold's .glb reader, version 3 ====================================
 //
-// Version 2: a part made of parts (an "assembly") has a triangle range too,
-// in `assemblies`; and sizes read from the file are checked before they are
-// added or multiplied, so a damaged file is refused instead of overflowing.
-// Version 1 was Duck Mold's Phase 0.
+// Version 3: the model's named sockets, in `sockets`, so a game can put a
+// hat on `head.top`. Version 2: a part made of parts (an "assembly") has a
+// triangle range too, in `assemblies`; and sizes read from the file are
+// checked before they are added or multiplied, so a damaged file is refused
+// instead of overflowing. Version 1 was Duck Mold's Phase 0.
 
 /// A model read from a Duck Mold `.glb`, in Duck Forge's directions:
 /// x is right, y is up, z is forward, 1 unit is about a metre. The model
@@ -58,6 +59,12 @@ pub struct GlbModel {
     /// one is named after it: `left_arm/hand` is in `left_arm`. Empty for
     /// a model with none, and for files from before version 2.
     pub assemblies: Vec<GlbPart>,
+    /// The model's sockets: named points, each facing a way, where things
+    /// join. The model's own have bare names (`top`), a part's are
+    /// `part.socket` (`head.top`), a part inside an assembly keeps its
+    /// path (`left_arm/hand.bottom`). Parts without a name have none
+    /// here. Empty for files from before version 3.
+    pub sockets: Vec<GlbSocket>,
 }
 
 /// One triangle: three places in `vertices`, clockwise seen from the
@@ -90,6 +97,20 @@ pub struct GlbPart {
     pub first_triangle: usize,
     /// How many triangles it has.
     pub triangles: usize,
+}
+
+/// One named socket: a point on the model and the way it faces, in the
+/// model's own space (before the model is moved or turned), like the
+/// vertices.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlbSocket {
+    /// Its name: `top`, `head.top`, `left_arm/hand.bottom`.
+    pub name: String,
+    /// Where it is.
+    pub at: [f32; 3],
+    /// The way it faces, 1 long: something joined there faces the other
+    /// way, the two pressed together.
+    pub facing: [f32; 3],
 }
 
 /// Reads the bytes of a `.glb` file written by Duck Mold.
@@ -229,6 +250,30 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
     let parts = part_list(&extras["parts"], "part", triangles.len())?;
     let assemblies = part_list(&extras["assemblies"], "assembly", triangles.len())?;
 
+    // The sockets, with x negated like the points.
+    let mut sockets = Vec::new();
+    for entry in extras["sockets"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        let name = entry["name"].as_str().ok_or("a socket has no name")?;
+        let three = |field: &str| match entry[field].as_array().map(Vec::as_slice) {
+            Some([x, y, z]) => match (x.as_f64(), y.as_f64(), z.as_f64()) {
+                (Some(x), Some(y), Some(z)) => {
+                    Ok([-(x as f32) + 0.0, y as f32 + 0.0, z as f32 + 0.0])
+                }
+                _ => Err(format!("the socket \"{name}\" has a broken {field}")),
+            },
+            _ => Err(format!("the socket \"{name}\" has no {field}")),
+        };
+        sockets.push(GlbSocket {
+            name: name.to_owned(),
+            at: three("at")?,
+            facing: three("facing")?,
+        });
+    }
+
     Ok(GlbModel {
         name: extras["name"].as_str().unwrap_or("model").to_owned(),
         vertices,
@@ -236,6 +281,7 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
         palette,
         parts,
         assemblies,
+        sockets,
     })
 }
 
@@ -344,4 +390,4 @@ fn srgb(linear: f32) -> u8 {
     (curved * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-// ==== end of Duck Mold's .glb reader, version 2 =============================
+// ==== end of Duck Mold's .glb reader, version 3 =============================

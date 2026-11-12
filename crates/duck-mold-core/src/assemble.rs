@@ -3,7 +3,7 @@
 //! [`assemble`] takes a recipe that has been read ([`crate::load`]) and
 //! builds the [`Model`]. Every part is first built in its own space (a
 //! [`Body`]): a shape's faces, or, for an assembly, the parts inside it.
-//! Then it is placed in the list it belongs to, by `move` and `rotate` or
+//! Then it is placed in the list it belongs to, by `move` and `rotate`, or
 //! by joining one of its sockets to a socket of a part that is already
 //! placed. The tree of placed parts is kept to the end, when it is
 //! flattened into the model's faces.
@@ -25,10 +25,14 @@ use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
 use crate::recipe::{
-    Axis, Define, Loc, PaletteColor, PartDef, Placement, Recipe, Side, SocketDef, SocketKind,
-    SocketRef, Source, rgb_of,
+    Axis, Define, Loc, PaletteColor, PartDef, Placement, Recipe, Shape, Side, SocketDef,
+    SocketKind, SocketRef, Source, hex, rgb_of,
 };
-use crate::shapes::{self, Polygon};
+use crate::shapes::{self, Landing, Polygon};
+
+/// The socket a wedge has built in besides the seven every part has: the
+/// middle of its slope, facing out of it.
+pub const SLOPE: &str = "slope";
 
 /// The most triangles a model may have. Far beyond "game-ready"; it
 /// stops a recipe that nests uses of uses from filling the memory.
@@ -43,7 +47,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     let recipe = &loaded.recipe;
     let mut assembler = Assembler {
         issues,
-        palette: &loaded.palette,
+        palette: loaded.palette.clone(),
         referenced: vec![false; loaded.palette.len()],
         paint: Vec::new(),
         entry: Vec::new(),
@@ -74,7 +78,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     }
 
     // Colours of the recipe's own palette that nothing names.
-    for (color, referenced) in loaded.palette.iter().zip(&assembler.referenced) {
+    for (color, referenced) in assembler.palette.iter().zip(&assembler.referenced) {
         if color.own && !referenced {
             assembler.issues.push(color.loc.warning(
                 Code::Unused,
@@ -100,7 +104,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     }
     Some(Model {
         name: recipe.name.clone(),
-        palette: loaded.palette.clone(),
+        palette: assembler.palette,
         faces,
         parts,
         sockets: body.all_sockets(&Transform::IDENTITY),
@@ -242,20 +246,76 @@ impl Body {
     }
 
     /// One of the body's sockets, in its own space: a built-in one, on
-    /// the box around it, or one it declares.
+    /// the shape (see [`Body::land`]) or on the box around it, or one it
+    /// declares.
     fn socket(&self, name: &str) -> Option<Socket> {
         if let Some(side) = Side::from_name(name) {
             let bounds = self.bounds?;
+            let at = bounds.center() + Vec3::from(side.offset()).times(bounds.half());
+            let (at, facing) = match self.land(side, at) {
+                Landing::Touches { at, facing } => (at, facing),
+                // A built-in socket always meets the shape: its line runs
+                // through the middle.
+                Landing::Already | Landing::Misses => (at, side.facing().into()),
+            };
             return Some(Socket {
                 name: name.to_owned(),
-                at: bounds.center() + Vec3::from(side.offset()).times(bounds.half()),
-                facing: side.facing().into(),
+                at,
+                facing,
+            });
+        }
+        if name == SLOPE && self.is_wedge() {
+            // The top, moved down onto the slope.
+            return Some(Socket {
+                name: SLOPE.to_owned(),
+                ..self.socket(Side::Top.name())?
             });
         }
         self.sockets
             .iter()
             .find(|socket| socket.name == name)
             .cloned()
+    }
+
+    /// Whether it is one of the five built-in shapes, whose sockets sit
+    /// on its surface. A mesh from a file and an assembly keep theirs on
+    /// the box around them.
+    fn is_shape(&self) -> bool {
+        !self.broken && self.nodes.is_empty() && Shape::NAMES.contains(&self.kind.shape.as_str())
+    }
+
+    fn is_wedge(&self) -> bool {
+        self.is_shape() && self.kind.shape == "wedge"
+    }
+
+    /// Where a socket at `point`, on the `side` of the box around the
+    /// body, goes on the shape itself: straight in from the box until it
+    /// touches the surface, facing out of the surface there. A socket
+    /// already on the surface doesn't move; the middle never does.
+    fn land(&self, side: Side, point: Vec3) -> Landing {
+        let Some(bounds) = self.bounds else {
+            return Landing::Already;
+        };
+        if side == Side::Center || !self.is_shape() {
+            return Landing::Already;
+        }
+        let size = bounds.size();
+        shapes::land(
+            &self.faces,
+            point,
+            -Vec3::from(side.facing()),
+            size.x.max(size.y).max(size.z),
+        )
+    }
+
+    /// The names of its built-in sockets: the seven every part has, and a
+    /// wedge's `slope`.
+    fn built_in_names(&self) -> Vec<&'static str> {
+        let mut names: Vec<&'static str> = Side::ALL.map(Side::name).to_vec();
+        if self.is_wedge() {
+            names.push(SLOPE);
+        }
+        names
     }
 
     /// The names of all its sockets, declared ones first, for messages.
@@ -265,15 +325,15 @@ impl Body {
             .iter()
             .map(|socket| socket.name.clone())
             .collect();
-        names.extend(Side::ALL.map(|side| side.name().to_owned()));
+        names.extend(self.built_in_names().into_iter().map(str::to_owned));
         names
     }
 
     /// All its sockets, built-in ones first, moved by `place`.
     fn all_sockets(&self, place: &Transform) -> Vec<Socket> {
-        Side::ALL
+        self.built_in_names()
             .into_iter()
-            .filter_map(|side| self.socket(side.name()))
+            .filter_map(|name| self.socket(name))
             .chain(self.sockets.iter().cloned())
             .map(|socket| Socket {
                 name: socket.name,
@@ -379,8 +439,9 @@ enum Whole {
 
 struct Assembler<'a> {
     issues: &'a mut Vec<Issue>,
-    /// The model's palette.
-    palette: &'a [PaletteColor],
+    /// The model's palette: the recipe's and its files', and the colours
+    /// of imported materials the recipe gives none.
+    palette: Vec<PaletteColor>,
     /// For each palette colour, whether anything names it.
     referenced: Vec<bool>,
     /// The colour layers of the parts being built, outermost first.
@@ -566,11 +627,46 @@ impl Assembler<'_> {
     /// Chooses a colour for every face of a shape or mesh that has just
     /// been built. `groups_of` says which groups of faces a face name
     /// stands for; `words` lists the face names there are, for messages.
+    /// The palette colour for an imported material the recipe gives no
+    /// colour: the palette's colour of that name if there is one,
+    /// otherwise the file's own, added to the palette under the
+    /// material's name. What was chosen goes in `kept`, for the warning,
+    /// unless it is simply the same colour the palette already has.
+    fn own_color(&mut self, name: &str, rgb: [u8; 3], kept: &mut Vec<Kept>) -> usize {
+        let note = |kept: &mut Vec<Kept>, what: Kept| {
+            if !kept.iter().any(|known| known.name() == name) {
+                kept.push(what);
+            }
+        };
+        if let Some(at) = self.palette.iter().position(|color| color.name == name) {
+            self.referenced[at] = true;
+            let palette = self.palette[at].rgb;
+            if palette != rgb {
+                note(kept, Kept::Palette(name.to_owned(), palette, rgb));
+            }
+            return at;
+        }
+        let loc = self.entry.last().cloned().unwrap_or_default();
+        self.palette.push(PaletteColor {
+            name: name.to_owned(),
+            rgb,
+            loc,
+            own: false,
+        });
+        self.referenced.push(true);
+        note(kept, Kept::Added(name.to_owned(), rgb));
+        self.palette.len() - 1
+    }
+
+    /// The palette colour of each face, from the nearest layer that names
+    /// one. `has_own` says which groups of faces have a colour of their own
+    /// in their file, which takes the place of the "no colour" warning.
     fn paint_faces(
         &mut self,
         faces: &[Polygon],
         groups_of: &dyn Fn(&str) -> Option<Vec<usize>>,
         words: &[String],
+        has_own: &dyn Fn(usize) -> bool,
     ) -> Vec<Option<usize>> {
         // A colour for a group of faces. `Some(None)` is a colour that
         // was written but isn't in the palette.
@@ -605,6 +701,9 @@ impl Assembler<'_> {
         // A whole-part colour for the faces that are left, from the
         // nearest layer that has one.
         let left = faces.iter().any(|face| !by_group.contains_key(&face.group));
+        let left_with_none = faces
+            .iter()
+            .any(|face| !by_group.contains_key(&face.group) && !has_own(face.group));
         let mut whole = Whole::None;
         if left {
             for layer in self.paint.iter_mut().rev() {
@@ -619,6 +718,7 @@ impl Assembler<'_> {
                 break;
             }
             if matches!(whole, Whole::None)
+                && left_with_none
                 && let Some(entry) = self.entry.last()
             {
                 self.issues.push(entry.warning(
@@ -650,8 +750,12 @@ impl Assembler<'_> {
                     .into_iter()
                     .map(str::to_owned)
                     .collect();
-                let colors =
-                    self.paint_faces(&faces, &|name| shapes::face_groups(shape, name), &words);
+                let colors = self.paint_faces(
+                    &faces,
+                    &|name| shapes::face_groups(shape, name),
+                    &words,
+                    &|_| false,
+                );
                 Body::solid(shape.name(), None, faces, colors)
             }
             Source::Use(named) => {
@@ -726,7 +830,23 @@ impl Assembler<'_> {
                         .position(|material| material == name)
                         .map(|at| vec![at])
                 };
-                let colors = self.paint_faces(&faces, &material, &mesh.materials);
+                let has_own = |group: usize| mesh.color_of(group).is_some();
+                let mut colors = self.paint_faces(&faces, &material, &mesh.materials, &has_own);
+                // Faces the recipe gives no colour keep the file's own.
+                let mut kept = Vec::new();
+                for (face, color) in faces.iter().zip(colors.iter_mut()) {
+                    if color.is_none()
+                        && let Some(rgb) = mesh.color_of(face.group)
+                    {
+                        *color = Some(self.own_color(&mesh.materials[face.group], rgb, &mut kept));
+                    }
+                }
+                if !kept.is_empty()
+                    && let Some(entry) = self.entry.last()
+                {
+                    let message = kept_colours_message(&mesh.file, &kept);
+                    self.issues.push(entry.warning(Code::NoColor, message));
+                }
                 Body::solid("mesh", Some(mesh.file.clone()), faces, colors)
             }
             // A file that couldn't be read, or a part that couldn't be:
@@ -763,6 +883,13 @@ impl Assembler<'_> {
                 ));
                 continue;
             }
+            if def.name == SLOPE && body.is_wedge() {
+                self.issues.push(def.loc.error(
+                    Code::DuplicateName,
+                    "a wedge already has a socket called \"slope\" built in, in the middle of its slope: give this one another name",
+                ));
+                continue;
+            }
             if body.broken {
                 continue;
             }
@@ -771,13 +898,30 @@ impl Assembler<'_> {
                     side,
                     shift,
                     facing,
-                } => body.bounds.map(|bounds| {
+                } => body.bounds.and_then(|bounds| {
                     let slide = Vec3::from(side.offset()) + Vec3::from(*shift);
-                    let facing = facing.unwrap_or(side.facing());
-                    (
-                        bounds.center() + slide.times(bounds.half()),
-                        Vec3::from(facing),
-                    )
+                    let point = bounds.center() + slide.times(bounds.half());
+                    // `facing`, if the recipe gives one, wins over the
+                    // surface's.
+                    let chosen = facing.map(Vec3::from);
+                    match body.land(*side, point) {
+                        Landing::Already => {
+                            Some((point, chosen.unwrap_or(side.facing().into())))
+                        }
+                        Landing::Touches { at, facing } => Some((at, chosen.unwrap_or(facing))),
+                        Landing::Misses => {
+                            self.issues.push(def.loc.error(
+                                Code::OutOfRange,
+                                format!(
+                                    "shift = {} puts the socket \"{}\" beside the {}, where there is nothing for it to sit on: bring the numbers closer to 0",
+                                    numbers(shift),
+                                    def.name,
+                                    body.kind.shape
+                                ),
+                            ));
+                            None
+                        }
+                    }
                 }),
                 SocketKind::At { at, facing } => Some((Vec3::from(*at), Vec3::from(*facing))),
                 SocketKind::From { part, socket } => {
@@ -936,7 +1080,7 @@ impl Assembler<'_> {
             to_part,
             to_socket,
             to_loc,
-            rotate,
+            twist,
         } = &parts[at].placement
         else {
             return Join::Wait;
@@ -1003,13 +1147,105 @@ impl Assembler<'_> {
         // Turn as little as possible until my socket faces theirs, then
         // twist around the join.
         let face_it = Mat3::turning(my_facing, -theirs.facing);
-        let twist = Mat3::around(theirs.facing, *rotate);
+        let twist = Mat3::around(theirs.facing, *twist);
         let turn = twist * face_it;
         Join::Place(Transform {
             turn: turn * before,
             shift: theirs.at - turn * my_point,
         })
     }
+}
+
+/// What happened to an imported material that the recipe gives no
+/// colour, for the warning.
+enum Kept {
+    /// Its own colour in the file, added to the palette under its name.
+    Added(String, [u8; 3]),
+    /// The palette's colour of the same name (first), which isn't the
+    /// file's (second).
+    Palette(String, [u8; 3], [u8; 3]),
+}
+
+impl Kept {
+    fn name(&self) -> &str {
+        match self {
+            Kept::Added(name, _) | Kept::Palette(name, _, _) => name,
+        }
+    }
+}
+
+/// `"a"`, `"a" and "b"`, `"a", "b" and "c"`.
+fn quoted_list<'a>(names: impl Iterator<Item = &'a str>) -> String {
+    let names: Vec<String> = names.map(|name| format!("\"{name}\"")).collect();
+    match names.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The warning for an imported file's materials the recipe gives no
+/// colour.
+fn kept_colours_message(file: &str, kept: &[Kept]) -> String {
+    let (materials, have) = if kept.len() == 1 {
+        ("material", "has")
+    } else {
+        ("materials", "have")
+    };
+    let mut message = format!(
+        "the {materials} {} of \"{file}\" {have} no colour in the recipe",
+        quoted_list(kept.iter().map(Kept::name))
+    );
+    let all_added = kept.iter().all(|kept| matches!(kept, Kept::Added(..)));
+    if all_added {
+        let added: Vec<String> = kept
+            .iter()
+            .filter_map(|kept| match kept {
+                Kept::Added(name, rgb) => Some(format!("{name} {}", hex(*rgb))),
+                Kept::Palette(..) => None,
+            })
+            .collect();
+        message.push_str(&format!(
+            ", so {} the file's own, added to the palette under {}: {}",
+            if added.len() == 1 {
+                "it keeps"
+            } else {
+                "they keep"
+            },
+            if added.len() == 1 {
+                "its name"
+            } else {
+                "their names"
+            },
+            added.join(", ")
+        ));
+    } else {
+        for kept in kept {
+            message.push_str(&match kept {
+                Kept::Added(name, rgb) => format!(
+                    "; \"{name}\" keeps the file's own, {}, added to the palette under its name",
+                    hex(*rgb)
+                ),
+                Kept::Palette(name, palette, file_rgb) => format!(
+                    "; \"{name}\" takes the palette's colour of that name, {}, not the file's {}",
+                    hex(*palette),
+                    hex(*file_rgb)
+                ),
+            });
+        }
+    }
+    message
+        .push_str(". To choose others, give the part a \"color\", or \"colors\" by material name");
+    message
+}
+
+/// `[0, 0.9, 0.9]`: numbers as a recipe writes them.
+fn numbers(values: &[f64; 3]) -> String {
+    let words: Vec<String> = values
+        .iter()
+        .map(|value| format!("{}", value + 0.0))
+        .collect();
+    format!("[{}]", words.join(", "))
 }
 
 /// The names that a recipe gave, without the `#2` stand-ins of unnamed

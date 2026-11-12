@@ -3,7 +3,8 @@
 Duck Mold makes game-ready 3D models from text. You write a **recipe** (a
 TOML or JSON file that lists a palette and the parts of a model), and the
 `duck-mold` program builds it and tells you, in words and numbers, how it
-came out. You never need to look at a picture.
+came out. The numbers answer most questions; when you can read images,
+`duck-mold render` draws the model too, so you can check it looks right.
 
 This guide is all you need. The same text is printed by `duck-mold guide`.
 
@@ -14,6 +15,18 @@ duck-mold inspect lamp.toml --json    # check it, build it in memory, measure it
 ```
 
 ```bash
+duck-mold render lamp.toml            # draw it: lamp.png, four views on one sheet
+```
+
+```bash
+duck-mold inspect lamp.toml --sockets # also list every named socket: head.top, ...
+```
+
+(`duck-mold preview lamp.toml` opens a window for a person to look
+around the model in, which builds it again on every save. It needs a
+screen and waits until the window is closed: as an agent, use `render`.)
+
+```bash
 duck-mold export lamp.toml            # write lamp.glb next to the recipe
 ```
 
@@ -22,7 +35,20 @@ duck-mold export lamp.toml            # write lamp.glb next to the recipe
    (each names a line, a field and usually the fix) and run it again.
 3. Read the report: `size`, `triangles`, `ground`, `floating`,
    `overlapping`, `warnings`. Compare them with what you meant (section 7).
-4. When the numbers are right, run `export`.
+4. If you can look at images, run `render` and look at the PNG: is each
+   part where you meant, facing the right way, the right colour?
+5. When it is right, run `export`.
+
+`render` draws a sheet of four views, each a square (256 pixels unless
+`--size` says otherwise): **front** (top left, looking the model in the
+face, so its left is on your right), **right side** (top right, the
+model facing right), **back** (bottom left) and **three-quarter** (bottom
+right, from the front right and above). Every view is at the same scale.
+Under them is the model's name, size and triangle count. A light grey
+face is one nobody coloured. With `--json`, `views` says where each view
+is in the picture. It writes the PNG next to the recipe unless `-o`
+says where, and draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is,
+too.
 
 Exit codes: **0** it worked (warnings included), **1** the recipe has
 errors, **2** the command was wrong or a file couldn't be read or written.
@@ -139,7 +165,7 @@ A part (an entry of `parts`, or of `define`) gets its shape from
 |---|---|
 | `shape = "box"` | a built-in shape (table below) |
 | `use = "leg"` | a copy of a part from `define` |
-| `file = "wheel.toml"` | another recipe, or an `.obj` mesh. The path starts from the recipe's folder. |
+| `file = "wheel.toml"` | another recipe, or a mesh: `.obj`, `.gltf` or `.glb`. The path starts from the recipe's folder. |
 | `parts = [ ... ]` | an assembly: a list of parts of its own |
 
 Its other fields:
@@ -150,15 +176,16 @@ Its other fields:
 | `color` | A palette name: the colour of the whole part. |
 | `colors` | Colours for single faces: `{ top = "grass", sides = "dirt" }`. |
 | `attach`, `to` | Join my socket `attach` to `to = "part.socket"`, a socket of another part in the same list. Always both. |
-| `rotate` | **Attached part:** one number, degrees to twist around the join. **Free part:** `[x, y, z]` degrees, around x, then y, then z. |
+| `twist` | Attached part only: one number, degrees to twist it around the join. |
+| `rotate` | Free part only: `[x, y, z]` degrees, around x, then y, then z. |
 | `move` | Free part only: `[x, y, z]`, where its middle goes. |
 | `scale` | One number or `[x, y, z]`, above zero. |
 | `mirror` | `"x"`, `"y"` or `"z"`: flips the part, its sockets too. `mirror = "x"` makes a right arm from a left arm. |
 | `sockets` | The part's own named sockets (section 6). |
 | `note` | For people. Ignored. |
 
-A part in `define` has no `name`, `attach`, `to`, `move`, `rotate`,
-`scale` or `mirror`: those go on the part that uses it.
+A part in `define` has no `name`, `attach`, `to`, `twist`, `move`,
+`rotate`, `scale` or `mirror`: those go on the part that uses it.
 
 The shapes. All are centred on their own middle.
 
@@ -190,19 +217,20 @@ own: `colors` on it is an error; colour the parts inside.
 A socket is a named point on a part with a direction it faces. Two
 sockets join face to face: the points meet and the directions oppose.
 
-**Every part has seven sockets built in**, on the box around it: `top`,
-`bottom`, `left`, `right`, `front`, `back` (the middle of each side,
-facing out) and `center`. An assembly has them too, on the box around
-all of it.
+**Every part has seven sockets built in**: `top`, `bottom`, `left`,
+`right`, `front`, `back` (the middle of each side, facing out) and
+`center`. A **wedge** has an eighth, `slope`: the middle of its slope,
+facing straight out of it.
 
-**They are on the box, not on the surface.** For a box, a cylinder and a
-sphere that is the same place. On a sloped shape some of them are in the
-air: a **cone**'s `left`, `right`, `front` and `back` are beside its
-slope (only `top`, its point, and `bottom` touch it), and a **wedge**'s
-`top` and `front` are above its slope. A part joined to a socket in the
-air floats, and `inspect` reports it. To put something on a slope,
-declare a socket with `at` and `facing`. For round shapes, keep
-`segments` a multiple of 4 if anything joins their sides.
+**On a shape, a socket sits on its surface, never in the air.** Each
+built-in socket starts in the middle of a side of the box around the
+shape; if the shape isn't there, the socket moves straight in until it
+touches the shape, and faces straight out of the surface. So a
+**cone**'s `left`, `right`, `front` and `back` are halfway up its slant,
+tilted up with it, and a **wedge**'s `top` and `front` are both the
+middle of its slope (the same place as `slope`). On a box, and on a
+cylinder's or sphere's sides, they are where the box is. An assembly, or
+a part made from a file, keeps its sockets on the box around it.
 
 Declare more in a part's `sockets` table, one of three ways:
 
@@ -217,11 +245,24 @@ grip     = { from = "hand.bottom" }                    # a socket of a part insi
 - `shift` slides a socket across its side: each number runs from -1 (the
   left, bottom or back edge) to 1 (the right, top or front edge). The
   number for the direction the side faces must be 0. Sockets placed this
-  way keep their place when the part changes size.
+  way keep their place when the part changes size. On a round or sloped
+  side the socket then moves straight in onto the surface and faces out
+  of it, as the built-in ones do: eyes `on = "front"` of a sphere sit on
+  the sphere and look out of it (`examples/snowman.toml`). A shift that
+  misses the shape altogether is an error.
 - `at` is in the part's own units, measured from its middle. `facing` is
   `up`, `down`, `left`, `right`, `front`, `back` or `[x, y, z]`; without
-  it the socket faces up. `facing` also works with `on`.
+  it the socket faces up. `facing` also works with `on`, and wins over
+  the surface's: `{ on = "top", shift = [0.5, 0, 0.5], facing = "up" }`
+  on a wedge stands a chimney upright on its slope.
 - `from` passes a socket of an inner part to the outside of an assembly.
+
+**Sockets go into the `.glb`**, so a game can put things where the
+recipe says: a hat on `head.top`, a tool in `left_arm.grip`, a part
+inside an assembly as `left_arm/hand.bottom`, the model's own as `top`.
+Only named parts' sockets are written: name every part a game will
+need. `inspect --sockets` lists them all, with where each is and the
+way it faces.
 
 **How a joined part is turned.** It is turned as little as possible to
 make its socket face the other one. A part whose `bottom` joins a `top`
@@ -231,10 +272,12 @@ the same way, the part is turned right round the upright axis (it stays
 the right way up); if they face up or down, it rolls over sideways (its
 front stays in front).
 
-**`rotate` on a joined part** twists it around the join, clockwise seen
+**`twist` on a joined part** turns it around the join, clockwise seen
 from the side the other socket faces. On a socket that faces up,
-`rotate = 90` is the same turn as `rotate = [0, 90, 0]` on a free part:
-forward turns to the right.
+`twist = 90` is the same turn as `rotate = [0, 90, 0]` on a free part:
+forward turns to the right. A joined part has no `rotate`, and a free
+part no `twist`; writing one where the other belongs is an error that
+shows the right one.
 
 `mirror` and `scale` are done to a part before it is joined, sockets
 included: a mirrored arm's shoulder socket is on its other side.
@@ -292,7 +335,7 @@ What to check, in this order:
    `origin` on purpose.
 6. **`parts`.** Each part's `bounds` says where it ended up, and
    `attached_to` what it is joined to. `kind` is its shape (`assembly`
-   for a part made of parts, `mesh` for an `.obj`); `uses` names its
+   for a part made of parts, `mesh` for a mesh file); `uses` names its
    `define`. A part inside another is named with a slash:
    `left_arm/hand`.
 7. **`palette`.** How many triangles each colour paints.
@@ -344,9 +387,9 @@ As JSON (`"ok": false`, with `errors` and `warnings`), each is:
 | `conflict` | Two fields that can't go together (`attach` with `move`; two sources of shape). The message says which to remove. |
 | `cycle` | A part that uses itself, or parts attached in a ring. The message shows the chain. |
 | `reserved` | `bones`, `colliders` and `lods` are kept for a later phase. Remove them. |
-| `unsupported` | Not available yet: see-through colours, glTF import. |
+| `unsupported` | Not available: see-through colours, compressed glTF. |
 | `file_not_found` | A file the recipe names can't be read. Paths start from the recipe's folder. |
-| `bad_mesh` | A mistake inside an `.obj` file, with its line. |
+| `bad_mesh` | A mistake inside a mesh file (an `.obj`'s with its line). |
 | `io` | The file on the command line can't be read or written. |
 
 Warnings (the model is still built; exit code 0):
@@ -407,10 +450,17 @@ joined part: join the socket that should touch.
 **Share a palette between models.** `palette = "palette.toml"`, where
 that file is a plain list of `name = "#RRGGBB"`.
 
-**Use a mesh made elsewhere.** `file = "rock.obj"`. Run
-`duck-mold inspect rock.obj` first: it lists the file's size and its
-material names, which are the face names for `colors`. Use `scale` if
-it was made in other units (`scale = 0.01` for centimetres).
+**Use a mesh made elsewhere.** `file = "rock.obj"`, `file = "lamp.gltf"`
+or `file = "lamp.glb"`. Run `duck-mold inspect lamp.gltf` first: it lists
+the file's size and its material names, which are the face names for
+`colors`. Use `scale` if it was made in other units (`scale = 0.01` for
+centimetres). A glTF material you give no colour keeps the file's own
+base colour, added to the palette under the material's name, with a
+`no_color` warning that lists them: give the part a `color`, or `colors`
+by material name, to choose your own. A `.glb` Duck Mold wrote brings its
+palette, so it looks as it did (`examples/desk.toml`). Only the mesh is
+read: animations, bones and textures are left out with a note, and a
+compressed file is refused.
 
 **Choose where the model's zero point is.** `origin = "pole.bottom"`
 puts it at a socket of one part instead of under the middle of the
@@ -423,15 +473,17 @@ whole model.
 - **`attach` without `to`** (or the other way round): they go together.
 - **`to` naming a part in another list**, or one with no `name`. Parts
   attach to parts in their own list.
-- **`rotate = [0, 90, 0]` on an attached part.** There it is one
-  number: `rotate = 90`.
+- **`rotate` on an attached part.** A joined part turns around its join
+  with one number: `twist = 90`. (Duck Mold's first version wrote that
+  as `rotate = 90`; it is now an error that shows `twist`.)
 - **A hex code in `color`.** Colours go in the palette, by name.
 - **`colour`.** The fields are spelt `color` and `colors`.
 - **Left and right swapped.** They are the model's own: left is -x,
   and the model faces +z.
-- **Joining to the side of a cone, or the top of a wedge.** Those
-  built-in sockets are in the air (section 6). `inspect` shows the part
-  as floating.
+- **Expecting a part on a slope to stand upright.** A cone's sides and
+  a wedge's `top`, `front` and `slope` face out of the slope, so what you
+  join there leans with it. Declare a socket with `facing = "up"` to
+  stand something upright on a slope.
 - **Too many segments.** 64 on a sphere is 3,968 triangles. Try 8.
 - **`colors` on an assembly.** Colour the parts inside it, or give the
   assembly a plain `color`.
@@ -443,13 +495,13 @@ Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
 bones, animation, colliders or LODs (`bones`, `colliders` and `lods` are
-reserved names), no glTF import (only `.obj`), no rendering to a
-picture, no window.
+reserved names), no window.
 
 ## 12. Files for reference
 
-- `examples/`: crate, table, tree, house, robot. Read `robot.toml` for
-  nested parts.
+- `examples/`: crate, table, tree, house, robot, snowman. Read
+  `robot.toml` for nested parts and `snowman.toml` for sockets on curved
+  surfaces.
 - `docs/recipe-format.md`: every field, default and range.
 - `docs/forge-handoff.md`: what is in the `.glb`, and how Duck Forge
   reads it.

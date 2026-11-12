@@ -78,17 +78,50 @@ target/release/duck-mold export examples/robot.toml
 That writes `examples/robot.glb`. Any glTF viewer opens it: the 3D
 Viewer that comes with Windows, Blender, or an online glTF viewer.
 
+5. See it:
+
+```bash
+target/release/duck-mold render examples/robot.toml
+```
+
+That writes `examples/robot.png`, four views of the model on one sheet,
+without opening a window:
+
+![The robot from the front, the right, the back and three-quarter](tests/golden/robot.png)
+
+6. Or look at it in a window, from every side:
+
+```bash
+target/release/duck-mold preview examples/robot.toml
+```
+
+Drag with the left mouse button to turn it, roll the wheel to come
+closer, Escape to quit. Leave the window open while you edit the recipe:
+every time you save, the model is built again. If the recipe has a
+mistake, the window says so in red and keeps showing the last version
+that built.
+
+![The preview window showing the robot](docs/preview.png)
+
 ## The commands
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures an `.obj` mesh, or a `.glb` that Duck Mold wrote. |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
+| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
+| `duck-mold preview <file>` | Opens a window showing the model: drag to orbit, wheel to zoom, Escape to quit. It builds the model again whenever the recipe, or a file it uses, is saved. |
 | `duck-mold guide` | Prints the guide for AI agents. |
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
-Add `--json` to `inspect` or `export` to get the report as JSON, for an
-agent or a script.
+Add `--json` to `inspect`, `export` or `render` to get the report as
+JSON, for an agent or a script.
+
+`render` draws with Duck Forge's own renderer, so the picture shows the
+model the way a Duck Forge game draws it. The same recipe always gives
+the same picture, byte for byte. Each view is drawn from far away and
+zoomed in, so it looks nearly flat, like a drawing, and every view is at
+the same scale, so the model is the same size in each.
 
 The program ends with code 0 when it worked, 1 when the recipe has
 mistakes, and 2 when the command itself was wrong or a file couldn't be
@@ -146,7 +179,8 @@ error: lamp.toml:26: parts[2].segments: 100 is too big. Allowed: 3 to 64.
   every time, and the same recipe always gives exactly the same file. So
   keep the recipe; the `.glb` can always be made again.
 - **Parts and sockets.** A part is a shape (box, cylinder, sphere, cone,
-  wedge), a mesh from an `.obj` file, or an assembly of other parts.
+  wedge), a mesh from a file (`.obj`, `.gltf` or `.glb`, from Blender or
+  any modelling program), or an assembly of other parts.
   Parts are joined socket to socket, by name. A part can declare sockets
   of its own: `neck = { on = "top" }`.
 - **Define once, use many times.** A part under `[define.leg]` can be
@@ -168,19 +202,37 @@ A recipe can be written as TOML (the examples) or as JSON
 | [crate.toml](examples/crate.toml) | The smallest useful recipe: one box, two colours. |
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
-| [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, windows and a chimney placed by sockets. |
+| [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, windows and a chimney placed by sockets, and a skylight on the roof's `slope`. |
 | [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
+| [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
+| [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
 
 Each is commented line by line.
 
 ## Using a model in Duck Forge
 
-Duck Forge can't load model files yet. Duck Mold's `.glb` files are kept
-simple enough for Duck Forge to read with what it already has, and a
-tested reader, ready to copy into Duck Forge, is in
-[docs/forge/duck_mold_glb.rs](docs/forge/duck_mold_glb.rs).
-[docs/forge-handoff.md](docs/forge-handoff.md) says exactly what Duck
-Forge needs to do.
+```rust
+let robot = Mesh::load_glb("assets/robot.glb")?;
+canvas.draw_mesh(&robot, &Transform::at(position), &camera);
+```
+
+The `.glb` keeps every named part's sockets, so a game can put things
+on the model where the recipe joined its parts: a hat on `head.top`, a
+sword in `right_arm.grip`. `duck-mold inspect robot.toml --sockets`
+lists their names.
+
+```rust
+let model = duckforge::glb::GlbModel::load("assets/robot.glb")?;
+let top = model.socket("head.top").unwrap();
+let hat_at = robot_transform.apply(top.position());
+```
+
+Duck Forge reads Duck Mold's `.glb` files with the reader in
+[docs/forge/duck_mold_glb.rs](docs/forge/duck_mold_glb.rs), a copy of
+which is in Duck Forge. [docs/forge-handoff.md](docs/forge-handoff.md)
+says what is in the file and how to keep the two copies the same.
+A model faces +z, so a default Duck Forge camera sees it from behind:
+see the handoff note.
 
 ## Documents
 
@@ -190,18 +242,20 @@ Forge needs to do.
 | [docs/recipe-format.md](docs/recipe-format.md) | Every field of a recipe, with its default and range. |
 | [docs/forge-handoff.md](docs/forge-handoff.md) | What is inside a `.glb`, and what Duck Forge must do to load one. |
 | [DESIGN.md](DESIGN.md) | Why Duck Mold is the way it is, decision by decision, in plain words. |
-| [PHASE0_REPORT.md](PHASE0_REPORT.md) | What works, what doesn't yet, and what comes next. |
+| [PHASE0_REPORT.md](PHASE0_REPORT.md) | Phase 0: what works, what doesn't yet, and what comes next. |
+| [PHASE1_REPORT.md](PHASE1_REPORT.md) | Phase 1: pictures, the preview window, sockets on surfaces and in the `.glb`, `twist`, glTF import. |
 
 ## Project layout
 
 ```
 Duck-Mold/
-├── Cargo.toml                 the workspace: two crates, built together
-├── examples/                  five recipes to read and change
+├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
+├── Cargo.toml                 the workspace: three crates, built together
+├── examples/                  seven recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
-├── tests/golden/              the examples' exact output, kept by the tests
+├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/
-    ├── duck-mold-core/        the library: everything except the command line
+    ├── duck-mold-core/        the library: everything except pictures and the command line
     │   ├── src/
     │   │   ├── source.rs      TOML or JSON text -> one tree that remembers line numbers
     │   │   ├── issue.rs       mistakes as data: file, line, field, message, fix
@@ -210,12 +264,14 @@ Duck-Mold/
     │   │   ├── math.rs        points, turns, and an exact sine and cosine
     │   │   ├── shapes.rs      box, cylinder, sphere, cone, wedge
     │   │   ├── mesh.rs        reading .obj files
+    │   │   ├── gltf.rs        reading .gltf and .glb files
     │   │   ├── assemble.rs    parts, sockets, joins, nesting, colour
     │   │   ├── model.rs       the built model: a tree of parts and their faces
     │   │   ├── glb.rs         writing (and reading back) .glb
     │   │   ├── inspect.rs     size, ground, floating and overlapping parts
     │   │   └── tools.rs       what the commands do, for any front end
     │   └── tests/             one file of tests per step
+    ├── duck-mold-view/        pictures (`render`) and the window (`preview`), by Duck Forge
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 
@@ -233,7 +289,19 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-All three must pass before a commit.
+All three must pass before a commit. GitHub runs them again, on Windows
+and on Linux, for every push and pull request
+(`.github/workflows/ci.yml`), with the preview window and without it.
+
+The preview window comes from Duck Forge (the `preview` feature, on by
+default). On Linux it uses X11 and needs the `libxkbcommon-x11` library
+when the window opens (most desktops have it; on Ubuntu or Debian,
+`sudo apt install libxkbcommon-x11-0`). For a machine with no screen,
+build without it; everything else works the same:
+
+```bash
+cargo build --release --no-default-features
+```
 
 The tests include **golden files**: `tests/golden/` holds the exact
 `.glb` and the exact report for each example, and the tests compare

@@ -1,7 +1,8 @@
 //! `duck-mold`: build and inspect 3D models from text recipes.
 //!
 //! This file only reads the command line and prints. All the work is done
-//! by the `duck-mold-core` library ([`duck_mold_core::tools`]).
+//! by the libraries: `duck-mold-core` ([`duck_mold_core::tools`]) and, for
+//! pictures, `duck-mold-view` ([`duck_mold_view::render`]).
 //!
 //! Exit codes: 0 it worked (warnings included), 1 the recipe has errors,
 //! 2 the command line was wrong or a file couldn't be read or written.
@@ -17,6 +18,7 @@ use std::process::ExitCode;
 use clap::{Parser, Subcommand};
 use duck_mold_core::issue::{Issue, Report};
 use duck_mold_core::tools::{self, Failure};
+use duck_mold_view::render;
 
 /// Duck Mold makes game-ready 3D models for Duck Forge from text recipes.
 ///
@@ -48,6 +50,10 @@ enum Command {
         /// Print the report as JSON, for agents.
         #[arg(long)]
         json: bool,
+        /// Also list every named socket and where it is: the names a game
+        /// can ask the .glb for, like head.top.
+        #[arg(long)]
+        sockets: bool,
     },
     /// Build a recipe and write the model as a .glb file.
     ///
@@ -63,6 +69,38 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Draw a model and save the picture as a PNG: front, right side,
+    /// back and three-quarter views on one sheet. Opens no window.
+    ///
+    /// The same recipe always gives the same picture, byte for byte.
+    /// Nothing is written if the recipe has mistakes.
+    Render {
+        /// A recipe (.toml or .json), an .obj mesh, or a .glb that Duck
+        /// Mold wrote.
+        file: PathBuf,
+        /// Where to write the picture. By default: next to the file, with
+        /// the same name and the ending .png.
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// How big each view is, in pixels (128 to 2048). The picture is
+        /// twice as wide, and twice as tall plus a line for the caption.
+        #[arg(long, value_name = "PIXELS", default_value_t = render::DEFAULT_SIZE)]
+        size: usize,
+        /// Print the full report as JSON, for agents, with where each view
+        /// is in the picture.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a window that shows the model: drag to orbit, roll the wheel
+    /// to zoom, Escape to quit.
+    ///
+    /// When the recipe, or a file it uses, is saved, the model is built
+    /// again. Mistakes are shown in the window, and the last good model
+    /// stays up. Needs a screen; on a machine without one, use render.
+    Preview {
+        /// A recipe (.toml or .json), or a mesh (.obj, .gltf or .glb).
+        file: PathBuf,
+    },
     /// Print the guide for AI agents: how to write recipes and use these
     /// commands, from scratch.
     Guide,
@@ -74,7 +112,15 @@ const GUIDE: &str = include_str!("../../../docs/AI_GUIDE.md");
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Command::Inspect { file, json } => match tools::inspect_file(&file) {
+        Command::Inspect {
+            file,
+            json,
+            sockets,
+        } => match if sockets {
+            tools::inspect_file_with_sockets(&file)
+        } else {
+            tools::inspect_file(&file)
+        } {
             Ok(inspection) => {
                 if json {
                     say_json(&inspection);
@@ -104,6 +150,37 @@ fn main() -> ExitCode {
                 ExitCode::SUCCESS
             }
             Err(failure) => fail(&failure, json),
+        },
+        Command::Render {
+            file,
+            output,
+            size,
+            json,
+        } => match render::render_file(&file, output.as_deref(), size) {
+            Ok(rendered) => {
+                if json {
+                    say_json(&rendered);
+                } else {
+                    say(&format!(
+                        "wrote {} ({} x {} pixels, {} bytes): {}",
+                        rendered.output,
+                        rendered.width,
+                        rendered.height,
+                        rendered.bytes,
+                        rendered.inspection.summary
+                    ));
+                    complain_about(&rendered.inspection.warnings);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(failure) => fail(&failure, json),
+        },
+        Command::Preview { file } => match duck_mold_view::preview::run(&file) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(error) => {
+                complain(&format!("error: {error}"));
+                ExitCode::from(2)
+            }
         },
         Command::Guide => {
             say(GUIDE.trim_end());

@@ -213,7 +213,8 @@ The other fields of a part:
 | `color` | A palette name: the part's colour. |
 | `colors` | Colours for single faces, by face name: `{ top = "grass" }`. |
 | `attach`, `to` | Join my socket `attach` to the socket `to = "part.socket"` of another part in the same list. |
-| `rotate` | With `attach`: one number, the degrees to twist the part around the join. Without `attach`: `[x, y, z]` degrees. |
+| `twist` | *(Phase 1.)* With `attach`: one number, the degrees to twist the part around the join. |
+| `rotate` | Without `attach`: `[x, y, z]` degrees. (In Phase 0 it was also the twist; see below.) |
 | `move` | Without `attach`: `[x, y, z]`, where the part's centre goes. |
 | `scale` | One number, or `[x, y, z]`. Must be above zero. |
 | `mirror` | `"x"`, `"y"` or `"z"`: flips the part across that direction, sockets too. `mirror = "x"` turns a left arm into a right arm. |
@@ -223,12 +224,14 @@ The other fields of a part:
 
 A part is placed in one of two ways. With `attach` and `to` it goes where
 the sockets say; `move` is refused (the message says to move the socket),
-and `rotate` is one number that twists it around the join. Without them
+and `twist` is one number that turns it around the join. Without them
 it sits at the centre of its list, moved and turned by `move` and
 `rotate = [x, y, z]`: the escape hatch for when you do want to type a
-position. (`rotate` was two fields in the first draft, `turn` and
-`rotate`; they became one name by decision 5. Writing the wrong form for
-the part's kind is an error that shows the right one.)
+position. (The first draft had two fields, `turn` and `rotate`; they
+became one name, `rotate`, by decision 5, with two forms. Phase 1 split
+them again as `twist` and `rotate`, since one field meaning two things
+surprised (section 17, step 4). Writing either on the wrong kind of part
+is an error that shows the right one.)
 
 ### The five shapes
 
@@ -291,12 +294,12 @@ directions oppose, the way two magnets snap together.
 `bottom`, `left`, `right`, `front`, `back` (the middle of each side,
 facing outwards) and `center`. For many models these are all you need.
 
-They are on the box, which is the surface for a box, a cylinder and a
-sphere, but not everywhere on a sloped shape: a cone's side sockets and
-a wedge's `top` and `front` are in the air beside the slope, and a part
-joined there floats (`inspect` reports it). Building showed this to be
-the design's weakest spot; `PHASE0_REPORT.md` proposes sockets that know
-the shape as an early Phase 1 change.
+In Phase 0 they were on the box, which is the surface for a box, a
+cylinder and a sphere, but not everywhere on a sloped shape: a cone's
+side sockets and a wedge's `top` and `front` were in the air beside the
+slope. **From Phase 1 a shape's sockets know the shape** (section 17,
+step 3): one that would be in the air moves straight in onto the
+surface and faces out of it, and a wedge has an eighth, `slope`.
 
 A part can declare more, in one of three ways:
 
@@ -331,10 +334,11 @@ my `bottom` meets the trunk's `top`, facing it.
   it turns around the upright axis, so it stays the right way up. If the
   sockets face up or down, it rolls over sideways instead, so its front
   still faces front. One fixed rule, so the result never depends on luck.
-- **`rotate`**, on a joined part, then twists it around the join by one
+- **`twist`**, on a joined part, then turns it around the join by one
   number of degrees, clockwise when you look at the join from the side
-  the other socket faces. For a socket that faces up, `rotate = 90` is
-  the same turn as `rotate = [0, 90, 0]` on a free part.
+  the other socket faces. For a socket that faces up, `twist = 90` is
+  the same turn as `rotate = [0, 90, 0]` on a free part. (Phase 0 called
+  it `rotate = 90`.)
 - `mirror` and `scale` happen to the part first, sockets included, so a
   mirrored arm's shoulder socket is on its other side, ready to join.
 
@@ -504,7 +508,7 @@ Mold writes a deliberately narrow kind of it:
 | Colours | `COLOR_0`: three decimal numbers per corner, linear. |
 | Triangles | A list of corner numbers, always 32-bit. Faces do not share corners with other faces. |
 | Material | One plain, matt material. No textures, no UVs. |
-| Extras | Under `extras.duck_mold`: the format version, the recipe's name, the palette (names and `#RRGGBB`), the list of parts with the triangles each one owns, and the list of assemblies (parts made of parts) with the triangles of every part inside each. Other programs ignore this; Duck tools read it. (Assemblies were added after Phase 0, when Duck Forge wanted to recolour a whole arm; `docs/forge-handoff.md` describes both lists.) |
+| Extras | Under `extras.duck_mold`: the format version, the recipe's name, the palette (names and `#RRGGBB`), the list of parts with the triangles each one owns, and the list of assemblies (parts made of parts) with the triangles of every part inside each, and (from Phase 1) every named socket with where it is and the way it faces. Other programs ignore this; Duck tools read it. (Assemblies were added after Phase 0, when Duck Forge wanted to recolour a whole arm; sockets in Phase 1, so a game can put a hat on `head.top`; `docs/forge-handoff.md` describes all three lists.) |
 | Not written | Cameras, lights, animations, skins, textures, a date, your folder names. |
 
 **Directions in the file.** glTF also says y is up and z is forward, but
@@ -545,12 +549,15 @@ Mold.
 
 ## 9. The commands
 
-The program is `duck-mold`. Three commands, plus help.
+The program is `duck-mold`. Three commands, plus help; Phase 1 adds
+`render` and `preview`.
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file> [--json]` | Checks and builds a recipe in memory and reports on it. Also takes an `.obj` mesh, or a `.glb` that Duck Mold wrote, to measure it as it is. Writes nothing. |
+| `duck-mold inspect <file> [--json] [--sockets]` | Checks and builds a recipe in memory and reports on it. Also takes an `.obj` mesh, or a `.glb` that Duck Mold wrote, to measure it as it is. Writes nothing. *(Phase 1:)* `--sockets` adds every named socket, where it is and the way it faces: the names a game can ask the `.glb` for. |
 | `duck-mold export <recipe> [-o <file.glb>] [--json]` | Builds the recipe and writes the `.glb` (default: next to the recipe, same name). Ends with a one-line summary; `--json` gives the full inspect report. |
+| `duck-mold render <file> [-o <file.png>] [--size N] [--json]` | *(Phase 1.)* Draws the model and writes a PNG: four views on one sheet (section 17, step 2). Takes what `inspect` takes. |
+| `duck-mold preview <file>` | *(Phase 1.)* Opens a window showing the model: drag to orbit, wheel to zoom, Escape to quit; builds it again when a file it reads is saved (section 17, step 7). |
 | `duck-mold guide` | Prints the agent guide, which is built into the program, so an agent with only the program can learn it. |
 | `duck-mold help`, `--help`, `--version` | Every command; `duck-mold <command> --help` for one. |
 
@@ -691,7 +698,7 @@ When the recipe has mistakes:
       "path": "parts[3].atach",
       "message": "there is no field \"atach\" here",
       "got": "atach",
-      "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "rotate", "move", "scale", "mirror", "sockets", "note"] },
+      "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
       "suggestion": "attach"
     }
   ],
@@ -772,8 +779,8 @@ section planned both formats and advised keeping OBJ and letting glTF go
 first if time ran short. OBJ is small and well defined; glTF has many
 ways to store the same numbers, and reading other programs' files is
 where the time goes. What Phase 0 does read is its own `.glb`, for
-`inspect`. A `.glb` or `.gltf` named in a recipe gets a clear "not yet"
-message that suggests saving the mesh as `.obj`.
+`inspect`. (Phase 1 added glTF: section 17, step 6, and
+`docs/recipe-format.md`, "Files as parts".)
 
 ---
 
@@ -781,16 +788,18 @@ message that suggests saving the mesh as `.obj`.
 
 ```
 Duck-Mold/
+├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
 ├── Cargo.toml                 the workspace: both crates, shared settings
 ├── DESIGN.md                  this file
 ├── README.md                  for people
 ├── PHASE0_REPORT.md           what works, known limits, what comes next
+├── PHASE1_REPORT.md           the same for Phase 1
 ├── docs/
 │   ├── AI_GUIDE.md            for agents: the CLI from scratch (also `duck-mold guide`)
 │   ├── recipe-format.md       every field, default and range
 │   ├── forge-handoff.md       what a Duck Forge loader must support
 │   └── forge/duck_mold_glb.rs the reader written for Duck Forge
-├── examples/                  crate, table, tree, house, robot (.toml), and crate.json
+├── examples/                  crate, table, tree, house, robot, snowman (.toml), and crate.json
 ├── tests/golden/              the examples' exact .glb files and reports
 └── crates/
     ├── duck-mold-core/        the library: everything except the command line
@@ -808,13 +817,19 @@ Duck-Mold/
     │   │   ├── inspect.rs     size, counts, ground, floating, overlapping
     │   │   └── tools.rs       what the commands do, for any front end
     │   └── tests/             one file of tests per step
+    ├── duck-mold-view/        (Phase 1) pictures and the window, by Duck Forge
+    │   ├── src/render.rs      `render`: turn the model for each view, draw, lay out the sheet
+    │   ├── src/preview.rs     `preview`: a Duck Forge game that shows the model and watches its files
+    │   └── tests/             each view sees what it says; same bytes; the window, without a window
     └── duck-mold-cli/         the `duck-mold` program: commands, text and JSON output
         └── tests/             the program itself, and the golden-file tests
 ```
 
 Two crates, as you asked: the library does the work and knows nothing
 about the command line, so a GUI or an MCP server can sit on the same
-library later, as Duck Echo's does.
+library later, as Duck Echo's does. Phase 1 adds a third,
+`duck-mold-view`, so that the library also knows nothing of pictures or
+of Duck Forge.
 
 Rust edition 2024, like Duck Forge and Duck Quill. `unsafe` is forbidden
 and every public item must have a comment, as in Duck Echo.
@@ -826,6 +841,8 @@ and every public item must have a comment, as in Duck Echo.
 | `toml` | core | Reads TOML and tells me where every field is, for line numbers. |
 | `serde`, `serde_json` | core | Writes JSON (reports, and the JSON block inside a `.glb`) and reads glTF. |
 | `clap` | cli | Reads the command line and writes `--help` from the same comments, so help can't drift from what the program does. Duck Echo uses it too. |
+| `duckforge` | view | *(Phase 1.)* Duck Forge itself, from GitHub, pinned to one commit on its `main`, with its graphics card and sound turned off: its CPU renderer draws `render`'s pictures and the preview, and its window (the `preview` feature, on by default) shows the preview. It brings `png` and `gif`, and with the window `winit` and `softbuffer`. |
+| `png` | view | *(Phase 1.)* Writes the pictures. The same library and version Duck Forge uses. |
 
 That is all. Things written here rather than imported, because each is
 small and the wording or the bytes matter: the JSON reader for recipes
@@ -838,8 +855,9 @@ reader.
 ## 14. Tests and the quality bar
 
 - **Every step has tests**, written with that step and committed with it.
-- **Golden files.** Each of the five examples has its `.glb` and its
-  `inspect --json` report stored in `tests/golden/`. A test runs the
+- **Golden files.** Each of the five examples has its `.glb`, its
+  `inspect --json` report and (from Phase 1) its `render` picture stored
+  in `tests/golden/`. A test runs the
   real program, rebuilds them and compares every byte. If one changes,
   the test fails and shows what changed; a change that is meant is
   accepted with `DUCK_MOLD_ACCEPT=1 cargo test -p duck-mold-cli --test
@@ -857,6 +875,9 @@ reader.
   meshes, for every shape and every example.
 - `cargo fmt` and `cargo clippy` with warnings as errors, clean at every
   commit.
+- **On Windows and Linux.** From Phase 1, GitHub runs the formatting
+  check, the build, every test and clippy on both, for every push and
+  pull request (`.github/workflows/ci.yml`, copied from Duck Quill's).
 - One commit per step, in your order: workspace, recipes, shapes, parts
   and sockets, colour, export, inspect, import; then the examples, the
   documents, and the report.
@@ -903,15 +924,22 @@ These are the answers that were given, and what each led to.
 4. **Importing glTF.** *OBJ stays in Phase 0; glTF import moves to
    Phase 1* (section 12).
 5. **The names.** *`turn` became `rotate`; the rest stayed.* One field,
-   `rotate`, is a single number on an attached part and `[x, y, z]` on a
-   free one (section 4).
+   `rotate`, was a single number on an attached part and `[x, y, z]` on a
+   free one (section 4). Phase 1 gave the single number its own name,
+   `twist`.
 
 ---
 
 ## 17. Phase 1
 
-**Status: proposed, waiting for approval.** Phase 1 adds seven things,
-built in this order, one commit each. Every step comes with tests, keeps
+**Status: approved, with three changes, and built** (`PHASE1_REPORT.md`
+says what came of it; the *As built* notes below say where the building
+changed a detail). The three changes are folded in below: Phase 1 is
+built on a new branch from `main`, with Duck Forge pinned to a commit on
+its `main`; an imported material with no colour in the recipe brings its
+own (step 6); and unnamed parts' sockets stay out of the `.glb`
+(step 5). Phase 1 adds seven things, built in this order, one commit
+each. Every step comes with tests, keeps
 fmt and clippy clean, regenerates the golden files if the output
 changes, updates the README, `docs/AI_GUIDE.md` and
 `docs/recipe-format.md`, and adds an example. When a step changes
@@ -948,7 +976,11 @@ unless `--size` says otherwise):
 | **back** | **three-quarter**: from the front right, 45° round and 30° above |
 
 Each view has its name in a corner, and a line under them gives the
-model's name, triangle count and size, as `inspect` says them. All four
+model's name, size and triangle count, as `inspect` says them. A line
+one pixel wide runs between the views, so with 256-pixel views the
+sheet is 513 × 536 pixels. `--size` takes 128 (the smallest at which
+the names fit) to 2048. `render` takes what `inspect` takes, so it also
+draws an `.obj` or a `.glb` as it is. All four
 views use the same distance and zoom, so the model is the same size in
 each. The camera is far away and zoomed in (a 20° view, where Duck Forge
 games usually use 60°), so the views look nearly flat, like drawings,
@@ -1015,7 +1047,9 @@ That moves exactly these:
 On a box, on a cylinder's top and bottom, on a wedge's back and
 bottom, and wherever else the box and the shape already meet, nothing
 changes. To stand something upright on a slope (a chimney on a roof),
-use an exact socket: `at = [...]` with `facing = "up"`.
+give the socket a `facing`: it wins over the surface's, so
+`{ on = "top", shift = [0.5, 0, 0.5], facing = "up" }` on a wedge is on
+the slope, facing up.
 
 Parts made from files (OBJ, glTF, other recipes) keep their sockets on
 the box for now, as assemblies do; a later phase can give them the same
@@ -1033,7 +1067,8 @@ the air.
    moves in onto the surface and tilts to match it.
 4. A `shift` that puts a socket where the shape isn't at all (a corner
    of a cone's box, or high up on a wedge's side, above the slope) used
-   to float; now it is an error that says how far that shift can go.
+   to float; now it is an error that names the shift and says to bring
+   its numbers closer to 0.
 5. A wedge that declares a socket of its own called `slope` is now an
    error, since the name is built in.
 
@@ -1041,6 +1076,14 @@ None of the five examples changes: their `.glb` files stay byte for
 byte the same, and the tests check that. Two of Duck Mold's own tests
 join to a wedge's `top`, and are updated. `inspect` stops reporting
 parts joined to those sockets as floating.
+
+*As built:* the five examples did build to the same bytes. Then, as the
+step's examples, the house gained a skylight on its roof's `slope`, and
+a sixth example, `snowman.toml`, has eyes, buttons and arms on the
+surface of balls and a badge on a cone's slant. How it works: the line
+straight in from the box is followed through the shape's own faces, so
+the socket is exactly on the faces drawn, also for shapes with few
+`segments`.
 
 ### Step 4. `twist` for a joined part
 
@@ -1059,6 +1102,12 @@ The recipe `version` stays 0: Duck Mold hasn't been released, and an
 old recipe either still works or says exactly what to change. None of
 the examples uses `rotate`.
 
+*As built:* both errors are `conflict`s, like `move` on a joined part,
+and each carries its fix as the suggestion (`twist = 90`,
+`rotate = [0, 30, 0]`). `rotate = [x, y, z]` on a joined part, which
+was already an error, now points to `twist` as well. The example is the
+snowman's badge, twisted 45° into a diamond.
+
 ### Step 5. Sockets in the `.glb`
 
 A game can ask where a socket is and put something there: a hat on
@@ -1067,11 +1116,14 @@ A game can ask where a socket is and put something there: a hat on
 faces, in the model's own space.
 
 - The `.glb`'s `extras.duck_mold` gains `sockets`: every socket of every
-  part, built-in and declared, where it ended up after building, as
-  `{ "name": "head.top", "at": [x, y, z], "facing": [x, y, z] }`. The
+  named part, built-in and declared, where it ended up after building,
+  as `{ "name": "head.top", "at": [x, y, z], "facing": [x, y, z] }`. The
   model's own sockets have bare names (`top`), a part's are
   `part.socket` (`head.top`), and parts inside assemblies keep their
   paths (`left_arm/hand.bottom`, `left_arm.grip`).
+- **A part without a name has no sockets in the file**, and nor do the
+  parts inside it: a game can't ask for a part it can't name, and the
+  stand-in names (`#2`) change whenever the recipe's list does.
 - They are stored in glTF's directions, like the corners (x negated), so
   the reader turns them back the same way it turns the corners.
 - The robot has about 200 sockets, which makes its file roughly half as
@@ -1088,6 +1140,11 @@ faces, in the model's own space.
 - `duck-mold inspect --sockets` lists every socket and where it is, to
   find the names to ask for.
 
+*As built:* the robot has 187 named sockets, and its file went from
+35.7 KB to 50 KB. Duck Mold reads a `.glb`'s sockets back too, so
+`inspect --sockets robot.glb` lists the same ones as the recipe. The
+Khronos validator still finds nothing to say about any example.
+
 ### Step 6. Importing glTF and `.glb`
 
 `file = "lamp.glb"` or `file = "lamp.gltf"` makes a part that doesn't
@@ -1101,14 +1158,20 @@ move, exactly as `.obj` files do today. What it reads:
   corner numbers of any size.
 - Material names become face names for `colors`, as `usemtl` names do
   for OBJ: `colors = { glass = "yellow", base = "steel" }`.
+- **A material the recipe gives no colour keeps its own.** Its base
+  colour is added to the palette under the material's name, and a
+  warning lists those names, so nothing comes out grey by accident. To
+  choose the colours yourself, give the part a `color` or `colors`. (If
+  the palette already has a colour with that name, the palette's colour
+  is used, and the warning says so.)
 - A `.glb` that Duck Mold wrote keeps its colours, the way a recipe
   used as a part does.
 
 What it leaves out, with a note in the report rather than an error:
 textures, UVs, normals (Duck Mold works out its own), lines and points,
 bones and skins, animations, shape keys (morph targets), cameras and
-lights. The file's own colours are not used, except in Duck Mold's own
-files: colour comes from the palette, as for OBJ.
+lights. Textures are not read, so a material's colour is its base
+colour alone.
 
 What it refuses, with a sentence saying why: compressed meshes (Draco,
 meshopt, packed numbers), and any file that says it needs a glTF
@@ -1123,6 +1186,27 @@ The example: a small lamp written as a `.gltf` by hand (two materials,
 two pieces with their own positions), not by Duck Mold, so the import is
 tested on a file Duck Mold didn't write, and a recipe that uses it
 alongside a Duck Mold `.glb`.
+
+*As built:* `crates/duck-mold-core/src/gltf.rs`, about 850 lines with
+its own tests and no new library, reads into the same mesh type as OBJ, which now carries
+each material's colour. The example is `examples/desk.toml`: a desk with
+`parts/lamp.gltf` (three materials, four pieces: a box with 16-bit
+corner numbers, one with 8-bit ones placed by a matrix, a shade as a
+fan, a bulb with no corner numbers; the shade and bulb inside a tilted
+arm; written by `examples/parts/make_lamp.py`, not by Duck Mold, and
+checked clean by the Khronos validator) and `parts/crate.glb`. The
+recipe paints the lamp's stand and leaves its shade and bulb to keep the
+file's colours, so the desk is the one example with a warning, and the
+tests expect it. The colour rule, as approved: a material the recipe
+leaves uncoloured keeps its base colour, added to the palette under its
+name; if the palette already has that name, the palette's colour is
+used (and the warning says so, when the two differ). Faces with no
+material, like an OBJ's, stay grey with the usual warning. A `.glb` that
+Duck Mold wrote joins its palette to the model's at load time, exactly as
+a recipe used as a part does, conflicts included. Base colours turn into
+0-255 through Duck Mold's fixed sRGB table, so every computer gets the
+same palette. `inspect` and `render` take `.gltf` and other `.glb` files
+too.
 
 ### Step 7. The preview window
 
@@ -1147,6 +1231,21 @@ screenshot.
 
 It is tested without a window by Duck Forge's `Simulation`, which feeds
 it mouse drags, wheel turns and changed files and checks what it draws.
+
+*As built:* `crates/duck-mold-view/src/preview.rs`. The model is drawn
+in perspective (a 40° view), from the front right and a little above to
+start, lit from over the viewer's shoulder whichever way it is turned.
+Saving keeps the view where it was. Mistakes show in red and warnings in
+amber at the top, wrapped to fit, and are printed to the terminal too.
+`load` now lists every file it reads, the recipe first (palette files,
+recipes used as parts, meshes and a `.gltf`'s `.bin`), and those are
+what is watched. Built with `--no-default-features`, `duck-mold preview`
+says it was built without its window and suggests `render`; without a
+screen, it says so in one line. On Linux the window needs X11 and the
+`libxkbcommon-x11` library when it opens, which Duck Forge loads then:
+building needs neither. It was also tried for real on a virtual X
+screen: the robot drawn, a colour change saved and shown, a broken save
+shown in red over the last good model. CI builds and tests both ways.
 
 Phase 1 ends with `PHASE1_REPORT.md`: what works, known limits, what
 changed from this design, and what Phase 2 should start with.

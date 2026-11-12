@@ -12,13 +12,14 @@ use serde::Serialize;
 
 use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
-use crate::inspect::{Inspection, MaterialUse, inspect};
+use crate::gltf::{is_duck_mold_glb, read_gltf};
+use crate::inspect::{Inspection, MaterialUse, inspect, socket_report};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
 use crate::mesh::{MeshFile, read_obj};
 use crate::model::{Face, Model, Part, PartKind};
-use crate::recipe::Loc;
+use crate::recipe::{Loc, PaletteColor};
 
 /// Why an operation gave nothing.
 #[derive(Debug, Clone, PartialEq)]
@@ -64,8 +65,21 @@ pub struct Built {
 }
 
 /// Reads and builds a file: a recipe (`.toml`, `.json`), or a model to
-/// measure (an `.obj` mesh, or a `.glb` that Duck Mold wrote).
+/// measure (an `.obj` mesh, a `.gltf` or `.glb`: a `.glb` that Duck Mold
+/// wrote comes back with its parts and palette).
 pub fn build(path: &Path) -> Result<Built, Failure> {
+    build_watching(path).0
+}
+
+/// [`build`], and every file it read, the file itself first, whether or
+/// not it built: what a window watches, to build again when one changes.
+pub fn build_watching(path: &Path) -> (Result<Built, Failure>, Vec<PathBuf>) {
+    let mut files = vec![path.to_path_buf()];
+    let built = build_noting(path, &mut files);
+    (built, files)
+}
+
+fn build_noting(path: &Path, files: &mut Vec<PathBuf>) -> Result<Built, Failure> {
     let source = display_path(path);
     let ending = path
         .extension()
@@ -76,6 +90,7 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
         "toml" | "json" => {
             let mut issues = Vec::new();
             let loaded = load(path, &mut issues).map_err(Failure::Usage)?;
+            files.clone_from(&loaded.files);
             match assemble(&loaded, &mut issues) {
                 Some(model) => Ok(Built {
                     model,
@@ -86,7 +101,7 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
                 None => Err(Failure::Invalid(Report::from_issues(issues))),
             }
         }
-        "glb" => {
+        "glb" if is_duck_mold_glb(&read_file(path)?) => {
             let bytes = read_file(path)?;
             let model = read_glb(&bytes, &source)
                 .map_err(|issue| Failure::Invalid(Report::from_issues(vec![*issue])))?;
@@ -96,6 +111,27 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
                 warnings: Vec::new(),
                 materials: Vec::new(),
             })
+        }
+        "glb" | "gltf" => {
+            let bytes = read_file(path)?;
+            let mut issues = Vec::new();
+            let beside = path.parent().unwrap_or(Path::new("."));
+            match read_gltf(&bytes, &source, beside, &mut issues) {
+                Some(mesh) => {
+                    files.extend(mesh.extra_files.iter().cloned());
+                    Ok(Built {
+                        model: model_of_mesh(&mesh, path),
+                        source,
+                        warnings: Report::from_issues(issues).warnings,
+                        materials: mesh
+                            .material_counts()
+                            .into_iter()
+                            .map(|(name, triangles)| MaterialUse { name, triangles })
+                            .collect(),
+                    })
+                }
+                None => Err(Failure::Invalid(Report::from_issues(issues))),
+            }
         }
         "obj" => {
             let text = String::from_utf8(read_file(path)?).map_err(|_| {
@@ -120,26 +156,40 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
                 None => Err(Failure::Invalid(Report::from_issues(issues))),
             }
         }
-        "gltf" => Err(Failure::Usage(Box::new(Issue::error(
-            Code::Unsupported,
-            "",
-            format!(
-                "\"{source}\" is a glTF text file, which Duck Mold can't read yet. It reads recipes (.toml, .json), .obj meshes and the .glb files it writes"
-            ),
-        )))),
         _ => Err(Failure::Usage(Box::new(Issue::error(
             Code::Io,
             "",
             format!(
-                "\"{source}\" isn't something Duck Mold reads: give it a recipe (.toml or .json), an .obj mesh or a .glb file it wrote"
+                "\"{source}\" isn't something Duck Mold reads: give it a recipe (.toml or .json) or a mesh (.obj, .gltf or .glb)"
             ),
         )))),
     }
 }
 
 /// A mesh file as a model of one part, exactly as the file has it: not
-/// moved to the ground, not coloured.
+/// moved to the ground, and coloured only by the colours its materials
+/// have in the file (a glTF's; an OBJ's aren't read).
 fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
+    let mut palette: Vec<PaletteColor> = Vec::new();
+    let color_of_material: Vec<Option<usize>> = (0..mesh.materials.len())
+        .map(|material| {
+            let rgb = mesh.color_of(material)?;
+            let name = &mesh.materials[material];
+            let at = palette
+                .iter()
+                .position(|color| color.name == *name)
+                .unwrap_or_else(|| {
+                    palette.push(PaletteColor {
+                        name: name.clone(),
+                        rgb,
+                        loc: Loc::default(),
+                        own: false,
+                    });
+                    palette.len() - 1
+                });
+            Some(at)
+        })
+        .collect();
     let name = path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -148,9 +198,10 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
     let faces: Vec<Face> = mesh
         .triangles
         .iter()
-        .map(|corners| Face {
+        .zip(&mesh.material_of)
+        .map(|(corners, &material)| Face {
             corners: corners.map(|corner| Vec3::from(corner).tidied()).to_vec(),
-            color: None,
+            color: color_of_material[material],
         })
         .collect();
     let part = Part {
@@ -172,7 +223,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
     };
     Model {
         name,
-        palette: Vec::new(),
+        palette,
         faces,
         parts: vec![part],
         sockets: Vec::new(),
@@ -201,6 +252,16 @@ pub fn inspect_file(path: &Path) -> Result<Inspection, Failure> {
     let built = build(path)?;
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
     inspection.materials = built.materials;
+    Ok(inspection)
+}
+
+/// `duck-mold inspect --sockets`: [`inspect_file`], with every named
+/// socket listed too.
+pub fn inspect_file_with_sockets(path: &Path) -> Result<Inspection, Failure> {
+    let built = build(path)?;
+    let mut inspection = inspect(&built.model, &built.source, built.warnings);
+    inspection.materials = built.materials;
+    inspection.sockets = socket_report(&built.model);
     Ok(inspection)
 }
 
@@ -241,7 +302,18 @@ pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Fai
         None => recipe.with_extension("glb"),
     };
     let bytes = write_glb(&built.model);
-    std::fs::write(&output, &bytes).map_err(|error| {
+    write_file(&output, &bytes)?;
+    Ok(Exported {
+        inspection: inspect(&built.model, &built.source, built.warnings),
+        output: display_path(&output),
+        bytes: bytes.len(),
+    })
+}
+
+/// Writes a file the program was asked to write, or says in one sentence
+/// why it can't.
+pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
+    std::fs::write(path, bytes).map_err(|error| {
         let reason = match error.kind() {
             std::io::ErrorKind::NotFound => "that folder doesn't exist",
             std::io::ErrorKind::PermissionDenied => "permission denied",
@@ -250,12 +322,7 @@ pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Fai
         Failure::Usage(Box::new(Issue::error(
             Code::Io,
             "",
-            format!("can't write \"{}\": {reason}", display_path(&output)),
+            format!("can't write \"{}\": {reason}", display_path(path)),
         )))
-    })?;
-    Ok(Exported {
-        inspection: inspect(&built.model, &built.source, built.warnings),
-        output: display_path(&output),
-        bytes: bytes.len(),
     })
 }

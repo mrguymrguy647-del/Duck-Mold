@@ -5,8 +5,8 @@
 //! the part's face names, so `colors = { Moss = "leaf" }` paints them
 //! from the palette like any other face.
 //!
-//! This phase reads OBJ files. Importing glTF is planned for a later
-//! one.
+//! This file reads OBJ files; [`crate::gltf`] reads glTF (`.gltf` and
+//! `.glb`) into the same [`MeshFile`].
 
 use crate::issue::{Code, Issue};
 use crate::source::Pos;
@@ -23,6 +23,15 @@ pub struct MeshFile {
     pub material_of: Vec<usize>,
     /// The material names, in the order the file first uses them.
     pub materials: Vec<String>,
+    /// Each material's own colour in the file, 0 to 255, when it has one
+    /// (glTF's base colour): used for its faces when the recipe gives
+    /// them none. Empty for OBJ, whose colours aren't read.
+    pub colors: Vec<Option<[u8; 3]>>,
+    /// True for a `.glb` Duck Mold wrote: its materials are its palette
+    /// colours, which join the model's palette as a recipe's do.
+    pub from_duck_mold: bool,
+    /// Other files read for it: a `.gltf`'s `.bin`.
+    pub extra_files: Vec<std::path::PathBuf>,
 }
 
 /// The most mistakes reported for one mesh file. A damaged file can have
@@ -231,7 +240,7 @@ pub fn read_obj(text: &str, file: &str, issues: &mut Vec<Issue>) -> Option<MeshF
 }
 
 /// True for a triangle squashed to a line or a point.
-fn has_no_area(triangle: &[[f64; 3]; 3]) -> bool {
+pub(crate) fn has_no_area(triangle: &[[f64; 3]; 3]) -> bool {
     let [a, b, c] = triangle.map(|[x, y, z]| (x, y, z));
     let (ab, ac) = (
         (b.0 - a.0, b.1 - a.1, b.2 - a.2),
@@ -257,5 +266,10 @@ impl MeshFile {
             counts[material].1 += 1;
         }
         counts
+    }
+
+    /// The material's own colour in the file, if it has one.
+    pub fn color_of(&self, material: usize) -> Option<[u8; 3]> {
+        self.colors.get(material).copied().flatten()
     }
 }

@@ -1,10 +1,12 @@
-//! Golden files: the five example recipes must always build to exactly
+//! Golden files: the example recipes must always build to exactly
 //! the same bytes.
 //!
 //! `tests/golden/` at the top of the repository holds, for each example,
-//! the `.glb` that `duck-mold export` writes and the report that
-//! `duck-mold inspect --json` prints. These tests run the real program
-//! and compare every byte. That is what "the same recipe always gives
+//! the `.glb` that `duck-mold export` writes, the report that
+//! `duck-mold inspect --json` prints and the picture that
+//! `duck-mold render` draws. These tests run the real program and
+//! compare every byte. CI runs them on Windows and Linux, so a picture
+//! that came out differently on one of them would show here. That is what "the same recipe always gives
 //! the same output" means in practice: on this computer, on another one,
 //! and after any change to the code.
 //!
@@ -24,7 +26,9 @@ use std::process::Command;
 #[path = "../../../docs/forge/duck_mold_glb.rs"]
 mod forge;
 
-const EXAMPLES: [&str; 5] = ["crate", "table", "tree", "house", "robot"];
+const EXAMPLES: [&str; 7] = [
+    "crate", "table", "tree", "house", "robot", "snowman", "desk",
+];
 
 /// The top of the repository.
 fn root() -> PathBuf {
@@ -102,6 +106,21 @@ fn every_example_builds_to_its_golden_glb() {
 }
 
 #[test]
+fn every_example_renders_to_its_golden_picture() {
+    let scratch = scratch("golden_png");
+    for name in EXAMPLES {
+        let output = scratch.join(format!("{name}.png"));
+        duck_mold(&[
+            "render",
+            &format!("examples/{name}.toml"),
+            "-o",
+            output.to_str().unwrap(),
+        ]);
+        check(&format!("{name}.png"), &std::fs::read(output).unwrap());
+    }
+}
+
+#[test]
 fn every_example_inspects_to_its_golden_report() {
     for name in EXAMPLES {
         let report = duck_mold(&["inspect", &format!("examples/{name}.toml"), "--json"]);
@@ -141,13 +160,26 @@ fn every_example_is_a_clean_model() {
         .unwrap();
         assert_eq!(report["ok"], true, "{name}");
         assert_eq!(report["name"], name);
-        assert_eq!(report["warnings"], serde_json::json!([]), "{name}");
+        // The desk's lamp keeps two colours from its file, and says so.
+        let warnings = report["warnings"].as_array().unwrap();
+        if name == "desk" {
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0]["code"], "no_color");
+        } else {
+            assert_eq!(warnings.len(), 0, "{name}: {warnings:?}");
+        }
         assert_eq!(report["ground"]["rests_on_ground"], true, "{name}");
         assert_eq!(report["floating"], serde_json::json!([]), "{name}");
-        // Only the tree overlaps, and it means to: its tiers are pushed
-        // into each other.
+        // Only the tree and the snowman overlap, and they mean to: the
+        // tree's tiers are pushed into each other, and the snowman's five
+        // lumps of coal are pressed into the snow.
         let overlaps = report["overlapping"].as_array().unwrap().len();
-        assert_eq!(overlaps, if name == "tree" { 2 } else { 0 }, "{name}");
+        let meant = match name {
+            "tree" => 2,
+            "snowman" => 5,
+            _ => 0,
+        };
+        assert_eq!(overlaps, meant, "{name}");
         assert!(report.get("unpainted_triangles").is_none(), "{name}");
     }
 }
@@ -248,6 +280,30 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
                 report["bounds"]["max"][axis].as_f64().unwrap() as f32,
                 "{name}"
             );
+        }
+        // Every named socket, where `inspect --sockets` says it is. The
+        // file holds 32-bit numbers, so they agree to about 0.00001.
+        let listed: serde_json::Value = serde_json::from_slice(&duck_mold(&[
+            "inspect",
+            &format!("examples/{name}.toml"),
+            "--sockets",
+            "--json",
+        ]))
+        .unwrap();
+        let listed = listed["sockets"].as_array().unwrap();
+        assert_eq!(model.sockets.len(), listed.len(), "{name}");
+        for (socket, expected) in model.sockets.iter().zip(listed) {
+            assert_eq!(socket.name, expected["name"], "{name}");
+            for axis in 0..3 {
+                for (found, field) in [(socket.at, "at"), (socket.facing, "facing")] {
+                    let want = expected[field][axis].as_f64().unwrap();
+                    assert!(
+                        (f64::from(found[axis]) - want).abs() < 1e-5,
+                        "{name}: {} {field}",
+                        socket.name
+                    );
+                }
+            }
         }
         // What docs/forge-handoff.md suggests as Duck Forge's first test.
         if name == "crate" {

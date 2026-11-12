@@ -281,8 +281,8 @@ pub enum Placement {
         to_socket: String,
         /// Where `to` was written.
         to_loc: Loc,
-        /// Degrees to twist around the join.
-        rotate: f64,
+        /// Degrees to twist around the join: `twist`.
+        twist: f64,
     },
 }
 
@@ -420,9 +420,9 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-const PART_FIELDS: [&str; 19] = [
+const PART_FIELDS: [&str; 20] = [
     "name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color",
-    "colors", "attach", "to", "rotate", "move", "scale", "mirror", "sockets", "note",
+    "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note",
 ];
 
 /// The fields at the top of a recipe.
@@ -1240,10 +1240,11 @@ impl Decoder<'_> {
         }
     }
 
-    /// `attach` and `to`, or `move` and `rotate`.
+    /// `attach`, `to` and `twist`, or `move` and `rotate`.
     fn placement(&mut self, fields: &mut Fields<'_>, place: Place) -> Placement {
         let attach = fields.take("attach");
         let to = fields.take("to");
+        let twist = fields.take("twist");
         let rotate = fields.take("rotate");
         let move_by = fields.take("move");
 
@@ -1251,6 +1252,7 @@ impl Decoder<'_> {
             for (entry, field) in [
                 (attach, "attach"),
                 (to, "to"),
+                (twist, "twist"),
                 (rotate, "rotate"),
                 (move_by, "move"),
             ] {
@@ -1263,6 +1265,15 @@ impl Decoder<'_> {
 
         match (attach, to) {
             (None, None) => {
+                if let Some(entry) = twist {
+                    // Without a join there is nothing to twist around.
+                    let degrees = entry.node.value.as_number().map_or("90".to_owned(), plain);
+                    let message = format!(
+                        "this part isn't joined to anything, so there is nothing to twist it around: to turn it around the upright axis, write rotate = [0, {degrees}, 0]"
+                    );
+                    self.error(Code::Conflict, &fields.sub("twist"), entry.key_pos, message)
+                        .suggestion = Some(format!("rotate = [0, {degrees}, 0]"));
+                }
                 let move_by = move_by
                     .and_then(|entry| {
                         self.three(&entry.node, &fields.sub("move"), MOVE_RANGE, "[0, 1.5, 0]")
@@ -1294,18 +1305,32 @@ impl Decoder<'_> {
                         "an attached part goes where its sockets say: remove \"move\", or move the socket it attaches to (see \"shift\")",
                     );
                 }
-                let rotate = rotate
+                if let Some(entry) = rotate {
+                    // Phase 0 wrote the twist as `rotate = 90`.
+                    let (message, fix) = match entry.node.value.as_number() {
+                        Some(degrees) => (
+                            format!(
+                                "a joined part turns around its join with \"twist\": write twist = {}",
+                                plain(degrees)
+                            ),
+                            format!("twist = {}", plain(degrees)),
+                        ),
+                        None => (
+                            "a joined part is turned by its join, not by \"rotate\": to turn it further around the join, write twist = 90".to_owned(),
+                            "twist = 90".to_owned(),
+                        ),
+                    };
+                    self.error(
+                        Code::Conflict,
+                        &fields.sub("rotate"),
+                        entry.key_pos,
+                        message,
+                    )
+                    .suggestion = Some(fix);
+                }
+                let twist = twist
                     .and_then(|entry| {
-                        let path = fields.sub("rotate");
-                        if matches!(entry.node.value, Value::Array(_)) {
-                            self.error(
-                                Code::TypeMismatch,
-                                &path,
-                                entry.node.pos,
-                                "an attached part is twisted around its join by one number of degrees, like rotate = 90",
-                            );
-                            return None;
-                        }
+                        let path = fields.sub("twist");
                         self.ranged(&entry.node, &path, (-36_000.0, 36_000.0), "90")
                     })
                     .unwrap_or(0.0);
@@ -1322,7 +1347,7 @@ impl Decoder<'_> {
                         to_part,
                         to_socket,
                         to_loc: self.loc(&to_path, to.node.pos),
-                        rotate,
+                        twist,
                     },
                     _ => Placement::none(),
                 }
