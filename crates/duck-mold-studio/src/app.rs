@@ -15,7 +15,7 @@ use eframe::egui::{
     pos2,
 };
 
-use crate::theme;
+use crate::{properties, theme};
 
 /// The most pixels the viewport is drawn with. On a very large or very
 /// sharp screen the picture is drawn smaller and stretched, so turning
@@ -49,6 +49,8 @@ pub struct StudioApp {
     shown_selected: Option<String>,
     /// Where on the screen the viewport was last drawn.
     view_rect: Option<Rect>,
+    /// What is being typed in the properties panel.
+    draft: properties::Draft,
 }
 
 impl Default for StudioApp {
@@ -68,6 +70,7 @@ impl StudioApp {
             titled: String::new(),
             shown_selected: None,
             view_rect: None,
+            draft: properties::Draft::default(),
         }
     }
 
@@ -200,6 +203,16 @@ impl StudioApp {
             .default_size(230.0)
             .min_size(140.0)
             .show(ui, |ui| outliner(ui, studio, &mut self.shown_selected));
+
+        egui::Panel::right("duck_mold_properties")
+            .resizable(true)
+            .default_size(270.0)
+            .min_size(220.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .auto_shrink([false, false])
+                    .show(ui, |ui| properties::show(ui, studio, &mut self.draft));
+            });
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
             self.view_rect = Some(ui.available_rect_before_wrap());

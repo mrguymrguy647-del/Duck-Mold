@@ -521,6 +521,12 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   `use = "arm"`) is changed in the definition, so every part using it
   changes. The report says so: `"definition": "arm", "also_changes":
   ["right_arm/hand"]`.
+- **A part made from a defined part** (`left_eye`, which is `use =
+  "eye"`): `set --shape`, `--size`, `--radius`, `--height`,
+  `--segments`, `--color` and `--face-color` change the definition,
+  because that is where they are written, so every part using it
+  changes, and the report names them the same way. Its `--twist`, its
+  join and its name are its own.
 - **A part inside another recipe file** is refused: edit that file.
 - If the file was saved by someone else while the edit was being worked
   out, the edit is worked out again on the new text, so neither change

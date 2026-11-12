@@ -274,10 +274,10 @@ fn main() -> ExitCode {
                         });
                         if let Some(definition) = &info.definition {
                             say(&if info.also_changes.is_empty() {
-                                format!("  it is inside the definition \"{definition}\"")
+                                format!("  this changed the definition \"{definition}\"")
                             } else {
                                 format!(
-                                    "  it is inside the definition \"{definition}\", so this also changes: {}",
+                                    "  this changed the definition \"{definition}\", so it also changes: {}",
                                     info.also_changes.join(", ")
                                 )
                             });

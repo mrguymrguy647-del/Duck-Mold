@@ -5,6 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
+use duck_mold_core::edit::{Changes, Edit, Made, Sizes};
 use duck_mold_view::render::BACKGROUND;
 use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::viewport::Picture;
@@ -411,4 +412,232 @@ fn the_selection_lasts_while_the_part_does() {
     assert!(studio.check_files());
     assert_eq!(studio.selected(), None);
     assert!(studio.part("bulb").is_some());
+}
+
+// ---- step 5: editing ---------------------------------------------------------
+
+/// The lines only the old text has, and the lines only the new one has.
+fn changed<'a>(old: &'a str, new: &'a str) -> (Vec<&'a str>, Vec<&'a str>) {
+    let (old, new): (Vec<&str>, Vec<&str>) = (old.lines().collect(), new.lines().collect());
+    let start = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    let end = old[start..]
+        .iter()
+        .rev()
+        .zip(new[start..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    (
+        old[start..old.len() - end].to_vec(),
+        new[start..new.len() - end].to_vec(),
+    )
+}
+
+fn set(part: &str, changes: Changes) -> Edit {
+    Edit::Set {
+        part: part.into(),
+        changes,
+    }
+}
+
+#[test]
+fn an_edit_is_written_to_the_recipe_at_once_and_nothing_else_changes() {
+    let recipe = copy_of("robot", "studio_edit");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    let builds = studio.builds();
+
+    let said = studio
+        .apply(&set(
+            "head",
+            Changes {
+                color: Some("red".into()),
+                ..Changes::default()
+            },
+        ))
+        .unwrap();
+    assert_eq!(said, "Set \"head\": colour red");
+    assert_eq!(studio.status(), said);
+    let after = std::fs::read_to_string(&recipe).unwrap();
+    let (gone, new) = changed(&before, &after);
+    assert_eq!(new, ["color = \"red\""]);
+    assert_eq!(gone.len(), 1, "{gone:?}");
+    // What the Studio shows is the file, built again.
+    assert_eq!(studio.text(), after);
+    assert_eq!(studio.builds(), builds + 1);
+    assert!(!studio.has_mistakes());
+
+    // The panel's facts are read from the file too.
+    assert!(studio.select(Some("head")));
+    let facts = studio.facts().unwrap();
+    assert_eq!(facts.color.as_deref(), Some("red"));
+    assert_eq!(facts.shape.as_deref(), Some("box"));
+    assert!(studio.palette().iter().any(|(name, _)| name == "red"));
+}
+
+#[test]
+fn an_edit_that_cant_be_made_says_why_and_writes_nothing() {
+    let recipe = copy_of("robot", "studio_edit_refused");
+    let before = std::fs::read(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    let why = studio
+        .apply(&set(
+            "head",
+            Changes {
+                color: Some("pink".into()),
+                ..Changes::default()
+            },
+        ))
+        .unwrap_err();
+    assert!(why.starts_with("Not changed: "), "{why}");
+    assert!(why.contains("pink"), "{why}");
+    assert_eq!(studio.status(), why);
+    assert_eq!(std::fs::read(&recipe).unwrap(), before);
+    assert!(!studio.has_mistakes());
+
+    // Looking only: nothing is ever written.
+    let mut looking = Studio::open(&recipe, true);
+    let why = looking
+        .apply(&Edit::Remove {
+            part: "antenna_tip".into(),
+            with_attached: false,
+        })
+        .unwrap_err();
+    assert_eq!(why, "This window is only for looking: nothing was changed");
+    assert_eq!(std::fs::read(&recipe).unwrap(), before);
+}
+
+#[test]
+fn the_selection_follows_the_part_through_an_edit() {
+    let recipe = copy_of("robot", "studio_edit_selection");
+    let mut studio = Studio::open(&recipe, false);
+
+    // Renamed: still selected, under its new name.
+    assert!(studio.select(Some("antenna_tip")));
+    studio
+        .apply(&Edit::Rename {
+            part: "antenna_tip".into(),
+            new_name: "bulb".into(),
+        })
+        .unwrap();
+    assert_eq!(studio.selected(), Some("bulb"));
+
+    // A part inside a renamed part keeps its place in it.
+    assert!(studio.select(Some("left_arm/hand")));
+    studio
+        .apply(&Edit::Rename {
+            part: "left_arm".into(),
+            new_name: "port_arm".into(),
+        })
+        .unwrap();
+    assert_eq!(studio.selected(), Some("port_arm/hand"));
+
+    // Added: the new part is selected.
+    studio
+        .apply(&Edit::Add {
+            name: "hat".into(),
+            made: Made::Shape("cone".into()),
+            to: "head.top".into(),
+            attach: None,
+            sizes: Sizes {
+                radius: Some(0.1),
+                height: Some(0.1),
+                ..Sizes::default()
+            },
+            color: Some("red".into()),
+            twist: None,
+        })
+        .unwrap();
+    assert_eq!(studio.selected(), Some("hat"));
+
+    // Copied: the copy is selected.
+    studio
+        .apply(&Edit::Duplicate {
+            part: "hat".into(),
+            name: None,
+            to: None,
+            mirror: false,
+        })
+        .unwrap();
+    let copy = studio.selected().unwrap().to_owned();
+    assert_ne!(copy, "hat");
+    assert!(copy.starts_with("hat"), "{copy}");
+
+    // Removed: nothing is selected.
+    studio
+        .apply(&Edit::Remove {
+            part: copy,
+            with_attached: false,
+        })
+        .unwrap();
+    assert_eq!(studio.selected(), None);
+}
+
+#[test]
+fn a_part_from_a_definition_says_which_parts_change_before_any_edit() {
+    let recipe = copy_of("robot", "studio_edit_definition");
+    let before = std::fs::read(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+
+    // Made with `use`: what it is made of is the definition's.
+    assert!(studio.select(Some("left_eye")));
+    let uses = studio.facts().unwrap().uses.unwrap();
+    assert_eq!(uses.definition, "eye");
+    assert_eq!(uses.also_changes, ["right_eye"]);
+
+    // Inside a definition: any edit changes the other arm's hand too.
+    assert!(studio.select(Some("left_arm/hand")));
+    let inside = studio.facts().unwrap().inside.unwrap();
+    assert_eq!(inside.definition, "arm");
+    assert_eq!(inside.also_changes, ["right_arm/hand"]);
+
+    // A part written once names nothing.
+    assert!(studio.select(Some("head")));
+    let facts = studio.facts().unwrap();
+    assert_eq!((facts.inside, facts.uses), (None, None));
+    // Asking changed nothing.
+    assert_eq!(std::fs::read(&recipe).unwrap(), before);
+
+    // And the edit, when made, says so again.
+    let said = studio
+        .apply(&set(
+            "left_arm/hand",
+            Changes {
+                color: Some("glow".into()),
+                ..Changes::default()
+            },
+        ))
+        .unwrap();
+    assert_eq!(
+        said,
+        "Set \"left_arm/hand\": colour glow (also changed: right_arm/hand)"
+    );
+}
+
+#[test]
+fn an_edit_is_made_on_what_the_file_holds_now() {
+    // Both at once: another program saves the recipe, and before the
+    // Studio has looked, the person changes something in the Studio.
+    let recipe = copy_of("robot", "studio_edit_both");
+    let mut studio = Studio::open(&recipe, false);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    save(
+        &recipe,
+        &text.replace("name = \"robot\"", "name = \"robot2\""),
+    );
+
+    studio
+        .apply(&set(
+            "head",
+            Changes {
+                color: Some("red".into()),
+                ..Changes::default()
+            },
+        ))
+        .unwrap();
+    let after = std::fs::read_to_string(&recipe).unwrap();
+    // Both changes are in the file.
+    assert!(after.contains("name = \"robot2\""));
+    assert_eq!(studio.model().unwrap().name, "robot2");
+    studio.select(Some("head"));
+    assert_eq!(studio.facts().unwrap().color.as_deref(), Some("red"));
 }

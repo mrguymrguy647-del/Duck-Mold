@@ -16,6 +16,7 @@ pub mod viewport;
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
+use duck_mold_core::edit::{self, Edit, Facts};
 use duck_mold_core::inspect::{Inspection, PartReport, inspect};
 use duck_mold_core::issue::Issue;
 use duck_mold_core::load::display_path;
@@ -383,6 +384,112 @@ impl Studio {
         self.selected.as_deref()
     }
 
+    /// What the recipe says about the selected part, for the properties
+    /// panel: its name, what it is made of, its sizes, colour, join and
+    /// twist, and which other parts an edit to it would change. `None`
+    /// with nothing selected, or for a part that can't be edited here (a
+    /// part inside another file, or any part of a model file).
+    pub fn facts(&self) -> Option<Facts> {
+        let syntax = Syntax::from_path(&self.path)?;
+        edit::describe(&self.text, syntax, self.model(), self.selected.as_deref()?)
+    }
+
+    /// The names of the recipe's palette colours, in the recipe's order,
+    /// each with its colour as `[red, green, blue]`.
+    pub fn palette(&self) -> Vec<(String, [u8; 3])> {
+        self.model().map_or_else(Vec::new, |model| {
+            model
+                .palette
+                .iter()
+                .map(|color| (color.name.clone(), color.rgb))
+                .collect()
+        })
+    }
+
+    /// Makes one change to the recipe: the same edit, by the same
+    /// function, as `duck-mold edit`. The file is written at once and
+    /// built again. Says what was done, or why nothing was.
+    ///
+    /// The selection follows the part: a renamed part stays selected, and
+    /// a part that was added or copied becomes the selection.
+    pub fn apply(&mut self, change: &Edit) -> Result<String, String> {
+        if self.look_only {
+            let why = "This window is only for looking: nothing was changed".to_owned();
+            self.say(why.clone());
+            return Err(why);
+        }
+        // What the file holds now is what is edited, not what was read a
+        // moment ago: if another program has just saved it, that is seen
+        // first.
+        self.check_files();
+        let parts_before: Vec<String> = self.outline().into_iter().map(|row| row.path).collect();
+        match edit::edit_file(&self.path, change, false) {
+            Ok(edited) => {
+                let before = std::mem::take(&mut self.text);
+                let mut follow = self.selection_after(change);
+                self.reload();
+                if matches!(change, Edit::Duplicate { .. }) {
+                    // The copy is the part that wasn't there before.
+                    follow = self
+                        .outline()
+                        .into_iter()
+                        .map(|row| row.path)
+                        .find(|path| !parts_before.contains(path));
+                }
+                if let Some(path) = follow {
+                    self.select(Some(&path));
+                }
+                if edited.edit.written {
+                    self.edited(before, &edited.edit.summary);
+                }
+                let mut said = edited.edit.summary.clone();
+                if !edited.edit.also_changes.is_empty() {
+                    said.push_str(&format!(
+                        " (also changed: {})",
+                        edited.edit.also_changes.join(", ")
+                    ));
+                }
+                // Capital first, as the other things the Studio says.
+                let said = capital(&said);
+                self.say(said.clone());
+                Ok(said)
+            }
+            Err(failure) => {
+                let why = format!("Not changed: {}", first_error(&failure));
+                self.say(why.clone());
+                Err(why)
+            }
+        }
+    }
+
+    /// The part to select once an edit is made, where that isn't the one
+    /// selected already.
+    fn selection_after(&self, change: &Edit) -> Option<String> {
+        // A path next to another: `left_arm/hand` and `claw` give
+        // `left_arm/claw`.
+        let beside = |path: &str, name: &str| match path.rsplit_once('/') {
+            Some((around, _)) => format!("{around}/{name}"),
+            None => name.to_owned(),
+        };
+        match change {
+            Edit::Rename { part, new_name } => {
+                let selected = self.selected.as_deref()?;
+                if selected == part {
+                    Some(beside(part, new_name))
+                } else {
+                    // A part inside the renamed one keeps its place there.
+                    let inside = selected.strip_prefix(part.as_str())?.strip_prefix('/')?;
+                    Some(format!("{}/{inside}", beside(part, new_name)))
+                }
+            }
+            Edit::Add { name, to, .. } => {
+                let (target, _) = to.rsplit_once('.')?;
+                Some(beside(target, name))
+            }
+            _ => None,
+        }
+    }
+
     /// Brings the whole model back into view (or the selected part, if
     /// one is), without turning the camera.
     pub fn frame(&mut self) {
@@ -497,4 +604,15 @@ impl Studio {
     }
 
     fn changed_outside(&mut self, _before: String) {}
+
+    fn edited(&mut self, _before: String, _summary: &str) {}
+}
+
+/// The same words, starting with a capital letter.
+fn capital(words: &str) -> String {
+    let mut letters = words.chars();
+    match letters.next() {
+        Some(first) => first.to_uppercase().chain(letters).collect(),
+        None => String::new(),
+    }
 }

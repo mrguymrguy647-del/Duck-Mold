@@ -386,6 +386,29 @@ fn find(doc: &Doc, part: &str) -> Result<Found, Stop> {
     Err(problem(Code::UnknownPart, "no part was named"))
 }
 
+/// Where a part's shape, sizes and colours are written: its own table,
+/// or, for a part made with `use`, the definition it uses (whose name
+/// is given too). A definition's shape and colours are its own: the part
+/// that uses it can't have others.
+fn making(doc: &Doc, found: &Found) -> (TreePath, Option<String>) {
+    let mut table = found.path();
+    let mut definition = None;
+    for _ in 0..32 {
+        let used = doc
+            .node(&table)
+            .and_then(|node| text_of(node, "use"))
+            .map(str::to_owned);
+        match used {
+            Some(name) if doc.node(&[key("define"), key(&name)]).is_some() => {
+                table = vec![key("define"), key(&name)];
+                definition = Some(name);
+            }
+            _ => break,
+        }
+    }
+    (table, definition)
+}
+
 /// Splits `head.top` into the part and the socket.
 fn split_socket(written: &str) -> Result<(&str, &str), Stop> {
     match written.rsplit_once('.') {
@@ -757,9 +780,14 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 twist,
             } = changes;
             let found = find(doc, part)?;
-            let table = found.path();
+            // Twist is the part's own. What it is made of is written in
+            // the definition, for a part that uses one.
+            let own = found.path();
+            let (table, uses) = making(doc, &found);
+            let mut made_changed = false;
             let mut said = Vec::new();
             if let Some(shape) = shape {
+                made_changed = true;
                 let Some((size_fields, faces)) = shape_words(shape) else {
                     return Err(problem(
                         Code::UnknownShape,
@@ -800,14 +828,17 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 said.push(format!("shape {shape}"));
             }
             for (name, value) in sizes.fields() {
+                made_changed = true;
                 said.push(format!("{name} {}", value.write(doc.syntax)));
                 set(doc, &table, &name, value)?;
             }
             if let Some(color) = color {
+                made_changed = true;
                 set(doc, &table, "color", text(color))?;
                 said.push(format!("colour {color}"));
             }
             for (face, color) in face_colors {
+                made_changed = true;
                 let colors = with(&table, key("colors"));
                 if doc.entries(&colors).is_some() {
                     doc.set_field(&colors, face, &text(color), &[])
@@ -823,7 +854,7 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 said.push(format!("{face} {color}"));
             }
             if let Some(twist) = twist {
-                set(doc, &table, "twist", Val::Num(*twist))?;
+                set(doc, &own, "twist", Val::Num(*twist))?;
                 said.push(format!("twist {}", doc::number_text(*twist)));
             }
             if said.is_empty() {
@@ -832,9 +863,19 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                     "nothing to set: give at least one of --shape, --size, --radius, --height, --segments, --color, --face-color, --twist",
                 ));
             }
+            // Changing what a definition is made of changes every part
+            // that uses it.
+            let touched = match uses {
+                Some(definition) if made_changed => Found {
+                    definition: Some(definition),
+                    inside: String::new(),
+                    ..found
+                },
+                _ => found,
+            };
             Ok(Outcome {
                 summary: format!("set \"{part}\": {}", said.join(", ")),
-                touched: Some(found),
+                touched: Some(touched),
             })
         }
         Edit::Duplicate {
@@ -1158,12 +1199,144 @@ fn share(found: &Found, model: Option<&Model>, part: &str) -> Option<Shared> {
     }
     let also_changes = using
         .iter()
-        .map(|user| format!("{}/{}", user.path, found.inside))
+        .map(|user| {
+            if found.inside.is_empty() {
+                user.path.clone()
+            } else {
+                format!("{}/{}", user.path, found.inside)
+            }
+        })
         .filter(|path| path != part)
         .collect();
     Some(Shared {
         definition,
         also_changes,
+    })
+}
+
+/// What the recipe says about one part: what the Studio's properties
+/// panel shows, read from the file as it is.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Facts {
+    /// Its own name, if it has one.
+    pub name: Option<String>,
+    /// What it is made of. `None` for a part made of parts of its own.
+    pub made: Option<Made>,
+    /// The built-in shape it is, its own or its definition's. `None` for
+    /// an assembly or a part from a file.
+    pub shape: Option<String>,
+    /// The sizes that shape has, with the default for each one the
+    /// recipe leaves out. Empty when it isn't a shape.
+    pub sizes: Sizes,
+    /// Its palette colour, its own or its definition's.
+    pub color: Option<String>,
+    /// The socket it is joined to: `body.neck`.
+    pub to: Option<String>,
+    /// Its own socket that joins there.
+    pub attach: Option<String>,
+    /// Degrees it is twisted around its join.
+    pub twist: f64,
+    /// Set when the part is inside a definition: every edit to it
+    /// changes the other parts named here too.
+    pub inside: Option<Shared>,
+    /// Set when the part is made with `use`: an edit to its shape, sizes
+    /// or colours changes the definition, and so the other parts named
+    /// here.
+    pub uses: Option<Shared>,
+}
+
+/// Reads what the recipe says about a part. `None` if the text can't be
+/// read, the part isn't in it, or it is inside another file.
+pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -> Option<Facts> {
+    fn number(node: &Node, name: &str) -> Option<f64> {
+        let Value::Table(entries) = &node.value else {
+            return None;
+        };
+        match entries.iter().find(|entry| entry.key == name)?.node.value {
+            Value::Int(whole) => Some(whole as f64),
+            Value::Float(number) => Some(number),
+            _ => None,
+        }
+    }
+    fn three(node: &Node, name: &str) -> Option<[f64; 3]> {
+        let Value::Table(entries) = &node.value else {
+            return None;
+        };
+        let Value::Array(items) = &entries.iter().find(|entry| entry.key == name)?.node.value
+        else {
+            return None;
+        };
+        let numbers: Vec<f64> = items
+            .iter()
+            .filter_map(|item| match item.value {
+                Value::Int(whole) => Some(whole as f64),
+                Value::Float(number) => Some(number),
+                _ => None,
+            })
+            .collect();
+        <[f64; 3]>::try_from(numbers).ok()
+    }
+
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let doc = Doc::parse(text, syntax).ok()?;
+    let found = find(&doc, part).ok()?;
+    let own = doc.node(&found.path())?;
+    let (made_at, via) = making(&doc, &found);
+    let made_node = doc.node(&made_at)?;
+
+    let made = if let Some(defined) = text_of(own, "use") {
+        Some(Made::Use(defined.to_owned()))
+    } else if let Some(file) = text_of(own, "file") {
+        Some(Made::File(file.to_owned()))
+    } else {
+        text_of(own, "shape").map(|shape| Made::Shape(shape.to_owned()))
+    };
+    let shape = text_of(made_node, "shape")
+        .filter(|shape| shape_words(shape).is_some())
+        .map(str::to_owned);
+    let mut sizes = Sizes::default();
+    if let Some((fields, _)) = shape.as_deref().and_then(shape_words) {
+        let round = if shape.as_deref() == Some("sphere") {
+            12
+        } else {
+            16
+        };
+        for field in fields {
+            match *field {
+                "size" => sizes.size = Some(three(made_node, "size").unwrap_or([1.0; 3])),
+                "radius" => sizes.radius = Some(number(made_node, "radius").unwrap_or(0.5)),
+                "height" => sizes.height = Some(number(made_node, "height").unwrap_or(1.0)),
+                _ => {
+                    sizes.segments = Some(
+                        number(made_node, "segments").map_or(round, |count| count.max(0.0) as u32),
+                    );
+                }
+            }
+        }
+    }
+    let inside = share(&found, model, part);
+    let uses = via.and_then(|definition| {
+        share(
+            &Found {
+                definition: Some(definition),
+                inside: String::new(),
+                ..found.clone()
+            },
+            model,
+            part,
+        )
+    });
+    Some(Facts {
+        name: found.name.clone(),
+        made,
+        shape,
+        sizes,
+        color: text_of(made_node, "color").map(str::to_owned),
+        to: text_of(own, "to").map(str::to_owned),
+        attach: text_of(own, "attach").map(str::to_owned),
+        twist: number(own, "twist").unwrap_or(0.0),
+        inside,
+        uses,
     })
 }
 

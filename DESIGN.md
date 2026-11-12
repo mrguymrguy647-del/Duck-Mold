@@ -1545,6 +1545,19 @@ viewport and the problems panel, with no editing. The window code from
 Phase 1 (Duck Forge's game window) is removed, so Duck Mold has one
 window library instead of two, and `preview` gains pan and the grid.
 
+*As built (step 5):* a part comes from a definition in two ways, and
+the panel says which. A part *inside* a definition (`left_arm/hand`):
+"Inside the definition "arm". Any change here also changes:
+right_arm/hand." A part *made from* a definition (`left_eye`, with `use
+= "eye"`): "Made from the definition "eye". Changing its shape, size or
+colour also changes: right_eye." For the second kind the `set` edit
+itself had to learn something: the eye's size and colour are written in
+the definition, not on the part, so `set` now changes them there (on the
+command line too), and reports the other parts. The part's name, join
+and twist are its own. A size is typed or dragged and becomes an edit
+when it is settled (Enter, a click elsewhere, the mouse let go), so a
+drag is one edit, not hundreds.
+
 *As built (step 3):* the Phase 1 window code and its `preview` switch
 are gone, so every build is the same and CI no longer builds twice. The
 Studio is the program `DuckMoldStudio`; `duck-mold studio` and `duck-mold

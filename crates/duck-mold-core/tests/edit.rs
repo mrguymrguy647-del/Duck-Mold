@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 
 use duck_mold_core::edit::{
-    Applied, Changes, Edit, Made, Sizes, apply, edit_file, shared, swap_in,
+    Applied, Changes, Edit, Made, Sizes, apply, describe, edit_file, shared, swap_in,
 };
 use duck_mold_core::issue::Code;
 use duck_mold_core::model::{Model, Part};
@@ -789,6 +789,175 @@ fn a_part_inside_a_definition_is_edited_there_and_the_others_are_named() {
     let model = applied.model.unwrap();
     part(&model, "left_bulb/ring");
     part(&model, "right_bulb/ring");
+}
+
+#[test]
+fn what_a_part_that_uses_a_definition_is_made_of_is_changed_in_the_definition() {
+    // The bulb's colour is written once, in its definition.
+    let edit = set_with(
+        "left_bulb",
+        Changes {
+            color: Some("steel".into()),
+            ..Changes::default()
+        },
+    );
+    let applied = done(LAMP, Syntax::Toml, &edit);
+    assert_eq!(
+        changed(LAMP, &applied.text),
+        (vec!["color = \"glow\""], vec!["color = \"steel\""])
+    );
+    assert!(applied.text.contains("[define.bulb]\ncolor = \"steel\"\n"));
+    let also = applied.shared.unwrap();
+    assert_eq!(also.definition, "bulb");
+    assert_eq!(also.also_changes, ["right_bulb"]);
+
+    // Its twist is its own: only that part's lines change, and no other
+    // part is named.
+    let edit = set_with(
+        "left_bulb",
+        Changes {
+            twist: Some(30.0),
+            ..Changes::default()
+        },
+    );
+    let applied = done(LAMP, Syntax::Toml, &edit);
+    let (gone, new) = changed(LAMP, &applied.text);
+    assert_eq!((gone, new), (vec![], vec!["twist = 30"]));
+    assert!(applied.text.contains("to = \"pole.left\"\ntwist = 30\n"));
+    assert_eq!(applied.shared, None);
+
+    // A definition that is one shape: its size is the definition's too.
+    let eyes = "version = 0\n[define.eye]\nshape = \"box\"\nsize = [0.1, 0.1, 0.1]\n\n[[parts]]\nname = \"head\"\nshape = \"box\"\n\n[[parts]]\nname = \"left_eye\"\nuse = \"eye\"\nattach = \"back\"\nto = \"head.front\"\n\n[[parts]]\nname = \"right_eye\"\nuse = \"eye\"\nattach = \"bottom\"\nto = \"head.top\"\n";
+    let edit = set_with(
+        "right_eye",
+        Changes {
+            sizes: Sizes {
+                size: Some([0.2, 0.2, 0.1]),
+                ..Sizes::default()
+            },
+            twist: Some(45.0),
+            ..Changes::default()
+        },
+    );
+    let applied = done(eyes, Syntax::Toml, &edit);
+    assert_eq!(
+        changed(eyes, &applied.text),
+        (
+            vec![
+                "size = [0.1, 0.1, 0.1]",
+                "",
+                "[[parts]]",
+                "name = \"head\"",
+                "shape = \"box\"",
+                "",
+                "[[parts]]",
+                "name = \"left_eye\"",
+                "use = \"eye\"",
+                "attach = \"back\"",
+                "to = \"head.front\"",
+                "",
+                "[[parts]]",
+                "name = \"right_eye\"",
+                "use = \"eye\"",
+                "attach = \"bottom\"",
+                "to = \"head.top\"",
+            ],
+            vec![
+                "size = [0.2, 0.2, 0.1]",
+                "",
+                "[[parts]]",
+                "name = \"head\"",
+                "shape = \"box\"",
+                "",
+                "[[parts]]",
+                "name = \"left_eye\"",
+                "use = \"eye\"",
+                "attach = \"back\"",
+                "to = \"head.front\"",
+                "",
+                "[[parts]]",
+                "name = \"right_eye\"",
+                "use = \"eye\"",
+                "attach = \"bottom\"",
+                "to = \"head.top\"",
+                "twist = 45",
+            ]
+        )
+    );
+    assert_eq!(applied.shared.unwrap().also_changes, ["left_eye"]);
+    let model = applied.model.unwrap();
+    for eye in ["left_eye", "right_eye"] {
+        let size = part(&model, eye).bounds.unwrap().size();
+        assert!((size.x.max(size.z) - 0.2).abs() < 0.08, "{eye}: {size:?}");
+    }
+}
+
+#[test]
+fn describe_reads_what_the_recipe_says_about_a_part() {
+    let model = done(LAMP, Syntax::Toml, &add_hat()).model.unwrap();
+    let facts = |part: &str| describe(LAMP, Syntax::Toml, Some(&model), part).unwrap();
+
+    // A shape, with its sizes; one the recipe leaves out has its default.
+    let base = facts("base");
+    assert_eq!(base.name.as_deref(), Some("base"));
+    assert_eq!(base.made, Some(Made::Shape("cylinder".into())));
+    assert_eq!(base.shape.as_deref(), Some("cylinder"));
+    assert_eq!(
+        base.sizes,
+        Sizes {
+            size: None,
+            radius: Some(0.3),
+            height: Some(0.05),
+            segments: Some(16),
+        }
+    );
+    assert_eq!(base.color.as_deref(), Some("steel"));
+    assert_eq!((base.to, base.attach, base.twist), (None, None, 0.0));
+    assert_eq!((base.inside, base.uses), (None, None));
+
+    // A joined, twisted box.
+    let pole = facts("pole");
+    assert_eq!(pole.sizes.size, Some([0.05, 1.0, 0.05]));
+    assert_eq!(pole.sizes.radius, None);
+    assert_eq!(pole.to.as_deref(), Some("base.pole"));
+    assert_eq!(pole.attach.as_deref(), Some("bottom"));
+    assert_eq!(pole.twist, 15.0);
+
+    // A part made from a definition: its colour is the definition's, and
+    // changing what it is made of changes the other bulb.
+    let bulb = facts("left_bulb");
+    assert_eq!(bulb.made, Some(Made::Use("bulb".into())));
+    assert_eq!(bulb.shape, None);
+    assert_eq!(bulb.sizes, Sizes::default());
+    assert_eq!(bulb.color.as_deref(), Some("glow"));
+    assert_eq!(bulb.to.as_deref(), Some("pole.left"));
+    assert_eq!(bulb.inside, None);
+    let uses = bulb.uses.unwrap();
+    assert_eq!(uses.definition, "bulb");
+    assert_eq!(uses.also_changes, ["right_bulb"]);
+
+    // A part inside a definition: every edit changes the other one.
+    let glass = facts("right_bulb/glass");
+    assert_eq!(glass.shape.as_deref(), Some("sphere"));
+    assert_eq!(glass.sizes.radius, Some(0.1));
+    assert_eq!(glass.sizes.segments, Some(12));
+    assert_eq!(glass.uses, None);
+    let inside = glass.inside.unwrap();
+    assert_eq!(inside.definition, "bulb");
+    assert_eq!(inside.also_changes, ["left_bulb/glass"]);
+
+    // The same from JSON.
+    let json = to_json(LAMP);
+    let pole = describe(&json, Syntax::Json, Some(&model), "pole").unwrap();
+    assert_eq!(pole.sizes.size, Some([0.05, 1.0, 0.05]));
+    assert_eq!(pole.twist, 15.0);
+
+    // No such part, or a part inside another file: nothing to show.
+    assert_eq!(describe(LAMP, Syntax::Toml, Some(&model), "shade"), None);
+    let recipe = "version = 0\n[[parts]]\nname = \"wheel\"\nfile = \"wheel.toml\"\n";
+    assert_eq!(describe(recipe, Syntax::Toml, None, "wheel/tyre"), None);
+    let wheel = describe(recipe, Syntax::Toml, None, "wheel").unwrap();
+    assert_eq!(wheel.made, Some(Made::File("wheel.toml".into())));
 }
 
 #[test]

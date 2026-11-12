@@ -301,8 +301,11 @@ fn a_part_is_selected_in_the_list_or_in_the_picture() {
     screen.get_by_label("antenna_tip").click();
     screen.run_steps(2);
     assert_eq!(selected(&screen).as_deref(), Some("antenna_tip"));
-    // Clicking the selected one lets go of it.
-    screen.get_by_label("antenna_tip").click();
+    // Clicking the selected one lets go of it. (Its name is now in the
+    // properties panel too, so the row is asked for as a button.)
+    screen
+        .get_by_role_and_label(egui::accesskit::Role::Button, "antenna_tip")
+        .click();
     screen.run_steps(2);
     assert_eq!(selected(&screen), None);
 
@@ -361,6 +364,206 @@ fn clicking_a_problem_selects_the_part_it_is_about() {
     assert_eq!(selected(&screen).as_deref(), Some("b"));
 }
 
+// ---- the properties panel ------------------------------------------------------
+
+/// Opens a copy of the robot and selects a part in the list.
+fn robot_with(test: &str, part: &str) -> (PathBuf, Harness<'static, StudioApp>) {
+    let recipe = copy_of("robot.toml", test);
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.state_mut().studio_mut().unwrap().select(Some(part));
+    screen.run_steps(2);
+    (recipe, screen)
+}
+
+/// The lines of the changed recipe that differ from the example's: what
+/// is left of it after taking away the lines the two start and end with
+/// alike.
+fn new_lines(recipe: &Path) -> Vec<String> {
+    let before = std::fs::read_to_string(examples().join("robot.toml")).unwrap();
+    let after = std::fs::read_to_string(recipe).unwrap();
+    let (old, new): (Vec<&str>, Vec<&str>) = (before.lines().collect(), after.lines().collect());
+    let start = old.iter().zip(&new).take_while(|(a, b)| a == b).count();
+    let end = old[start..]
+        .iter()
+        .rev()
+        .zip(new[start..].iter().rev())
+        .take_while(|(a, b)| a == b)
+        .count();
+    new[start..new.len() - end]
+        .iter()
+        .map(|line| (*line).to_owned())
+        .collect()
+}
+
+#[test]
+fn the_panel_shows_the_selected_part_and_changes_the_recipe() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_panel", "head");
+    for label in [
+        "Name",
+        "Made of",
+        "Size",
+        "Colour",
+        "Joined to",
+        "By its",
+        "Twist",
+    ] {
+        assert!(
+            screen.query_all_by_label(label).count() >= 1,
+            "the panel should show {label}"
+        );
+    }
+    // Nothing has been written by looking.
+    assert!(new_lines(&recipe).is_empty());
+
+    // Colour: pick another from the palette.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Colour")
+        .click();
+    screen.run_steps(2);
+    screen.get_by_label("red").click();
+    screen.run_steps(3);
+    assert_eq!(new_lines(&recipe), ["color = \"red\""]);
+    screen.get_by_label_contains("Set \"head\": colour red");
+
+    // Name: type a new one and press Enter. The part stays selected.
+    let name = screen.get_by_role_and_label(Role::TextInput, "Name");
+    name.focus();
+    screen.run_steps(2);
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .type_text("skull");
+    screen.run_steps(2);
+    screen.key_press(egui::Key::Enter);
+    screen.run_steps(3);
+    assert_eq!(selected(&screen).as_deref(), Some("skull"));
+    let lines = new_lines(&recipe);
+    assert!(lines.contains(&"name = \"skull\"".to_owned()), "{lines:?}");
+    // What was joined to the head is joined to the skull.
+    assert!(
+        lines.contains(&"to = \"skull.antenna\"".to_owned()),
+        "{lines:?}"
+    );
+    assert!(screen.state().studio().unwrap().problems().is_empty());
+}
+
+#[test]
+fn a_part_from_a_definition_says_so_before_any_edit() {
+    // Made with `use`: the eye is defined once.
+    let (recipe, screen) = robot_with("screens_panel_use", "left_eye");
+    screen.get_by_label(
+        "Made from the definition \"eye\". Changing its shape, size or colour also changes: right_eye.",
+    );
+    assert!(new_lines(&recipe).is_empty());
+
+    // Inside a definition: the arm's hand is the other arm's hand too.
+    let (recipe, mut screen) = robot_with("screens_panel_inside", "left_arm/hand");
+    screen.get_by_label(
+        "Inside the definition \"arm\". Any change here also changes: right_arm/hand.",
+    );
+    assert!(new_lines(&recipe).is_empty());
+    // And the change is then made in the definition, once.
+    screen
+        .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Colour")
+        .click();
+    screen.run_steps(2);
+    screen.get_by_label("glow").click();
+    screen.run_steps(3);
+    assert_eq!(new_lines(&recipe), ["color = \"glow\""]);
+    screen.get_by_label_contains("(also changed: right_arm/hand)");
+
+    // A part written once has no such notice.
+    let (_, screen) = robot_with("screens_panel_once", "head");
+    assert!(screen.query_by_label_contains("the definition").is_none());
+}
+
+#[test]
+fn duplicate_mirror_copy_and_remove_are_buttons() {
+    let (recipe, mut screen) = robot_with("screens_panel_buttons", "antenna_tip");
+    screen.get_by_label("Duplicate").click();
+    screen.run_steps(3);
+    let copy = selected(&screen).unwrap();
+    assert_ne!(copy, "antenna_tip");
+    assert!(new_lines(&recipe).contains(&format!("name = \"{copy}\"")));
+
+    // Nothing hangs from the copy: it goes at once.
+    screen.get_by_label("Remove").click();
+    screen.run_steps(3);
+    assert_eq!(selected(&screen), None);
+    assert!(new_lines(&recipe).is_empty(), "{:?}", new_lines(&recipe));
+
+    // The head has eyes and an antenna hanging from it: the Studio asks.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    screen.run_steps(2);
+    screen.get_by_label("Remove").click();
+    screen.run_steps(2);
+    screen.get_by_label("4 other parts hang from this one. Remove them too?");
+    assert!(screen.state().studio().unwrap().part("head").is_some());
+    screen.get_by_label("Keep them").click();
+    screen.run_steps(2);
+    assert!(screen.state().studio().unwrap().part("head").is_some());
+    screen.get_by_label("Remove").click();
+    screen.run_steps(2);
+    screen.get_by_label("Remove them all").click();
+    screen.run_steps(3);
+    let studio = screen.state().studio().unwrap();
+    for gone in ["head", "left_eye", "right_eye", "antenna", "antenna_tip"] {
+        assert!(studio.part(gone).is_none(), "{gone} should be gone");
+    }
+    assert!(studio.part("body").is_some());
+
+    // A mirror copy of the left arm is a right arm.
+    let (recipe, mut screen) = robot_with("screens_panel_mirror", "left_leg");
+    screen.get_by_label("Mirror copy").click();
+    screen.run_steps(3);
+    let lines = new_lines(&recipe);
+    // A new part, mirrored, on the socket of the other side.
+    assert_eq!(
+        lines,
+        [
+            "name = \"left_leg_2\"",
+            "use = \"leg\"",
+            "attach = \"hip\"",
+            "to = \"body.right_leg\"",
+            "mirror = \"x\"",
+            "",
+            "[[parts]]"
+        ]
+    );
+}
+
+#[test]
+fn when_only_looking_the_panel_changes_nothing() {
+    let recipe = copy_of("robot.toml", "screens_panel_look");
+    let mut screen = harness(StudioApp::with_file(&recipe, true), false);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("antenna_tip"));
+    screen.run_steps(2);
+    screen.get_by_label("Looking only: nothing can be changed here.");
+    screen.get_by_label("Remove").click();
+    screen.run_steps(3);
+    assert!(
+        screen
+            .state()
+            .studio()
+            .unwrap()
+            .part("antenna_tip")
+            .is_some()
+    );
+    assert!(new_lines(&recipe).is_empty());
+}
+
 /// Pictures of whole screens, compared with the stored ones in
 /// `tests/screens/`. Linux only: see the top of this file.
 #[cfg(target_os = "linux")]
@@ -410,6 +613,20 @@ mod picture {
         screen.remove_cursor();
         screen.run_steps(2);
         check(&mut screen, "selected");
+    }
+
+    #[test]
+    fn a_part_from_a_definition_selected() {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("robot.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen.get_by_label("left_eye").click();
+        screen.run_steps(2);
+        screen.remove_cursor();
+        screen.run_steps(2);
+        check(&mut screen, "definition");
     }
 
     #[test]
