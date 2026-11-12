@@ -233,8 +233,12 @@ touches the shape, and faces straight out of the surface. So a
 **cone**'s `left`, `right`, `front` and `back` are halfway up its slant,
 tilted up with it, and a **wedge**'s `top` and `front` are both the
 middle of its slope (the same place as `slope`). On a box, and on a
-cylinder's or sphere's sides, they are where the box is. An assembly, or
-a part made from a file, keeps its sockets on the box around it.
+cylinder's or sphere's sides, they are where the box is. A part made of parts, and a part made from a
+file, follow the same rule, through every face inside them; only where
+nothing lies straight behind the box side (a gap between two posts)
+does the socket stay on the box. **The whole model's own sockets stay
+on its box** (so do a recipe file's, used as a part): they say how big
+it is and where the ground is.
 
 Declare more in a part's `sockets` table, one of three ways:
 

@@ -758,10 +758,13 @@ fn a_part_inside_a_definition_is_edited_there_and_the_others_are_named() {
     let also = applied.shared.unwrap();
     assert_eq!(also.definition, "bulb");
     assert_eq!(also.also_changes, ["right_bulb/glass"]);
-    // Both bulbs grew.
+    // Both bulbs grew, from 0.2 across to 0.3. (About: a bulb joins by
+    // the side of its glass, below the middle, so it hangs a little
+    // tilted, and a tilted ball of flat faces isn't exactly as tall.)
     let model = applied.model.unwrap();
     for bulb in ["left_bulb/glass", "right_bulb/glass"] {
-        assert!((part(&model, bulb).bounds.unwrap().size().y - 0.3).abs() < 1e-9);
+        let tall = part(&model, bulb).bounds.unwrap().size().y;
+        assert!((tall - 0.3).abs() < 0.02, "{tall}");
     }
 
     // The Studio asks before any edit: the same answer.

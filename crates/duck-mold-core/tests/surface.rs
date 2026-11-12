@@ -309,13 +309,144 @@ fn a_scaled_cone_still_has_its_sockets_on_its_slant() {
     );
 }
 
+// ---- Phase 2, step 2: parts made of parts, and parts from files -------------
+
 #[test]
-fn a_mesh_or_an_assembly_keeps_its_sockets_on_its_box() {
+fn a_part_made_of_parts_has_its_sockets_on_its_surface_too() {
+    // A group holding one cone: its sides are on the cone's slant, as the
+    // cone's own are.
     let model = built(
         "version = 0\norigin = \"group.center\"\n[[parts]]\nname = \"group\"\n[[parts.parts]]\nname = \"c\"\nshape = \"cone\"\n",
     );
     assert_eq!(
         socket(&model, "group", "left"),
-        (vec3(-0.5, 0.0, 0.0), vec3(-1.0, 0.0, 0.0))
+        (vec3(-0.25, 0.0, 0.0), unit(vec3(-1.0, 0.5, 0.0)))
     );
+    assert_eq!(
+        socket(&model, "group", "top"),
+        (vec3(0.0, 0.5, 0.0), vec3(0.0, 1.0, 0.0))
+    );
+
+    // A table (a top on four legs) as a part of a bigger model: its
+    // `bottom` is under its top, where the surface is, and something
+    // joined there hangs under the table instead of floating between
+    // the legs.
+    let model = built(
+        r#"
+version = 0
+origin = "table.center"
+
+[define.leg]
+shape = "box"
+size = [0.1, 0.7, 0.1]
+
+[[parts]]
+name = "table"
+
+[[parts.parts]]
+name = "top"
+shape = "box"
+size = [1.2, 0.1, 0.8]
+[parts.parts.sockets]
+a = { on = "bottom", shift = [-0.9, 0, -0.9] }
+b = { on = "bottom", shift = [0.9, 0, 0.9] }
+
+[[parts.parts]]
+name = "leg_a"
+use = "leg"
+attach = "top"
+to = "top.a"
+
+[[parts.parts]]
+name = "leg_b"
+use = "leg"
+attach = "top"
+to = "top.b"
+
+[[parts]]
+name = "lamp"
+shape = "sphere"
+radius = 0.05
+attach = "top"
+to = "table.bottom"
+"#,
+    );
+    let (at, facing) = socket(&model, "table", "bottom");
+    assert_eq!(facing, vec3(0.0, -1.0, 0.0));
+    // The table is 0.8 tall and centred: its top's underside is at 0.3.
+    assert_eq!(at, vec3(0.0, 0.3, 0.0));
+    let report = inspect(&model, "test.toml", Vec::new());
+    assert!(report.floating.is_empty(), "{:#?}", report.floating);
+}
+
+#[test]
+fn a_socket_over_a_gap_stays_on_the_box() {
+    // Two posts with a gap between: nothing is straight down from the
+    // middle of the top, so `top` stays where the box is, and a socket
+    // shifted over the gap is no mistake.
+    let model = built(
+        "version = 0\norigin = \"gate.center\"\n[[parts]]\nname = \"gate\"\n[parts.sockets]\nsign = { on = \"front\", shift = [0, 0.5, 0] }\n[[parts.parts]]\nname = \"a\"\nshape = \"box\"\nsize = [0.2, 2, 0.2]\nmove = [-1, 0, 0]\n[[parts.parts]]\nname = \"b\"\nshape = \"box\"\nsize = [0.2, 2, 0.2]\nmove = [1, 0, 0]\n",
+    );
+    assert_eq!(
+        socket(&model, "gate", "top"),
+        (vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0))
+    );
+    assert_eq!(
+        socket(&model, "gate", "sign"),
+        (vec3(0.0, 0.5, 0.1), vec3(0.0, 0.0, 1.0))
+    );
+    // Its sides are on the posts.
+    assert_eq!(socket(&model, "gate", "left").0, vec3(-1.1, 0.0, 0.0));
+}
+
+#[test]
+fn a_whole_models_own_sockets_stay_on_its_box() {
+    // The same table, as the model itself: its `bottom` is on the ground
+    // between its legs, and the model stands on y = 0.
+    let table = "version = 0\n[define.leg]\nshape = \"box\"\nsize = [0.1, 0.7, 0.1]\n[[parts]]\nname = \"top\"\nshape = \"box\"\nsize = [1.2, 0.1, 0.8]\n[parts.sockets]\na = { on = \"bottom\", shift = [-0.9, 0, -0.9] }\nb = { on = \"bottom\", shift = [0.9, 0, 0.9] }\n[[parts]]\nname = \"leg_a\"\nuse = \"leg\"\nattach = \"top\"\nto = \"top.a\"\n[[parts]]\nname = \"leg_b\"\nuse = \"leg\"\nattach = \"top\"\nto = \"top.b\"\n";
+    let model = built(table);
+    let own = |name: &str| {
+        let socket = model.sockets.iter().find(|s| s.name == name).unwrap();
+        (socket.at, socket.facing)
+    };
+    assert_eq!(own("bottom"), (vec3(0.0, 0.0, 0.0), vec3(0.0, -1.0, 0.0)));
+    assert_eq!(own("top").0, vec3(0.0, 0.8, 0.0));
+    assert_eq!(model.bounds().unwrap().min.y, 0.0);
+}
+
+#[test]
+fn a_part_from_a_mesh_file_has_its_sockets_on_its_surface() {
+    // A pyramid as an OBJ file: a square base and four sloping sides.
+    let folder = std::path::Path::new(env!("CARGO_TARGET_TMPDIR")).join("surface_mesh");
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(&folder).unwrap();
+    // (OBJ's x is the model's left, so it is negated on the way in; the
+    // pyramid is the same either way round.)
+    std::fs::write(
+        folder.join("pyramid.obj"),
+        "v -1 0 -1\nv 1 0 -1\nv 1 0 1\nv -1 0 1\nv 0 2 0\nf 1 2 3 4\nf 1 5 2\nf 2 5 3\nf 3 5 4\nf 4 5 1\n",
+    )
+    .unwrap();
+    std::fs::write(
+        folder.join("scene.toml"),
+        "version = 0\norigin = \"p.center\"\n[[parts]]\nname = \"p\"\nfile = \"pyramid.obj\"\n[parts.sockets]\nflag = { on = \"front\", shift = [0.5, 0, 0] }\n",
+    )
+    .unwrap();
+    let mut issues = Vec::new();
+    let loaded = duck_mold_core::load::load(&folder.join("scene.toml"), &mut issues).unwrap();
+    let model = assemble(&loaded, &mut issues).expect("it builds");
+    // Halfway up (the middle of its box), a side is 0.5 from the middle
+    // and leans back 1 for every 2 up.
+    assert_eq!(
+        socket(&model, "p", "front"),
+        (vec3(0.0, 0.0, 0.5), unit(vec3(0.0, 1.0, 2.0)))
+    );
+    assert_eq!(
+        socket(&model, "p", "left"),
+        (vec3(-0.5, 0.0, 0.0), unit(vec3(-2.0, 1.0, 0.0)))
+    );
+    // A declared socket slides across the box, then moves in onto the
+    // nearest face straight behind it: here, the edge between two sides.
+    let (at, _) = socket(&model, "p", "flag");
+    assert_eq!(at, vec3(0.5, 0.0, 0.5));
 }

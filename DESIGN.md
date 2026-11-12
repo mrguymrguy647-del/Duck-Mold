@@ -1564,6 +1564,20 @@ What changes for existing recipes: a part joined to a built-in or
 was in the air, moves onto the surface. The tests will show whether any
 example changes, and the report will list them.
 
+*As built:* no example's shape changed: every golden picture and report
+is the same. Three `.glb` files changed, in their sockets only: the
+house's `roof.front` and `roof.back` are now on the roof's slopes, the
+robot's arms' and legs' side sockets are on the limbs, and the desk
+lamp's `top`, `front` and `back` are on the lamp. One more choice: a
+recipe file used as a part keeps its own sockets on its box, like the
+model, so that a recipe's sockets are in the same places however it is
+used. A socket declared with `on` + `shift` over a gap in an assembly
+stays on the box and is no mistake (on a single shape it still is).
+Two of Duck Mold's own tests changed with the rule: their robot's arm
+declares its shoulder on the arm as a whole, and that socket is now on
+the upper arm itself, so the arm joins flush where it used to stop short
+by the width of the hand.
+
 ### Step 9: starting it on Windows without a terminal
 
 As Duck Quill does:
