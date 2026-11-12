@@ -45,7 +45,7 @@ Merge #1 and #9 first. Then change the base of #2 and #10 to `main`
 ### 1. Tests on Windows and Linux for every push
 
 `.github/workflows/ci.yml` is Duck Quill's workflow (the same pinned
-Rust, 1.97.0, on `windows-latest` and `ubuntu-latest`) with three
+Rust, 1.97.0, on `windows-latest` and `ubuntu-latest`) with two
 additions:
 
 - a formatting check;
