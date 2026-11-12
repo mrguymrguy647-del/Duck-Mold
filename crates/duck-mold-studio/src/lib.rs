@@ -9,6 +9,7 @@
 //! it is given.
 
 pub mod app;
+pub mod library;
 pub mod properties;
 pub mod theme;
 pub mod view;

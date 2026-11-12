@@ -12,6 +12,7 @@
 //! saves the file, it does the same.
 
 pub mod history;
+pub mod library;
 mod sockets;
 pub mod viewport;
 
@@ -111,6 +112,7 @@ pub struct Studio {
     /// undone and can be made again.
     undo: Vec<history::Step>,
     redo: Vec<history::Step>,
+    library: library::Library,
 }
 
 impl Studio {
@@ -138,8 +140,10 @@ impl Studio {
             dragging: None,
             undo: Vec::new(),
             redo: Vec::new(),
+            library: library::Library::default(),
         };
         studio.reload();
+        studio.read_library();
         studio.frame();
         studio
     }
@@ -199,7 +203,19 @@ impl Studio {
     }
 
     pub(super) fn say(&mut self, status: impl Into<String>) {
-        self.status = status.into();
+        self.status = self.shorten(&status.into());
+    }
+
+    /// The same words with files named from the recipe's folder:
+    /// `parts/lamp.gltf`, not the whole way to it from the top of the
+    /// disk. That is how the recipe itself names them.
+    fn shorten(&self, words: &str) -> String {
+        match self.path.parent() {
+            Some(folder) if !folder.as_os_str().is_empty() => {
+                words.replace(&format!("{}/", display_path(folder)), "")
+            }
+            _ => words.to_owned(),
+        }
     }
 
     /// How many times the file has been built.
@@ -259,6 +275,14 @@ impl Studio {
                     .collect();
             }
         }
+        let problems = std::mem::take(&mut self.problems);
+        self.problems = problems
+            .into_iter()
+            .map(|problem| Problem {
+                text: self.shorten(&problem.text),
+                ..problem
+            })
+            .collect();
         // A selected part that is gone is no longer selected.
         if let Some(selected) = &self.selected
             && self.part(selected).is_none()
@@ -283,7 +307,8 @@ impl Studio {
             return false;
         }
         self.since_check = 0.0;
-        self.check_files()
+        let library = self.check_library();
+        self.check_files() || library
     }
 
     /// Checks the files now. True if one had changed, and the model was
@@ -339,6 +364,9 @@ impl Studio {
         let mut rows = Vec::new();
         if let Some(report) = self.report() {
             walk(&report.parts, 0, &mut rows);
+        }
+        for row in &mut rows {
+            row.kind = self.shorten(&row.kind);
         }
         rows
     }
@@ -645,8 +673,13 @@ impl Studio {
     /// export` does. Says where it went.
     pub fn export(&mut self) -> Result<String, String> {
         let done = tools::export_file(&self.path, None)
-            .map(|exported| format!("Wrote {} ({} bytes)", exported.output, exported.bytes))
-            .map_err(|failure| first_error(&failure));
+            .map(|exported| {
+                self.shorten(&format!(
+                    "Wrote {} ({} bytes)",
+                    exported.output, exported.bytes
+                ))
+            })
+            .map_err(|failure| self.shorten(&first_error(&failure)));
         self.say(match &done {
             Ok(said) => said.clone(),
             Err(why) => format!("Not exported: {why}"),
@@ -659,12 +692,12 @@ impl Studio {
     pub fn render_picture(&mut self) -> Result<String, String> {
         let done = render::render_file(&self.path, None, render::DEFAULT_SIZE)
             .map(|rendered| {
-                format!(
+                self.shorten(&format!(
                     "Wrote {} ({} x {} pixels)",
                     rendered.output, rendered.width, rendered.height
-                )
+                ))
             })
-            .map_err(|failure| first_error(&failure));
+            .map_err(|failure| self.shorten(&first_error(&failure)));
         self.say(match &done {
             Ok(said) => said.clone(),
             Err(why) => format!("No picture: {why}"),

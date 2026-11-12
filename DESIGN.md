@@ -1545,6 +1545,21 @@ viewport and the problems panel, with no editing. The window code from
 Phase 1 (Duck Forge's game window) is removed, so Duck Mold has one
 window library instead of two, and `preview` gains pan and the grid.
 
+*As built (step 8):* the library is the folder `parts` next to the
+recipe, or one chosen with the Folder button (for this sitting; it isn't
+remembered). Each file's small picture is the three-quarter view of
+`render`'s sheet, 96 pixels square, drawn by the same code, so it is the
+same on every computer; a test compares one byte for byte. A file that
+doesn't build is listed without a picture and can't be chosen; its tip
+says what is wrong with it. The library panel only shows what there is:
+a part is chosen in the list a click on a socket opens, where the
+library's parts come after the shapes and the recipe's own definitions.
+A file outside the recipe's folder is written with the way to it
+(`../shared/cap.toml`). The folder is looked at twice a second, like the
+recipe. The Studio also names files from the recipe's folder everywhere
+it shows them (`parts/lamp.gltf`, `Wrote robot.glb`), as the recipe
+does, not by the whole way from the top of the disk.
+
 *As built (step 7):* as designed. A step is the file's whole text
 before and after a change; undo writes the "before" back, but only if
 the file still holds the "after" (so nothing saved in that instant is

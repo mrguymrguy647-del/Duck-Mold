@@ -132,6 +132,17 @@ round markers.
 Each of these is an `add`, `join`, `add-socket` or `set-socket` edit in
 the recipe file, the same ones `duck-mold edit` makes.
 
+**The parts library.** Under the parts list is the library: every
+recipe and model file (`.obj`, `.gltf`, `.glb`) in the folder `parts`
+next to your recipe, each with a small picture. They are offered in the
+list that opens when you click a socket, below the shapes, and are added
+the same way. The recipe then names the file (`file =
+"parts/lamp.gltf"`): nothing is copied, and when the file changes, so
+does every model that uses it. **Folder** chooses another folder. Try it
+with `examples/desk.toml`, whose library is `examples/parts`.
+
+![The desk example: a click on a socket offers shapes, defined parts and the library](docs/studio-library.png)
+
 **Undo and redo** (the buttons, or Ctrl+Z and Ctrl+Y) take back and
 repeat every change, one at a time, as far back as 500 steps. Because
 the Studio writes each change to the file at once, undo writes the

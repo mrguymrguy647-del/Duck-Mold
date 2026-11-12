@@ -295,6 +295,14 @@ fn draw_view(model: &Model, view: &View, size: usize) -> Canvas {
     canvas
 }
 
+/// One small picture of a model, `size` pixels square: the three-quarter
+/// view of `render`'s sheet, with no caption. The Studio's parts library
+/// shows these. Each pixel is `0x00RRGGBB`, row by row from the top.
+pub fn render_small(model: &Model, size: usize) -> Vec<u32> {
+    let view = &VIEWS[VIEWS.len() - 1];
+    draw_view(model, view, size.max(1)).pixels().to_vec()
+}
+
 /// The model as a Duck Forge mesh, each corner moved by `place` first.
 ///
 /// Every face keeps corners of its own, and its triangles keep the

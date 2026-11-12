@@ -805,6 +805,74 @@ fn undo_and_redo_are_buttons_and_keys() {
     assert!(looking.query_by_label("Redo").is_none());
 }
 
+// ---- the parts library ---------------------------------------------------------
+
+#[test]
+fn a_library_part_is_chosen_in_the_add_list() {
+    // The robot, with a `parts` folder beside it.
+    let recipe = copy_of("robot.toml", "screens_library");
+    let parts = recipe.with_file_name("parts");
+    std::fs::create_dir_all(&parts).unwrap();
+    std::fs::copy(examples().join("parts/crate.glb"), parts.join("crate.glb")).unwrap();
+    std::fs::write(
+        parts.join("hat.toml"),
+        "version = 0\nname = \"hat\"\n[palette]\nfelt = \"#333344\"\n[[parts]]\nname = \"cone\"\nshape = \"cone\"\nradius = 0.15\nheight = 0.25\ncolor = \"felt\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        parts.join("broken.toml"),
+        "version = 0\n[[parts]]\nshape = \"blob\"\n",
+    )
+    .unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+
+    // The panel under the parts list shows what is in the folder.
+    screen.get_by_label("Library");
+    screen.get_by_label("parts");
+    screen.get_by_label("crate");
+    screen.get_by_label("hat");
+    screen.get_by_label("broken");
+
+    // Click a socket: the list offers the library's parts too.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    screen.run_steps(2);
+    let on_top = socket_on_screen(&screen, "head", "top");
+    click_at(&mut screen, on_top);
+    screen.get_by_label("From the library");
+    // (Each is on the screen twice now: in the panel and in the list.
+    // The list's is the later one.)
+    let hat = screen.query_all_by_label("hat").last().unwrap();
+    hat.click();
+    screen.run_steps(3);
+    assert_eq!(selected(&screen).as_deref(), Some("hat"));
+    assert_eq!(
+        new_lines(&recipe),
+        [
+            "",
+            "[[parts]]",
+            "name = \"hat\"",
+            "file = \"parts/hat.toml\"",
+            "attach = \"bottom\"",
+            "to = \"head.top\"",
+        ]
+    );
+    // It built; and inspect noticed that the hat covers the antenna.
+    let studio = screen.state().studio().unwrap();
+    assert!(!studio.has_mistakes(), "{:?}", studio.problems());
+    assert!(studio.part("hat/cone").is_some());
+    screen.get_by_label_contains("is hidden inside \"hat/cone\"");
+
+    // When only looking, there is no library to add from.
+    let mut looking = harness(StudioApp::with_file(&recipe, true), false);
+    looking.run_steps(2);
+    assert!(looking.query_by_label("Library").is_none());
+}
+
 /// Pictures of whole screens, compared with the stored ones in
 /// `tests/screens/`. Linux only: see the top of this file.
 #[cfg(target_os = "linux")]
@@ -887,6 +955,22 @@ mod picture {
         click_at(&mut screen, on_right);
         screen.run_steps(2);
         check(&mut screen, "add-list");
+    }
+
+    #[test]
+    fn the_library_in_the_add_list() {
+        // The desk example uses the examples' `parts` folder.
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("desk.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen.state_mut().studio_mut().unwrap().select(Some("top"));
+        screen.run_steps(2);
+        let at = socket_on_screen(&screen, "top", "top");
+        click_at(&mut screen, at);
+        screen.run_steps(2);
+        check(&mut screen, "library");
     }
 
     #[test]

@@ -11,7 +11,7 @@ use duck_mold_core::tools;
 use duck_mold_view::studio::Studio;
 use eframe::egui::{self, Rect, RichText, Sense};
 
-use crate::{properties, theme, view};
+use crate::{library, properties, theme, view};
 
 /// The Studio's window: a file that is open, or the start page.
 pub struct StudioApp {
@@ -25,6 +25,8 @@ pub struct StudioApp {
     shown_selected: Option<String>,
     /// What is being typed in the properties panel.
     draft: properties::Draft,
+    /// The library's small pictures.
+    thumbs: library::Thumbs,
 }
 
 impl Default for StudioApp {
@@ -43,6 +45,7 @@ impl StudioApp {
             titled: String::new(),
             shown_selected: None,
             draft: properties::Draft::default(),
+            thumbs: library::Thumbs::default(),
         }
     }
 
@@ -199,7 +202,17 @@ impl StudioApp {
             .resizable(true)
             .default_size(230.0)
             .min_size(140.0)
-            .show(ui, |ui| outliner(ui, studio, &mut self.shown_selected));
+            .show(ui, |ui| {
+                // The library sits under the parts, in the same column.
+                if !studio.look_only() {
+                    egui::Panel::bottom("duck_mold_library")
+                        .resizable(true)
+                        .default_size(170.0)
+                        .min_size(80.0)
+                        .show(ui, |ui| library::panel(ui, studio, &mut self.thumbs));
+                }
+                outliner(ui, studio, &mut self.shown_selected);
+            });
 
         egui::Panel::right("duck_mold_properties")
             .resizable(true)
@@ -212,7 +225,7 @@ impl StudioApp {
             });
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
-            view::show(ui, studio, &mut self.view);
+            view::show(ui, studio, &mut self.view, &mut self.thumbs);
         });
 
         // Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes, unless a

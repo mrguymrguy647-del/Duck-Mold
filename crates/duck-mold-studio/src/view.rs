@@ -11,6 +11,7 @@
 //! The picture is drawn by Duck Forge's CPU renderer
 //! ([`Studio::picture`]) and shown as one image.
 
+use crate::library::Thumbs;
 use duck_mold_core::edit::{Made, Spot};
 use duck_mold_core::recipe::Shape;
 use duck_mold_view::studio::viewport::Orbit;
@@ -109,7 +110,7 @@ fn picture_size(ui: &egui::Ui, rect: Rect) -> (usize, usize) {
 }
 
 /// Draws the viewport and handles the mouse on it.
-pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View) {
+pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mut Thumbs) {
     let rect = ui.available_rect_before_wrap();
     view.rect = Some(rect);
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
@@ -249,12 +250,18 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View) {
         Color32::from_white_alpha(150),
     );
 
-    add_list(ui, studio, view, rect);
+    add_list(ui, studio, view, thumbs, rect);
 }
 
 /// The short list that opens where a part is to be added: the five
-/// shapes, and the parts the recipe defines.
-fn add_list(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, within: Rect) {
+/// shapes, the parts the recipe defines, and the parts of the library.
+fn add_list(
+    ui: &mut egui::Ui,
+    studio: &mut Studio,
+    view: &mut View,
+    thumbs: &mut Thumbs,
+    within: Rect,
+) {
     let Some(adding) = &view.adding else {
         return;
     };
@@ -295,6 +302,21 @@ fn add_list(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, within: Rec
                         chosen = Some(Made::Use(name));
                     }
                 }
+            }
+            let library = studio.library().to_vec();
+            if !library.is_empty() {
+                ui.separator();
+                ui.label(RichText::new("From the library").weak().small());
+                egui::ScrollArea::vertical()
+                    .max_height(180.0)
+                    .show(ui, |ui| {
+                        for item in &library {
+                            if crate::library::item_button(ui, studio, thumbs, item, 32.0).clicked()
+                            {
+                                chosen = Some(Made::File(item.written.clone()));
+                            }
+                        }
+                    });
             }
         });
     if let Some(made) = chosen {

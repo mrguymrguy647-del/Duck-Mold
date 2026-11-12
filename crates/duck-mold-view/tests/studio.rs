@@ -271,15 +271,17 @@ fn export_and_render_write_next_to_the_recipe_and_say_so() {
     let mut studio = Studio::open(&recipe, false);
     let said = studio.export().unwrap();
     let glb = recipe.with_extension("glb");
+    // The file is named from the recipe's folder, as the recipe names
+    // files: not by the whole way to it.
     assert!(
-        said.starts_with("Wrote ") && said.contains("table.glb"),
+        said.starts_with("Wrote table.glb (") && said.ends_with(" bytes)"),
         "{said}"
     );
     assert_eq!(studio.status(), said);
     assert_eq!(&std::fs::read(&glb).unwrap()[..4], b"glTF");
 
     let said = studio.render_picture().unwrap();
-    assert!(said.contains("table.png (513 x 536 pixels)"), "{said}");
+    assert_eq!(said, "Wrote table.png (513 x 536 pixels)");
     assert_eq!(
         &std::fs::read(recipe.with_extension("png")).unwrap()[..4],
         b"\x89PNG"
@@ -1226,5 +1228,199 @@ fn when_only_looking_nothing_is_undone_and_old_steps_are_forgotten() {
         std::fs::read_to_string(&small)
             .unwrap()
             .contains("size = [1, 1.1, 1]")
+    );
+}
+
+// ---- step 8: the parts library -----------------------------------------------
+
+/// A copy of the robot with a `parts` folder beside it: the examples'
+/// own parts, and a small recipe.
+fn robot_with_library(test: &str) -> PathBuf {
+    let recipe = copy_of("robot", test);
+    let parts = recipe.with_file_name("parts");
+    std::fs::create_dir_all(&parts).unwrap();
+    for file in ["crate.glb", "lamp.gltf"] {
+        std::fs::copy(examples().join("parts").join(file), parts.join(file)).unwrap();
+    }
+    std::fs::write(
+        parts.join("hat.toml"),
+        "version = 0\nname = \"hat\"\n[palette]\nfelt = \"#333344\"\n[[parts]]\nname = \"cone\"\nshape = \"cone\"\nradius = 0.15\nheight = 0.25\ncolor = \"felt\"\n",
+    )
+    .unwrap();
+    recipe
+}
+
+#[test]
+fn the_library_is_the_parts_folder_beside_the_recipe_with_a_picture_each() {
+    // The examples' own `parts` folder is the library of every example.
+    let studio = Studio::open(examples().join("desk.toml"), false);
+    assert_eq!(studio.library_folder(), examples().join("parts"));
+    let items = studio.library();
+    let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
+    assert_eq!(names, ["crate", "lamp"]);
+    assert_eq!(items[0].written, "parts/crate.glb");
+    assert_eq!(items[1].written, "parts/lamp.gltf");
+    for item in items {
+        assert_eq!(item.problem, None, "{}", item.name);
+        let picture = item.picture.as_ref().unwrap();
+        assert_eq!((picture.width, picture.height), (96, 96));
+        assert!(drawn(picture) > 500, "{} is drawn", item.name);
+    }
+    // The same code as `render`, so the same picture on every computer.
+    check_picture("library-lamp", items[1].picture.as_ref().unwrap());
+
+    // No such folder: an empty library, and no mistake.
+    let recipe = copy_of("robot", "studio_library_none");
+    let studio = Studio::open(&recipe, false);
+    assert!(studio.library().is_empty());
+    assert!(!studio.has_mistakes());
+}
+
+#[test]
+fn a_library_part_is_added_to_a_socket_like_a_shape() {
+    let recipe = robot_with_library("studio_library_add");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    let names: Vec<&str> = studio
+        .library()
+        .iter()
+        .map(|item| item.name.as_str())
+        .collect();
+    assert_eq!(names, ["crate", "hat", "lamp"]);
+
+    let hat = studio.library()[1].clone();
+    assert_eq!(hat.written, "parts/hat.toml");
+    let said = studio
+        .add_to_socket("head", "top", &Made::File(hat.written.clone()))
+        .unwrap();
+    assert_eq!(said, "Added \"hat\" (parts/hat.toml) on head.top");
+    let after = std::fs::read_to_string(&recipe).unwrap();
+    let (gone, new) = changed(&before, &after);
+    assert!(gone.is_empty());
+    // The recipe names the file: nothing is copied, and it has no sizes
+    // of its own.
+    assert_eq!(
+        new,
+        [
+            "",
+            "[[parts]]",
+            "name = \"hat\"",
+            "file = \"parts/hat.toml\"",
+            "attach = \"bottom\"",
+            "to = \"head.top\"",
+        ]
+    );
+    assert_eq!(studio.selected(), Some("hat"));
+    assert!(!studio.has_mistakes(), "{:?}", studio.problems());
+    assert!(studio.part("hat/cone").is_some());
+
+    // A model file, at a point of a surface.
+    assert!(studio.select(Some("body")));
+    let body = studio.part("body").unwrap().bounds.unwrap();
+    let point = body.center() + vec3(body.half().x * 0.75, body.half().y * -0.6, body.half().z);
+    let Clicked::Surface { spot, .. } = studio.point_at(VIEW, seen(&studio, point)) else {
+        panic!("expected the body's surface");
+    };
+    studio
+        .add_to_surface("body", &spot, &Made::File("parts/lamp.gltf".into()))
+        .unwrap();
+    assert_eq!(studio.selected(), Some("lamp"));
+    assert_eq!(
+        studio.part("lamp").unwrap().attached_to.as_deref(),
+        Some("body.spot")
+    );
+
+    // The library's files are watched: when the hat changes, so does the
+    // robot wearing it.
+    let tall = std::fs::read_to_string(recipe.with_file_name("parts").join("hat.toml"))
+        .unwrap()
+        .replace("height = 0.25", "height = 0.6");
+    let short = studio.model().unwrap().bounds().unwrap().size().y;
+    save(&recipe.with_file_name("parts").join("hat.toml"), &tall);
+    assert!(studio.check_files());
+    assert!(studio.model().unwrap().bounds().unwrap().size().y > short + 0.3);
+}
+
+#[test]
+fn the_library_follows_its_folder_and_says_what_cant_be_used() {
+    let recipe = robot_with_library("studio_library_changes");
+    let mut studio = Studio::open(&recipe, false);
+    let parts = recipe.with_file_name("parts");
+    assert!(!studio.check_library(), "nothing has changed yet");
+    let reads = studio.library_reads();
+
+    // A file that isn't a model is listed, with what is wrong with it,
+    // and has no picture.
+    std::fs::write(
+        parts.join("broken.toml"),
+        "version = 0\n[[parts]]\nshape = \"blob\"\n",
+    )
+    .unwrap();
+    assert!(studio.check_library());
+    assert_eq!(studio.library_reads(), reads + 1);
+    let broken = &studio.library()[0];
+    assert_eq!(broken.name, "broken");
+    assert_eq!(broken.picture, None);
+    assert!(
+        broken.problem.as_deref().unwrap().contains("blob"),
+        "{:?}",
+        broken.problem
+    );
+    // Things that aren't parts are left out.
+    std::fs::write(parts.join("notes.txt"), "not a part").unwrap();
+    std::fs::remove_file(parts.join("broken.toml")).unwrap();
+    assert!(studio.check_library());
+    let names: Vec<&str> = studio
+        .library()
+        .iter()
+        .map(|item| item.name.as_str())
+        .collect();
+    assert_eq!(names, ["crate", "hat", "lamp"]);
+
+    // Another folder can be chosen. A file outside the recipe's folder
+    // is written with the way to it.
+    let elsewhere = recipe
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("studio_library_elsewhere");
+    let _ = std::fs::remove_dir_all(&elsewhere);
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::copy(parts.join("hat.toml"), elsewhere.join("cap.toml")).unwrap();
+    studio.set_library_folder(Some(elsewhere.clone()));
+    assert_eq!(studio.library_folder(), elsewhere);
+    let items = studio.library();
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0].written, "../studio_library_elsewhere/cap.toml");
+    studio
+        .add_to_socket("head", "top", &Made::File(items[0].written.clone()))
+        .unwrap();
+    assert!(!studio.has_mistakes(), "{:?}", studio.problems());
+    assert!(studio.part("cap/cone").is_some());
+
+    // The recipe's own folder as the library: the recipe isn't a part of
+    // itself.
+    studio.set_library_folder(Some(recipe.parent().unwrap().to_path_buf()));
+    assert!(studio.library().iter().all(|item| item.name != "robot"));
+    studio.set_library_folder(None);
+    assert_eq!(studio.library_folder(), parts);
+}
+
+#[test]
+fn files_are_named_from_the_recipes_folder() {
+    // The desk has two parts from files, and a warning about one. Opened
+    // by its whole path, the Studio still names them as the recipe does.
+    let studio = Studio::open(examples().join("desk.toml"), false);
+    let rows = studio.outline();
+    let lamp = rows.iter().find(|row| row.path == "lamp").unwrap();
+    assert_eq!(lamp.kind, "parts/lamp.gltf (mesh)");
+    let warning = &studio.problems()[0];
+    assert!(
+        warning
+            .text
+            .contains("of \"parts/lamp.gltf\" have no colour"),
+        "{}",
+        warning.text
     );
 }
