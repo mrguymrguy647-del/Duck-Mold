@@ -151,6 +151,30 @@ impl Model {
         )
     }
 
+    /// Every socket a game can ask for by name, where it finally is: the
+    /// model's own by their bare names (`top`), then each part's as
+    /// `part.socket` (`head.top`), a part inside an assembly with its path
+    /// (`left_arm/hand.bottom`), an assembly's own after it
+    /// (`left_arm.grip`), in the order of the parts.
+    ///
+    /// A part without a name (`#2`) has none here, and nor do the parts
+    /// inside it: a game can't ask for a part that has no name, and the
+    /// stand-in names change whenever the recipe's list does.
+    pub fn named_sockets(&self) -> Vec<Socket> {
+        fn gather(parts: &[Part], into: &mut Vec<Socket>) {
+            for part in parts.iter().filter(|part| !part.name.starts_with('#')) {
+                into.extend(part.sockets.iter().map(|socket| Socket {
+                    name: format!("{}.{}", part.path, socket.name),
+                    ..socket.clone()
+                }));
+                gather(&part.parts, into);
+            }
+        }
+        let mut sockets = self.sockets.clone();
+        gather(&self.parts, &mut sockets);
+        sockets
+    }
+
     /// Every part that has faces of its own (not an assembly), in order,
     /// however deep it is.
     pub fn leaves(&self) -> Vec<&Part> {

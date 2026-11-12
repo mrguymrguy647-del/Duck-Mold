@@ -93,7 +93,7 @@ without opening a window:
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures an `.obj` mesh, or a `.glb` that Duck Mold wrote. |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures an `.obj` mesh, or a `.glb` that Duck Mold wrote. `--sockets` also lists every named socket and where it is. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws an `.obj` or `.glb` as it is, too. |
 | `duck-mold guide` | Prints the guide for AI agents. |
@@ -197,6 +197,17 @@ Each is commented line by line.
 ```rust
 let robot = Mesh::load_glb("assets/robot.glb")?;
 canvas.draw_mesh(&robot, &Transform::at(position), &camera);
+```
+
+The `.glb` keeps every named part's sockets, so a game can put things
+on the model where the recipe joined its parts: a hat on `head.top`, a
+sword in `right_arm.grip`. `duck-mold inspect robot.toml --sockets`
+lists their names.
+
+```rust
+let model = duckforge::glb::GlbModel::load("assets/robot.glb")?;
+let top = model.socket("head.top").unwrap();
+let hat_at = robot_transform.apply(top.position());
 ```
 
 Duck Forge reads Duck Mold's `.glb` files with the reader in

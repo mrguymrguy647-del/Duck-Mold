@@ -50,6 +50,10 @@ enum Command {
         /// Print the report as JSON, for agents.
         #[arg(long)]
         json: bool,
+        /// Also list every named socket and where it is: the names a game
+        /// can ask the .glb for, like head.top.
+        #[arg(long)]
+        sockets: bool,
     },
     /// Build a recipe and write the model as a .glb file.
     ///
@@ -98,7 +102,15 @@ const GUIDE: &str = include_str!("../../../docs/AI_GUIDE.md");
 
 fn main() -> ExitCode {
     match Cli::parse().command {
-        Command::Inspect { file, json } => match tools::inspect_file(&file) {
+        Command::Inspect {
+            file,
+            json,
+            sockets,
+        } => match if sockets {
+            tools::inspect_file_with_sockets(&file)
+        } else {
+            tools::inspect_file(&file)
+        } {
             Ok(inspection) => {
                 if json {
                     say_json(&inspection);

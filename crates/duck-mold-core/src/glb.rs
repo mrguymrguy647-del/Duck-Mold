@@ -13,7 +13,8 @@
 //!   colour, so every viewer shades it flat, as Duck Forge does;
 //! - colour is stored per corner (`COLOR_0`), as linear light;
 //! - the palette, the list of parts and the list of assemblies (parts
-//!   made of parts), each with the triangles it owns, are kept under
+//!   made of parts), each with the triangles it owns, and the named
+//!   sockets, each with where it is and the way it faces, are kept under
 //!   `extras.duck_mold`.
 //!
 //! glTF's "right" is -x where Duck Forge's is +x, so on the way out x is
@@ -25,8 +26,8 @@ use std::ops::Range;
 use serde::Serialize;
 
 use crate::issue::{Code, Issue};
-use crate::math::{Bounds, Transform, tidy, vec3};
-use crate::model::{Face, Model, Part, PartKind};
+use crate::math::{Bounds, Transform, Vec3, tidy, vec3};
+use crate::model::{Face, Model, Part, PartKind, Socket};
 use crate::recipe::{Loc, PaletteColor, hex, rgb_of};
 
 /// The grey of a face nobody coloured: `#B4B4B4`.
@@ -208,6 +209,23 @@ struct DuckMold {
     /// The parts made of parts, outer ones first: each owns the triangles
     /// of every part inside it, which come one after the other.
     assemblies: Vec<PartEntry>,
+    /// Every named socket ([`Model::named_sockets`]), in glTF's
+    /// directions like the corners: `head.top`, where it is and the way
+    /// it faces, so a game can put a hat there.
+    sockets: Vec<SocketEntry>,
+}
+
+#[derive(Serialize)]
+struct SocketEntry {
+    name: String,
+    at: [f64; 3],
+    facing: [f64; 3],
+}
+
+/// A point or direction in glTF's directions: x negated (`+ 0.0` keeps
+/// a zero from being written `-0.0`).
+fn to_gltf(v: Vec3) -> [f64; 3] {
+    [-v.x + 0.0, v.y + 0.0, v.z + 0.0]
 }
 
 #[derive(Serialize)]
@@ -406,6 +424,15 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
                     .collect(),
                 assemblies: assembly_entries(&model.parts, &parts),
                 parts,
+                sockets: model
+                    .named_sockets()
+                    .into_iter()
+                    .map(|socket| SocketEntry {
+                        name: socket.name,
+                        at: to_gltf(socket.at),
+                        facing: to_gltf(socket.facing),
+                    })
+                    .collect(),
             },
         },
     };
@@ -436,9 +463,10 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
 ///
 /// The parts come back as a tree, rebuilt from the parts and assemblies
 /// the file lists (a file from before assemblies were written gives a
-/// flat list), and every face comes back with the corners it was written
-/// with. What isn't stored doesn't come back: which socket a part was
-/// joined to, or what it was made from. Other glTF files are refused:
+/// flat list), every face with the corners it was written with, and the
+/// named sockets with their parts. What isn't stored doesn't come back:
+/// which socket a part was joined to, what it was made from, or the
+/// sockets of unnamed parts. Other glTF files are refused:
 /// importing them is planned for a later phase.
 pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
     let bad = |message: &str| {
@@ -667,14 +695,62 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
             entries.push((name.to_owned(), own, assembly));
         }
     }
-    let parts = part_tree("", &entries, &faces);
+    let mut parts = part_tree("", &entries, &faces);
+
+    // The sockets: the model's own by bare name, a part's after its path.
+    // Files from before sockets were written have none.
+    let mut sockets = Vec::new();
+    for entry in extras["sockets"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        let three = |field: &str| -> Option<Vec3> {
+            let list = entry[field].as_array()?;
+            match list.as_slice() {
+                [x, y, z] => Some(vec3(-x.as_f64()? + 0.0, y.as_f64()?, z.as_f64()?)),
+                _ => None,
+            }
+        };
+        let (Some(name), Some(at), Some(facing)) =
+            (entry["name"].as_str(), three("at"), three("facing"))
+        else {
+            return Err(bad("its list of sockets is damaged"));
+        };
+        let socket = |name: &str| Socket {
+            name: name.to_owned(),
+            at,
+            facing,
+        };
+        match name.rsplit_once('.') {
+            None => sockets.push(socket(name)),
+            Some((path, own)) => {
+                if let Some(part) = find_part(&mut parts, path) {
+                    part.sockets.push(socket(own));
+                }
+            }
+        }
+    }
     Ok(Model {
         name: extras["name"].as_str().unwrap_or("model").to_owned(),
         palette,
         faces,
         parts,
-        sockets: Vec::new(),
+        sockets,
     })
+}
+
+/// The part with this path (`left_arm/hand`), however deep it is.
+fn find_part<'a>(parts: &'a mut [Part], path: &str) -> Option<&'a mut Part> {
+    for part in parts {
+        if part.path == path {
+            return Some(part);
+        }
+        if path.starts_with(&format!("{}/", part.path)) {
+            return find_part(&mut part.parts, path);
+        }
+    }
+    None
 }
 
 /// The parts inside the assembly `within` (`""` for the top of the

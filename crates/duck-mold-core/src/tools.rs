@@ -12,7 +12,7 @@ use serde::Serialize;
 
 use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
-use crate::inspect::{Inspection, MaterialUse, inspect};
+use crate::inspect::{Inspection, MaterialUse, inspect, socket_report};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
@@ -201,6 +201,16 @@ pub fn inspect_file(path: &Path) -> Result<Inspection, Failure> {
     let built = build(path)?;
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
     inspection.materials = built.materials;
+    Ok(inspection)
+}
+
+/// `duck-mold inspect --sockets`: [`inspect_file`], with every named
+/// socket listed too.
+pub fn inspect_file_with_sockets(path: &Path) -> Result<Inspection, Failure> {
+    let built = build(path)?;
+    let mut inspection = inspect(&built.model, &built.source, built.warnings);
+    inspection.materials = built.materials;
+    inspection.sockets = socket_report(&built.model);
     Ok(inspection)
 }
 

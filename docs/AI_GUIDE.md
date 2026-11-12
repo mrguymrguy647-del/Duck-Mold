@@ -19,6 +19,10 @@ duck-mold render lamp.toml            # draw it: lamp.png, four views on one she
 ```
 
 ```bash
+duck-mold inspect lamp.toml --sockets # also list every named socket: head.top, ...
+```
+
+```bash
 duck-mold export lamp.toml            # write lamp.glb next to the recipe
 ```
 
@@ -247,6 +251,13 @@ grip     = { from = "hand.bottom" }                    # a socket of a part insi
   the surface's: `{ on = "top", shift = [0.5, 0, 0.5], facing = "up" }`
   on a wedge stands a chimney upright on its slope.
 - `from` passes a socket of an inner part to the outside of an assembly.
+
+**Sockets go into the `.glb`**, so a game can put things where the
+recipe says: a hat on `head.top`, a tool in `left_arm.grip`, a part
+inside an assembly as `left_arm/hand.bottom`, the model's own as `top`.
+Only named parts' sockets are written: name every part a game will
+need. `inspect --sockets` lists them all, with where each is and the
+way it faces.
 
 **How a joined part is turned.** It is turned as little as possible to
 make its socket face the other one. A part whose `bottom` joins a `top`

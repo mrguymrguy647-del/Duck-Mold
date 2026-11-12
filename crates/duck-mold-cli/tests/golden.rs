@@ -272,6 +272,30 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
                 "{name}"
             );
         }
+        // Every named socket, where `inspect --sockets` says it is. The
+        // file holds 32-bit numbers, so they agree to about 0.00001.
+        let listed: serde_json::Value = serde_json::from_slice(&duck_mold(&[
+            "inspect",
+            &format!("examples/{name}.toml"),
+            "--sockets",
+            "--json",
+        ]))
+        .unwrap();
+        let listed = listed["sockets"].as_array().unwrap();
+        assert_eq!(model.sockets.len(), listed.len(), "{name}");
+        for (socket, expected) in model.sockets.iter().zip(listed) {
+            assert_eq!(socket.name, expected["name"], "{name}");
+            for axis in 0..3 {
+                for (found, field) in [(socket.at, "at"), (socket.facing, "facing")] {
+                    let want = expected[field][axis].as_f64().unwrap();
+                    assert!(
+                        (f64::from(found[axis]) - want).abs() < 1e-5,
+                        "{name}: {} {field}",
+                        socket.name
+                    );
+                }
+            }
+        }
         // What docs/forge-handoff.md suggests as Duck Forge's first test.
         if name == "crate" {
             assert_eq!((model.vertices.len(), model.triangles.len()), (8, 12));

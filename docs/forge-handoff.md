@@ -17,8 +17,9 @@ Everything between its two `// ====` marker lines is the reader, and
 Duck Forge's `src/glb.rs` holds the same lines, byte for byte. Each
 project keeps its own introduction and imports above the markers, and
 Duck Forge its own functions below them (`GlbModel::load`, `to_mesh`,
-`part`, `GlbPart::range`, `Mesh::load_glb`). The first marker says the
-reader's version; this note describes **version 2**.
+`part`, `socket`, `GlbPart::range`, `GlbSocket::position` and
+`direction`, `Mesh::load_glb`). The first marker says the reader's
+version; this note describes **version 3**.
 
 To change the reader: change it here, raise the version in both marker
 lines, run Duck Mold's tests, then copy the lines between the markers
@@ -33,6 +34,7 @@ diff <(sed -n '/^\/\/ ==== Duck Mold/,/^\/\/ ==== end of Duck Mold/p' Duck-Mold/
 |---|---|
 | 1 | Duck Mold's Phase 0. |
 | 2 | Assemblies (below). Sizes read from the file are checked before they are added or multiplied, so a damaged file that claims more numbers or triangles than it holds is refused with a sentence instead of overflowing (which a debug build turns into a crash). |
+| 3 | Sockets (below): `GlbModel.sockets`, so a game can ask where `head.top` is. Duck Mold's Phase 1. |
 
 ## What a Duck Mold `.glb` is
 
@@ -74,6 +76,16 @@ One file, glTF 2.0 binary. Always the same narrow shape:
      next to each other. A part inside an assembly is named after it:
      `left_arm/hand` is in `left_arm`. Files written before version 2 of
      the reader have no `assemblies`; read that as none.
+   - `sockets`: `[{ "name": "head.top", "at": [x, y, z], "facing": [x, y, z] }, ...]`:
+     every named socket, where it ended up. The model's own have bare
+     names (`top`), a part's are `part.socket`, a part inside an
+     assembly keeps its path (`left_arm/hand.bottom`), an assembly's own
+     come after its name (`left_arm.grip`). Parts without a name, and
+     the parts inside them, have none here. `at` and `facing` are in
+     glTF's directions like the positions: **negate x** for both.
+     `facing` is 1 long. Files written before version 3 of the reader
+     have no `sockets`; read that as none. (Like `assemblies`, adding it
+     changed the meaning of nothing, so `version` is still 0.)
 
 Sizes and counts come from the file, so check them before adding or
 multiplying them.
@@ -132,18 +144,24 @@ canvas.draw_mesh(&robot, &Transform::at(position), &camera);
 ```
 
 `duckforge::glb::GlbModel::load(path)?` gives the name, the palette, the
-parts and the assemblies; `model.part("left_arm")` finds a part or an
-assembly by name, and `mesh.triangles[part.range()]` are its triangles
-(to recolour an arm, say). A file that isn't a Duck Mold model is a
-one-sentence `LoadError`.
+parts, the assemblies and the sockets; `model.part("left_arm")` finds a
+part or an assembly by name, and `mesh.triangles[part.range()]` are its
+triangles (to recolour an arm, say). `model.socket("head.top")` finds a
+socket: `position()` is where it is and `direction()` the way it faces,
+in the model's own space, so a hat goes at
+`transform.apply(socket.position())`. `duck-mold inspect --sockets`
+lists every name. A file that isn't a Duck Mold model is a one-sentence
+`LoadError`.
 
 ## Files to test with
 
 `tests/golden/*.glb` in this repository: crate (12 triangles), table
-(60), tree (70), house (76, with one assembly, its roof), robot (384,
-with four: its arms and legs). Each has a `*.inspect.json` beside it
-with the size, box, triangle count, palette and colour counts the loader
-should find, and the tree of parts. The report's numbers are 64-bit and
+(60), tree (70), house (88, with one assembly, its roof), robot (384,
+with four: its arms and legs), snowman (600). Each has a
+`*.inspect.json` beside it with the size, box, triangle count, palette
+and colour counts the loader should find, and the tree of parts;
+`duck-mold inspect examples/robot.toml --sockets --json` lists the
+sockets it should find. The report's numbers are 64-bit and
 the file holds 32-bit ones, so positions agree to about 0.00001, not
 exactly. The official Khronos glTF validator reports no errors,
 warnings, infos or hints on any of them.

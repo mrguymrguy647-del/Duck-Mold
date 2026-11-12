@@ -508,7 +508,7 @@ Mold writes a deliberately narrow kind of it:
 | Colours | `COLOR_0`: three decimal numbers per corner, linear. |
 | Triangles | A list of corner numbers, always 32-bit. Faces do not share corners with other faces. |
 | Material | One plain, matt material. No textures, no UVs. |
-| Extras | Under `extras.duck_mold`: the format version, the recipe's name, the palette (names and `#RRGGBB`), the list of parts with the triangles each one owns, and the list of assemblies (parts made of parts) with the triangles of every part inside each. Other programs ignore this; Duck tools read it. (Assemblies were added after Phase 0, when Duck Forge wanted to recolour a whole arm; `docs/forge-handoff.md` describes both lists.) |
+| Extras | Under `extras.duck_mold`: the format version, the recipe's name, the palette (names and `#RRGGBB`), the list of parts with the triangles each one owns, and the list of assemblies (parts made of parts) with the triangles of every part inside each, and (from Phase 1) every named socket with where it is and the way it faces. Other programs ignore this; Duck tools read it. (Assemblies were added after Phase 0, when Duck Forge wanted to recolour a whole arm; sockets in Phase 1, so a game can put a hat on `head.top`; `docs/forge-handoff.md` describes all three lists.) |
 | Not written | Cameras, lights, animations, skins, textures, a date, your folder names. |
 
 **Directions in the file.** glTF also says y is up and z is forward, but
@@ -554,7 +554,7 @@ The program is `duck-mold`. Three commands, plus help; Phase 1 adds
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file> [--json]` | Checks and builds a recipe in memory and reports on it. Also takes an `.obj` mesh, or a `.glb` that Duck Mold wrote, to measure it as it is. Writes nothing. |
+| `duck-mold inspect <file> [--json] [--sockets]` | Checks and builds a recipe in memory and reports on it. Also takes an `.obj` mesh, or a `.glb` that Duck Mold wrote, to measure it as it is. Writes nothing. *(Phase 1:)* `--sockets` adds every named socket, where it is and the way it faces: the names a game can ask the `.glb` for. |
 | `duck-mold export <recipe> [-o <file.glb>] [--json]` | Builds the recipe and writes the `.glb` (default: next to the recipe, same name). Ends with a one-line summary; `--json` gives the full inspect report. |
 | `duck-mold render <file> [-o <file.png>] [--size N] [--json]` | *(Phase 1.)* Draws the model and writes a PNG: four views on one sheet (section 17, step 2). Takes what `inspect` takes. |
 | `duck-mold guide` | Prints the agent guide, which is built into the program, so an agent with only the program can learn it. |
@@ -1134,6 +1134,11 @@ faces, in the model's own space.
   turns. Then a pull request in each repository.
 - `duck-mold inspect --sockets` lists every socket and where it is, to
   find the names to ask for.
+
+*As built:* the robot has 187 named sockets, and its file went from
+35.7 KB to 50 KB. Duck Mold reads a `.glb`'s sockets back too, so
+`inspect --sockets robot.glb` lists the same ones as the recipe. The
+Khronos validator still finds nothing to say about any example.
 
 ### Step 6. Importing glTF and `.glb`
 

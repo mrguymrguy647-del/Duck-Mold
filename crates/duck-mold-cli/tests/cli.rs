@@ -233,6 +233,44 @@ fn export_writes_nothing_when_the_recipe_has_mistakes() {
 }
 
 #[test]
+fn inspect_sockets_lists_every_named_socket() {
+    let folder = folder("cli_sockets");
+    let output = run(&folder, &["inspect", "tree.toml", "--sockets"]);
+    assert_eq!(output.status.code(), Some(0));
+    let text = stdout(&output);
+    let lines: Vec<&str> = text
+        .lines()
+        .skip_while(|line| !line.starts_with("  sockets"))
+        .collect();
+    // The model's seven, and seven for each of its two parts.
+    assert_eq!(lines.len(), 21, "{text}");
+    assert_eq!(
+        lines[0],
+        "  sockets      top             at 0.00, 2.80, 0.00   facing up"
+    );
+    // A cone's sides are on its slant, facing out of it.
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.contains("leaves.left") && line.contains("facing [-0.916, 0.401, 0]")),
+        "{text}"
+    );
+
+    let report = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--sockets", "--json"],
+    ));
+    let sockets = report["sockets"].as_array().unwrap();
+    assert_eq!(sockets.len(), 21);
+    assert_eq!(sockets[7]["name"], "trunk.top");
+    assert_eq!(sockets[7]["facing"], serde_json::json!([0.0, 1.0, 0.0]));
+
+    // Without --sockets they aren't listed.
+    let report = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    assert!(report.get("sockets").is_none());
+}
+
+#[test]
 fn render_writes_a_png_next_to_the_recipe() {
     let folder = folder("cli_render");
     let output = run(&folder, &["render", "tree.toml"]);
