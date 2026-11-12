@@ -368,6 +368,168 @@ fn render_writes_nothing_for_a_bad_recipe_or_a_bad_size() {
 }
 
 #[test]
+fn edit_changes_the_recipe_and_prints_the_report() {
+    let folder = folder("cli_edit");
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "star",
+            "--shape",
+            "sphere",
+            "--radius",
+            "0.1",
+            "--to",
+            "leaves.top",
+            "--color",
+            "leaf",
+            "--twist",
+            "-30",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let said = stdout(&output);
+    assert!(
+        said.starts_with(
+            "edited tree.toml: added \"star\" (sphere) on leaves.top\ntree  (tree.toml)\n"
+        ),
+        "{said}"
+    );
+    assert!(said.contains("parts        3"), "{said}");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        format!(
+            "{TREE}\n[[parts]]\nname = \"star\"\nshape = \"sphere\"\nradius = 0.1\ncolor = \"leaf\"\nattach = \"bottom\"\nto = \"leaves.top\"\ntwist = -30\n"
+        )
+    );
+
+    // As JSON: inspect's report, with what the edit did.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add-socket",
+            "trunk",
+            "knot",
+            "--on",
+            "front",
+            "--shift",
+            "-0.5,0.2,0",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["triangles"], 162);
+    assert_eq!(report["edit"]["command"], "add-socket");
+    assert_eq!(report["edit"]["written"], true);
+    assert_eq!(
+        report["edit"]["summary"],
+        "added the socket \"knot\" on the front of \"trunk\""
+    );
+
+    // A dry run says what would happen and writes nothing.
+    let before = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "rename", "star", "top", "--dry-run"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        stdout(&output).starts_with(
+            "would edit tree.toml: renamed \"star\" to \"top\" (a dry run: nothing was written)\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn an_edit_that_cant_be_made_says_why_and_writes_nothing() {
+    let folder = folder("cli_edit_refused");
+    // No such part: exit code 2, one line, with the likely fix.
+    let output = run(&folder, &["edit", "tree.toml", "remove", "trunc"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: tree.toml: there is no part \"trunc\" in the recipe. Did you mean \"trunk\"?\n"
+    );
+    // It would break the recipe: exit code 1, the mistakes, as JSON too.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--color",
+            "pink",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let report = json(&output);
+    assert_eq!(report["ok"], false);
+    assert_eq!(report["errors"][0]["code"], "unknown_color");
+    // The words themselves are wrong: exit code 2.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "trunk", "--size", "1,2"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--size needs three numbers"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "add", "x", "--to", "trunk.top"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--shape box"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        TREE
+    );
+}
+
+#[test]
+fn every_edit_has_a_command_and_is_in_the_guide() {
+    // The Studio builds `Edit` values; so does the command line. Every
+    // kind of edit must be reachable from both, and written down for
+    // agents.
+    let folder = folder("cli_edit_all");
+    let help = stdout(&run(&folder, &["edit", "--help"]));
+    let guide = guide();
+    for command in duck_mold_core::edit::Edit::COMMANDS {
+        assert!(
+            help.lines()
+                .any(|line| line.trim_start().starts_with(&format!("{command} "))),
+            "`duck-mold edit` has no command {command}:\n{help}"
+        );
+        let output = run(&folder, &["edit", "tree.toml", command, "--help"]);
+        assert_eq!(output.status.code(), Some(0), "{command}");
+        assert!(
+            guide.contains(&format!("`duck-mold edit <recipe> {command} ")),
+            "the guide doesn't describe `duck-mold edit <recipe> {command}`"
+        );
+    }
+}
+
+#[test]
 fn preview_needs_a_file_that_is_there() {
     // Only what fails before a window would open is tried here: a test
     // machine may have a screen, and a window would wait to be closed.
@@ -474,6 +636,7 @@ fn help_and_version_explain_the_program() {
             "inspect",
             "export",
             "render",
+            "edit",
             "preview",
             "guide",
             "Exit codes: 0 it worked, 1 the recipe has errors, 2",

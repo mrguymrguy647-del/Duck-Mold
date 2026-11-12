@@ -110,12 +110,13 @@ that built.
 | `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
+| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
 | `duck-mold preview <file>` | Opens a window showing the model: drag to orbit, wheel to zoom, Escape to quit. It builds the model again whenever the recipe, or a file it uses, is saved. |
 | `duck-mold guide` | Prints the guide for AI agents. |
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
-Add `--json` to `inspect`, `export` or `render` to get the report as
-JSON, for an agent or a script.
+Add `--json` to `inspect`, `export`, `render` or `edit` to get the
+report as JSON, for an agent or a script.
 
 `render` draws with Duck Forge's own renderer, so the picture shows the
 model the way a Duck Forge game draws it. The same recipe always gives

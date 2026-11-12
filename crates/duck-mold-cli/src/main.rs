@@ -20,6 +20,8 @@ use duck_mold_core::issue::{Issue, Report};
 use duck_mold_core::tools::{self, Failure};
 use duck_mold_view::render;
 
+mod edit;
+
 /// Duck Mold makes game-ready 3D models for Duck Forge from text recipes.
 ///
 /// A recipe is a TOML or JSON file that lists a palette and the parts of
@@ -100,6 +102,27 @@ enum Command {
     Preview {
         /// A recipe (.toml or .json), or a mesh (.obj, .gltf or .glb).
         file: PathBuf,
+    },
+    /// Make one change to a recipe without typing it: add, remove, rename,
+    /// join, set, duplicate, add-color, set-color, add-socket, set-socket.
+    ///
+    /// Only what has to change in the file is changed: comments, order
+    /// and layout stay. Prints the same report as inspect, for the recipe
+    /// after the change. A change that would leave the recipe with more
+    /// mistakes than it had is refused, and nothing is written. These are
+    /// the same edits the Studio makes.
+    Edit {
+        /// The recipe (.toml or .json).
+        recipe: PathBuf,
+        #[command(subcommand)]
+        change: Box<edit::Change>,
+        /// Print the report as JSON, for agents, with what the edit did
+        /// under "edit".
+        #[arg(long, global = true)]
+        json: bool,
+        /// Say what would happen, and write nothing.
+        #[arg(long, global = true)]
+        dry_run: bool,
     },
     /// Print the guide for AI agents: how to write recipes and use these
     /// commands, from scratch.
@@ -182,6 +205,68 @@ fn main() -> ExitCode {
                 ExitCode::from(2)
             }
         },
+        Command::Edit {
+            recipe,
+            change,
+            json,
+            dry_run,
+        } => {
+            let edit = match change.to_edit() {
+                Ok(edit) => edit,
+                Err(message) => {
+                    let issue =
+                        Issue::error(duck_mold_core::issue::Code::TypeMismatch, "", message);
+                    return fail(&Failure::Usage(Box::new(issue)), json);
+                }
+            };
+            match duck_mold_core::edit::edit_file(&recipe, &edit, dry_run) {
+                Ok(edited) => {
+                    if json {
+                        say_json(&edited.to_json());
+                    } else {
+                        let info = &edited.edit;
+                        say(&match (dry_run, info.written) {
+                            (true, _) => format!(
+                                "would edit {}: {} (a dry run: nothing was written)",
+                                info.file, info.summary
+                            ),
+                            (false, true) => format!("edited {}: {}", info.file, info.summary),
+                            (false, false) => format!(
+                                "{} is already that way: {} changed nothing",
+                                info.file, info.command
+                            ),
+                        });
+                        if let Some(definition) = &info.definition {
+                            say(&if info.also_changes.is_empty() {
+                                format!("  it is inside the definition \"{definition}\"")
+                            } else {
+                                format!(
+                                    "  it is inside the definition \"{definition}\", so this also changes: {}",
+                                    info.also_changes.join(", ")
+                                )
+                            });
+                        }
+                        match &edited.inspection {
+                            Some(inspection) => {
+                                say(inspection.to_text().trim_end());
+                                complain_about(&inspection.warnings);
+                            }
+                            None => complain(
+                                Report::from_issues(edited.errors.clone())
+                                    .to_string()
+                                    .trim_end(),
+                            ),
+                        }
+                    }
+                    if edited.inspection.is_some() {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(1)
+                    }
+                }
+                Err(failure) => fail(&failure, json),
+            }
+        }
         Command::Guide => {
             say(GUIDE.trim_end());
             ExitCode::SUCCESS

@@ -10,6 +10,7 @@
 //! by the small reader in this file, because the usual JSON library
 //! doesn't say where a value was.
 
+use std::ops::Range;
 use std::path::Path;
 
 /// A place in a file: line and column, both counting from 1.
@@ -29,6 +30,10 @@ pub struct Node {
     pub value: Value,
     /// Where it starts.
     pub pos: Pos,
+    /// The bytes of the text it is written in, from its first to just
+    /// past its last: what an edit replaces to change it. (Counted in the
+    /// text without the invisible mark some Windows editors put first.)
+    pub span: Range<usize>,
 }
 
 /// One `name = value` of a table, in the order the file has them.
@@ -38,6 +43,8 @@ pub struct Entry {
     pub key: String,
     /// Where the name is written.
     pub key_pos: Pos,
+    /// The bytes of the name as written (with its quotes, in JSON).
+    pub key_span: Range<usize>,
     /// The value.
     pub node: Node,
 }
@@ -185,6 +192,7 @@ fn parse_toml(text: &str) -> Result<Node, SyntaxError> {
     Ok(Node {
         value: toml_table(table.get_ref(), &lines),
         pos: Pos { line: 1, column: 1 },
+        span: 0..text.len(),
     })
 }
 
@@ -195,6 +203,7 @@ fn toml_table(table: &toml::de::DeTable<'_>, lines: &Lines<'_>) -> Value {
             let entry = Entry {
                 key: key.get_ref().to_string(),
                 key_pos: lines.pos(key.span().start),
+                key_span: key.span(),
                 node: toml_node(value, lines),
             };
             (key.span().start, entry)
@@ -230,6 +239,7 @@ fn toml_node(value: &toml::Spanned<toml::de::DeValue<'_>>, lines: &Lines<'_>) ->
     Node {
         value: converted,
         pos: lines.pos(value.span().start),
+        span: value.span(),
     }
 }
 
@@ -347,7 +357,11 @@ impl<'a> JsonReader<'a> {
             }
             Some(c) => return self.error(start, format!("a value can't start with `{c}`")),
         };
-        Ok(Node { value, pos })
+        Ok(Node {
+            value,
+            pos,
+            span: start..self.at,
+        })
     }
 
     fn object(&mut self, depth: usize) -> Result<Value, SyntaxError> {
@@ -380,6 +394,7 @@ impl<'a> JsonReader<'a> {
             }
             let key_start = self.at;
             let key = self.string()?;
+            let key_end = self.at;
             if entries.iter().any(|entry| entry.key == key) {
                 return self.error(key_start, format!("the field \"{key}\" is written twice"));
             }
@@ -392,6 +407,7 @@ impl<'a> JsonReader<'a> {
             entries.push(Entry {
                 key,
                 key_pos: self.lines.pos(key_start),
+                key_span: key_start..key_end,
                 node,
             });
             self.skip_space()?;

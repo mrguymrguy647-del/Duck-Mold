@@ -14,6 +14,7 @@
 pub const RECIPE_VERSION: i64 = 0;
 
 pub mod assemble;
+pub mod edit;
 pub mod glb;
 pub mod gltf;
 pub mod inspect;

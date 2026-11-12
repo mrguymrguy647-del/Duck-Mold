@@ -1345,8 +1345,19 @@ Rules for all of them:
   refused, with a line saying to open that file.
 
 Not edits in this phase: moving a part that isn't joined (`move`,
-`rotate`), `scale`, `mirror`, and declaring sockets. They are still
-typed in the recipe, and the Studio shows them.
+`rotate`), `scale`, `mirror` (except through `duplicate --mirror`),
+sockets written with `at` or `from`, and `define`. They are still typed
+in the recipe, and the Studio shows them.
+
+*As built:* `crates/duck-mold-core/src/edit/`. `doc.rs` holds the
+replacements (set a value, add or remove a field, add a table, add,
+remove or copy an item of a list), each tested on its own in TOML and
+JSON; `mod.rs` holds the `Edit` type, finds parts by the path `inspect`
+prints, and checks the result. The TOML reader already gave the place of
+every header, so a part's block is found from the tree, with no second
+parser. Two things the design didn't say: an edit that changes nothing
+writes nothing and says so; and `remove` is refused if it would leave
+the recipe with no parts, since that is a new mistake.
 
 ### How an edit rewrites the file
 

@@ -92,6 +92,31 @@ pub fn load_text(
     }
 }
 
+/// Reads a recipe from text that belongs to the file at `path`, without
+/// reading that file: for an edit, which builds the text it is about to
+/// write. The files the recipe names are looked for beside `path`;
+/// `display` is the recipe's name in messages.
+pub fn load_text_at(
+    text: &str,
+    syntax: Syntax,
+    path: &Path,
+    display: &str,
+    issues: &mut Vec<Issue>,
+) -> Loaded {
+    let mut loader = Loader {
+        issues,
+        palette: Vec::new(),
+        open: Vec::new(),
+        files: vec![path.to_path_buf()],
+    };
+    let recipe = loader.recipe(text, syntax, path, display, true);
+    Loaded {
+        recipe,
+        palette: loader.palette,
+        files: loader.files,
+    }
+}
+
 struct Loader<'a> {
     issues: &'a mut Vec<Issue>,
     /// The model's palette so far.
