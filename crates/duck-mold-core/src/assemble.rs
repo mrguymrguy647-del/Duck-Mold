@@ -25,10 +25,14 @@ use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
 use crate::recipe::{
-    Axis, Define, Loc, PaletteColor, PartDef, Placement, Recipe, Side, SocketDef, SocketKind,
-    SocketRef, Source, rgb_of,
+    Axis, Define, Loc, PaletteColor, PartDef, Placement, Recipe, Shape, Side, SocketDef,
+    SocketKind, SocketRef, Source, rgb_of,
 };
-use crate::shapes::{self, Polygon};
+use crate::shapes::{self, Landing, Polygon};
+
+/// The socket a wedge has built in besides the seven every part has: the
+/// middle of its slope, facing out of it.
+pub const SLOPE: &str = "slope";
 
 /// The most triangles a model may have. Far beyond "game-ready"; it
 /// stops a recipe that nests uses of uses from filling the memory.
@@ -242,20 +246,76 @@ impl Body {
     }
 
     /// One of the body's sockets, in its own space: a built-in one, on
-    /// the box around it, or one it declares.
+    /// the shape (see [`Body::land`]) or on the box around it, or one it
+    /// declares.
     fn socket(&self, name: &str) -> Option<Socket> {
         if let Some(side) = Side::from_name(name) {
             let bounds = self.bounds?;
+            let at = bounds.center() + Vec3::from(side.offset()).times(bounds.half());
+            let (at, facing) = match self.land(side, at) {
+                Landing::Touches { at, facing } => (at, facing),
+                // A built-in socket always meets the shape: its line runs
+                // through the middle.
+                Landing::Already | Landing::Misses => (at, side.facing().into()),
+            };
             return Some(Socket {
                 name: name.to_owned(),
-                at: bounds.center() + Vec3::from(side.offset()).times(bounds.half()),
-                facing: side.facing().into(),
+                at,
+                facing,
+            });
+        }
+        if name == SLOPE && self.is_wedge() {
+            // The top, moved down onto the slope.
+            return Some(Socket {
+                name: SLOPE.to_owned(),
+                ..self.socket(Side::Top.name())?
             });
         }
         self.sockets
             .iter()
             .find(|socket| socket.name == name)
             .cloned()
+    }
+
+    /// Whether it is one of the five built-in shapes, whose sockets sit
+    /// on its surface. A mesh from a file and an assembly keep theirs on
+    /// the box around them.
+    fn is_shape(&self) -> bool {
+        !self.broken && self.nodes.is_empty() && Shape::NAMES.contains(&self.kind.shape.as_str())
+    }
+
+    fn is_wedge(&self) -> bool {
+        self.is_shape() && self.kind.shape == "wedge"
+    }
+
+    /// Where a socket at `point`, on the `side` of the box around the
+    /// body, goes on the shape itself: straight in from the box until it
+    /// touches the surface, facing out of the surface there. A socket
+    /// already on the surface doesn't move; the middle never does.
+    fn land(&self, side: Side, point: Vec3) -> Landing {
+        let Some(bounds) = self.bounds else {
+            return Landing::Already;
+        };
+        if side == Side::Center || !self.is_shape() {
+            return Landing::Already;
+        }
+        let size = bounds.size();
+        shapes::land(
+            &self.faces,
+            point,
+            -Vec3::from(side.facing()),
+            size.x.max(size.y).max(size.z),
+        )
+    }
+
+    /// The names of its built-in sockets: the seven every part has, and a
+    /// wedge's `slope`.
+    fn built_in_names(&self) -> Vec<&'static str> {
+        let mut names: Vec<&'static str> = Side::ALL.map(Side::name).to_vec();
+        if self.is_wedge() {
+            names.push(SLOPE);
+        }
+        names
     }
 
     /// The names of all its sockets, declared ones first, for messages.
@@ -265,15 +325,15 @@ impl Body {
             .iter()
             .map(|socket| socket.name.clone())
             .collect();
-        names.extend(Side::ALL.map(|side| side.name().to_owned()));
+        names.extend(self.built_in_names().into_iter().map(str::to_owned));
         names
     }
 
     /// All its sockets, built-in ones first, moved by `place`.
     fn all_sockets(&self, place: &Transform) -> Vec<Socket> {
-        Side::ALL
+        self.built_in_names()
             .into_iter()
-            .filter_map(|side| self.socket(side.name()))
+            .filter_map(|name| self.socket(name))
             .chain(self.sockets.iter().cloned())
             .map(|socket| Socket {
                 name: socket.name,
@@ -763,6 +823,13 @@ impl Assembler<'_> {
                 ));
                 continue;
             }
+            if def.name == SLOPE && body.is_wedge() {
+                self.issues.push(def.loc.error(
+                    Code::DuplicateName,
+                    "a wedge already has a socket called \"slope\" built in, in the middle of its slope: give this one another name",
+                ));
+                continue;
+            }
             if body.broken {
                 continue;
             }
@@ -771,13 +838,30 @@ impl Assembler<'_> {
                     side,
                     shift,
                     facing,
-                } => body.bounds.map(|bounds| {
+                } => body.bounds.and_then(|bounds| {
                     let slide = Vec3::from(side.offset()) + Vec3::from(*shift);
-                    let facing = facing.unwrap_or(side.facing());
-                    (
-                        bounds.center() + slide.times(bounds.half()),
-                        Vec3::from(facing),
-                    )
+                    let point = bounds.center() + slide.times(bounds.half());
+                    // `facing`, if the recipe gives one, wins over the
+                    // surface's.
+                    let chosen = facing.map(Vec3::from);
+                    match body.land(*side, point) {
+                        Landing::Already => {
+                            Some((point, chosen.unwrap_or(side.facing().into())))
+                        }
+                        Landing::Touches { at, facing } => Some((at, chosen.unwrap_or(facing))),
+                        Landing::Misses => {
+                            self.issues.push(def.loc.error(
+                                Code::OutOfRange,
+                                format!(
+                                    "shift = {} puts the socket \"{}\" beside the {}, where there is nothing for it to sit on: bring the numbers closer to 0",
+                                    numbers(shift),
+                                    def.name,
+                                    body.kind.shape
+                                ),
+                            ));
+                            None
+                        }
+                    }
                 }),
                 SocketKind::At { at, facing } => Some((Vec3::from(*at), Vec3::from(*facing))),
                 SocketKind::From { part, socket } => {
@@ -1010,6 +1094,15 @@ impl Assembler<'_> {
             shift: theirs.at - turn * my_point,
         })
     }
+}
+
+/// `[0, 0.9, 0.9]`: numbers as a recipe writes them.
+fn numbers(values: &[f64; 3]) -> String {
+    let words: Vec<String> = values
+        .iter()
+        .map(|value| format!("{}", value + 0.0))
+        .collect();
+    format!("[{}]", words.join(", "))
 }
 
 /// The names that a recipe gave, without the `#2` stand-ins of unnamed

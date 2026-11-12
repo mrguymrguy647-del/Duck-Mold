@@ -1,4 +1,4 @@
-//! Golden files: the five example recipes must always build to exactly
+//! Golden files: the example recipes must always build to exactly
 //! the same bytes.
 //!
 //! `tests/golden/` at the top of the repository holds, for each example,
@@ -26,7 +26,7 @@ use std::process::Command;
 #[path = "../../../docs/forge/duck_mold_glb.rs"]
 mod forge;
 
-const EXAMPLES: [&str; 5] = ["crate", "table", "tree", "house", "robot"];
+const EXAMPLES: [&str; 6] = ["crate", "table", "tree", "house", "robot", "snowman"];
 
 /// The top of the repository.
 fn root() -> PathBuf {
@@ -161,10 +161,16 @@ fn every_example_is_a_clean_model() {
         assert_eq!(report["warnings"], serde_json::json!([]), "{name}");
         assert_eq!(report["ground"]["rests_on_ground"], true, "{name}");
         assert_eq!(report["floating"], serde_json::json!([]), "{name}");
-        // Only the tree overlaps, and it means to: its tiers are pushed
-        // into each other.
+        // Only the tree and the snowman overlap, and they mean to: the
+        // tree's tiers are pushed into each other, and the snowman's five
+        // lumps of coal are pressed into the snow.
         let overlaps = report["overlapping"].as_array().unwrap().len();
-        assert_eq!(overlaps, if name == "tree" { 2 } else { 0 }, "{name}");
+        let meant = match name {
+            "tree" => 2,
+            "snowman" => 5,
+            _ => 0,
+        };
+        assert_eq!(overlaps, meant, "{name}");
         assert!(report.get("unpainted_triangles").is_none(), "{name}");
     }
 }

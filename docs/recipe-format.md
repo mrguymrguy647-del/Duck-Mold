@@ -181,25 +181,29 @@ everything inside it that has none of its own.
 
 A socket is a named point with a direction it faces.
 
-**Built in.** Every part has seven, on the box around it: `top`,
-`bottom`, `left`, `right`, `front`, `back` (the middle of each side,
-facing out) and `center` (the middle, facing up). These names can't be
-declared again.
+**Built in.** Every part has seven: `top`, `bottom`, `left`, `right`,
+`front`, `back` (the middle of each side, facing out) and `center` (the
+middle, facing up). A wedge has an eighth, `slope`: the middle of its
+slope, facing straight out of it. These names can't be declared again
+(`slope` only on a wedge).
 
-They are on the box, which for a sloped shape is not always its surface.
-A cone's `left`, `right`, `front` and `back` are in the air beside its
-slope, and a wedge's `top` and `front` are in the air above its slope; a
-part joined there floats (and `inspect` says so). Declare a socket with
-`at` for those places. A round shape's side sockets are exactly on its
-surface when `segments` is a multiple of 4.
+**On the surface.** A socket of one of the five shapes sits on the
+shape's surface. It starts on the side of the box around the shape; if
+the shape isn't there, it moves straight in until it touches the shape,
+and faces straight out of the surface there (on an edge between two
+faces, halfway between them). A socket already on the surface doesn't
+move. So a cone's `left`, `right`, `front` and `back` are halfway up
+its slant, and a wedge's `top` and `front` are the middle of its slope.
+An assembly, and a part made from a file, keep their sockets on the box
+around them.
 
 **Declared.** Under `sockets`, each name is one of three forms:
 
 | Form | Fields | |
 |---|---|---|
 | On a side | `on` | `top`, `bottom`, `left`, `right`, `front`, `back` or `center`. |
-| | `shift` (default `[0, 0, 0]`) | Slides the socket across the side: each number from -1 (the left, bottom or back edge) to 1 (the right, top or front edge). The number for the direction the side faces must be 0. With `center`, all three are free. |
-| | `facing` (default: out of the side) | A direction. |
+| | `shift` (default `[0, 0, 0]`) | Slides the socket across the side of the box: each number from -1 (the left, bottom or back edge) to 1 (the right, top or front edge). The number for the direction the side faces must be 0. With `center`, all three are free. Then, on a shape, the socket moves straight in onto the surface, as above; a shift that puts it beside the shape, where there is nothing to sit on, is an error. |
+| | `facing` (default: out of the surface) | A direction. Given, it wins over the surface's. |
 | At a point | `at` | `[x, y, z]` in the part's own space. For a shape, zero is its middle. For an assembly, zero is where a part of its list goes when it is neither attached nor moved. For a recipe used as a part, zero is its `origin`. |
 | | `facing` (default `"up"`) | A direction. |
 | Passed on | `from` | `"part.socket"`: a socket of a part inside this assembly, offered to the outside under a new name. |

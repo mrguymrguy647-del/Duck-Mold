@@ -291,12 +291,12 @@ directions oppose, the way two magnets snap together.
 `bottom`, `left`, `right`, `front`, `back` (the middle of each side,
 facing outwards) and `center`. For many models these are all you need.
 
-They are on the box, which is the surface for a box, a cylinder and a
-sphere, but not everywhere on a sloped shape: a cone's side sockets and
-a wedge's `top` and `front` are in the air beside the slope, and a part
-joined there floats (`inspect` reports it). Building showed this to be
-the design's weakest spot; `PHASE0_REPORT.md` proposes sockets that know
-the shape as an early Phase 1 change.
+In Phase 0 they were on the box, which is the surface for a box, a
+cylinder and a sphere, but not everywhere on a sloped shape: a cone's
+side sockets and a wedge's `top` and `front` were in the air beside the
+slope. **From Phase 1 a shape's sockets know the shape** (section 17,
+step 3): one that would be in the air moves straight in onto the
+surface and faces out of it, and a wedge has an eighth, `slope`.
 
 A part can declare more, in one of three ways:
 
@@ -793,7 +793,7 @@ Duck-Mold/
 │   ├── recipe-format.md       every field, default and range
 │   ├── forge-handoff.md       what a Duck Forge loader must support
 │   └── forge/duck_mold_glb.rs the reader written for Duck Forge
-├── examples/                  crate, table, tree, house, robot (.toml), and crate.json
+├── examples/                  crate, table, tree, house, robot, snowman (.toml), and crate.json
 ├── tests/golden/              the examples' exact .glb files and reports
 └── crates/
     ├── duck-mold-core/        the library: everything except the command line
@@ -1037,7 +1037,9 @@ That moves exactly these:
 On a box, on a cylinder's top and bottom, on a wedge's back and
 bottom, and wherever else the box and the shape already meet, nothing
 changes. To stand something upright on a slope (a chimney on a roof),
-use an exact socket: `at = [...]` with `facing = "up"`.
+give the socket a `facing`: it wins over the surface's, so
+`{ on = "top", shift = [0.5, 0, 0.5], facing = "up" }` on a wedge is on
+the slope, facing up.
 
 Parts made from files (OBJ, glTF, other recipes) keep their sockets on
 the box for now, as assemblies do; a later phase can give them the same
@@ -1055,7 +1057,8 @@ the air.
    moves in onto the surface and tilts to match it.
 4. A `shift` that puts a socket where the shape isn't at all (a corner
    of a cone's box, or high up on a wedge's side, above the slope) used
-   to float; now it is an error that says how far that shift can go.
+   to float; now it is an error that names the shift and says to bring
+   its numbers closer to 0.
 5. A wedge that declares a socket of its own called `slope` is now an
    error, since the name is built in.
 
@@ -1063,6 +1066,14 @@ None of the five examples changes: their `.glb` files stay byte for
 byte the same, and the tests check that. Two of Duck Mold's own tests
 join to a wedge's `top`, and are updated. `inspect` stops reporting
 parts joined to those sockets as floating.
+
+*As built:* the five examples did build to the same bytes. Then, as the
+step's examples, the house gained a skylight on its roof's `slope`, and
+a sixth example, `snowman.toml`, has eyes, buttons and arms on the
+surface of balls and a badge on a cone's slant. How it works: the line
+straight in from the box is followed through the shape's own faces, so
+the socket is exactly on the faces drawn, also for shapes with few
+`segments`.
 
 ### Step 4. `twist` for a joined part
 

@@ -207,19 +207,20 @@ own: `colors` on it is an error; colour the parts inside.
 A socket is a named point on a part with a direction it faces. Two
 sockets join face to face: the points meet and the directions oppose.
 
-**Every part has seven sockets built in**, on the box around it: `top`,
-`bottom`, `left`, `right`, `front`, `back` (the middle of each side,
-facing out) and `center`. An assembly has them too, on the box around
-all of it.
+**Every part has seven sockets built in**: `top`, `bottom`, `left`,
+`right`, `front`, `back` (the middle of each side, facing out) and
+`center`. A **wedge** has an eighth, `slope`: the middle of its slope,
+facing straight out of it.
 
-**They are on the box, not on the surface.** For a box, a cylinder and a
-sphere that is the same place. On a sloped shape some of them are in the
-air: a **cone**'s `left`, `right`, `front` and `back` are beside its
-slope (only `top`, its point, and `bottom` touch it), and a **wedge**'s
-`top` and `front` are above its slope. A part joined to a socket in the
-air floats, and `inspect` reports it. To put something on a slope,
-declare a socket with `at` and `facing`. For round shapes, keep
-`segments` a multiple of 4 if anything joins their sides.
+**On a shape, a socket sits on its surface, never in the air.** Each
+built-in socket starts in the middle of a side of the box around the
+shape; if the shape isn't there, the socket moves straight in until it
+touches the shape, and faces straight out of the surface. So a
+**cone**'s `left`, `right`, `front` and `back` are halfway up its slant,
+tilted up with it, and a **wedge**'s `top` and `front` are both the
+middle of its slope (the same place as `slope`). On a box, and on a
+cylinder's or sphere's sides, they are where the box is. An assembly, or
+a part made from a file, keeps its sockets on the box around it.
 
 Declare more in a part's `sockets` table, one of three ways:
 
@@ -234,10 +235,16 @@ grip     = { from = "hand.bottom" }                    # a socket of a part insi
 - `shift` slides a socket across its side: each number runs from -1 (the
   left, bottom or back edge) to 1 (the right, top or front edge). The
   number for the direction the side faces must be 0. Sockets placed this
-  way keep their place when the part changes size.
+  way keep their place when the part changes size. On a round or sloped
+  side the socket then moves straight in onto the surface and faces out
+  of it, as the built-in ones do: eyes `on = "front"` of a sphere sit on
+  the sphere and look out of it (`examples/snowman.toml`). A shift that
+  misses the shape altogether is an error.
 - `at` is in the part's own units, measured from its middle. `facing` is
   `up`, `down`, `left`, `right`, `front`, `back` or `[x, y, z]`; without
-  it the socket faces up. `facing` also works with `on`.
+  it the socket faces up. `facing` also works with `on`, and wins over
+  the surface's: `{ on = "top", shift = [0.5, 0, 0.5], facing = "up" }`
+  on a wedge stands a chimney upright on its slope.
 - `from` passes a socket of an inner part to the outside of an assembly.
 
 **How a joined part is turned.** It is turned as little as possible to
@@ -446,9 +453,10 @@ whole model.
 - **`colour`.** The fields are spelt `color` and `colors`.
 - **Left and right swapped.** They are the model's own: left is -x,
   and the model faces +z.
-- **Joining to the side of a cone, or the top of a wedge.** Those
-  built-in sockets are in the air (section 6). `inspect` shows the part
-  as floating.
+- **Expecting a part on a slope to stand upright.** A cone's sides and
+  a wedge's `top`, `front` and `slope` face out of the slope, so what you
+  join there leans with it. Declare a socket with `facing = "up"` to
+  stand something upright on a slope.
 - **Too many segments.** 64 on a sphere is 3,968 triangles. Try 8.
 - **`colors` on an assembly.** Colour the parts inside it, or give the
   assembly a plain `color`.
@@ -464,8 +472,9 @@ reserved names), no glTF import (only `.obj`), no window.
 
 ## 12. Files for reference
 
-- `examples/`: crate, table, tree, house, robot. Read `robot.toml` for
-  nested parts.
+- `examples/`: crate, table, tree, house, robot, snowman. Read
+  `robot.toml` for nested parts and `snowman.toml` for sockets on curved
+  surfaces.
 - `docs/recipe-format.md`: every field, default and range.
 - `docs/forge-handoff.md`: what is in the `.glb`, and how Duck Forge
   reads it.

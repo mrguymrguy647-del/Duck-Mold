@@ -147,10 +147,16 @@ fn mirror_flips_a_part_and_its_sockets() {
     let slope = &model.faces[ramp.faces.start];
     let normal = slope.normal().unwrap();
     assert!(normal.y > 0.0 && normal.z < 0.0, "{normal:?}");
-    // Its socket called "front" is now at its back.
+    // Its socket called "back" is now at its front.
     assert_eq!(
-        socket(&model, "ramp", "front"),
-        (vec3(3.0, 0.0, -0.5), vec3(0.0, 0.0, -1.0))
+        socket(&model, "ramp", "back"),
+        (vec3(3.0, 0.0, 0.5), vec3(0.0, 0.0, 1.0))
+    );
+    // And its slope socket faces up and back, out of the flipped slope.
+    let half = std::f64::consts::FRAC_1_SQRT_2;
+    assert_eq!(
+        socket(&model, "ramp", "slope"),
+        (vec3(3.0, 0.0, 0.0), vec3(0.0, half, -half).tidied())
     );
     // Every face still faces outwards.
     let middle = ramp.bounds.unwrap().center() + vec3(0.0, -0.2, 0.2);
@@ -285,20 +291,20 @@ fn sockets_that_face_the_same_way_follow_the_fixed_rule() {
         "[[parts]]\nname = \"b\"\nshape = \"wedge\"\nattach = \"right\"\nto = \"a.right\"",
     ));
     assert_eq!(bounds(&model, "b").min.x, 0.5);
-    assert_eq!(socket(&model, "b", "top").1, vec3(0.0, 1.0, 0.0));
-    assert_eq!(socket(&model, "b", "front").1, vec3(0.0, 0.0, -1.0));
+    assert_eq!(socket(&model, "b", "bottom").1, vec3(0.0, -1.0, 0.0));
+    assert_eq!(socket(&model, "b", "back").1, vec3(0.0, 0.0, 1.0));
 
     // Upright sockets: the part rolls over sideways, its front still in
     // front.
     let model = built(&after_a(
-        "[[parts]]\nname = \"b\"\nshape = \"wedge\"\nattach = \"top\"\nto = \"a.top\"",
+        "[[parts]]\nname = \"b\"\nshape = \"wedge\"\nattach = \"bottom\"\nto = \"a.bottom\"",
     ));
-    assert_eq!(bounds(&model, "b").min.y, 0.5);
+    assert_eq!(bounds(&model, "b").max.y, -0.5);
     assert_eq!(
-        socket(&model, "b", "top"),
-        (vec3(0.0, 0.5, 0.0), vec3(0.0, -1.0, 0.0))
+        socket(&model, "b", "bottom"),
+        (vec3(0.0, -0.5, 0.0), vec3(0.0, 1.0, 0.0))
     );
-    assert_eq!(socket(&model, "b", "front").1, vec3(0.0, 0.0, 1.0));
+    assert_eq!(socket(&model, "b", "back").1, vec3(0.0, 0.0, -1.0));
     assert_eq!(socket(&model, "b", "left").1, vec3(1.0, 0.0, 0.0));
 }
 

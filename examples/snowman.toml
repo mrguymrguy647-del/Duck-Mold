@@ -1,0 +1,158 @@
+# A snowman: three balls of snow, coal eyes and buttons, a carrot nose,
+# stick arms and a party hat with a badge.
+#
+#   duck-mold render examples/snowman.toml
+#
+# Everything here sits on a curved surface. A socket made with `on` and
+# `shift` is first slid across a side of the part's box, as on a box;
+# on a ball, or on a cone's slant, it then moves straight in until it
+# sits on the surface, and faces straight out of it. So the eyes and
+# buttons sit on the snow and follow its curve, the arms lean out and
+# up, and the badge lies flat on the hat's slant.
+#
+# The coal is pressed into the snow on purpose, and `inspect` lists it
+# under "overlapping": a fact in the report, not a mistake.
+
+version = 0
+name = "snowman"
+description = "A snowman with a carrot nose and a party hat."
+
+[palette]
+snow   = "#EEF2F6"
+coal   = "#2B2B2E"
+carrot = "#E8792B"
+stick  = "#6B4A2B"
+hat    = "#C8364A"
+gold   = "#F2C84B"
+
+# A lump of coal, pressed into the snow: its middle goes on the socket.
+[define.coal]
+shape = "sphere"
+radius = 0.035
+segments = 6
+color = "coal"
+
+[define.arm]
+shape = "cylinder"
+radius = 0.02
+height = 0.45
+segments = 6
+color = "stick"
+
+[[parts]]
+name = "base"
+shape = "sphere"
+radius = 0.45
+color = "snow"
+
+# Three buttons down the front and an arm on each side, a little above
+# the middle. On a ball, each faces straight out of the snow where it
+# is: the arms lean up as well as out.
+[[parts]]
+name = "body"
+shape = "sphere"
+radius = 0.33
+color = "snow"
+attach = "bottom"
+to = "base.top"
+
+[parts.sockets]
+button_top    = { on = "front", shift = [0, 0.45, 0] }
+button_middle = { on = "front" }
+button_bottom = { on = "front", shift = [0, -0.45, 0] }
+left_arm      = { on = "left", shift = [0, 0.35, 0] }
+right_arm     = { on = "right", shift = [0, 0.35, 0] }
+
+[[parts]]
+name = "head"
+shape = "sphere"
+radius = 0.22
+color = "snow"
+attach = "bottom"
+to = "body.top"
+
+# The model's left is -x, so the left eye is shifted towards -1.
+[parts.sockets]
+left_eye  = { on = "front", shift = [-0.35, 0.3, 0] }
+right_eye = { on = "front", shift = [0.35, 0.3, 0] }
+nose      = { on = "front", shift = [0, -0.1, 0] }
+
+[[parts]]
+name = "left_eye"
+use = "coal"
+attach = "center"
+to = "head.left_eye"
+
+[[parts]]
+name = "right_eye"
+use = "coal"
+attach = "center"
+to = "head.right_eye"
+
+[[parts]]
+name = "nose"
+shape = "cone"
+radius = 0.04
+height = 0.25
+segments = 8
+color = "carrot"
+attach = "bottom"
+to = "head.nose"
+
+[[parts]]
+name = "button_top"
+use = "coal"
+attach = "center"
+to = "body.button_top"
+
+[[parts]]
+name = "button_middle"
+use = "coal"
+attach = "center"
+to = "body.button_middle"
+
+[[parts]]
+name = "button_bottom"
+use = "coal"
+attach = "center"
+to = "body.button_bottom"
+
+[[parts]]
+name = "left_arm"
+use = "arm"
+attach = "bottom"
+to = "body.left_arm"
+
+[[parts]]
+name = "right_arm"
+use = "arm"
+attach = "bottom"
+to = "body.right_arm"
+
+[[parts]]
+name = "hat"
+shape = "cone"
+radius = 0.14
+height = 0.3
+color = "hat"
+attach = "bottom"
+to = "head.top"
+
+[[parts]]
+name = "pompom"
+shape = "sphere"
+radius = 0.04
+segments = 6
+color = "gold"
+attach = "bottom"
+to = "hat.top"
+
+# A cone's `front` is on its slant, halfway up, facing out of it: the
+# badge's back lies flat against the hat.
+[[parts]]
+name = "badge"
+shape = "box"
+size = [0.07, 0.07, 0.01]
+color = "gold"
+attach = "back"
+to = "hat.front"

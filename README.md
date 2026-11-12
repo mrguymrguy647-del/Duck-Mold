@@ -186,8 +186,9 @@ A recipe can be written as TOML (the examples) or as JSON
 | [crate.toml](examples/crate.toml) | The smallest useful recipe: one box, two colours. |
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
-| [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, windows and a chimney placed by sockets. |
+| [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, windows and a chimney placed by sockets, and a skylight on the roof's `slope`. |
 | [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
+| [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
 
 Each is commented line by line.
 
