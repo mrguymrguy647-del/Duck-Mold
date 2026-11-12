@@ -253,6 +253,41 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
         if name == "crate" {
             assert_eq!((model.vertices.len(), model.triangles.len()), (8, 12));
         }
+        // Every assembly in the report's tree of parts is in the file, with
+        // the triangles of all the parts inside it, outer ones first.
+        fn assemblies(parts: &serde_json::Value, into: &mut Vec<(String, u64)>) {
+            for part in parts.as_array().unwrap() {
+                if part["kind"] == "assembly" {
+                    into.push((
+                        part["name"].as_str().unwrap().to_owned(),
+                        part["triangles"].as_u64().unwrap(),
+                    ));
+                    assemblies(&part["parts"], into);
+                }
+            }
+        }
+        let mut expected = Vec::new();
+        assemblies(&report["parts"], &mut expected);
+        let found: Vec<(String, u64)> = model
+            .assemblies
+            .iter()
+            .map(|a| (a.name.clone(), a.triangles as u64))
+            .collect();
+        assert_eq!(found, expected, "{name}");
+        for assembly in &model.assemblies {
+            let inside = format!("{}/", assembly.name);
+            let parts: Vec<_> = model
+                .parts
+                .iter()
+                .filter(|p| p.name.starts_with(&inside))
+                .collect();
+            assert_eq!(assembly.first_triangle, parts[0].first_triangle, "{name}");
+            assert_eq!(
+                parts.iter().map(|p| p.triangles).sum::<usize>(),
+                assembly.triangles,
+                "{name}"
+            );
+        }
         // The parts own every triangle, in order.
         let mut next = 0;
         for part in &model.parts {
@@ -309,4 +344,57 @@ fn the_readmes_examples_are_true() {
         lines += 1;
     }
     assert!(lines >= 10);
+}
+
+#[test]
+fn inspecting_a_golden_glb_gives_the_recipes_tree_of_parts() {
+    // What a .glb keeps of its parts: names, the tree, and triangles.
+    fn tree(parts: &serde_json::Value) -> Vec<String> {
+        parts
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|part| {
+                let assembly = part["kind"] == "assembly";
+                format!(
+                    "{}{} {} [{}]",
+                    part["name"].as_str().unwrap(),
+                    if assembly { " (assembly)" } else { "" },
+                    part["triangles"],
+                    tree(&part["parts"]).join(", ")
+                )
+            })
+            .collect()
+    }
+    for name in EXAMPLES {
+        let from_recipe: serde_json::Value = serde_json::from_slice(
+            &std::fs::read(
+                root()
+                    .join("tests/golden")
+                    .join(format!("{name}.inspect.json")),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let glb = format!("tests/golden/{name}.glb");
+        let from_glb: serde_json::Value =
+            serde_json::from_slice(&duck_mold(&["inspect", &glb, "--json"])).unwrap();
+        assert_eq!(
+            tree(&from_glb["parts"]),
+            tree(&from_recipe["parts"]),
+            "{name}"
+        );
+        for field in [
+            "size",
+            "bounds",
+            "triangles",
+            "vertices",
+            "ground",
+            "palette",
+            "floating",
+            "overlapping",
+        ] {
+            assert_eq!(from_glb[field], from_recipe[field], "{name}: {field}");
+        }
+    }
 }

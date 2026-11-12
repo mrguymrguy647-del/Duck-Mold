@@ -1,8 +1,8 @@
 //! Reads the `.glb` files Duck Mold writes, for Duck Forge.
 //!
-//! This file is written to be copied into Duck Forge. It needs only the
-//! standard library and `serde_json`, which Duck Forge already uses for
-//! sprite sheets, so it adds no new dependency.
+//! This file is written to be copied into Duck Forge (its `src/glb.rs`).
+//! It needs only the standard library and `serde_json`, which Duck Forge
+//! already uses for sprite sheets, so it adds no new dependency.
 //!
 //! It is deliberately separate from Duck Mold's own code: it shares
 //! nothing with the exporter, so a mistake in one cannot hide a mistake
@@ -10,26 +10,29 @@
 //!
 //! What comes out is exactly what a Duck Forge `Mesh` holds: a list of
 //! points, and triangles with three corners (clockwise seen from the
-//! front) and one colour each. In Duck Forge:
+//! front) and one colour each. Duck Forge's `Mesh::load_glb` does that.
 //!
-//! ```ignore
-//! let model = read_duck_mold_glb(&std::fs::read("assets/robot.glb")?)?;
-//! let mut mesh = Mesh::new();
-//! for [x, y, z] in &model.vertices {
-//!     mesh.add_vertex(vec3(*x, *y, *z));
-//! }
-//! for triangle in &model.triangles {
-//!     let [a, b, c] = triangle.corners;
-//!     let [red, green, blue] = triangle.color;
-//!     mesh.add_triangle(a, b, c, Color::rgb(red, green, blue));
-//! }
-//! ```
+//! **Copying it.** Everything between the two `// ====` marker lines below
+//! is the reader, and Duck Forge's `src/glb.rs` holds the same lines, byte
+//! for byte; each project keeps its own introduction and imports above
+//! them, and Duck Forge its own functions below. The first marker says the
+//! reader's version. To change the reader: change it here, raise the
+//! version, run Duck Mold's tests, and copy the lines between the markers
+//! into Duck Forge. Duck Mold's `docs/forge-handoff.md` has the command
+//! that checks the two copies are the same.
 //!
-//! It reads the narrow kind of `.glb` that Duck Mold writes (see
-//! `docs/forge-handoff.md`), not glTF in general: anything else is
-//! refused with a sentence saying why.
+//! It reads the narrow kind of `.glb` that Duck Mold writes (Duck Mold's
+//! `docs/forge-handoff.md` describes it), not glTF in general: anything
+//! else is refused with a sentence saying why.
 
 use std::collections::HashMap;
+
+// ==== Duck Mold's .glb reader, version 2 ====================================
+//
+// Version 2: a part made of parts (an "assembly") has a triangle range too,
+// in `assemblies`; and sizes read from the file are checked before they are
+// added or multiplied, so a damaged file is refused instead of overflowing.
+// Version 1 was Duck Mold's Phase 0.
 
 /// A model read from a Duck Mold `.glb`, in Duck Forge's directions:
 /// x is right, y is up, z is forward, 1 unit is about a metre. The model
@@ -45,8 +48,16 @@ pub struct GlbModel {
     pub triangles: Vec<GlbTriangle>,
     /// The model's palette, by name.
     pub palette: Vec<GlbColor>,
-    /// The model's parts and which triangles each owns, in order.
+    /// The model's parts and which triangles each owns, in order. Each
+    /// part has a shape of its own; together they own every triangle,
+    /// once each.
     pub parts: Vec<GlbPart>,
+    /// The parts made of other parts (a robot's arm made of an upper arm,
+    /// an elbow and a hand, say), each with the range of all its parts'
+    /// triangles, outer ones before the parts inside them. A part inside
+    /// one is named after it: `left_arm/hand` is in `left_arm`. Empty for
+    /// a model with none, and for files from before version 2.
+    pub assemblies: Vec<GlbPart>,
 }
 
 /// One triangle: three places in `vertices`, clockwise seen from the
@@ -69,7 +80,8 @@ pub struct GlbColor {
     pub rgb: [u8; 3],
 }
 
-/// One part of the model.
+/// One part of the model, or one assembly, and its triangles: those
+/// from `first_triangle` on, `triangles` of them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GlbPart {
     /// Its name; a part inside another is written `left_arm/hand`.
@@ -214,32 +226,8 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
             rgb: [channel(1)?, channel(3)?, channel(5)?],
         });
     }
-    let mut parts = Vec::new();
-    for entry in extras["parts"]
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-    {
-        let part = GlbPart {
-            name: entry["name"]
-                .as_str()
-                .ok_or("a part has no name")?
-                .to_owned(),
-            first_triangle: entry["first_triangle"]
-                .as_u64()
-                .ok_or("a part has no first triangle")? as usize,
-            triangles: entry["triangles"]
-                .as_u64()
-                .ok_or("a part has no triangle count")? as usize,
-        };
-        if part.first_triangle + part.triangles > triangles.len() {
-            return Err(format!(
-                "the part \"{}\" names triangles that aren't there",
-                part.name
-            ));
-        }
-        parts.push(part);
-    }
+    let parts = part_list(&extras["parts"], "part", triangles.len())?;
+    let assemblies = part_list(&extras["assemblies"], "assembly", triangles.len())?;
 
     Ok(GlbModel {
         name: extras["name"].as_str().unwrap_or("model").to_owned(),
@@ -247,7 +235,48 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
         triangles,
         palette,
         parts,
+        assemblies,
     })
+}
+
+/// A list of parts (or of assemblies) with their triangles, each checked
+/// against the `count` of triangles there are. A missing list is empty.
+fn part_list(list: &serde_json::Value, what: &str, count: usize) -> Result<Vec<GlbPart>, String> {
+    let a = if what.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        "an"
+    } else {
+        "a"
+    };
+    let mut parts = Vec::new();
+    for entry in list.as_array().map(Vec::as_slice).unwrap_or_default() {
+        let whole = |field: &str| {
+            entry[field]
+                .as_u64()
+                .and_then(|number| usize::try_from(number).ok())
+                .ok_or_else(|| format!("{a} {what} has no {}", field.replace('_', " ")))
+        };
+        let part = GlbPart {
+            name: entry["name"]
+                .as_str()
+                .ok_or_else(|| format!("{a} {what} has no name"))?
+                .to_owned(),
+            first_triangle: whole("first_triangle")?,
+            triangles: whole("triangles")?,
+        };
+        // Checked, so a damaged file can't overflow the sum.
+        if part
+            .first_triangle
+            .checked_add(part.triangles)
+            .is_none_or(|end| end > count)
+        {
+            return Err(format!(
+                "the {what} \"{}\" names triangles that aren't there",
+                part.name
+            ));
+        }
+        parts.push(part);
+    }
+    Ok(parts)
 }
 
 /// The bytes of one list of numbers, found through the description: an
@@ -267,16 +296,27 @@ fn numbers<'a>(
     {
         return Err("a list of numbers isn't the kind Duck Mold writes".into());
     }
-    let per = if kind == "VEC3" { 12 } else { 4 };
+    let per: usize = if kind == "VEC3" { 12 } else { 4 };
     let count = accessor["count"]
         .as_u64()
-        .ok_or("a list of numbers has no count")? as usize;
+        .ok_or("a list of numbers has no count")?;
     let view = &gltf["bufferViews"][accessor["bufferView"]
         .as_u64()
         .ok_or("a list of numbers has no place")? as usize];
-    let start = view["byteOffset"].as_u64().unwrap_or(0) as usize
-        + accessor["byteOffset"].as_u64().unwrap_or(0) as usize;
-    bin.get(start..start + count * per)
+    // Checked sums: a damaged file can claim more numbers than any file
+    // could hold, and that must be a refusal, not a crash.
+    let span = usize::try_from(count)
+        .ok()
+        .and_then(|count| count.checked_mul(per))
+        .zip(
+            view["byteOffset"]
+                .as_u64()
+                .unwrap_or(0)
+                .checked_add(accessor["byteOffset"].as_u64().unwrap_or(0))
+                .and_then(|start| usize::try_from(start).ok()),
+        )
+        .and_then(|(length, start)| Some(start..start.checked_add(length)?));
+    span.and_then(|span| bin.get(span))
         .ok_or_else(|| "a list of numbers runs past the end of the file".to_owned())
 }
 
@@ -303,3 +343,5 @@ fn srgb(linear: f32) -> u8 {
     };
     (curved * 255.0).round().clamp(0.0, 255.0) as u8
 }
+
+// ==== end of Duck Mold's .glb reader, version 2 =============================

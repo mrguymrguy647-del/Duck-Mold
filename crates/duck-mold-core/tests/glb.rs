@@ -192,6 +192,42 @@ impl Glb {
     }
 }
 
+/// A `.glb` with its JSON block changed by `change`, put back together
+/// with the right lengths, so that only what `change` did is different.
+fn with_json(glb: &[u8], change: impl Fn(&str) -> String) -> Vec<u8> {
+    let json_end = 20 + u32_at(glb, 12) as usize;
+    let json = std::str::from_utf8(&glb[20..json_end]).unwrap();
+    let mut json = change(json.trim_end()).into_bytes();
+    while !json.len().is_multiple_of(4) {
+        json.push(b' ');
+    }
+    let numbers = &glb[json_end..]; // its length, "BIN\0", the numbers
+    let total = 12 + 8 + json.len() + numbers.len();
+    let mut out = Vec::new();
+    out.extend(b"glTF");
+    out.extend(2u32.to_le_bytes());
+    out.extend((total as u32).to_le_bytes());
+    out.extend((json.len() as u32).to_le_bytes());
+    out.extend(b"JSON");
+    out.extend(json);
+    out.extend(numbers);
+    out
+}
+
+/// The file with Duck Mold's mark under "extras" renamed, byte for byte
+/// (so its lengths still add up): what a .glb from another program looks
+/// like to the readers.
+fn renamed(glb: &[u8]) -> Vec<u8> {
+    let (from, to) = (b"duck_mold", b"duck_mole");
+    let mut out = glb.to_vec();
+    let at = out
+        .windows(from.len())
+        .position(|window| window == from)
+        .expect("the file has Duck Mold's mark");
+    out[at..at + to.len()].copy_from_slice(to);
+    out
+}
+
 fn triples(numbers: &[f32]) -> Vec<[f32; 3]> {
     numbers.chunks(3).map(|c| [c[0], c[1], c[2]]).collect()
 }
@@ -371,6 +407,209 @@ fn the_palette_and_the_parts_are_kept_in_the_file() {
             { "name": "right_leg", "first_triangle": 108, "triangles": 60 }
         ])
     );
+    // This robot's arms and legs are single shapes: no assemblies.
+    assert_eq!(extras["assemblies"], serde_json::json!([]));
+}
+
+/// A tower: a base, and a column made of two parts, the top one itself
+/// made of two parts. Parts inside parts, two levels deep.
+const TOWER: &str = r##"
+version = 0
+name = "tower"
+
+[palette]
+stone = "#8C8C88"
+gold = "#E0B040"
+
+[define.top]
+color = "gold"
+[[define.top.parts]]
+name = "cap"
+shape = "box"
+size = [0.6, 0.2, 0.6]
+[[define.top.parts]]
+name = "spire"
+shape = "cone"
+segments = 4
+attach = "bottom"
+to = "cap.top"
+
+[[parts]]
+name = "base"
+shape = "box"
+size = [2, 0.2, 2]
+color = "stone"
+
+[[parts]]
+name = "column"
+color = "stone"
+attach = "bottom"
+to = "base.top"
+[[parts.parts]]
+name = "shaft"
+shape = "cylinder"
+segments = 8
+radius = 0.2
+height = 2
+[[parts.parts]]
+name = "top"
+use = "top"
+attach = "bottom"
+to = "shaft.top"
+"##;
+
+#[test]
+fn assemblies_are_kept_with_the_triangles_of_every_part_inside_them() {
+    let model = built(TOWER);
+    let glb = open(&write_glb(&model));
+    let extras = &glb.json["extras"]["duck_mold"];
+    // The parts with shapes of their own, one after the other...
+    assert_eq!(
+        extras["parts"],
+        serde_json::json!([
+            { "name": "base", "first_triangle": 0, "triangles": 12 },
+            { "name": "column/shaft", "first_triangle": 12, "triangles": 28 },
+            { "name": "column/top/cap", "first_triangle": 40, "triangles": 12 },
+            { "name": "column/top/spire", "first_triangle": 52, "triangles": 6 }
+        ])
+    );
+    // ...and the parts made of parts, outer first, each owning all the
+    // triangles of the parts inside it.
+    assert_eq!(
+        extras["assemblies"],
+        serde_json::json!([
+            { "name": "column", "first_triangle": 12, "triangles": 46 },
+            { "name": "column/top", "first_triangle": 40, "triangles": 18 }
+        ])
+    );
+
+    // The Duck Forge reader gives them too.
+    let read = forge::read_duck_mold_glb(&write_glb(&model)).unwrap();
+    let assemblies: Vec<(&str, usize, usize)> = read
+        .assemblies
+        .iter()
+        .map(|a| (a.name.as_str(), a.first_triangle, a.triangles))
+        .collect();
+    assert_eq!(assemblies, [("column", 12, 46), ("column/top", 40, 18)]);
+    // Recolouring an assembly's range recolours exactly its parts: all of
+    // them gold or stone before, the column's 46 triangles are the ones in
+    // its range.
+    let column = &read.assemblies[0];
+    let inside: usize = read
+        .parts
+        .iter()
+        .filter(|part| part.name.starts_with("column/"))
+        .map(|part| part.triangles)
+        .sum();
+    assert_eq!(inside, column.triangles);
+}
+
+#[test]
+fn duck_mold_reads_the_tree_of_parts_back() {
+    let model = built(TOWER);
+    let read = read_glb(&write_glb(&model), "tower.glb").unwrap();
+    // The same tree: names, paths, kinds and faces.
+    fn shape(parts: &[duck_mold_core::model::Part]) -> Vec<String> {
+        parts
+            .iter()
+            .map(|part| {
+                let kind = if part.parts.is_empty() {
+                    "part"
+                } else {
+                    "assembly"
+                };
+                format!(
+                    "{} {} {}..{} [{}]",
+                    part.path,
+                    kind,
+                    part.faces.start,
+                    part.faces.end,
+                    shape(&part.parts).join(", ")
+                )
+            })
+            .collect()
+    }
+    assert_eq!(shape(&read.parts), shape(&model.parts));
+    assert_eq!(
+        shape(&read.parts),
+        [
+            "base part 0..6 []",
+            "column assembly 6..27 [column/shaft part 6..16 [], column/top assembly 16..27 [column/top/cap part 16..22 [], column/top/spire part 22..27 []]]"
+        ]
+    );
+    assert_eq!(read.parts[1].kind.shape, "assembly");
+    assert_eq!(read.parts[1].parts[1].name, "top");
+    assert_eq!(read.parts[1].bounds, model.parts[1].bounds);
+    // And writing it again gives the same file, assemblies included.
+    assert_eq!(write_glb(&read), write_glb(&model));
+}
+
+#[test]
+fn a_file_from_before_assemblies_still_reads() {
+    // Phase 0's files had no "assemblies": both readers take that as none,
+    // and Duck Mold lists the parts flat, as it did then.
+    let new = write_glb(&built(TOWER));
+    let old = with_json(&new, |json| {
+        let mut value: serde_json::Value = serde_json::from_str(json).unwrap();
+        value["extras"]["duck_mold"]
+            .as_object_mut()
+            .unwrap()
+            .remove("assemblies");
+        serde_json::to_string(&value).unwrap()
+    });
+    let read = forge::read_duck_mold_glb(&old).unwrap();
+    assert_eq!(read.assemblies, Vec::new());
+    assert_eq!(read.parts.len(), 4);
+    let model = read_glb(&old, "old.glb").unwrap();
+    let names: Vec<&str> = model.parts.iter().map(|p| p.path.as_str()).collect();
+    assert_eq!(
+        names,
+        ["base", "column/shaft", "column/top/cap", "column/top/spire"]
+    );
+}
+
+#[test]
+fn a_damaged_file_that_claims_too_much_is_refused_not_a_crash() {
+    // Sizes inside the file are checked before they are added or
+    // multiplied: a damaged one is a refusal, not an overflow (which a
+    // debug build turns into a crash).
+    let glb = write_glb(&built(TOWER));
+    let count = format!("\"count\":{}", built(TOWER).vertex_count());
+    for huge in ["99999", "4611686018427387904", "18446744073709551615"] {
+        let damaged = with_json(&glb, |json| {
+            assert!(json.contains(&count), "the first count is the corners'");
+            json.replacen(&count, &format!("\"count\":{huge}"), 1)
+        });
+        let error = forge::read_duck_mold_glb(&damaged).unwrap_err();
+        assert!(error.contains("runs past the end of the file"), "{error}");
+        let error = read_glb(&damaged, "huge.glb").unwrap_err();
+        assert_eq!(error.code, Code::BadMesh);
+    }
+    for (list, entry) in [
+        (
+            "parts",
+            "\"name\":\"base\",\"first_triangle\":0,\"triangles\":12",
+        ),
+        (
+            "assemblies",
+            "\"name\":\"column\",\"first_triangle\":12,\"triangles\":46",
+        ),
+    ] {
+        let damaged = with_json(&glb, |json| {
+            assert!(json.contains(entry), "{list}");
+            json.replacen(entry, &entry.replace(":12", ":18446744073709551615"), 1)
+        });
+        let error = forge::read_duck_mold_glb(&damaged).unwrap_err();
+        assert!(
+            error.contains("names triangles that aren't there"),
+            "{list}: {error}"
+        );
+        let error = read_glb(&damaged, "parts.glb").unwrap_err();
+        assert!(
+            error.message.contains("doesn't match its triangles"),
+            "{list}"
+        );
+    }
 }
 
 // ---- the reader for Duck Forge -----------------------------------------------
@@ -531,8 +770,8 @@ fn the_duck_forge_reader_refuses_what_it_cannot_read() {
             .contains("cut short")
     );
     // A file without Duck Mold's extras.
-    let text = String::from_utf8_lossy(&glb).replace("duck_mold", "duck_mole");
-    assert!(forge::read_duck_mold_glb(text.as_bytes()).is_err());
+    let error = forge::read_duck_mold_glb(&renamed(&glb)).unwrap_err();
+    assert!(error.contains("wasn't written by Duck Mold"), "{error}");
 }
 
 // ---- the same recipe, the same bytes -----------------------------------------
@@ -608,8 +847,8 @@ fn duck_mold_refuses_files_it_did_not_write() {
 
     // A real .glb from somewhere else: no Duck Mold extras.
     let glb = write_glb(&built(ROBOT));
-    let foreign = String::from_utf8_lossy(&glb).replace("duck_mold", "duck_mole");
-    let error = read_glb(foreign.as_bytes(), "duck.glb").unwrap_err();
+    let foreign = renamed(&glb);
+    let error = read_glb(&foreign, "duck.glb").unwrap_err();
     assert_eq!(error.code, Code::Unsupported);
     assert!(error.message.contains("wasn't written by Duck Mold"));
 

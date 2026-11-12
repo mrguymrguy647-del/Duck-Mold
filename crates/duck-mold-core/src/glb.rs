@@ -12,12 +12,15 @@
 //! - every face has corners of its own, all with the same direction and
 //!   colour, so every viewer shades it flat, as Duck Forge does;
 //! - colour is stored per corner (`COLOR_0`), as linear light;
-//! - the palette and the list of parts are kept under
+//! - the palette, the list of parts and the list of assemblies (parts
+//!   made of parts), each with the triangles it owns, are kept under
 //!   `extras.duck_mold`.
 //!
 //! glTF's "right" is -x where Duck Forge's is +x, so on the way out x is
 //! negated and each triangle's corners are listed the other way round.
 //! Reading does the same in reverse.
+
+use std::ops::Range;
 
 use serde::Serialize;
 
@@ -199,7 +202,12 @@ struct DuckMold {
     version: i64,
     name: String,
     palette: Vec<PaletteEntry>,
+    /// The parts with a shape of their own, in order: together they own
+    /// every triangle, once each.
     parts: Vec<PartEntry>,
+    /// The parts made of parts, outer ones first: each owns the triangles
+    /// of every part inside it, which come one after the other.
+    assemblies: Vec<PartEntry>,
 }
 
 #[derive(Serialize)]
@@ -213,6 +221,29 @@ struct PartEntry {
     name: String,
     first_triangle: usize,
     triangles: usize,
+}
+
+/// The assemblies among `parts`, and those inside them, outer ones first,
+/// each with the triangles of the parts inside it. `leaves` are the
+/// parts with a shape of their own, as they were written; a part inside
+/// an assembly is named after it (`left_arm/hand` is in `left_arm`), and
+/// its triangles are next to the others in it.
+fn assembly_entries(parts: &[Part], leaves: &[PartEntry]) -> Vec<PartEntry> {
+    let mut entries = Vec::new();
+    for part in parts.iter().filter(|part| !part.parts.is_empty()) {
+        let inside = format!("{}/", part.path);
+        let mine: Vec<&PartEntry> = leaves
+            .iter()
+            .filter(|leaf| leaf.name.starts_with(&inside))
+            .collect();
+        entries.push(PartEntry {
+            name: part.path.clone(),
+            first_triangle: mine.first().map_or(0, |leaf| leaf.first_triangle),
+            triangles: mine.iter().map(|leaf| leaf.triangles).sum(),
+        });
+        entries.extend(assembly_entries(&part.parts, leaves));
+    }
+    entries
 }
 
 /// Writes the model as the bytes of a `.glb` file.
@@ -373,6 +404,7 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
                         hex: hex(color.rgb),
                     })
                     .collect(),
+                assemblies: assembly_entries(&model.parts, &parts),
                 parts,
             },
         },
@@ -402,10 +434,12 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
 
 /// Reads a `.glb` that Duck Mold wrote back into a model, to measure it.
 ///
-/// The parts come back as a flat list (the tree is not stored), each
-/// named by its path, and every face comes back with the corners it was
-/// written with. Other glTF files are refused: importing them is planned
-/// for a later phase.
+/// The parts come back as a tree, rebuilt from the parts and assemblies
+/// the file lists (a file from before assemblies were written gives a
+/// flat list), and every face comes back with the corners it was written
+/// with. What isn't stored doesn't come back: which socket a part was
+/// joined to, or what it was made from. Other glTF files are refused:
+/// importing them is planned for a later phase.
 pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
     let bad = |message: &str| {
         Box::new(
@@ -473,11 +507,18 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         {
             return None;
         }
-        let count = accessor["count"].as_u64()? as usize;
+        let count = usize::try_from(accessor["count"].as_u64()?).ok()?;
         let view = &gltf["bufferViews"][accessor["bufferView"].as_u64()? as usize];
-        let offset = view["byteOffset"].as_u64().unwrap_or(0) as usize
-            + accessor["byteOffset"].as_u64().unwrap_or(0) as usize;
-        Some((count, bin.get(offset..offset + count * per * 4)?))
+        // Checked, so a damaged file can't overflow the sums.
+        let offset = usize::try_from(
+            view["byteOffset"]
+                .as_u64()
+                .unwrap_or(0)
+                .checked_add(accessor["byteOffset"].as_u64().unwrap_or(0))?,
+        )
+        .ok()?;
+        let length = count.checked_mul(per)?.checked_mul(4)?;
+        Some((count, bin.get(offset..offset.checked_add(length)?)?))
     };
     let primitive = &gltf["meshes"][0]["primitives"][0];
     let attributes = &primitive["attributes"];
@@ -598,35 +639,81 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         at += fan;
     }
 
-    // The parts, as a flat list.
-    let mut parts = Vec::new();
-    for entry in extras["parts"]
-        .as_array()
-        .map(Vec::as_slice)
-        .unwrap_or_default()
-    {
-        let (Some(name), Some(first), Some(count)) = (
-            entry["name"].as_str(),
-            entry["first_triangle"].as_u64(),
-            entry["triangles"].as_u64(),
-        ) else {
-            return Err(bad("its list of parts is damaged"));
-        };
-        let (first, count) = (first as usize, count as usize);
-        if first + count > triangle_count {
-            return Err(bad("its list of parts doesn't match its triangles"));
+    // The parts: each with a shape of its own from "parts", each made of
+    // parts from "assemblies", as a tree again. A part goes inside the
+    // assembly its name starts with: `left_arm/hand` inside `left_arm`.
+    let mut entries: Vec<(String, Range<usize>, bool)> = Vec::new();
+    for (list, assembly) in [(&extras["parts"], false), (&extras["assemblies"], true)] {
+        for entry in list.as_array().map(Vec::as_slice).unwrap_or_default() {
+            let whole = |field: &str| entry[field].as_u64().and_then(|n| usize::try_from(n).ok());
+            let (Some(name), Some(first), Some(count)) = (
+                entry["name"].as_str(),
+                whole("first_triangle"),
+                whole("triangles"),
+            ) else {
+                return Err(bad("its list of parts is damaged"));
+            };
+            if first
+                .checked_add(count)
+                .is_none_or(|end| end > triangle_count)
+            {
+                return Err(bad("its list of parts doesn't match its triangles"));
+            }
+            let own = if count == 0 {
+                faces.len()..faces.len()
+            } else {
+                face_of_triangle[first]..face_of_triangle[first + count - 1] + 1
+            };
+            entries.push((name.to_owned(), own, assembly));
         }
-        let own = if count == 0 {
-            faces.len()..faces.len()
-        } else {
-            face_of_triangle[first]..face_of_triangle[first + count - 1] + 1
-        };
-        parts.push(Part {
-            name: name.to_owned(),
-            path: name.to_owned(),
+    }
+    let parts = part_tree("", &entries, &faces);
+    Ok(Model {
+        name: extras["name"].as_str().unwrap_or("model").to_owned(),
+        palette,
+        faces,
+        parts,
+        sockets: Vec::new(),
+    })
+}
+
+/// The parts inside the assembly `within` (`""` for the top of the
+/// model), with the parts inside them, in the order of their faces.
+///
+/// A part's place is the nearest assembly that its name starts with, so a
+/// file from before assemblies were written (Duck Mold's Phase 0) gives a
+/// flat list, as it always did.
+fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Face]) -> Vec<Part> {
+    let is_assembly = |name: &str| {
+        entries
+            .iter()
+            .any(|(other, _, assembly)| *assembly && other == name)
+    };
+    // The nearest assembly a name is inside: `a/b/c` is in `a/b` if that
+    // is an assembly, else in `a`, else at the top.
+    let place_of = |name: &str| -> String {
+        let mut place = name;
+        while let Some((outer, _)) = place.rsplit_once('/') {
+            if is_assembly(outer) {
+                return outer.to_owned();
+            }
+            place = outer;
+        }
+        String::new()
+    };
+    let mut children: Vec<&(String, Range<usize>, bool)> = entries
+        .iter()
+        .filter(|(name, _, _)| place_of(name) == within)
+        .collect();
+    children.sort_by_key(|(_, own, _)| own.start);
+    children
+        .into_iter()
+        .map(|(name, own, assembly)| Part {
+            name: name.rsplit('/').next().unwrap_or(name).to_owned(),
+            path: name.clone(),
             loc: Loc::default(),
             kind: PartKind {
-                shape: "part".to_owned(),
+                shape: if *assembly { "assembly" } else { "part" }.to_owned(),
                 uses: None,
                 file: None,
             },
@@ -639,18 +726,14 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
                     .iter()
                     .flat_map(|face| face.corners.iter().copied()),
             ),
-            faces: own,
-            parts: Vec::new(),
-        });
-    }
-
-    Ok(Model {
-        name: extras["name"].as_str().unwrap_or("model").to_owned(),
-        palette,
-        faces,
-        parts,
-        sockets: Vec::new(),
-    })
+            faces: own.clone(),
+            parts: if *assembly {
+                part_tree(name, entries, faces)
+            } else {
+                Vec::new()
+            },
+        })
+        .collect()
 }
 
 #[cfg(test)]
