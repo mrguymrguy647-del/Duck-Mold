@@ -5,7 +5,7 @@ why, in plain words. It was written before any code, approved with five
 decisions (section 16), and has been kept in step with what was built:
 where the building changed a detail, the text here was changed to match,
 and `PHASE0_REPORT.md` lists those changes. Section 17 is the design
-for Phase 1.
+for Phase 1, and section 18 the design for Phase 2 (the Studio).
 
 Duck Mold turns a text file (a *recipe*) into a game-ready 3D model for
 Duck Forge. It is an assembler, not a modelling program: you name parts,
@@ -1249,3 +1249,301 @@ shown in red over the last good model. CI builds and tests both ways.
 
 Phase 1 ends with `PHASE1_REPORT.md`: what works, known limits, what
 changed from this design, and what Phase 2 should start with.
+
+---
+
+## 18. Phase 2: the Studio
+
+**Status: proposed, waiting for approval.** Phase 2 adds a window, the
+*Studio*, where a person builds a model with the mouse instead of typing
+the recipe. Nine steps, one commit each, in the order of the brief.
+
+### The five rules, and how each is kept
+
+1. **The recipe is still the model.** The Studio holds no model of its
+   own. Every edit changes the recipe file at once, and the picture is
+   then built from the file again. There is no "unsaved" state and no
+   Save button.
+2. **People and agents are equals.** Every edit is one value of one
+   type in the library, `Edit`. The command line turns its words into an
+   `Edit`; the Studio turns a click into an `Edit`; both call the same
+   function. A test lists every kind of `Edit` and fails if one has no
+   command, or isn't in the agent guide.
+3. **Edits are gentle on the file.** An edit never writes the recipe out
+   afresh. It works out a few small replacements in the text ("these
+   characters become those") and leaves every other character alone.
+4. **The file can change underneath.** The Studio checks the recipe and
+   the files it uses twice a second, as the preview does, and builds
+   again when one changes. "Both at once" is below.
+5. **The same window library.** egui, opened by eframe, version 0.37:
+   what Duck Quill and Duck Forge's Studio use. The viewport is drawn by
+   Duck Forge's CPU renderer into a picture, which egui only shows.
+
+### The edit commands
+
+```bash
+duck-mold edit robot.toml add hat --shape cone --to head.top --color red
+duck-mold edit robot.toml set hat --radius 0.2 --height 0.3 --twist 45
+duck-mold edit robot.toml join hat --to body.neck
+duck-mold edit robot.toml rename hat cap
+duck-mold edit robot.toml duplicate cap --name cap_2 --to left_arm.grip
+duck-mold edit robot.toml remove cap_2
+duck-mold edit robot.toml add-color gold "#F2C84B"
+```
+
+| Command | What it does |
+|---|---|
+| `add <name> --to <part.socket>` | Adds a part joined to a socket. What it is made of: `--shape box` (or cylinder, sphere, cone, wedge), `--use <defined part>`, or `--file <recipe or mesh>`. Optional: `--attach <its own socket>`, the size options, `--color`, `--twist`. |
+| `remove <part>` | Removes a part. If other parts hang from it, it is refused and lists them; `--with-attached` removes those too. |
+| `rename <part> <new name>` | Renames a part, and changes every `to`, `from` and `origin` that named it. |
+| `join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes which of its own sockets it joins by. |
+| `set <part> ...` | Changes a part: `--size x,y,z`, `--radius`, `--height`, `--segments`, `--shape`, `--color`, `--face-color top=plank`, `--twist`. Several at once are one edit. |
+| `duplicate <part>` | Copies a part, comments and all, right after it, under a new name (`--name`, or `hat_2`). It joins the same socket unless `--to` says another. |
+| `add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
+
+Rules for all of them:
+
+- **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,
+  or `#2` for a part with no name.
+- **Each prints the same report as `inspect`**, for the recipe as it is
+  after the edit, with a line saying what changed. `--json` gives it as
+  data, with the lines that changed.
+- **`--dry-run`** reports what would happen and writes nothing.
+- **An edit that would break the recipe is refused.** If the recipe
+  would have more mistakes after the edit than before, nothing is
+  written, and the mistakes are listed. Exit codes are as everywhere:
+  0, 1 for mistakes, 2 for a command that can't be carried out.
+- **When `--attach` isn't given** for a new part, it joins by the side
+  opposite the socket it goes on: its `bottom` on a `top`, its `left`
+  on a `right`, otherwise its `bottom`.
+- **A part inside a defined part** (`left_arm/hand`, where `left_arm`
+  uses the definition `arm`) is edited in the definition, so every part
+  that uses `arm` changes. The report lists them.
+- **A part inside another recipe file** (`file = "wheel.toml"`) is
+  refused, with a line saying to open that file.
+
+Not edits in this phase: moving a part that isn't joined (`move`,
+`rotate`), `scale`, `mirror`, and declaring sockets. They are still
+typed in the recipe, and the Studio shows them.
+
+### How an edit rewrites the file
+
+Duck Mold already knows the line and column of everything in a recipe,
+for its error messages. Phase 2 makes it remember where each thing
+*ends* as well. An edit then becomes a short list of replacements:
+
+- **Changing a value** (`radius = 0.5` to `radius = 0.2`) replaces the
+  characters of the old value. The spacing around it and a comment
+  after it on the same line stay.
+- **Adding a field** puts one new line in the part, in the usual order
+  of fields, and before the part's own sub-tables (in TOML a field
+  written after `[parts.sockets]` would belong to the sockets).
+- **Adding a part** puts a new block after the last part of the list it
+  joins, written the way `docs/recipe-format.md` shows.
+- **Removing a part** takes out its block, the comment lines directly
+  above it, and its sub-tables.
+- **Renaming** replaces the name and each place that refers to it.
+
+Everything else in the file is untouched, byte for byte: comments, blank
+lines, the order of parts, how numbers are written, Windows or Unix line
+endings. Both TOML and JSON work this way, with the same code deciding
+*what* to change and a small part per language deciding *how it is
+written* (JSON's commas and braces, TOML's headers).
+
+After the replacements, the new text is read again and built before
+anything is written. If it doesn't come out as the edit meant (it reads
+with a mistake, say), the edit is refused and the file stays as it was.
+
+One limit: recipes can also write a list of parts on one line
+(`parts = [{...}, {...}]` in TOML). Changing values there works; adding
+or removing a part there is refused with a sentence suggesting the usual
+`[[parts]]` form.
+
+### The file changing underneath, and both at once
+
+- The Studio never holds a change that isn't in the file, so there is
+  nothing to merge and nothing to ask.
+- **Writing** is done by writing a new file beside the recipe and
+  swapping it in, so a program reading the recipe never sees half of it.
+- **An outside change** (an agent's edit, a save in a text editor) is
+  noticed within half a second. The model is built again, the view stays
+  where it was, and the selected part stays selected if it still exists.
+- **Both at once**: every edit, from the Studio or the command line,
+  reads the file again just before it writes. If the file is no longer
+  what the edit was worked out on, the edit is worked out again on the
+  new text. Edits name parts, not lines, so this usually just works, and
+  both changes are kept. If the edit no longer makes sense (its part was
+  removed or renamed meanwhile), it is refused with a message, and the
+  outside change stands.
+- What is left is two programs writing within the same few thousandths
+  of a second, where the later one wins. There are no lock files.
+- A recipe saved with mistakes shows them in the problems panel; the
+  last good model stays in the viewport, as in the preview.
+
+### Undo and redo
+
+- The Studio keeps, for each step, the file's text before and after: at
+  most 500 steps, of every file the step changed. Undo writes the
+  "before" text back; redo the "after". This is how Duck Forge's Studio
+  does it.
+- Because every edit is saved at once, undo always works "across a
+  save": there is no moment when it doesn't.
+- **A change from outside becomes a step too**, called "Changed outside
+  the Studio". So undo always takes back the most recent change to the
+  file, whoever made it, and the status line says which.
+- Dragging a number (a twist, a size) writes the file as it moves, at
+  most ten times a second, and counts as one step.
+- The steps are kept while the Studio is open, and forgotten when it
+  closes.
+- Undo is the Studio's own: there is no `duck-mold edit undo`. An agent
+  has `--dry-run` before an edit and git after it.
+
+### The Studio's layout
+
+```text
++------------------------------------------------------------------+
+| robot.toml    Undo  Redo    Add part v     Frame      384 tris   |
++-------------+--------------------------------------+-------------+
+| PARTS       |                                      | head        |
+|  body       |                                      |  name  head |
+|  head     < |              viewport                |  shape box  |
+|   left_eye  |      (Duck Forge's CPU renderer)     |  size  ...  |
+|   antenna   |                                      |  colour ... |
+|  left_arm   |       grid on the ground             |  joined to  |
+|   upper     |       sockets as small markers       |   body.neck |
+|   hand      |                                      |  twist 0    |
++-------------+                                      |             |
+| LIBRARY     |                                      |             |
+| [pic] [pic] |                                      |             |
+| lamp  crate |                                      |             |
++-------------+--------------------------------------+-------------+
+| PROBLEMS  warning, line 70: the material "shade" keeps its ...   |
++------------------------------------------------------------------+
+```
+
+- **Viewport.**
+  - Left-drag orbits. Right-drag or middle-drag pans (Shift + left-drag
+    too, for laptops). The wheel zooms. "Frame" brings the whole model,
+    or the selected part, back into view.
+  - A grid lies on the ground, one square to a metre.
+  - A click selects the part under the pointer. Duck Mold finds it by
+    following a line from the eye through the pointer to the first
+    triangle it meets, so the picture and the pick always agree.
+  - The selected part is brightened, with the box around it drawn.
+- **Parts** (the outliner): the tree `inspect` prints. A click selects.
+  The selection is the same in both places.
+- **Properties** of the selected part: name, what it is made of, its
+  sizes, its colour (a list of the palette, with "new colour..."), what
+  it is joined to, and its twist. Changing one is a `set`, `rename` or
+  `join` edit.
+- **Sockets** show as small markers on the selected part.
+  - Clicking one opens a short list (the five shapes, the recipe's
+    defined parts, the library), and choosing from it is an `add` edit.
+  - Dragging the selected part shows every other part's sockets, and
+    dropping it on one is a `join` edit.
+- **Library**: a folder of recipes and model files (`parts/` beside the
+  recipe, or one you choose). Each has a small picture, drawn by the
+  same code as `render`. Choosing one for a socket is an `add --file`
+  edit.
+- **Problems**: `inspect`'s errors and warnings, updated after every
+  change. Clicking one selects the part it is about.
+- With no file given, the Studio starts on a page with "Open" and "New
+  model" (a recipe with one box) and the recipes opened lately.
+
+### Where the code goes
+
+| Crate | What Phase 2 adds |
+|---|---|
+| `duck-mold-core` | `edit`: the `Edit` type, working out the replacements, and applying one to a file. No window, no pictures. |
+| `duck-mold-cli` | `duck-mold edit ...`, and `duck-mold studio <file>`, which starts the Studio program. |
+| `duck-mold-view` | Everything the Studio *does*, with no window: the selection, the camera, picking, the undo steps, watching files, and drawing the viewport into a picture. |
+| `duck-mold-studio` (new) | The window only: egui panels that show the above and pass clicks on. It builds `DuckMoldStudio.exe`. |
+
+The Studio's screen is written as a function that draws into a space it
+is given, not as the owner of the window. That, and using the same egui
+as Duck Forge's Studio, is what lets it be docked there later.
+
+The command-line program doesn't contain egui, so agents and machines
+without a screen build it as quickly as before. `duck-mold studio`
+starts the Studio program that sits beside it.
+
+### Testing without a screen
+
+- **Edits**:
+  - Every edit is run on every example recipe, in TOML and in JSON. The
+    test checks that only the expected lines changed and every other
+    byte is the same.
+  - It checks that the model built afterwards is what the edit meant.
+  - It checks that an edit and its opposite (rename and rename back)
+    give back the exact file.
+  - It checks that comments, blank lines and Windows line endings
+    survive.
+- **What the Studio does** is plain code in `duck-mold-view`, so tests
+  drive it directly: select, edit, undo, change the file from outside,
+  and check the file's text and the Studio's state.
+- **The viewport** is drawn by the CPU renderer, so its pictures are
+  golden files compared byte for byte on Windows and Linux, like
+  `render`'s: the grid, a selected part, the socket markers.
+- **The whole window** is tested with egui's own test tool
+  (`egui_kittest`, as in Duck Forge's Studio). It runs the real screens
+  with no window, clicks things by their label, and can save a picture
+  of the screen.
+  - Tests that click through the screens run on Windows and Linux.
+  - Pictures of whole screens are compared with stored ones on Linux
+    only, allowing a tiny difference. egui draws its text and panels
+    through the graphics driver, and drivers don't agree to the last
+    pixel. Linux has a software driver that CI can use.
+
+### What happens to `duck-mold preview`
+
+It stays as a command and becomes the Studio in look-only mode: the
+viewport and the problems panel, with no editing. The window code from
+Phase 1 (Duck Forge's game window) is removed, so Duck Mold has one
+window library instead of two, and `preview` gains pan and the grid.
+
+### Step 2: surface sockets for assemblies and parts from files
+
+The Phase 1 rule ("a socket that would float moves straight in onto the
+surface and faces out of it") is extended to parts made of parts and
+parts made from files. The search goes through every face inside the
+part. Two choices:
+
+- **A line that meets nothing** (the middle of a ring, say) leaves the
+  socket on the box, as it is today.
+- **The model's own seven sockets stay on its box.** They say how big
+  the model is and where the ground is. Otherwise a table's `bottom`
+  would move up between its legs to the underside of its top, and the
+  table would sink into the floor.
+
+What changes for existing recipes: a part joined to a built-in or
+`on` + `shift` socket of an assembly or a file part, where that socket
+was in the air, moves onto the surface. The tests will show whether any
+example changes, and the report will list them.
+
+### Step 9: starting it on Windows without a terminal
+
+As Duck Quill does:
+
+- `DuckMoldStudio.exe` opens no console window and has its own icon.
+  Double-clicking it opens the start page; dropping a recipe on it opens
+  that recipe.
+- From a copy of the repository: `Start Duck Mold Studio.bat` builds it
+  and starts it, and `create-shortcut.bat` puts a shortcut on the
+  desktop.
+- A release workflow builds a zip with `DuckMoldStudio.exe`,
+  `duck-mold.exe`, the examples and a "read me first" note. No installer
+  in this phase.
+
+### Decisions for you
+
+1. **`preview` becomes the Studio in look-only mode**, and the Phase 1
+   window code goes. Or keep both windows?
+2. **Undo is the Studio's, and is forgotten when it closes.** Or should
+   the steps be kept on disk, or reachable from the command line?
+3. **Editing a part that comes from a definition changes the
+   definition**, and so every part that uses it. Or should the Studio
+   make a private copy for that one part first?
+4. **Whole-screen pictures are compared on Linux only**; the viewport's
+   pictures and all the clicking tests run on both. Enough?
+5. **A zip, not an installer**, and an icon I make (a small duck built
+   in Duck Mold itself) unless you have one.
