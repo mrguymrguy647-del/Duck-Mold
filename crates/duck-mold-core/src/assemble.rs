@@ -8,19 +8,25 @@
 //! placed. The tree of placed parts is kept to the end, when it is
 //! flattened into the model's faces.
 //!
-//! Mistakes that need the built shapes are found here: a part or a socket
-//! that doesn't exist, a part that uses itself. As everywhere, all of
+//! Colour is decided here too. Every face gets one palette colour, from
+//! the nearest thing that names one: a face name in `colors` first, then
+//! the part's own `color`, then the `color` of each part it is inside,
+//! outwards (see [`Layer`]).
+//!
+//! Mistakes that need the built shapes are found here: a part, a socket,
+//! a colour or a face that doesn't exist, a part that uses itself. As everywhere, all of
 //! them are reported, and a part that couldn't be built is replaced by an
 //! empty placeholder so that nothing is complained about twice.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::issue::{Code, Issue};
 use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
 use crate::recipe::{
-    Axis, Define, Loc, PartDef, Placement, Recipe, Side, SocketDef, SocketKind, SocketRef, Source,
+    Axis, Define, Loc, PaletteColor, PartDef, Placement, Recipe, Side, SocketDef, SocketKind,
+    SocketRef, Source, rgb_of,
 };
 use crate::shapes::{self, Polygon};
 
@@ -37,6 +43,10 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     let recipe = &loaded.recipe;
     let mut assembler = Assembler {
         issues,
+        palette: &loaded.palette,
+        referenced: vec![false; loaded.palette.len()],
+        paint: Vec::new(),
+        entry: Vec::new(),
         using: Vec::new(),
         used: BTreeSet::new(),
         depth: 0,
@@ -58,7 +68,19 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
             Code::Unused,
             format!("the part \"{}\" is defined but never used", define.name),
         ));
+        assembler.entry.push(define.loc.clone());
         assembler.body(&define.part, &scope);
+        assembler.entry.pop();
+    }
+
+    // Colours of the recipe's own palette that nothing names.
+    for (color, referenced) in loaded.palette.iter().zip(&assembler.referenced) {
+        if color.own && !referenced {
+            assembler.issues.push(color.loc.warning(
+                Code::Unused,
+                format!("the colour \"{}\" is never used", color.name),
+            ));
+        }
     }
 
     if body.broken || assembler.issues.iter().any(Issue::is_error) {
@@ -101,6 +123,9 @@ struct Body {
     kind: PartKind,
     /// Its own faces, if it is a shape or a mesh.
     faces: Vec<Polygon>,
+    /// The palette colour of each of `faces`, in the same order. `None`
+    /// for a face nobody coloured.
+    colors: Vec<Option<usize>>,
     /// The parts inside it, each already placed, if it is an assembly.
     nodes: Vec<Node>,
     /// The sockets it declares. The seven built-in ones are worked out
@@ -131,6 +156,7 @@ impl Body {
                 file: None,
             },
             faces: Vec::new(),
+            colors: Vec::new(),
             nodes: Vec::new(),
             sockets: Vec::new(),
             bounds: None,
@@ -139,7 +165,12 @@ impl Body {
     }
 
     /// A shape or a mesh: faces of its own.
-    fn solid(shape: &str, file: Option<String>, faces: Vec<Polygon>) -> Body {
+    fn solid(
+        shape: &str,
+        file: Option<String>,
+        faces: Vec<Polygon>,
+        colors: Vec<Option<usize>>,
+    ) -> Body {
         let mut body = Body {
             kind: PartKind {
                 shape: shape.to_owned(),
@@ -147,6 +178,7 @@ impl Body {
                 file,
             },
             faces,
+            colors,
             nodes: Vec::new(),
             sockets: Vec::new(),
             bounds: None,
@@ -168,6 +200,7 @@ impl Body {
                 file,
             },
             faces: Vec::new(),
+            colors: Vec::new(),
             nodes,
             sockets: Vec::new(),
             bounds: None,
@@ -295,8 +328,54 @@ enum Join {
     Wait,
 }
 
+/// What one part says about colour, kept while the things inside it are
+/// built.
+///
+/// The layers of all the parts being built form a stack, outermost
+/// first. A face looks through it from the nearest layer outwards: first
+/// for its own name in `faces`, as far as the nearest assembly (face
+/// names don't reach through an assembly: its inner parts have faces of
+/// their own); then for a whole-part `color`, all the way out. So the
+/// nearest setting wins, and a face name beats a whole-part colour.
+struct Layer {
+    /// The part's `color`.
+    whole: Whole,
+    /// Where `color` was written.
+    whole_loc: Option<Loc>,
+    /// True once a face took its colour from `whole`.
+    painted: bool,
+    /// The part's `colors`: face name, palette colour (`None` if the
+    /// name isn't in the palette), and where it was written.
+    faces: Vec<(String, Option<usize>, Loc)>,
+    /// True once a shape or mesh looked at `faces`.
+    reached: bool,
+    /// True for an assembly.
+    wall: bool,
+}
+
+/// A part's `color`.
+#[derive(Clone, Copy)]
+enum Whole {
+    /// Not written.
+    None,
+    /// Written, but not a palette name. That is reported; the faces it
+    /// would have painted are not also reported as having no colour.
+    Unknown,
+    /// This palette colour.
+    Is(usize),
+}
+
 struct Assembler<'a> {
     issues: &'a mut Vec<Issue>,
+    /// The model's palette.
+    palette: &'a [PaletteColor],
+    /// For each palette colour, whether anything names it.
+    referenced: Vec<bool>,
+    /// The colour layers of the parts being built, outermost first.
+    paint: Vec<Layer>,
+    /// The list entries being built, outermost first: where to point
+    /// when a part has no colour.
+    entry: Vec<Loc>,
     /// The defined parts being built right now, outermost first, to
     /// catch a part that uses itself.
     using: Vec<(String, String)>,
@@ -365,11 +444,187 @@ impl Assembler<'_> {
             ));
             Body::broken()
         } else {
-            self.source(part, scope)
+            let layer = self.layer(part);
+            self.paint.push(layer);
+            let body = self.source(part, scope);
+            let layer = self.paint.pop().expect("pushed above");
+            if !body.broken {
+                self.check_layer(layer);
+            }
+            body
         };
         self.depth -= 1;
         self.declare_sockets(&mut body, &part.sockets);
         body
+    }
+
+    /// Reads what a part says about colour.
+    fn layer(&mut self, part: &PartDef) -> Layer {
+        let whole = match &part.color {
+            None => Whole::None,
+            Some(named) => match self.color(&named.text, &named.loc) {
+                Some(color) => Whole::Is(color),
+                None => Whole::Unknown,
+            },
+        };
+        let faces = part
+            .colors
+            .iter()
+            .map(|face| {
+                (
+                    face.face.clone(),
+                    self.color(&face.color, &face.loc),
+                    face.loc.clone(),
+                )
+            })
+            .collect();
+        Layer {
+            whole,
+            whole_loc: part.color.as_ref().map(|named| named.loc.clone()),
+            painted: false,
+            faces,
+            reached: false,
+            wall: matches!(part.source, Source::Parts(_) | Source::Recipe(_)),
+        }
+    }
+
+    /// Once a part is built: was what it said about colour any use?
+    fn check_layer(&mut self, layer: Layer) {
+        if let (Whole::Is(_), false, Some(loc)) = (layer.whole, layer.painted, &layer.whole_loc) {
+            self.issues.push(loc.warning(
+                Code::Unused,
+                "this colour changes nothing: every face in this part already has a colour of its own",
+            ));
+        }
+        if !layer.reached
+            && let Some((_, _, loc)) = layer.faces.first()
+        {
+            self.issues.push(loc.error(
+                Code::UnknownFace,
+                "this part is made of other parts and has no faces of its own: put \"colors\" on the parts inside it (a plain \"color\" works here)",
+            ));
+        }
+    }
+
+    /// The palette colour with this name. Reports a name that isn't in
+    /// the palette.
+    fn color(&mut self, name: &str, loc: &Loc) -> Option<usize> {
+        if let Some(at) = self.palette.iter().position(|color| color.name == name) {
+            self.referenced[at] = true;
+            return Some(at);
+        }
+        let issue = if name.starts_with('#') {
+            // A colour code where a name belongs.
+            let known =
+                rgb_of(name).and_then(|rgb| self.palette.iter().find(|color| color.rgb == rgb));
+            let message = match known {
+                Some(color) => format!(
+                    "\"{name}\" is not a palette name, but the palette has that colour as \"{}\"",
+                    color.name
+                ),
+                None => format!(
+                    "\"{name}\" is not a palette name. Add it to [palette] under a name (for example accent = \"{name}\") and write that name here"
+                ),
+            };
+            let issue = loc.error(Code::UnknownColor, message).got(name);
+            match known {
+                Some(color) => issue.suggest(color.name.clone()),
+                None => issue,
+            }
+        } else if self.palette.is_empty() {
+            loc.error(
+                Code::UnknownColor,
+                format!(
+                    "there is no colour \"{name}\": this recipe has no palette. Add a [palette] section with {name} = \"#RRGGBB\""
+                ),
+            )
+            .got(name)
+        } else {
+            loc.error(
+                Code::UnknownColor,
+                format!("there is no colour \"{name}\" in the palette"),
+            )
+            .got(name)
+            .one_of(name, self.palette.iter().map(|color| color.name.clone()))
+        };
+        self.issues.push(issue);
+        None
+    }
+
+    /// Chooses a colour for every face of a shape or mesh that has just
+    /// been built. `groups_of` says which groups of faces a face name
+    /// stands for; `words` lists the face names there are, for messages.
+    fn paint_faces(
+        &mut self,
+        faces: &[Polygon],
+        groups_of: &dyn Fn(&str) -> Option<Vec<usize>>,
+        words: &[String],
+    ) -> Vec<Option<usize>> {
+        // A colour for a group of faces. `Some(None)` is a colour that
+        // was written but isn't in the palette.
+        let mut by_group: BTreeMap<usize, Option<usize>> = BTreeMap::new();
+        let mut problems = Vec::new();
+        // Face names, from the nearest layer out to the nearest assembly.
+        for layer in self.paint.iter_mut().rev() {
+            if layer.wall {
+                break;
+            }
+            layer.reached = true;
+            for (face, color, loc) in &layer.faces {
+                match groups_of(face) {
+                    Some(groups) => {
+                        for group in groups {
+                            by_group.entry(group).or_insert(*color);
+                        }
+                    }
+                    None => problems.push(
+                        loc.error(
+                            Code::UnknownFace,
+                            format!("this part has no face called \"{face}\""),
+                        )
+                        .got(face.as_str())
+                        .one_of(face, words.iter().cloned()),
+                    ),
+                }
+            }
+        }
+        self.issues.append(&mut problems);
+
+        // A whole-part colour for the faces that are left, from the
+        // nearest layer that has one.
+        let left = faces.iter().any(|face| !by_group.contains_key(&face.group));
+        let mut whole = Whole::None;
+        if left {
+            for layer in self.paint.iter_mut().rev() {
+                match layer.whole {
+                    Whole::None => continue,
+                    Whole::Unknown => whole = Whole::Unknown,
+                    Whole::Is(color) => {
+                        layer.painted = true;
+                        whole = Whole::Is(color);
+                    }
+                }
+                break;
+            }
+            if matches!(whole, Whole::None)
+                && let Some(entry) = self.entry.last()
+            {
+                self.issues.push(entry.warning(
+                    Code::NoColor,
+                    "faces of this part have no colour and are built in plain grey: give the part a \"color\" from the palette",
+                ));
+            }
+        }
+        faces
+            .iter()
+            .map(|face| match by_group.get(&face.group) {
+                Some(color) => *color,
+                None => match whole {
+                    Whole::Is(color) => Some(color),
+                    Whole::None | Whole::Unknown => None,
+                },
+            })
+            .collect()
     }
 
     fn source(&mut self, part: &PartDef, scope: &Scope<'_>) -> Body {
@@ -379,7 +634,13 @@ impl Assembler<'_> {
                 if !self.count(&faces, &part.loc) {
                     return Body::broken();
                 }
-                Body::solid(shape.name(), None, faces)
+                let words: Vec<String> = shapes::face_words(shape)
+                    .into_iter()
+                    .map(str::to_owned)
+                    .collect();
+                let colors =
+                    self.paint_faces(&faces, &|name| shapes::face_groups(shape, name), &words);
+                Body::solid(shape.name(), None, faces, colors)
             }
             Source::Use(named) => {
                 let Some(define) = scope
@@ -446,7 +707,15 @@ impl Assembler<'_> {
                 if !self.count(&faces, &part.loc) {
                     return Body::broken();
                 }
-                Body::solid("mesh", Some(mesh.file.clone()), faces)
+                // A mesh's face names are its material names.
+                let material = |name: &str| {
+                    mesh.materials
+                        .iter()
+                        .position(|material| material == name)
+                        .map(|at| vec![at])
+                };
+                let colors = self.paint_faces(&faces, &material, &mesh.materials);
+                Body::solid("mesh", Some(mesh.file.clone()), faces, colors)
             }
             // A file that couldn't be read, or a part that couldn't be:
             // already reported.
@@ -560,7 +829,15 @@ impl Assembler<'_> {
 
     /// Builds every part of a list and puts each in its place.
     fn list(&mut self, parts: &[PartDef], scope: &Scope<'_>) -> Vec<Node> {
-        let bodies: Vec<Body> = parts.iter().map(|part| self.body(part, scope)).collect();
+        let bodies: Vec<Body> = parts
+            .iter()
+            .map(|part| {
+                self.entry.push(part.loc.clone());
+                let body = self.body(part, scope);
+                self.entry.pop();
+                body
+            })
+            .collect();
         let names: Vec<String> = parts
             .iter()
             .enumerate()
@@ -765,11 +1042,11 @@ fn emit(nodes: &[Node], outer: &Transform, prefix: &str, faces: &mut Vec<Face>) 
                 format!("{prefix}/{}", node.name)
             };
             let first = faces.len();
-            for polygon in &node.body.faces {
+            for (polygon, &color) in node.body.faces.iter().zip(&node.body.colors) {
                 let placed = polygon.transformed(&place);
                 faces.push(Face {
                     corners: placed.corners.into_iter().map(Vec3::tidied).collect(),
-                    color: None,
+                    color,
                 });
             }
             let parts = emit(&node.body.nodes, &place, &path, faces);

@@ -582,7 +582,7 @@ fn parts_can_be_nested_in_place_too() {
         &mut issues,
     );
     let model = assemble(&loaded, &mut issues).unwrap();
-    assert_eq!(issues, Vec::new());
+    assert!(issues.iter().all(|issue| !issue.is_error()), "{issues:#?}");
     assert_eq!(bounds(&model, "tower").min.y, 0.2);
     assert_eq!(bounds(&model, "tower/high").max.y, 2.2);
     assert_eq!(part(&model, "tower").kind.label(), "assembly");
@@ -624,7 +624,7 @@ fn a_whole_recipe_can_be_a_part() {
     let mut issues = Vec::new();
     let loaded = load(&folder.join("cart.toml"), &mut issues).unwrap();
     let model = assemble(&loaded, &mut issues).unwrap();
-    assert_eq!(issues, Vec::new());
+    assert!(issues.iter().all(|issue| !issue.is_error()), "{issues:#?}");
     // The wheel lies on its side, its axle socket on the bed's right.
     let wheel = bounds(&model, "wheel");
     assert_eq!(wheel.size().tidied(), vec3(0.2, 0.6, 0.6));

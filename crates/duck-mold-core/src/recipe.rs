@@ -1665,6 +1665,12 @@ fn parse_hex(text: &str) -> Result<[u8; 3], HexError> {
     }
 }
 
+/// The red, green and blue of a colour written `#RRGGBB` or `#RGB`.
+/// `None` for anything else.
+pub fn rgb_of(text: &str) -> Option<[u8; 3]> {
+    parse_hex(text).ok()
+}
+
 /// A colour as `#RRGGBB`.
 pub fn hex(rgb: [u8; 3]) -> String {
     format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2])
