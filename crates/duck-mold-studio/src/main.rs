@@ -11,6 +11,7 @@
 
 use std::path::PathBuf;
 
+use duck_mold_studio::recent::Recent;
 use duck_mold_studio::{StudioApp, theme};
 use eframe::egui;
 
@@ -47,12 +48,18 @@ fn main() -> eframe::Result {
     let app = match file {
         Some(file) => StudioApp::with_file(file, look_only),
         None => StudioApp::new(),
-    };
+    }
+    .remembering(Recent::of_this_person());
+    // The duck in the title bar and the taskbar: a picture of
+    // examples/duck.toml.
+    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
+        .expect("the icon is a PNG picture");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(app.title())
             .with_inner_size([1280.0, 800.0])
-            .with_min_inner_size([720.0, 480.0]),
+            .with_min_inner_size([720.0, 480.0])
+            .with_icon(icon),
         ..Default::default()
     };
     eframe::run_native(

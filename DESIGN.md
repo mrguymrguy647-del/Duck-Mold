@@ -1545,6 +1545,28 @@ viewport and the problems panel, with no editing. The window code from
 Phase 1 (Duck Forge's game window) is removed, so Duck Mold has one
 window library instead of two, and `preview` gains pan and the grid.
 
+*As built (step 9):*
+
+- `DuckMoldStudio.exe` opens no console in a release build, and carries
+  an icon: a picture of `examples/duck.toml`, a duck made in Duck Mold.
+  A test draws the recipe again and compares it with the stored icon
+  files byte for byte, so the icon can't drift from the recipe.
+- `Start Duck Mold Studio.bat` and `Create desktop shortcut.bat` are in
+  the repository's top folder; the download has its own `Create desktop
+  shortcut.bat` and `READ ME FIRST.txt`, from `release/`.
+- `.github/workflows/release.yml`, a copy of Duck Quill's, builds
+  `DuckMold-<version>-windows.zip`: both programs, the examples, the
+  recipe format and the agent guide. It publishes a release from the
+  "Run workflow" button or a `v` tag, and on a branch only builds the
+  zip to look at. It checks the zip: the files are there, `duck-mold`
+  knows its version and reads an example, and finds the Studio next to
+  it.
+- The start page lists the recipes opened lately (eight at most), kept
+  in one small text file in the system's settings folder
+  (`%APPDATA%\Duck Mold\recent.txt`). Nothing else is stored outside the
+  recipe files.
+- The version is now 0.2.0.
+
 *As built (step 8):* the library is the folder `parts` next to the
 recipe, or one chosen with the Folder button (for this sitting; it isn't
 remembered). Each file's small picture is the three-quarter view of

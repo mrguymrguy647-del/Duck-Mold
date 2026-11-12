@@ -11,6 +11,7 @@ use duck_mold_core::tools;
 use duck_mold_view::studio::Studio;
 use eframe::egui::{self, Rect, RichText, Sense};
 
+use crate::recent::Recent;
 use crate::{library, properties, theme, view};
 
 /// The Studio's window: a file that is open, or the start page.
@@ -27,6 +28,8 @@ pub struct StudioApp {
     draft: properties::Draft,
     /// The library's small pictures.
     thumbs: library::Thumbs,
+    /// The recipes opened lately, for the start page.
+    recent: Recent,
 }
 
 impl Default for StudioApp {
@@ -46,7 +49,18 @@ impl StudioApp {
             shown_selected: None,
             draft: properties::Draft::default(),
             thumbs: library::Thumbs::default(),
+            recent: Recent::nowhere(),
         }
+    }
+
+    /// Remembers the files that are opened in `recent`, and shows them on
+    /// the start page.
+    pub fn remembering(mut self, recent: Recent) -> StudioApp {
+        self.recent = recent;
+        if let Some(studio) = &self.studio {
+            self.recent.opened(studio.path());
+        }
+        self
     }
 
     /// With a file open: a recipe to edit, or (with `look_only`, or for a
@@ -60,6 +74,7 @@ impl StudioApp {
     /// Opens a file, in place of whatever was open.
     pub fn open(&mut self, path: PathBuf, look_only: bool) {
         if path.is_file() {
+            self.recent.opened(&path);
             self.studio = Some(Studio::open(path, look_only));
             self.notice = None;
         } else {
@@ -271,6 +286,7 @@ impl StudioApp {
     fn start_page(&mut self, ui: &mut egui::Ui) {
         let mut open = false;
         let mut new = false;
+        let mut again: Option<PathBuf> = None;
         egui::CentralPanel::default().show(ui, |ui| {
             ui.vertical_centered(|ui| {
                 ui.add_space(ui.available_height() * 0.25);
@@ -293,8 +309,34 @@ impl StudioApp {
                     ui.add_space(16.0);
                     ui.colored_label(theme::BAD, notice);
                 }
+                let recent: Vec<PathBuf> = self
+                    .recent
+                    .files()
+                    .into_iter()
+                    .map(Path::to_path_buf)
+                    .collect();
+                if !recent.is_empty() {
+                    ui.add_space(24.0);
+                    ui.label(RichText::new("Opened lately").weak());
+                    ui.add_space(4.0);
+                    for file in recent {
+                        let name = file
+                            .file_name()
+                            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                        if ui
+                            .button(name)
+                            .on_hover_text(file.display().to_string())
+                            .clicked()
+                        {
+                            again = Some(file);
+                        }
+                    }
+                }
             });
         });
+        if let Some(file) = again {
+            self.open(file, false);
+        }
         if open && let Some(path) = pick_file() {
             self.open(path, false);
         }

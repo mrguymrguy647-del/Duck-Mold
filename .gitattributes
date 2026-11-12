@@ -6,3 +6,9 @@
 # Models and pictures are not text.
 *.glb binary
 *.png binary
+*.ico binary
+
+# The files Windows itself reads keep Windows line endings: the scripts
+# to double-click, and the read-me that Notepad opens.
+*.bat text eol=crlf
+release/*.txt text eol=crlf

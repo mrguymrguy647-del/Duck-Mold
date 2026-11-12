@@ -1,0 +1,347 @@
+{
+  "ok": true,
+  "summary": "duck: 1.121 x 1.251 x 1.523 m, 836 triangles, 10 parts, 4 colours, rests on the ground, nothing floating, 2 overlaps",
+  "source": "examples/duck.toml",
+  "name": "duck",
+  "size": [
+    1.121304,
+    1.251295,
+    1.522908
+  ],
+  "bounds": {
+    "min": [
+      -0.560652,
+      0.0,
+      -0.761454
+    ],
+    "max": [
+      0.560652,
+      1.251295,
+      0.761454
+    ]
+  },
+  "triangles": 836,
+  "vertices": 1824,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "duck",
+      "hex": "#FFCC2E",
+      "triangles": 448
+    },
+    {
+      "name": "wing",
+      "hex": "#F2B600",
+      "triangles": 254
+    },
+    {
+      "name": "beak",
+      "hex": "#F28C28",
+      "triangles": 38
+    },
+    {
+      "name": "ink",
+      "hex": "#1B1446",
+      "triangles": 96
+    }
+  ],
+  "parts": [
+    {
+      "name": "body",
+      "kind": "sphere",
+      "triangles": 224,
+      "size": [
+        0.84,
+        0.714,
+        1.092
+      ],
+      "bounds": {
+        "min": [
+          -0.42,
+          0.067851,
+          -0.617755
+        ],
+        "max": [
+          0.42,
+          0.781851,
+          0.474245
+        ]
+      },
+      "colors": [
+        "duck"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "head",
+      "kind": "sphere",
+      "triangles": 224,
+      "size": [
+        0.56,
+        0.559897,
+        0.559897
+      ],
+      "bounds": {
+        "min": [
+          -0.28,
+          0.691398,
+          0.060694
+        ],
+        "max": [
+          0.28,
+          1.251295,
+          0.620591
+        ]
+      },
+      "colors": [
+        "duck"
+      ],
+      "attached_to": "body.neck",
+      "parts": []
+    },
+    {
+      "name": "beak",
+      "kind": "cone",
+      "triangles": 14,
+      "size": [
+        0.3,
+        0.174953,
+        0.214829
+      ],
+      "bounds": {
+        "min": [
+          -0.15,
+          0.710107,
+          0.546625
+        ],
+        "max": [
+          0.15,
+          0.88506,
+          0.761454
+        ]
+      },
+      "colors": [
+        "beak"
+      ],
+      "attached_to": "head.beak",
+      "parts": []
+    },
+    {
+      "name": "left_eye",
+      "kind": "sphere",
+      "uses": "eye",
+      "triangles": 48,
+      "size": [
+        0.076136,
+        0.077487,
+        0.078642
+      ],
+      "bounds": {
+        "min": [
+          -0.178068,
+          0.936835,
+          0.536422
+        ],
+        "max": [
+          -0.101932,
+          1.014322,
+          0.615064
+        ]
+      },
+      "colors": [
+        "ink"
+      ],
+      "attached_to": "head.left_eye",
+      "parts": []
+    },
+    {
+      "name": "right_eye",
+      "kind": "sphere",
+      "uses": "eye",
+      "triangles": 48,
+      "size": [
+        0.076136,
+        0.077487,
+        0.078642
+      ],
+      "bounds": {
+        "min": [
+          0.101932,
+          0.936835,
+          0.536422
+        ],
+        "max": [
+          0.178068,
+          1.014322,
+          0.615064
+        ]
+      },
+      "colors": [
+        "ink"
+      ],
+      "attached_to": "head.right_eye",
+      "parts": []
+    },
+    {
+      "name": "left_wing",
+      "kind": "sphere",
+      "uses": "wing",
+      "triangles": 120,
+      "size": [
+        0.184394,
+        0.350685,
+        0.617097
+      ],
+      "bounds": {
+        "min": [
+          -0.560652,
+          0.319285,
+          -0.445513
+        ],
+        "max": [
+          -0.376258,
+          0.66997,
+          0.171584
+        ]
+      },
+      "colors": [
+        "wing"
+      ],
+      "attached_to": "body.left_wing",
+      "parts": []
+    },
+    {
+      "name": "right_wing",
+      "kind": "sphere",
+      "uses": "wing",
+      "triangles": 120,
+      "size": [
+        0.184394,
+        0.350685,
+        0.617097
+      ],
+      "bounds": {
+        "min": [
+          0.376258,
+          0.319285,
+          -0.445513
+        ],
+        "max": [
+          0.560652,
+          0.66997,
+          0.171584
+        ]
+      },
+      "colors": [
+        "wing"
+      ],
+      "attached_to": "body.right_wing",
+      "mirrored": true,
+      "parts": []
+    },
+    {
+      "name": "tail",
+      "kind": "cone",
+      "triangles": 14,
+      "size": [
+        0.28,
+        0.312335,
+        0.309882
+      ],
+      "bounds": {
+        "min": [
+          -0.14,
+          0.487585,
+          -0.761454
+        ],
+        "max": [
+          0.14,
+          0.79992,
+          -0.451572
+        ]
+      },
+      "colors": [
+        "wing"
+      ],
+      "attached_to": "body.tail",
+      "parts": []
+    },
+    {
+      "name": "left_foot",
+      "kind": "box",
+      "uses": "foot",
+      "triangles": 12,
+      "size": [
+        0.204607,
+        0.164449,
+        0.30683
+      ],
+      "bounds": {
+        "min": [
+          -0.282615,
+          0.0,
+          -0.168686
+        ],
+        "max": [
+          -0.078008,
+          0.164449,
+          0.138144
+        ]
+      },
+      "colors": [
+        "beak"
+      ],
+      "attached_to": "body.left_foot",
+      "parts": []
+    },
+    {
+      "name": "right_foot",
+      "kind": "box",
+      "uses": "foot",
+      "triangles": 12,
+      "size": [
+        0.204607,
+        0.164449,
+        0.30683
+      ],
+      "bounds": {
+        "min": [
+          0.078008,
+          0.0,
+          -0.168686
+        ],
+        "max": [
+          0.282615,
+          0.164449,
+          0.138144
+        ]
+      },
+      "colors": [
+        "beak"
+      ],
+      "attached_to": "body.right_foot",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "left_eye",
+      "b": "head",
+      "depth": 0.04,
+      "hidden": false
+    },
+    {
+      "a": "right_eye",
+      "b": "head",
+      "depth": 0.04,
+      "hidden": false
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

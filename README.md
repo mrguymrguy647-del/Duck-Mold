@@ -1,12 +1,16 @@
 # Duck Mold
 
-Duck Mold makes game-ready 3D models from text. You describe a model in a
-short file, a **recipe**: which parts it has, which part joins which, and
-what colour each is. Duck Mold builds the model, tells you in words and
-numbers how it came out, and writes a `.glb` file for the
+<img src="crates/duck-mold-studio/assets/icon.png" alt="A duck, made in Duck Mold" width="96" align="right">
+
+Duck Mold makes game-ready 3D models from parts. You describe a model in
+a short file, a **recipe**: which parts it has, which part joins which,
+and what colour each is. You can type the recipe, or build it with the
+mouse in **Duck Mold Studio**, which writes the same file. Duck Mold
+builds the model, tells you in words and numbers how it came out, and
+writes a `.glb` file for the
 [Duck Forge](https://github.com/mrguymrguy647-del/Duck-Forge) game engine.
 
-It is not a modelling program. It is an assembler: you don't push points
+It is not a sculpting program. It is an assembler: you don't push points
 around, you name parts and say how they fit together. It belongs with
 [Duck Quill](https://github.com/mrguymrguy647-del/duck-quill) (2D art)
 and [Duck Echo](https://github.com/mrguymrguy647-del/Duck-Echo) (sound),
@@ -16,8 +20,25 @@ and like them it is made for two kinds of user: people who don't know
 **An AI agent?** Read [docs/AI_GUIDE.md](docs/AI_GUIDE.md), or run
 `duck-mold guide`: the whole tool on one page, from scratch.
 
-This is Phase 0: a command-line program and a library. There is no
-window yet.
+## Start the Studio on Windows, without a terminal
+
+- **From a download:** get `DuckMold-<version>-windows.zip` from the
+  [Releases](https://github.com/mrguymrguy647-del/Duck-Mold/releases)
+  page, unzip it, and double-click `DuckMoldStudio.exe`. `READ ME
+  FIRST.txt` in the folder says the rest. `Create desktop shortcut.bat`
+  puts the duck on your desktop.
+- **From a copy of this repository:** install Rust from
+  <https://rustup.rs>, then double-click `Start Duck Mold Studio.bat`.
+  It builds the Studio (a few minutes the first time) and starts it.
+  `Create desktop shortcut.bat` puts a shortcut on your desktop.
+
+The Studio opens on a page with **Open a model**, **New model** and the
+recipes you opened lately. You can also drop a recipe file on
+`DuckMoldStudio.exe`, or on its shortcut, to open it. No black console
+window opens behind it.
+
+The rest of this page builds a model by typing first, because that
+shows what a recipe is; the Studio comes at step 6 of the quick start.
 
 ## A first model
 
@@ -150,11 +171,15 @@ earlier text back to the file. A change another program made while the
 Studio was open (an agent, a text editor) is a step too, called "Changed
 outside the Studio": undo always takes back the latest change to the
 file, whoever made it. The steps are forgotten when the Studio closes.
-**Export** writes the `.glb` and **Render picture** the four-view
-picture, next to the recipe. The Studio keeps no model of its own: it
-shows the recipe file, so when you (or an agent) save the recipe in
-another program, the Studio builds it again. If the recipe has a
-mistake, the Studio says so and keeps showing the last version that
+
+**Export** and **Render picture**, in the top bar, write the `.glb` and
+the four-view picture next to the recipe: no terminal needed.
+
+**The file is the model.** The Studio keeps no model of its own: it
+shows the recipe file, and every change you make is written to it at
+once, so there is nothing to save. When you (or an agent) save the
+recipe in another program, the Studio builds it again. If the recipe has
+a mistake, the Studio says so and keeps showing the last version that
 built.
 
 ![The Studio showing the robot, with its left eye selected and its properties](docs/studio.png)
@@ -268,6 +293,7 @@ A recipe can be written as TOML (the examples) or as JSON
 | [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
+| [duck.toml](examples/duck.toml) | A ball stretched into a body with a three-number `scale`, parts placed at points of a round surface, one wing used twice. Its picture is the Studio's icon. |
 
 Each is commented line by line.
 
@@ -306,14 +332,19 @@ see the handoff note.
 | [DESIGN.md](DESIGN.md) | Why Duck Mold is the way it is, decision by decision, in plain words. |
 | [PHASE0_REPORT.md](PHASE0_REPORT.md) | Phase 0: what works, what doesn't yet, and what comes next. |
 | [PHASE1_REPORT.md](PHASE1_REPORT.md) | Phase 1: pictures, the preview window, sockets on surfaces and in the `.glb`, `twist`, glTF import. |
+| [PHASE2_REPORT.md](PHASE2_REPORT.md) | Phase 2: the Studio, the edit commands, undo, the parts library, the Windows download. |
 
 ## Project layout
 
 ```
 Duck-Mold/
 ├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
+├── .github/workflows/release.yml  makes the Windows download (a zip)
+├── Start Duck Mold Studio.bat double-click: builds the Studio and starts it
+├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
+├── release/                   what goes in the download beside the programs
 ├── Cargo.toml                 the workspace: four crates, built together
-├── examples/                  seven recipes to read and change, and parts/ for files they use
+├── examples/                  eight recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/
@@ -336,6 +367,7 @@ Duck-Mold/
     │   └── tests/             one file of tests per step
     ├── duck-mold-view/        pictures (`render`), and all the Studio does, with no window
     ├── duck-mold-studio/      the Studio's window (egui): the `DuckMoldStudio` program
+    │   └── assets/            its icon: a picture of examples/duck.toml
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 

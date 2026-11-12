@@ -566,13 +566,14 @@ Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
 bones, animation, colliders or LODs (`bones`, `colliders` and `lods` are
-reserved names), no window.
+reserved names). There is a window, Duck Mold Studio, but it is for
+people: everything it does, you do with `edit`.
 
 ## 13. Files for reference
 
-- `examples/`: crate, table, tree, house, robot, snowman. Read
-  `robot.toml` for nested parts and `snowman.toml` for sockets on curved
-  surfaces.
+- `examples/`: crate, table, tree, house, robot, desk, snowman, duck.
+  Read `robot.toml` for nested parts, `snowman.toml` and `duck.toml` for
+  sockets on curved surfaces, and `desk.toml` for parts from files.
 - `docs/recipe-format.md`: every field, default and range.
 - `docs/forge-handoff.md`: what is in the `.glb`, and how Duck Forge
   reads it.

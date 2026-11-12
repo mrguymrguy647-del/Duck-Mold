@@ -17,8 +17,14 @@ duck-mold-view = { workspace = true }
 eframe = { workspace = true }
 rfd = { workspace = true }
 
+# Puts the icon inside DuckMoldStudio.exe on Windows.
+[build-dependencies]
+winresource = "0.1"
+
 [dev-dependencies]
 egui_kittest = { workspace = true }
+# For the test that draws the icon from the duck recipe.
+png = { workspace = true }
 
 [lints]
 workspace = true

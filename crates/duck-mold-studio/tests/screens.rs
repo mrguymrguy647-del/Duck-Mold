@@ -873,6 +873,71 @@ fn a_library_part_is_chosen_in_the_add_list() {
     assert!(looking.query_by_label("Library").is_none());
 }
 
+// ---- the start page's list of recipes opened lately ----------------------------
+
+#[test]
+fn recipes_opened_lately_are_on_the_start_page() {
+    use duck_mold_studio::recent::Recent;
+    let folder = folder("screens_recent");
+    let list = folder.join("settings/recent.txt");
+    for name in ["robot.toml", "house.toml"] {
+        std::fs::copy(examples().join(name), folder.join(name)).unwrap();
+    }
+
+    // Nothing opened yet: no list on the start page.
+    let mut screen = harness(
+        StudioApp::new().remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    screen.step();
+    assert!(screen.query_by_label("Opened lately").is_none());
+
+    // Open two recipes, one after the other.
+    screen.state_mut().open(folder.join("robot.toml"), false);
+    screen.state_mut().open(folder.join("house.toml"), false);
+    screen.run_steps(2);
+    let written = std::fs::read_to_string(&list).unwrap();
+    let lines: Vec<&str> = written.lines().collect();
+    assert_eq!(lines.len(), 2);
+    assert!(
+        lines[0].ends_with("house.toml"),
+        "the newest is first: {lines:?}"
+    );
+    assert!(lines[1].ends_with("robot.toml"));
+
+    // The next time the Studio starts, they are on the start page, and a
+    // click opens one.
+    let mut screen = harness(
+        StudioApp::new().remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    screen.step();
+    screen.get_by_label("Opened lately");
+    screen.get_by_label("house.toml");
+    screen.get_by_label("robot.toml").click();
+    screen.run_steps(3);
+    assert_eq!(screen.state().title(), "robot.toml - Duck Mold Studio");
+    let written = std::fs::read_to_string(&list).unwrap();
+    assert!(written.lines().next().unwrap().ends_with("robot.toml"));
+
+    // A recipe that has been deleted since is left out.
+    std::fs::remove_file(folder.join("house.toml")).unwrap();
+    let mut screen = harness(
+        StudioApp::new().remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    screen.step();
+    screen.get_by_label("robot.toml");
+    assert!(screen.query_by_label("house.toml").is_none());
+
+    // A new model is remembered too; and only the latest eight are kept.
+    for number in 0..10 {
+        let recipe = folder.join(format!("model{number}.toml"));
+        screen.state_mut().start_new(&recipe);
+    }
+    assert_eq!(std::fs::read_to_string(&list).unwrap().lines().count(), 8);
+}
+
 /// Pictures of whole screens, compared with the stored ones in
 /// `tests/screens/`. Linux only: see the top of this file.
 #[cfg(target_os = "linux")]

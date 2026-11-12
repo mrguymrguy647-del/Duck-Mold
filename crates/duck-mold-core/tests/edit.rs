@@ -1347,7 +1347,7 @@ fn windows_line_endings_and_the_invisible_mark_survive() {
 fn examples() -> Vec<(String, String)> {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     [
-        "crate", "table", "tree", "house", "robot", "snowman", "desk",
+        "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck",
     ]
     .into_iter()
     .map(|name| {
