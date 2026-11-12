@@ -29,6 +29,12 @@ pub const TOUCH: f64 = 0.001;
 /// parts. Beyond it, the two parts are compared by their boxes only.
 const PAIR_BUDGET: usize = 50_000_000;
 
+/// About how many point-against-triangle tests are spent on finding how
+/// deep one part is inside another. A part with more sample points than
+/// this allows has every n-th one tested. Ordinary low-poly parts are far
+/// below it and are tested in full.
+const SAMPLE_BUDGET: usize = 500_000;
+
 /// The whole report on a model. As JSON it is what `--json` prints.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct Inspection {
@@ -794,8 +800,10 @@ fn depth_inside(inner: &Solid, outer: &Solid) -> (f64, bool) {
         .collect();
     // Every sample outside the other's box is certainly outside it.
     let mut all_inside = near.len() == inner.samples.len();
-    // For huge parts, look at every n-th sample only.
-    let step = (near.len() * outer.triangles.len() / PAIR_BUDGET).max(1);
+    // For parts with very many triangles, look at every n-th sample only.
+    let step = (near.len() * outer.triangles.len())
+        .div_ceil(SAMPLE_BUDGET)
+        .max(1);
     let mut deepest: f64 = 0.0;
     for &point in near.iter().step_by(step) {
         let distance = outer.distance_to(point);
@@ -816,18 +824,29 @@ fn depth_inside(inner: &Solid, outer: &Solid) -> (f64, bool) {
 /// whatever it has, once it finds one no bigger than `enough`. `None` if
 /// the parts have too many triangles to compare.
 fn distance(a: &Solid, b: &Solid, enough: f64) -> Option<f64> {
-    if a.triangles.len().saturating_mul(b.triangles.len()) > PAIR_BUDGET {
+    // When the question is only "are they within `enough` of each
+    // other?", triangles further than that from the other part's box
+    // can't matter. When it is "exactly how far apart?", all can.
+    let reach = if enough > 0.0 { enough } else { f64::INFINITY };
+    let near = |solid: &Solid, other: &Solid| {
+        solid
+            .boxes
+            .iter()
+            .filter(|bounds| bounds.gap_to(&other.bounds) <= reach)
+            .count()
+    };
+    if near(a, b).saturating_mul(near(b, a)) > PAIR_BUDGET {
         return None;
     }
-    // Triangles in order, skipping any whose box is already further away
-    // than the best distance found so far.
+    // Triangles in order, skipping any whose box is further away than
+    // matters: than `reach`, or than the best distance found so far.
     let mut best = f64::INFINITY;
     for (triangle_a, box_a) in a.triangles.iter().zip(&a.boxes) {
-        if box_a.gap_to(&b.bounds) >= best {
+        if box_a.gap_to(&b.bounds) > reach.min(best) {
             continue;
         }
         for (triangle_b, box_b) in b.triangles.iter().zip(&b.boxes) {
-            if box_a.gap_to(box_b) >= best {
+            if box_a.gap_to(box_b) > reach.min(best) {
                 continue;
             }
             best = best.min(triangle_distance(*triangle_a, *triangle_b));

@@ -186,6 +186,13 @@ A socket is a named point with a direction it faces.
 facing out) and `center` (the middle, facing up). These names can't be
 declared again.
 
+They are on the box, which for a sloped shape is not always its surface.
+A cone's `left`, `right`, `front` and `back` are in the air beside its
+slope, and a wedge's `top` and `front` are in the air above its slope; a
+part joined there floats (and `inspect` says so). Declare a socket with
+`at` for those places. A round shape's side sockets are exactly on its
+surface when `segments` is a multiple of 4.
+
 **Declared.** Under `sockets`, each name is one of three forms:
 
 | Form | Fields | |

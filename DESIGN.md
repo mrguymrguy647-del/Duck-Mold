@@ -290,6 +290,13 @@ directions oppose, the way two magnets snap together.
 `bottom`, `left`, `right`, `front`, `back` (the middle of each side,
 facing outwards) and `center`. For many models these are all you need.
 
+They are on the box, which is the surface for a box, a cylinder and a
+sphere, but not everywhere on a sloped shape: a cone's side sockets and
+a wedge's `top` and `front` are in the air beside the slope, and a part
+joined there floats (`inspect` reports it). Building showed this to be
+the design's weakest spot; `PHASE0_REPORT.md` proposes sockets that know
+the shape as an early Phase 1 change.
+
 A part can declare more, in one of three ways:
 
 ```toml

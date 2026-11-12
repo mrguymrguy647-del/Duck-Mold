@@ -87,7 +87,17 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
         return None;
     }
     let mut faces = Vec::new();
-    let parts = emit(&body.nodes, &Transform::IDENTITY, "", &mut faces);
+    let parts = emit(
+        &body.nodes,
+        &Transform::IDENTITY,
+        "",
+        &mut faces,
+        assembler.issues,
+    );
+    // A part scaled down to nothing is found only now.
+    if assembler.issues.iter().any(Issue::is_error) {
+        return None;
+    }
     Some(Model {
         name: recipe.name.clone(),
         palette: loaded.palette.clone(),
@@ -1034,7 +1044,18 @@ fn ring(start: usize, parts: &[PartDef], names: &[String]) -> Vec<String> {
 
 /// Flattens the tree of placed parts into the model's faces, and returns
 /// the tree as the model keeps it.
-fn emit(nodes: &[Node], outer: &Transform, prefix: &str, faces: &mut Vec<Face>) -> Vec<Part> {
+///
+/// Positions are rounded here (see [`crate::math::tidy`]). A face that
+/// rounding leaves with no area, because its part was scaled down to
+/// almost nothing, is left out, with a warning; a part that loses all
+/// its faces that way is an error.
+fn emit(
+    nodes: &[Node],
+    outer: &Transform,
+    prefix: &str,
+    faces: &mut Vec<Face>,
+    issues: &mut Vec<Issue>,
+) -> Vec<Part> {
     nodes
         .iter()
         .map(|node| {
@@ -1045,14 +1066,35 @@ fn emit(nodes: &[Node], outer: &Transform, prefix: &str, faces: &mut Vec<Face>) 
                 format!("{prefix}/{}", node.name)
             };
             let first = faces.len();
+            let mut lost = 0;
             for (polygon, &color) in node.body.faces.iter().zip(&node.body.colors) {
                 let placed = polygon.transformed(&place);
-                faces.push(Face {
+                let face = Face {
                     corners: placed.corners.into_iter().map(Vec3::tidied).collect(),
                     color,
-                });
+                };
+                if face.normal().is_some() {
+                    faces.push(face);
+                } else {
+                    lost += 1;
+                }
             }
-            let parts = emit(&node.body.nodes, &place, &path, faces);
+            if lost > 0 && lost == node.body.faces.len() {
+                issues.push(node.loc.error(
+                    Code::OutOfRange,
+                    format!(
+                        "the part \"{path}\" ends up too small to build: smaller than a thousandth of a millimetre. Check its size and every \"scale\" it is inside"
+                    ),
+                ));
+            } else if lost > 0 {
+                issues.push(node.loc.warning(
+                    Code::Skipped,
+                    format!(
+                        "{lost} faces of the part \"{path}\" end up with no area (it is thinner than a thousandth of a millimetre) and were left out"
+                    ),
+                ));
+            }
+            let parts = emit(&node.body.nodes, &place, &path, faces, issues);
             let own = first..faces.len();
             Part {
                 name: node.name.clone(),

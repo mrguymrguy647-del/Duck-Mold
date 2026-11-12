@@ -195,6 +195,15 @@ sockets join face to face: the points meet and the directions oppose.
 facing out) and `center`. An assembly has them too, on the box around
 all of it.
 
+**They are on the box, not on the surface.** For a box, a cylinder and a
+sphere that is the same place. On a sloped shape some of them are in the
+air: a **cone**'s `left`, `right`, `front` and `back` are beside its
+slope (only `top`, its point, and `bottom` touch it), and a **wedge**'s
+`top` and `front` are above its slope. A part joined to a socket in the
+air floats, and `inspect` reports it. To put something on a slope,
+declare a socket with `at` and `facing`. For round shapes, keep
+`segments` a multiple of 4 if anything joins their sides.
+
 Declare more in a part's `sockets` table, one of three ways:
 
 ```toml
@@ -420,6 +429,9 @@ whole model.
 - **`colour`.** The fields are spelt `color` and `colors`.
 - **Left and right swapped.** They are the model's own: left is -x,
   and the model faces +z.
+- **Joining to the side of a cone, or the top of a wedge.** Those
+  built-in sockets are in the air (section 6). `inspect` shows the part
+  as floating.
 - **Too many segments.** 64 on a sphere is 3,968 triangles. Try 8.
 - **`colors` on an assembly.** Colour the parts inside it, or give the
   assembly a plain `color`.

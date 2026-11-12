@@ -848,3 +848,39 @@ fn the_same_recipe_builds_the_same_model() {
     assert_eq!(built(ROBOT), built(ROBOT));
     assert_eq!(built(TABLE), built(TABLE));
 }
+
+#[test]
+fn a_part_scaled_down_to_nothing_is_an_error_not_an_empty_model() {
+    // A thousandth of a thousandth of a millimetre.
+    let issues = errors(
+        "version = 0\n[[parts]]\nname = \"speck\"\nscale = 0.001\nparts = [{ name = \"grain\", shape = \"box\", size = [0.001, 0.001, 0.001], scale = 0.001 }]\n",
+    );
+    let issue = only(&issues, Code::OutOfRange);
+    assert!(
+        issue
+            .message
+            .contains("the part \"speck/grain\" ends up too small to build"),
+        "{}",
+        issue.message
+    );
+    assert_eq!(issue.line, Some(5));
+}
+
+#[test]
+fn faces_squashed_flat_are_left_out_with_a_warning() {
+    // A sheet a millionth of a millimetre thick: its four edges have no
+    // area left, its two big faces do.
+    let (model, issues) = build(
+        "version = 0\n[[parts]]\nname = \"sheet\"\nscale = [1, 0.001, 1]\nparts = [{ name = \"leaf\", shape = \"box\", size = [1, 0.001, 1], scale = [1, 0.001, 1] }]\n",
+    );
+    let model = model.expect("it still builds");
+    assert_eq!(model.triangle_count(), 4);
+    let warning = only(&issues, Code::Skipped);
+    assert_eq!(
+        warning.message,
+        "4 faces of the part \"sheet/leaf\" end up with no area (it is thinner than a thousandth of a millimetre) and were left out"
+    );
+    // What is counted is what is written.
+    assert_eq!(model.faces.len(), 2);
+    assert!(model.faces.iter().all(|face| face.normal().is_some()));
+}
