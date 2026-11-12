@@ -435,7 +435,12 @@ impl Inspection {
 
         // The tree of parts, in columns.
         let mut rows: Vec<[String; 4]> = Vec::new();
-        fn gather(parts: &[PartReport], depth: usize, rows: &mut Vec<[String; 4]>) {
+        fn gather(
+            parts: &[PartReport],
+            depth: usize,
+            inside_mirrored: bool,
+            rows: &mut Vec<[String; 4]>,
+        ) {
             for part in parts {
                 let own_name = part.name.rsplit('/').next().unwrap_or(&part.name);
                 let label = match (&part.uses, &part.file) {
@@ -447,7 +452,9 @@ impl Inspection {
                 if let Some(socket) = &part.attached_to {
                     notes.push(format!("on {socket}"));
                 }
-                if part.mirrored {
+                // Said once, on the part that was flipped, not again on
+                // every part inside it.
+                if part.mirrored != inside_mirrored {
                     notes.push("mirrored".to_owned());
                 }
                 rows.push([
@@ -456,10 +463,10 @@ impl Inspection {
                     count(part.triangles, "triangle"),
                     notes.join(", "),
                 ]);
-                gather(&part.parts, depth + 1, rows);
+                gather(&part.parts, depth + 1, part.mirrored, rows);
             }
         }
-        gather(&self.parts, 0, &mut rows);
+        gather(&self.parts, 0, false, &mut rows);
         let width = |column: usize| {
             rows.iter()
                 .map(|row| row[column].chars().count())

@@ -1,0 +1,60 @@
+# A table: one part defined once and used four times, joined to sockets
+# that the table top declares.
+#
+#   duck-mold inspect examples/table.toml
+
+version = 0
+name = "table"
+description = "A table with four legs."
+
+[palette]
+oak      = "#B88A4A"
+dark_oak = "#8C6432"
+
+# A part defined once, to use many times. It has no place of its own:
+# each part that uses it says where it goes.
+[define.leg]
+shape = "box"
+size = [0.08, 0.7, 0.08]
+color = "dark_oak"
+
+# The table top. `sockets` adds four named points to its underside.
+# `shift` slides a socket across its side: -1 is the left or back edge,
+# 1 the right or front edge. (Front is +z, the way a model faces.)
+[[parts]]
+name = "top"
+shape = "box"
+size = [1.2, 0.06, 0.7]
+color = "oak"
+
+[parts.sockets]
+front_left  = { on = "bottom", shift = [-0.85, 0, 0.8] }
+front_right = { on = "bottom", shift = [0.85, 0, 0.8] }
+back_left   = { on = "bottom", shift = [-0.85, 0, -0.8] }
+back_right  = { on = "bottom", shift = [0.85, 0, -0.8] }
+
+# Each leg joins its own `top` (a socket every part has) to one of the
+# table top's sockets. No coordinates.
+[[parts]]
+name = "leg_front_left"
+use = "leg"
+attach = "top"
+to = "top.front_left"
+
+[[parts]]
+name = "leg_front_right"
+use = "leg"
+attach = "top"
+to = "top.front_right"
+
+[[parts]]
+name = "leg_back_left"
+use = "leg"
+attach = "top"
+to = "top.back_left"
+
+[[parts]]
+name = "leg_back_right"
+use = "leg"
+attach = "top"
+to = "top.back_right"

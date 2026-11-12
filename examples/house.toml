@@ -1,0 +1,103 @@
+# A small house: walls, a roof made of two wedges, a door, two windows
+# and a chimney. Everything is placed by sockets.
+#
+#   duck-mold inspect examples/house.toml
+#
+# A model faces forward, which is +z: the door is on the `front`.
+
+version = 0
+name = "house"
+description = "A small house with a pitched roof and a chimney."
+
+[palette]
+wall  = "#E8D8B8"
+tiles = "#B5523B"
+door  = "#6B4A2B"
+glass = "#9CC8E0"
+brick = "#8A4B3A"
+
+# The roof is an assembly: a part made of parts. A wedge is a ramp, full
+# height at its back and sloping down to its front edge. The second half
+# joins its back to the first half's back. Both of those sockets face the
+# same way, so the second half is turned right round and slopes the other
+# way: a ridge.
+[define.roof]
+color = "tiles"
+
+[[define.roof.parts]]
+name = "front_half"
+shape = "wedge"
+size = [3, 1, 1.4]
+colors = { left = "wall", right = "wall" }
+
+[[define.roof.parts]]
+name = "back_half"
+shape = "wedge"
+size = [3, 1, 1.4]
+colors = { left = "wall", right = "wall" }
+attach = "back"
+to = "front_half.back"
+
+# The walls, with a socket for everything that goes on them. A shift of
+# -1 up-and-down puts a socket on the bottom edge of its side.
+[[parts]]
+name = "walls"
+shape = "box"
+size = [3, 2, 2.4]
+color = "wall"
+
+[parts.sockets]
+door         = { on = "front", shift = [0, -1, 0] }
+window_left  = { on = "front", shift = [-0.6, 0.2, 0] }
+window_right = { on = "front", shift = [0.6, 0.2, 0] }
+chimney      = { on = "left", shift = [0, -1, -0.4] }
+
+# The roof's own `bottom` is the middle of the underside of the whole
+# assembly. It is a little deeper than the walls, so it overhangs.
+[[parts]]
+name = "roof"
+use = "roof"
+attach = "bottom"
+to = "walls.top"
+
+# The door declares a socket at the foot of its back, so that it stands
+# on the ground against the wall.
+[[parts]]
+name = "door"
+shape = "box"
+size = [0.6, 1.2, 0.08]
+color = "door"
+attach = "foot"
+to = "walls.door"
+
+[parts.sockets]
+foot = { on = "back", shift = [0, -1, 0] }
+
+[[parts]]
+name = "window_left"
+shape = "box"
+size = [0.5, 0.5, 0.06]
+color = "glass"
+attach = "back"
+to = "walls.window_left"
+
+[[parts]]
+name = "window_right"
+shape = "box"
+size = [0.5, 0.5, 0.06]
+color = "glass"
+attach = "back"
+to = "walls.window_right"
+
+# The chimney stands on the ground beside the left wall and reaches past
+# the ridge.
+[[parts]]
+name = "chimney"
+shape = "box"
+size = [0.4, 3.4, 0.4]
+color = "brick"
+attach = "foot"
+to = "walls.chimney"
+
+[parts.sockets]
+foot = { on = "right", shift = [0, -1, 0] }
