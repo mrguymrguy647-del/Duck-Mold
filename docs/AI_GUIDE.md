@@ -3,7 +3,8 @@
 Duck Mold makes game-ready 3D models from text. You write a **recipe** (a
 TOML or JSON file that lists a palette and the parts of a model), and the
 `duck-mold` program builds it and tells you, in words and numbers, how it
-came out. You never need to look at a picture.
+came out. The numbers answer most questions; when you can read images,
+`duck-mold render` draws the model too, so you can check it looks right.
 
 This guide is all you need. The same text is printed by `duck-mold guide`.
 
@@ -11,6 +12,10 @@ This guide is all you need. The same text is printed by `duck-mold guide`.
 
 ```bash
 duck-mold inspect lamp.toml --json    # check it, build it in memory, measure it
+```
+
+```bash
+duck-mold render lamp.toml            # draw it: lamp.png, four views on one sheet
 ```
 
 ```bash
@@ -22,7 +27,19 @@ duck-mold export lamp.toml            # write lamp.glb next to the recipe
    (each names a line, a field and usually the fix) and run it again.
 3. Read the report: `size`, `triangles`, `ground`, `floating`,
    `overlapping`, `warnings`. Compare them with what you meant (section 7).
-4. When the numbers are right, run `export`.
+4. If you can look at images, run `render` and look at the PNG: is each
+   part where you meant, facing the right way, the right colour?
+5. When it is right, run `export`.
+
+`render` draws a sheet of four views, each a square (256 pixels unless
+`--size` says otherwise): **front** (top left, looking the model in the
+face, so its left is on your right), **right side** (top right, the
+model facing right), **back** (bottom left) and **three-quarter** (bottom
+right, from the front right and above). Every view is at the same scale.
+Under them is the model's name, size and triangle count. A light grey
+face is one nobody coloured. With `--json`, `views` says where each view
+is in the picture. It writes the PNG next to the recipe unless `-o`
+says where, and draws an `.obj` or `.glb` as it is, too.
 
 Exit codes: **0** it worked (warnings included), **1** the recipe has
 errors, **2** the command was wrong or a file couldn't be read or written.
@@ -443,8 +460,7 @@ Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
 bones, animation, colliders or LODs (`bones`, `colliders` and `lods` are
-reserved names), no glTF import (only `.obj`), no rendering to a
-picture, no window.
+reserved names), no glTF import (only `.obj`), no window.
 
 ## 12. Files for reference
 

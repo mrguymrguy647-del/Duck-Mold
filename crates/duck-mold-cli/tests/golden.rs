@@ -2,9 +2,11 @@
 //! the same bytes.
 //!
 //! `tests/golden/` at the top of the repository holds, for each example,
-//! the `.glb` that `duck-mold export` writes and the report that
-//! `duck-mold inspect --json` prints. These tests run the real program
-//! and compare every byte. That is what "the same recipe always gives
+//! the `.glb` that `duck-mold export` writes, the report that
+//! `duck-mold inspect --json` prints and the picture that
+//! `duck-mold render` draws. These tests run the real program and
+//! compare every byte. CI runs them on Windows and Linux, so a picture
+//! that came out differently on one of them would show here. That is what "the same recipe always gives
 //! the same output" means in practice: on this computer, on another one,
 //! and after any change to the code.
 //!
@@ -98,6 +100,21 @@ fn every_example_builds_to_its_golden_glb() {
     for name in EXAMPLES {
         let bytes = export(&format!("examples/{name}.toml"), &scratch);
         check(&format!("{name}.glb"), &bytes);
+    }
+}
+
+#[test]
+fn every_example_renders_to_its_golden_picture() {
+    let scratch = scratch("golden_png");
+    for name in EXAMPLES {
+        let output = scratch.join(format!("{name}.png"));
+        duck_mold(&[
+            "render",
+            &format!("examples/{name}.toml"),
+            "-o",
+            output.to_str().unwrap(),
+        ]);
+        check(&format!("{name}.png"), &std::fs::read(output).unwrap());
     }
 }
 

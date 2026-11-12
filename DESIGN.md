@@ -545,12 +545,14 @@ Mold.
 
 ## 9. The commands
 
-The program is `duck-mold`. Three commands, plus help.
+The program is `duck-mold`. Three commands, plus help; Phase 1 adds
+`render`.
 
 | Command | What it does |
 |---|---|
 | `duck-mold inspect <file> [--json]` | Checks and builds a recipe in memory and reports on it. Also takes an `.obj` mesh, or a `.glb` that Duck Mold wrote, to measure it as it is. Writes nothing. |
 | `duck-mold export <recipe> [-o <file.glb>] [--json]` | Builds the recipe and writes the `.glb` (default: next to the recipe, same name). Ends with a one-line summary; `--json` gives the full inspect report. |
+| `duck-mold render <file> [-o <file.png>] [--size N] [--json]` | *(Phase 1.)* Draws the model and writes a PNG: four views on one sheet (section 17, step 2). Takes what `inspect` takes. |
 | `duck-mold guide` | Prints the agent guide, which is built into the program, so an agent with only the program can learn it. |
 | `duck-mold help`, `--help`, `--version` | Every command; `duck-mold <command> --help` for one. |
 
@@ -809,13 +811,18 @@ Duck-Mold/
     │   │   ├── inspect.rs     size, counts, ground, floating, overlapping
     │   │   └── tools.rs       what the commands do, for any front end
     │   └── tests/             one file of tests per step
+    ├── duck-mold-view/        (Phase 1) pictures: `render`, drawn by Duck Forge's CPU renderer
+    │   ├── src/render.rs      turn the model for each view, draw, lay out the sheet
+    │   └── tests/             each view sees what it says; same scale; same bytes
     └── duck-mold-cli/         the `duck-mold` program: commands, text and JSON output
         └── tests/             the program itself, and the golden-file tests
 ```
 
 Two crates, as you asked: the library does the work and knows nothing
 about the command line, so a GUI or an MCP server can sit on the same
-library later, as Duck Echo's does.
+library later, as Duck Echo's does. Phase 1 adds a third,
+`duck-mold-view`, so that the library also knows nothing of pictures or
+of Duck Forge.
 
 Rust edition 2024, like Duck Forge and Duck Quill. `unsafe` is forbidden
 and every public item must have a comment, as in Duck Echo.
@@ -827,6 +834,8 @@ and every public item must have a comment, as in Duck Echo.
 | `toml` | core | Reads TOML and tells me where every field is, for line numbers. |
 | `serde`, `serde_json` | core | Writes JSON (reports, and the JSON block inside a `.glb`) and reads glTF. |
 | `clap` | cli | Reads the command line and writes `--help` from the same comments, so help can't drift from what the program does. Duck Echo uses it too. |
+| `duckforge` | view | *(Phase 1.)* Duck Forge itself, from GitHub, pinned to one commit on its `main`, with its window, graphics card and sound turned off: its CPU renderer draws `render`'s pictures. It brings `png` and `gif`. |
+| `png` | view | *(Phase 1.)* Writes the pictures. The same library and version Duck Forge uses. |
 
 That is all. Things written here rather than imported, because each is
 small and the wording or the bytes matter: the JSON reader for recipes
@@ -839,8 +848,9 @@ reader.
 ## 14. Tests and the quality bar
 
 - **Every step has tests**, written with that step and committed with it.
-- **Golden files.** Each of the five examples has its `.glb` and its
-  `inspect --json` report stored in `tests/golden/`. A test runs the
+- **Golden files.** Each of the five examples has its `.glb`, its
+  `inspect --json` report and (from Phase 1) its `render` picture stored
+  in `tests/golden/`. A test runs the
   real program, rebuilds them and compares every byte. If one changes,
   the test fails and shows what changed; a change that is meant is
   accepted with `DUCK_MOLD_ACCEPT=1 cargo test -p duck-mold-cli --test
@@ -956,7 +966,11 @@ unless `--size` says otherwise):
 | **back** | **three-quarter**: from the front right, 45° round and 30° above |
 
 Each view has its name in a corner, and a line under them gives the
-model's name, triangle count and size, as `inspect` says them. All four
+model's name, size and triangle count, as `inspect` says them. A line
+one pixel wide runs between the views, so with 256-pixel views the
+sheet is 513 × 536 pixels. `--size` takes 128 (the smallest at which
+the names fit) to 2048. `render` takes what `inspect` takes, so it also
+draws an `.obj` or a `.glb` as it is. All four
 views use the same distance and zoom, so the model is the same size in
 each. The camera is far away and zoomed in (a 20° view, where Duck Forge
 games usually use 60°), so the views look nearly flat, like drawings,

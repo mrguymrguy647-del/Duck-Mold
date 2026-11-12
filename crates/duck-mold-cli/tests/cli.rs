@@ -233,6 +233,103 @@ fn export_writes_nothing_when_the_recipe_has_mistakes() {
 }
 
 #[test]
+fn render_writes_a_png_next_to_the_recipe() {
+    let folder = folder("cli_render");
+    let output = run(&folder, &["render", "tree.toml"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let bytes = std::fs::read(folder.join("tree.png")).unwrap();
+    assert_eq!(&bytes[0..8], b"\x89PNG\r\n\x1a\n");
+    assert_eq!(
+        stdout(&output),
+        format!(
+            "wrote tree.png (513 x 536 pixels, {} bytes): tree: 1.40 x 2.80 x 1.40 m, 42 triangles, 2 parts, 2 colours, rests on the ground, nothing floating, nothing overlapping\n",
+            bytes.len()
+        )
+    );
+    assert_eq!(stderr(&output), "ok: no problems found\n");
+
+    // The same recipe gives the same picture, run after run.
+    let output = run(&folder, &["render", "tree.toml", "-o", "again.png"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(std::fs::read(folder.join("again.png")).unwrap(), bytes);
+
+    // A model file can be drawn too, as it is.
+    run(&folder, &["export", "tree.toml"]);
+    let output = run(&folder, &["render", "tree.glb", "--size", "128"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(stdout(&output).starts_with("wrote tree.png (257 x 269 pixels"));
+}
+
+#[test]
+fn render_json_says_where_each_view_is() {
+    let folder = folder("cli_render_json");
+    let output = run(
+        &folder,
+        &[
+            "render",
+            "tree.toml",
+            "-o",
+            "sheet.png",
+            "--size",
+            "200",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    let report = json(&output);
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["output"], "sheet.png");
+    assert_eq!(report["width"], 401);
+    assert_eq!(report["triangles"], 42);
+    assert_eq!(
+        report["bytes"].as_u64().unwrap(),
+        std::fs::metadata(folder.join("sheet.png")).unwrap().len()
+    );
+    let views: Vec<(String, u64, u64)> = report["views"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|view| {
+            assert_eq!(view["size"], 200);
+            (
+                view["name"].as_str().unwrap().to_owned(),
+                view["left"].as_u64().unwrap(),
+                view["top"].as_u64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        views,
+        [
+            ("front".to_owned(), 0, 0),
+            ("right".to_owned(), 201, 0),
+            ("back".to_owned(), 0, 201),
+            ("three_quarter".to_owned(), 201, 201),
+        ]
+    );
+    assert_eq!(
+        report["views"][1]["from"],
+        serde_json::json!([1.0, 0.0, 0.0])
+    );
+}
+
+#[test]
+fn render_writes_nothing_for_a_bad_recipe_or_a_bad_size() {
+    let folder = folder("cli_render_bad");
+    let output = run(&folder, &["render", "bad.toml"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!folder.join("bad.png").exists());
+
+    let output = run(&folder, &["render", "tree.toml", "--size", "16"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(!folder.join("tree.png").exists());
+    assert_eq!(
+        stderr(&output),
+        "error: size: --size 16 is too small for the views' names to fit. Did you mean \"--size 256\"? Allowed: 128 to 2048.\n"
+    );
+}
+
+#[test]
 fn warnings_do_not_change_the_exit_code() {
     let folder = folder("cli_warnings");
     std::fs::write(
@@ -318,6 +415,7 @@ fn help_and_version_explain_the_program() {
         for expected in [
             "inspect",
             "export",
+            "render",
             "guide",
             "Exit codes: 0 it worked, 1 the recipe has errors, 2",
         ] {

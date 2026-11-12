@@ -267,12 +267,8 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
 
     let used = palette.iter().filter(|color| color.triangles > 0).count();
     let summary = format!(
-        "{}: {} x {} x {} m, {}, {}, {}, {}, {}, {}",
-        model.name,
-        length(size.x),
-        length(size.y),
-        length(size.z),
-        count(triangles, "triangle"),
+        "{}, {}, {}, {}, {}, {}",
+        headline(&model.name, size.to_array(), triangles),
         count(leaves.len(), "part"),
         count(used, "colour"),
         ground_words(&ground),
@@ -369,6 +365,15 @@ fn length(metres: f64) -> String {
     }
 }
 
+/// The start of the summary: `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
+fn headline(name: &str, size: [f64; 3], triangles: usize) -> String {
+    let [x, y, z] = size.map(length);
+    format!(
+        "{name}: {x} x {y} x {z} m, {}",
+        count(triangles, "triangle")
+    )
+}
+
 /// `1 part`, `3 parts`.
 fn count(number: usize, word: &str) -> String {
     if number == 1 {
@@ -389,6 +394,13 @@ fn ground_words(ground: &Ground) -> String {
 }
 
 impl Inspection {
+    /// The start of [`Inspection::summary`]: the model's name, size and
+    /// triangle count, as `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
+    /// `render` writes it under its pictures.
+    pub fn headline(&self) -> String {
+        headline(&self.name, self.size, self.triangles)
+    }
+
     /// The report for people, a few aligned lines.
     pub fn to_text(&self) -> String {
         let mut out = String::new();

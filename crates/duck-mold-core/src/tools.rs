@@ -241,7 +241,18 @@ pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Fai
         None => recipe.with_extension("glb"),
     };
     let bytes = write_glb(&built.model);
-    std::fs::write(&output, &bytes).map_err(|error| {
+    write_file(&output, &bytes)?;
+    Ok(Exported {
+        inspection: inspect(&built.model, &built.source, built.warnings),
+        output: display_path(&output),
+        bytes: bytes.len(),
+    })
+}
+
+/// Writes a file the program was asked to write, or says in one sentence
+/// why it can't.
+pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
+    std::fs::write(path, bytes).map_err(|error| {
         let reason = match error.kind() {
             std::io::ErrorKind::NotFound => "that folder doesn't exist",
             std::io::ErrorKind::PermissionDenied => "permission denied",
@@ -250,12 +261,7 @@ pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Fai
         Failure::Usage(Box::new(Issue::error(
             Code::Io,
             "",
-            format!("can't write \"{}\": {reason}", display_path(&output)),
+            format!("can't write \"{}\": {reason}", display_path(path)),
         )))
-    })?;
-    Ok(Exported {
-        inspection: inspect(&built.model, &built.source, built.warnings),
-        output: display_path(&output),
-        bytes: bytes.len(),
     })
 }

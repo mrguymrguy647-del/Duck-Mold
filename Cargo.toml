@@ -1,19 +1,22 @@
-# The Cargo "workspace": one project made of two crates (a Rust library and
-# a program) that are built together.
+# The Cargo "workspace": one project made of three crates (two Rust
+# libraries and a program) that are built together.
 #
 #   crates/duck-mold-core - the library: recipes, parts, sockets, colour,
-#                           the .glb writer and `inspect`. No command line.
+#                           the .glb writer and `inspect`. No command line,
+#                           no pictures, no game engine.
+#   crates/duck-mold-view - pictures of a model (`render`), drawn by Duck
+#                           Forge's CPU renderer.
 #   crates/duck-mold-cli  - the `duck-mold` program: a thin layer that reads
-#                           the command line and prints what the library says.
+#                           the command line and prints what the libraries say.
 #
-# The program uses the library; the library never uses the program. A GUI
-# or an MCP server can later sit on the same library.
+# The program uses the libraries; the libraries never use the program. A
+# GUI or an MCP server can later sit on the same libraries.
 
 [workspace]
 resolver = "3"
-members = ["crates/duck-mold-core", "crates/duck-mold-cli"]
+members = ["crates/duck-mold-core", "crates/duck-mold-view", "crates/duck-mold-cli"]
 
-# Settings shared by both crates.
+# Settings shared by every crate.
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
@@ -24,6 +27,7 @@ repository = "https://github.com/mrguymrguy647-del/Duck-Mold"
 # (DESIGN.md, section 13, says the same).
 [workspace.dependencies]
 duck-mold-core = { path = "crates/duck-mold-core" }
+duck-mold-view = { path = "crates/duck-mold-view" }
 # Reads TOML and says where every field is, for line numbers in errors.
 toml = { version = "1", default-features = false, features = ["std", "parse"] }
 # Writes JSON: reports, and the JSON block inside a .glb.
@@ -31,6 +35,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Reads the command line and writes --help from the same comments.
 clap = { version = "4", features = ["derive"] }
+# Duck Forge, the game engine Duck Mold makes models for: its CPU renderer
+# draws `duck-mold render`'s pictures. Pinned to one commit on its main
+# branch, so a picture can't change unless this line does. Its window,
+# graphics-card and sound features are off: the renderer needs none.
+duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "76850ee214732d6b0cd4e244e5849fdd687e380b", default-features = false }
+# Writes the PNG pictures. The same library (and version) Duck Forge uses.
+png = "0.18"
 
 [workspace.lints.rust]
 # No `unsafe` anywhere: nothing here needs it.

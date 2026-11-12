@@ -1,0 +1,16 @@
+[package]
+name = "duck-mold-view"
+description = "Pictures of Duck Mold models, drawn by Duck Forge's CPU renderer: `duck-mold render`."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+[dependencies]
+duck-mold-core = { workspace = true }
+duckforge = { workspace = true }
+png = { workspace = true }
+serde = { workspace = true }
+
+[lints]
+workspace = true

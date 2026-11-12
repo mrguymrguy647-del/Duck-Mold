@@ -78,17 +78,35 @@ target/release/duck-mold export examples/robot.toml
 That writes `examples/robot.glb`. Any glTF viewer opens it: the 3D
 Viewer that comes with Windows, Blender, or an online glTF viewer.
 
+5. See it:
+
+```bash
+target/release/duck-mold render examples/robot.toml
+```
+
+That writes `examples/robot.png`, four views of the model on one sheet,
+without opening a window:
+
+![The robot from the front, the right, the back and three-quarter](tests/golden/robot.png)
+
 ## The commands
 
 | Command | What it does |
 |---|---|
 | `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures an `.obj` mesh, or a `.glb` that Duck Mold wrote. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
+| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws an `.obj` or `.glb` as it is, too. |
 | `duck-mold guide` | Prints the guide for AI agents. |
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
-Add `--json` to `inspect` or `export` to get the report as JSON, for an
-agent or a script.
+Add `--json` to `inspect`, `export` or `render` to get the report as
+JSON, for an agent or a script.
+
+`render` draws with Duck Forge's own renderer, so the picture shows the
+model the way a Duck Forge game draws it. The same recipe always gives
+the same picture, byte for byte. Each view is drawn from far away and
+zoomed in, so it looks nearly flat, like a drawing, and every view is at
+the same scale, so the model is the same size in each.
 
 The program ends with code 0 when it worked, 1 when the recipe has
 mistakes, and 2 when the command itself was wrong or a file couldn't be
@@ -175,12 +193,17 @@ Each is commented line by line.
 
 ## Using a model in Duck Forge
 
-Duck Forge can't load model files yet. Duck Mold's `.glb` files are kept
-simple enough for Duck Forge to read with what it already has, and a
-tested reader, ready to copy into Duck Forge, is in
-[docs/forge/duck_mold_glb.rs](docs/forge/duck_mold_glb.rs).
-[docs/forge-handoff.md](docs/forge-handoff.md) says exactly what Duck
-Forge needs to do.
+```rust
+let robot = Mesh::load_glb("assets/robot.glb")?;
+canvas.draw_mesh(&robot, &Transform::at(position), &camera);
+```
+
+Duck Forge reads Duck Mold's `.glb` files with the reader in
+[docs/forge/duck_mold_glb.rs](docs/forge/duck_mold_glb.rs), a copy of
+which is in Duck Forge. [docs/forge-handoff.md](docs/forge-handoff.md)
+says what is in the file and how to keep the two copies the same.
+A model faces +z, so a default Duck Forge camera sees it from behind:
+see the handoff note.
 
 ## Documents
 
@@ -197,12 +220,12 @@ Forge needs to do.
 ```
 Duck-Mold/
 ├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
-├── Cargo.toml                 the workspace: two crates, built together
+├── Cargo.toml                 the workspace: three crates, built together
 ├── examples/                  five recipes to read and change
 ├── docs/                      the guide, the format, the Duck Forge handoff
-├── tests/golden/              the examples' exact output, kept by the tests
+├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/
-    ├── duck-mold-core/        the library: everything except the command line
+    ├── duck-mold-core/        the library: everything except pictures and the command line
     │   ├── src/
     │   │   ├── source.rs      TOML or JSON text -> one tree that remembers line numbers
     │   │   ├── issue.rs       mistakes as data: file, line, field, message, fix
@@ -217,6 +240,7 @@ Duck-Mold/
     │   │   ├── inspect.rs     size, ground, floating and overlapping parts
     │   │   └── tools.rs       what the commands do, for any front end
     │   └── tests/             one file of tests per step
+    ├── duck-mold-view/        pictures (`render`), drawn by Duck Forge's CPU renderer
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 
