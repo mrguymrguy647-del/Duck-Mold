@@ -1,0 +1,44 @@
+# The Cargo "workspace": one project made of two crates (a Rust library and
+# a program) that are built together.
+#
+#   crates/duck-mold-core - the library: recipes, parts, sockets, colour,
+#                           the .glb writer and `inspect`. No command line.
+#   crates/duck-mold-cli  - the `duck-mold` program: a thin layer that reads
+#                           the command line and prints what the library says.
+#
+# The program uses the library; the library never uses the program. A GUI
+# or an MCP server can later sit on the same library.
+
+[workspace]
+resolver = "3"
+members = ["crates/duck-mold-core", "crates/duck-mold-cli"]
+
+# Settings shared by both crates.
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.95"
+repository = "https://github.com/mrguymrguy647-del/Duck-Mold"
+
+# Every outside library, in one place, with why it is here
+# (DESIGN.md, section 13, says the same).
+[workspace.dependencies]
+duck-mold-core = { path = "crates/duck-mold-core" }
+# Reads TOML and says where every field is, for line numbers in errors.
+toml = { version = "1", default-features = false, features = ["std", "parse"] }
+# Writes JSON: reports, and the JSON block inside a .glb.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Reads the command line and writes --help from the same comments.
+clap = { version = "4", features = ["derive"] }
+
+[workspace.lints.rust]
+# No `unsafe` anywhere: nothing here needs it.
+unsafe_code = "forbid"
+# Every public item must say what it is for.
+missing_docs = "warn"
+
+# The tests build every example and compare bytes; a little optimisation
+# keeps them quick.
+[profile.test]
+opt-level = 1

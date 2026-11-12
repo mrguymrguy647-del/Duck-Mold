@@ -1,0 +1,21 @@
+[package]
+name = "duck-mold-cli"
+description = "The `duck-mold` command: build and inspect 3D models from text recipes."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+# The program is called `duck-mold`, not `duck-mold-cli`.
+[[bin]]
+name = "duck-mold"
+path = "src/main.rs"
+
+[dependencies]
+duck-mold-core = { workspace = true }
+clap = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

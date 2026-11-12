@@ -1,0 +1,7 @@
+# What Cargo builds.
+/target
+
+# Models written while trying things out. The golden files used by the
+# tests live in crates/duck-mold-core/tests/golden and are kept.
+/examples/*.glb
+/out
