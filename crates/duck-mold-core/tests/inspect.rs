@@ -587,7 +587,7 @@ fn faces_nobody_coloured_are_counted() {
     );
     // The warnings found while building are carried into the report.
     let codes: Vec<Code> = found.warnings.iter().map(|issue| issue.code).collect();
-    assert_eq!(codes, [Code::NoColor, Code::Unused]);
+    assert_eq!(codes, [Code::Unused, Code::NoColor]);
 }
 
 // ---- the operations behind the commands --------------------------------------

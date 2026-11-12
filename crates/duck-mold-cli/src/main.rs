@@ -63,7 +63,14 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Print the guide for AI agents: how to write recipes and use these
+    /// commands, from scratch.
+    Guide,
 }
+
+/// The guide, built into the program, so that an agent that has only
+/// the program can still learn to use it.
+const GUIDE: &str = include_str!("../../../docs/AI_GUIDE.md");
 
 fn main() -> ExitCode {
     match Cli::parse().command {
@@ -98,6 +105,10 @@ fn main() -> ExitCode {
             }
             Err(failure) => fail(&failure, json),
         },
+        Command::Guide => {
+            say(GUIDE.trim_end());
+            ExitCode::SUCCESS
+        }
     }
 }
 

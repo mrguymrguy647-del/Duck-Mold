@@ -249,6 +249,10 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
                 "{name}"
             );
         }
+        // What docs/forge-handoff.md suggests as Duck Forge's first test.
+        if name == "crate" {
+            assert_eq!((model.vertices.len(), model.triangles.len()), (8, 12));
+        }
         // The parts own every triangle, in order.
         let mut next = 0;
         for part in &model.parts {
@@ -257,4 +261,52 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
         }
         assert_eq!(next, model.triangles.len(), "{name}");
     }
+}
+
+#[test]
+fn the_readmes_examples_are_true() {
+    let readme = std::fs::read_to_string(root().join("README.md")).unwrap();
+    // The text between a line that is exactly `fence` and the next
+    // closing fence, starting the search at `after`.
+    let block = |after: &str, fence: &str| -> String {
+        let from = readme
+            .find(after)
+            .unwrap_or_else(|| panic!("the README no longer says: {after}"));
+        let start = from + readme[from..].find(fence).unwrap() + fence.len();
+        let end = start + readme[start..].find("\n```").unwrap();
+        readme[start..end].trim_start_matches('\n').to_owned() + "\n"
+    };
+
+    // Its first model builds with nothing to complain about.
+    let scratch = scratch("golden_readme");
+    let recipe = scratch.join("tree.toml");
+    std::fs::write(&recipe, block("## A first model", "```toml")).unwrap();
+    let report: serde_json::Value =
+        serde_json::from_slice(&duck_mold(&["inspect", recipe.to_str().unwrap(), "--json"]))
+            .unwrap();
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["warnings"], serde_json::json!([]));
+    assert_eq!(report["floating"], serde_json::json!([]));
+
+    // Every line it quotes from the robot's report is in the real one.
+    let output = Command::new(env!("CARGO_BIN_EXE_duck-mold"))
+        .args(["inspect", "examples/robot.toml"])
+        .current_dir(root())
+        .output()
+        .unwrap();
+    let real = format!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let quoted = block("## What `inspect` tells you", "```");
+    let mut lines = 0;
+    for line in quoted.lines().filter(|line| line.trim() != "...") {
+        assert!(
+            real.lines().any(|real| real == line),
+            "the README quotes a line the program doesn't print: {line}"
+        );
+        lines += 1;
+    }
+    assert!(lines >= 10);
 }

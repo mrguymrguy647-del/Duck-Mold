@@ -16,7 +16,7 @@ use std::collections::BTreeSet;
 
 use serde::Serialize;
 
-use crate::issue::{Code, Issue};
+use crate::issue::{Code, Issue, in_file_order};
 use crate::math::{Bounds, Vec3, tidy, vec3};
 use crate::model::{Model, Part};
 use crate::recipe::hex;
@@ -256,6 +256,8 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
             .in_file(source),
         );
     }
+
+    in_file_order(&mut warnings);
 
     let used = palette.iter().filter(|color| color.triangles > 0).count();
     let summary = format!(

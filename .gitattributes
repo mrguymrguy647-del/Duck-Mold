@@ -1,0 +1,7 @@
+# Every text file keeps Unix line endings on every computer. The tests
+# compare what the program prints with stored files byte for byte, and
+# on Windows Git would otherwise change the stored files' line endings.
+* text=auto eol=lf
+
+# Models are not text.
+*.glb binary

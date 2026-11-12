@@ -308,10 +308,11 @@ pub struct Report {
 }
 
 impl Report {
-    /// Sorts a list of issues into errors and warnings. The same issue
-    /// found twice (a mistake inside a part that is used twice) is kept
-    /// once.
-    pub fn from_issues(issues: Vec<Issue>) -> Self {
+    /// Sorts a list of issues into errors and warnings, each in the
+    /// order of the file's lines. The same issue found twice (a mistake
+    /// inside a part that is used twice) is kept once.
+    pub fn from_issues(mut issues: Vec<Issue>) -> Self {
+        in_file_order(&mut issues);
         let mut report = Report {
             ok: true,
             errors: Vec::new(),
@@ -361,6 +362,27 @@ impl fmt::Display for Report {
         }
         writeln!(f, "{}", self.closing_line())
     }
+}
+
+/// Puts issues in reading order: file by file (in the order the files
+/// first come up), and within a file from the top line down. Issues
+/// that have no line come after those that do.
+pub fn in_file_order(issues: &mut [Issue]) {
+    let mut files: Vec<String> = Vec::new();
+    for issue in issues.iter() {
+        if !files.contains(&issue.file) {
+            files.push(issue.file.clone());
+        }
+    }
+    // A stable sort: issues on the same line keep the order they were
+    // found in.
+    issues.sort_by_key(|issue| {
+        (
+            files.iter().position(|file| *file == issue.file),
+            issue.line.unwrap_or(usize::MAX),
+            issue.column.unwrap_or(usize::MAX),
+        )
+    });
 }
 
 /// The option closest to `written`, if one is close enough to be what was
@@ -478,6 +500,27 @@ mod tests {
         // Fields with nothing to say are left out.
         assert!(json.get("suggestion").is_none());
         assert!(json.get("allowed").is_none());
+    }
+
+    #[test]
+    fn issues_are_put_in_reading_order() {
+        let at = |file: &str, line: usize, path: &str| {
+            Issue::error(Code::Syntax, path, "x")
+                .in_file(file)
+                .at(Pos { line, column: 1 })
+        };
+        let mut issues = vec![
+            at("robot.toml", 30, "c"),
+            at("arm.toml", 2, "d"),
+            at("robot.toml", 4, "a"),
+            Issue::warning(Code::OffGround, "e", "x").in_file("robot.toml"),
+            at("robot.toml", 4, "b"),
+        ];
+        in_file_order(&mut issues);
+        let order: Vec<&str> = issues.iter().map(|issue| issue.path.as_str()).collect();
+        // File by file, top to bottom; no line comes last; ties keep
+        // their order.
+        assert_eq!(order, ["a", "b", "c", "e", "d"]);
     }
 
     #[test]

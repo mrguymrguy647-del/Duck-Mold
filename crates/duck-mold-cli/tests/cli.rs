@@ -141,8 +141,8 @@ fn mistakes_are_listed_with_file_line_field_and_fix_and_exit_code_1() {
 error: bad.toml:9: parts[0].colour: there is no field \"colour\" here. Did you mean \"color\"?
 error: bad.toml:14: parts[1].color: there is no colour \"leaf\" in the palette. It can be: bark.
 error: bad.toml:16: parts[1].to: there is no part \"trnk\" in this list. Did you mean \"trunk\"?
-warning: bad.toml:6: parts[0]: faces of this part have no colour and are built in plain grey: give the part a \"color\" from the palette.
 warning: bad.toml:4: palette.bark: the colour \"bark\" is never used.
+warning: bad.toml:6: parts[0]: faces of this part have no colour and are built in plain grey: give the part a \"color\" from the palette.
 3 errors, 2 warnings. Nothing was built.
 "
     );
@@ -318,6 +318,7 @@ fn help_and_version_explain_the_program() {
         for expected in [
             "inspect",
             "export",
+            "guide",
             "Exit codes: 0 it worked, 1 the recipe has errors, 2",
         ] {
             assert!(
@@ -334,4 +335,107 @@ fn help_and_version_explain_the_program() {
         "{help}"
     );
     assert!(help.contains("Nothing is written if the recipe has mistakes"));
+}
+
+// ---- the guide for agents ----------------------------------------------------
+
+/// The guide, as it is in the repository.
+fn guide() -> String {
+    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/AI_GUIDE.md"))
+        .unwrap()
+}
+
+/// The text of the first fenced block that starts with `fence`, found
+/// after `after` in the guide.
+fn block_after(guide: &str, after: &str, fence: &str) -> String {
+    let from = guide
+        .find(after)
+        .unwrap_or_else(|| panic!("the guide no longer says: {after}"));
+    let start = from + guide[from..].find(fence).expect("a fenced block follows") + fence.len();
+    let end = start + guide[start..].find("\n```").expect("the block ends");
+    guide[start..end].trim_start_matches('\n').to_owned() + "\n"
+}
+
+#[test]
+fn guide_prints_the_guide_that_is_in_the_repository() {
+    let folder = folder("cli_guide");
+    let output = run(&folder, &["guide"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(stdout(&output).trim_end(), guide().trim_end());
+}
+
+#[test]
+fn the_guides_first_recipe_gives_exactly_the_report_it_shows() {
+    // The guide teaches by example, so its example must be true.
+    let guide = guide();
+    let recipe = block_after(&guide, "## 3. A first recipe", "```toml");
+    let shown = block_after(&guide, "`duck-mold inspect lamp.toml` prints:", "```");
+    let folder = folder("cli_guide_lamp");
+    std::fs::write(folder.join("lamp.toml"), recipe).unwrap();
+
+    let output = run(&folder, &["inspect", "lamp.toml"]);
+    assert_eq!(output.status.code(), Some(0));
+    // The guide shows the report and the verdict together.
+    assert_eq!(format!("{}{}", stdout(&output), stderr(&output)), shown);
+
+    // And the JSON the guide quotes agrees with the real report.
+    let report = json(&run(&folder, &["inspect", "lamp.toml", "--json"]));
+    let quoted = block_after(&guide, "`inspect --json` prints (shortened):", "```json");
+    let quoted: serde_json::Value =
+        serde_json::from_str(&quoted).expect("the guide's JSON is valid");
+    for field in [
+        "ok",
+        "summary",
+        "source",
+        "name",
+        "size",
+        "bounds",
+        "triangles",
+        "vertices",
+        "ground",
+        "floating",
+        "overlapping",
+        "warnings",
+        "errors",
+    ] {
+        assert_eq!(report[field], quoted[field], "{field}");
+    }
+    assert_eq!(report["palette"][0], quoted["palette"][0]);
+    assert_eq!(report["parts"][1], quoted["parts"][0]);
+}
+
+#[test]
+fn every_field_the_guide_lists_is_a_real_field() {
+    // A recipe with a made-up field is refused with the list of fields
+    // that are allowed there. Every field in the guide's tables must be
+    // in one of those lists.
+    let folder = folder("cli_guide_fields");
+    std::fs::write(
+        folder.join("x.toml"),
+        "version = 0\nzzz = 1\n[[parts]]\nshape = \"box\"\nzzz = 1\n",
+    )
+    .unwrap();
+    let report = json(&run(&folder, &["inspect", "x.toml", "--json"]));
+    let mut real: Vec<String> = Vec::new();
+    for error in report["errors"].as_array().unwrap() {
+        for option in error["allowed"]["options"].as_array().unwrap() {
+            real.push(option.as_str().unwrap().to_owned());
+        }
+    }
+    let guide = guide();
+    let section = &guide[guide.find("## 5. The recipe on one page").unwrap()
+        ..guide.find("The shapes. All are centred").unwrap()];
+    let mut checked = 0;
+    for line in section.lines().filter(|line| line.starts_with("| `")) {
+        let cell = line.split('|').nth(1).unwrap();
+        for field in cell.split('`').skip(1).step_by(2) {
+            let field = field.split(' ').next().unwrap();
+            assert!(
+                real.iter().any(|name| name == field),
+                "the guide lists `{field}`, which the program doesn't know"
+            );
+            checked += 1;
+        }
+    }
+    assert_eq!(checked, 24, "the guide's tables list 24 fields");
 }

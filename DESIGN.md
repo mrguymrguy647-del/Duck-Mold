@@ -1,8 +1,10 @@
 # Duck Mold: design for Phase 0
 
-**Status: a proposal. Nothing is built yet.** This document says what
-Phase 0 will be and why, in plain words. Section 16 lists the questions I
-need you to answer before I start.
+**Status: approved and built.** This document says what Phase 0 is and
+why, in plain words. It was written before any code, approved with five
+decisions (section 16), and has been kept in step with what was built:
+where the building changed a detail, the text here was changed to match,
+and `PHASE0_REPORT.md` lists those changes.
 
 Duck Mold turns a text file (a *recipe*) into a game-ready 3D model for
 Duck Forge. It is an assembler, not a modelling program: you name parts,
@@ -35,10 +37,10 @@ Two things I did not expect:
    files (build shapes in code, or merge the built-in ones)", and its
    Phase 3 design lists "3D model files (OBJ, glTF)" under *left out on
    purpose*. So there is no glTF import to check against. Section 8 says
-   what I propose instead: a `.glb` kept so simple that Duck Forge can
+   what was done instead: a `.glb` kept so simple that Duck Forge can
    read it with what it already has, and a tested reader to prove it.
 2. **None of the three projects has a licence.** There is nothing to
-   match. See question 3 in section 16.
+   match. See decision 3 in section 16.
 
 ---
 
@@ -101,7 +103,7 @@ One note on the word "front". Duck Forge's cube code calls its -z face
 "front" because that is the face a default camera sees. For a model with a
 face and two arms, "front" has to be where it faces, or "left arm" would
 mean two different things. I chose "a model faces forward", which is also
-what glTF says. It is question 1 in section 16, because every character
+what glTF says. It is decision 1 in section 16, because every character
 you ever make depends on it.
 
 ---
@@ -199,20 +201,19 @@ gets its shape from **exactly one** of these four fields:
 |---|---|
 | `shape = "box"` | one of the five built-in shapes (table below) |
 | `use = "leg"` | a copy of a part from `define` |
-| `file = "wheel.toml"` | another recipe, or a mesh file (`.obj`, `.glb`, `.gltf`; section 12). The path starts from the recipe's folder. |
+| `file = "wheel.toml"` | another recipe, or a mesh file (`.obj`; section 12). The path starts from the recipe's folder. |
 | `parts = [ ... ]` | an assembly: a list of parts of its own (nesting) |
 
 The other fields of a part:
 
 | Field | What it is |
 |---|---|
-| `name` | What to call it: letters, digits, `_` and `-`. Needed if another part attaches to it. Names in one list must differ. An unnamed part is called by its place in the list: `#3`. |
+| `name` | What to call it: letters, digits, `_` and `-`. Needed if another part attaches to it. Names in one list must differ. An unnamed part is called by its place in the list, counting from 0 as error messages do: `#2` is `parts[2]`. |
 | `color` | A palette name: the part's colour. |
 | `colors` | Colours for single faces, by face name: `{ top = "grass" }`. |
 | `attach`, `to` | Join my socket `attach` to the socket `to = "part.socket"` of another part in the same list. |
-| `turn` | With `attach`: degrees to twist the part around the join. |
+| `rotate` | With `attach`: one number, the degrees to twist the part around the join. Without `attach`: `[x, y, z]` degrees. |
 | `move` | Without `attach`: `[x, y, z]`, where the part's centre goes. |
-| `rotate` | Without `attach`: `[x, y, z]` degrees. |
 | `scale` | One number, or `[x, y, z]`. Must be above zero. |
 | `mirror` | `"x"`, `"y"` or `"z"`: flips the part across that direction, sockets too. `mirror = "x"` turns a left arm into a right arm. |
 | `sockets` | The part's own named sockets (section 5). |
@@ -220,10 +221,13 @@ The other fields of a part:
 | `bones`, `colliders`, `lods` | Reserved, as above. |
 
 A part is placed in one of two ways. With `attach` and `to` it goes where
-the sockets say, and `move` or `rotate` are refused (the message says to
-use `turn`, or to move the socket). Without them it sits at the centre of
-its list, moved and turned by `move` and `rotate`: the escape hatch for
-when you do want to type a position.
+the sockets say; `move` is refused (the message says to move the socket),
+and `rotate` is one number that twists it around the join. Without them
+it sits at the centre of its list, moved and turned by `move` and
+`rotate = [x, y, z]`: the escape hatch for when you do want to type a
+position. (`rotate` was two fields in the first draft, `turn` and
+`rotate`; they became one name by decision 5. Writing the wrong form for
+the part's kind is an error that shows the right one.)
 
 ### The five shapes
 
@@ -252,13 +256,17 @@ the file, the line, the field, what is wrong, and a fix where one is
 obvious.
 
 ```
-error: robot.toml:31: parts[3].atach: there is no field "atach". Did you mean "attach"?
-error: robot.toml:32: parts[3].to: part "body" has no socket "nek". It has: neck, left_arm, right_arm, top, bottom, left, right, front, back, center. Did you mean "body.neck"?
-error: robot.toml:40: parts[4].color: "#D0453A" is not a palette name. Add it to [palette] (for example red = "#D0453A") and write color = "red".
-error: robot.toml:12: define.arm.segments: 200 is too many. Allowed: 3 to 64.
-warning: robot.toml:6: palette.rust: this colour is never used.
-4 errors, 1 warning. Nothing was written.
+error: robot.toml:12: define.arm.segments: 200 is too big. Allowed: 3 to 64.
+error: robot.toml:31: parts[3].atach: there is no field "atach" here. Did you mean "attach"?
+error: robot.toml:32: parts[3].to: the part "body" has no socket "nek". Did you mean "neck"?
+error: robot.toml:40: parts[4].color: "#D0453A" is not a palette name. Add it to [palette] under a name (for example accent = "#D0453A") and write that name here.
+warning: robot.toml:6: palette.rust: the colour "rust" is never used.
+4 errors, 1 warning. Nothing was built.
 ```
+
+They come file by file, from the top line down. When there is no
+suggestion to make, the line ends with what is allowed instead
+(`It can be: box, cylinder, sphere, cone, wedge.`).
 
 Things that are errors: a syntax mistake, an unknown or misspelt field, a
 missing or doubled field, a wrong kind of value, a number out of range, an
@@ -315,10 +323,10 @@ my `bottom` meets the trunk's `top`, facing it.
   it turns around the upright axis, so it stays the right way up. If the
   sockets face up or down, it rolls over sideways instead, so its front
   still faces front. One fixed rule, so the result never depends on luck.
-- **`turn`** then twists the part around the join, in degrees, clockwise
-  when you look at the join from the side the other socket faces. For a
-  socket that faces up, `turn = 90` is the same turn as
-  `rotate = [0, 90, 0]`.
+- **`rotate`**, on a joined part, then twists it around the join by one
+  number of degrees, clockwise when you look at the join from the side
+  the other socket faces. For a socket that faces up, `rotate = 90` is
+  the same turn as `rotate = [0, 90, 0]` on a free part.
 - `mirror` and `scale` happen to the part first, sockets included, so a
   mirrored arm's shoulder socket is on its other side, ready to join.
 
@@ -387,7 +395,7 @@ that:
 
 1. **The names are taken.** `bones`, `colliders` and `lods` are reserved
    in every part and at the top of the file. Today they give a clear
-   message (`"bones" is reserved for rigs and not available yet`), so no
+   message (`"bones" is reserved for rigs and isn't available yet`), so no
    recipe can use them for something else, and no recipe silently carries
    data that does nothing. That is Duck Echo's rule: a field that exists,
    works.
@@ -504,22 +512,25 @@ sprite sheets): the format is a 12-byte header, a block of JSON and a
 block of plain numbers. No new library, so Duck Forge's test that guards
 its dependency list stays green.
 
-In Phase 0 I will:
+In Phase 0:
 
-1. Write the `.glb` as above, and check it against the glTF rules in
-   tests (required fields, sizes, alignment, bounds).
-2. Write a **small, separate reader** that turns a Duck Mold `.glb` into
-   exactly what a Duck Forge `Mesh` holds: a list of points, and
-   triangles with clockwise corners and a `Color` each. It uses only the
-   standard library and `serde_json`, shares no code with the exporter
-   (so a mistake in one cannot hide a mistake in the other), and is
-   tested against all five examples. It is written to be copied into
-   Duck Forge as `Mesh::load_glb`.
-3. Write `docs/forge-import.md`: the file layout, the reader, and the
-   three lines of game code that draw a model.
+1. The `.glb` is written as above and checked against the glTF rules in
+   tests (required fields, sizes, alignment, bounds). The official
+   Khronos glTF validator was also run on the five examples by hand: no
+   errors, warnings, infos or hints.
+2. A **small, separate reader**, `docs/forge/duck_mold_glb.rs`, turns a
+   Duck Mold `.glb` into exactly what a Duck Forge `Mesh` holds: a list
+   of points, and triangles with clockwise corners and a colour each. It
+   uses only the standard library and `serde_json`, shares no code with
+   the exporter (so a mistake in one cannot hide a mistake in the
+   other), and is tested against all five examples. It is written to be
+   copied into Duck Forge as `Mesh::load_glb`.
+3. `docs/forge-handoff.md` lists exactly what a loader must support, for
+   the session that adds one to Duck Forge.
 
-What I can't do from here is put that reader into Duck Forge itself: this
-session can only write to the Duck Mold repository. That is question 2.
+Putting that reader into Duck Forge itself is a follow-up session in the
+Duck Forge repository (decision 2): this one can only write to Duck
+Mold.
 
 ---
 
@@ -529,7 +540,7 @@ The program is `duck-mold`. Three commands, plus help.
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file> [--json]` | Checks and builds a recipe in memory and reports on it. Also takes a `.glb`, `.gltf` or `.obj`, to measure a finished or foreign model. Writes nothing. |
+| `duck-mold inspect <file> [--json]` | Checks and builds a recipe in memory and reports on it. Also takes an `.obj` mesh, or a `.glb` that Duck Mold wrote, to measure it as it is. Writes nothing. |
 | `duck-mold export <recipe> [-o <file.glb>] [--json]` | Builds the recipe and writes the `.glb` (default: next to the recipe, same name). Ends with a one-line summary; `--json` gives the full inspect report. |
 | `duck-mold guide` | Prints the agent guide, which is built into the program, so an agent with only the program can learn it. |
 | `duck-mold help`, `--help`, `--version` | Every command; `duck-mold <command> --help` for one. |
@@ -625,7 +636,7 @@ its six parts shown here, to keep the example short):
       "size": [0.7, 0.8, 0.4],
       "bounds": { "min": [-0.35, 0.5, -0.2], "max": [0.35, 1.3, 0.2] },
       "colors": ["steel"], "attached_to": null, "parts": [] },
-    { "name": "left_arm", "kind": "use", "uses": "arm", "triangles": 12,
+    { "name": "left_arm", "kind": "box", "uses": "arm", "triangles": 12,
       "size": [0.16, 0.6, 0.16],
       "bounds": { "min": [-0.51, 0.63, -0.08], "max": [-0.35, 1.23, 0.08] },
       "colors": ["steel", "red"], "attached_to": "body.left_arm", "parts": [] }
@@ -644,8 +655,16 @@ its six parts shown here, to keep the example short):
 - `overlapping` entries: `{ "a": "leaves", "b": "trunk", "depth": 0.1, "hidden": false }`.
 - `export --json` prints the same report plus `"output": "robot.glb"`
   and `"bytes"`.
-- For a `.glb`, `.gltf` or `.obj` the report has the same fields; the
-  part list is there when the file carries Duck Mold's extras.
+- A part's `kind` is what it is made of: `box`, `cylinder`, `sphere`,
+  `cone`, `wedge`, `assembly` (a part made of parts) or `mesh`. `uses`
+  names the defined part it came from and `file` the file, when there is
+  one. `mirrored` appears when it is true.
+- Every palette colour is listed, with 0 triangles if nothing uses it.
+  `unpainted_triangles` appears when some faces have no colour.
+- For an `.obj` or a Duck Mold `.glb` the report has the same fields. A
+  `.glb` gives its parts as a flat list; an `.obj` is one part, and the
+  report adds `materials`, the file's material names with their triangle
+  counts.
 
 When the recipe has mistakes:
 
@@ -660,9 +679,9 @@ When the recipe has mistakes:
       "line": 31,
       "column": 1,
       "path": "parts[3].atach",
-      "message": "there is no field \"atach\"",
+      "message": "there is no field \"atach\" here",
       "got": "atach",
-      "allowed": { "options": ["name", "shape", "use", "file", "parts", "color", "colors", "attach", "to", "turn", "move", "rotate", "scale", "mirror", "sockets", "note"] },
+      "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "rotate", "move", "scale", "mirror", "sockets", "note"] },
       "suggestion": "attach"
     }
   ],
@@ -675,9 +694,11 @@ fixed word an agent can act on: `syntax`, `unknown_field`,
 `missing_field`, `type_mismatch`, `out_of_range`, `unsupported_version`,
 `unknown_shape`, `unknown_color`, `unknown_part`, `unknown_socket`,
 `unknown_face`, `duplicate_name`, `conflict`, `cycle`, `reserved`,
-`file_not_found`, `bad_mesh`; and for warnings `unused`, `no_color`,
-`floating`, `hidden`, `off_ground`. The first six are Duck Echo's own
-names. `allowed` is either `options` or a `min` and `max`.
+`unsupported`, `file_not_found`, `bad_mesh`, `io`; and for warnings
+`unused`, `no_color`, `floating`, `hidden`, `off_ground`, `skipped`. The
+first six are Duck Echo's own names. `allowed` is either `options` or a
+`min` and `max`. `docs/AI_GUIDE.md`, section 8, says what to do about
+each.
 
 ---
 
@@ -703,7 +724,7 @@ This is rule 1, and it needs care in a few places:
 
 ---
 
-## 12. Importing meshes (OBJ and glTF), last
+## 12. Importing meshes (OBJ), last
 
 A part can take its shape from a file, and is then a static part like any
 other: it has the seven built-in sockets, can declare more, and can be
@@ -726,25 +747,23 @@ to = "ground.top"
   lists the material names, the size and the triangle count, so you know
   what to write.
 - **OBJ:** points and faces (faces with more than three corners are cut
-  into triangles), material names. Lines, curves and textures are skipped
-  with a note.
-- **glTF** (`.glb`, or `.gltf` with its data beside it or inside it):
-  triangle meshes with their objects' positions applied. Skins,
-  animations, morph targets, textures and other draw modes are skipped
-  with a note saying what was skipped.
-- **Directions:** files are read as glTF means them (y up, facing +z,
+  into triangles), material names. Normals, texture coordinates and the
+  material file are passed over; lines and curves are skipped with a
+  note. A mistake in the file is reported with the mesh file's own name
+  and line.
+- **Directions:** a file is read as glTF means them (y up, facing +z,
   right-handed), which is also what Blender writes for OBJ by default.
   For a file made another way, `rotate` and `scale` on the part fix it.
 - The recipe plus the file it names are the source of truth together. The
   same two always give the same output.
 
-**Should it move to Phase 1?** My advice: **keep OBJ in Phase 0, and keep
-glTF only if steps 1 to 7 land cleanly.** OBJ is small and well defined.
-glTF is the piece with the long tail (many ways to store the same
-numbers), and it is the one I would move first. Duck Mold has to read its
-own `.glb` anyway for `inspect`, so the simple cases come almost free; it
-is the foreign files that take time. I will build it last, as you said,
-and the report will say plainly how far it got.
+**glTF import moved to Phase 1** (decision 4). The first draft of this
+section planned both formats and advised keeping OBJ and letting glTF go
+first if time ran short. OBJ is small and well defined; glTF has many
+ways to store the same numbers, and reading other programs' files is
+where the time goes. What Phase 0 does read is its own `.glb`, for
+`inspect`. A `.glb` or `.gltf` named in a recipe gets a clear "not yet"
+message that suggests saving the mesh as `.obj`.
 
 ---
 
@@ -755,27 +774,32 @@ Duck-Mold/
 ├── Cargo.toml                 the workspace: both crates, shared settings
 ├── DESIGN.md                  this file
 ├── README.md                  for people
-├── PHASE0_REPORT.md           written at the end
+├── PHASE0_REPORT.md           what works, known limits, what comes next
 ├── docs/
 │   ├── AI_GUIDE.md            for agents: the CLI from scratch (also `duck-mold guide`)
 │   ├── recipe-format.md       every field, default and range
-│   └── forge-import.md        the .glb layout and the reader for Duck Forge
+│   ├── forge-handoff.md       what a Duck Forge loader must support
+│   └── forge/duck_mold_glb.rs the reader written for Duck Forge
 ├── examples/                  crate, table, tree, house, robot (.toml), and crate.json
+├── tests/golden/              the examples' exact .glb files and reports
 └── crates/
     ├── duck-mold-core/        the library: everything except the command line
     │   ├── src/
     │   │   ├── source.rs      TOML or JSON text -> one tree that remembers line numbers
     │   │   ├── issue.rs       problems: code, file, line, field, message, fix
     │   │   ├── recipe.rs      the recipe's fields, read from that tree and checked
+    │   │   ├── load.rs        the files a recipe names: palettes, recipes, meshes
     │   │   ├── math.rs        points, turns, and the exact sine and cosine
     │   │   ├── shapes.rs      box, cylinder, sphere, cone, wedge
-    │   │   ├── assemble.rs    parts, sockets, joins, nesting -> a tree of placed parts
-    │   │   ├── model.rs       the built model: the part tree and its coloured triangles
-    │   │   ├── glb.rs         writing (and reading) .glb
+    │   │   ├── mesh.rs        reading .obj files
+    │   │   ├── assemble.rs    parts, sockets, joins, nesting, colour -> a tree of placed parts
+    │   │   ├── model.rs       the built model: the part tree and its coloured faces
+    │   │   ├── glb.rs         writing (and reading back) .glb
     │   │   ├── inspect.rs     size, counts, ground, floating, overlapping
-    │   │   └── import.rs      OBJ and glTF as static parts
-    │   └── tests/             golden files, the Duck Forge reader, one file per step
+    │   │   └── tools.rs       what the commands do, for any front end
+    │   └── tests/             one file of tests per step
     └── duck-mold-cli/         the `duck-mold` program: commands, text and JSON output
+        └── tests/             the program itself, and the golden-file tests
 ```
 
 Two crates, as you asked: the library does the work and knows nothing
@@ -793,11 +817,11 @@ and every public item must have a comment, as in Duck Echo.
 | `serde`, `serde_json` | core | Writes JSON (reports, and the JSON block inside a `.glb`) and reads glTF. |
 | `clap` | cli | Reads the command line and writes `--help` from the same comments, so help can't drift from what the program does. Duck Echo uses it too. |
 
-That is all. Things I will write rather than import, because each is
-small and I want control of the wording or the bytes: the JSON reader for
-recipes (so JSON recipes get line numbers too, which `serde_json` cannot
-give), "did you mean" suggestions, the `.glb` writer and reader, and the
-OBJ reader.
+That is all. Things written here rather than imported, because each is
+small and the wording or the bytes matter: the JSON reader for recipes
+(so JSON recipes get line numbers too, which `serde_json` cannot give),
+"did you mean" suggestions, the `.glb` writer and reader, and the OBJ
+reader.
 
 ---
 
@@ -805,32 +829,37 @@ OBJ reader.
 
 - **Every step has tests**, written with that step and committed with it.
 - **Golden files.** Each of the five examples has its `.glb` and its
-  `inspect --json` report stored in the repository. A test rebuilds them
-  and compares every byte. If one changes, the test fails and shows what
-  changed; a change that is meant is accepted with one command, and the
-  commit says why.
+  `inspect --json` report stored in `tests/golden/`. A test runs the
+  real program, rebuilds them and compares every byte. If one changes,
+  the test fails and shows what changed; a change that is meant is
+  accepted with `DUCK_MOLD_ACCEPT=1 cargo test -p duck-mold-cli --test
+  golden`, and the commit says why.
 - **Same in, same out.** Building twice gives the same bytes; the TOML
   and JSON forms of one recipe give the same bytes.
 - **Mistakes are tested too.** Each kind of error has a test for its
   file, line, field and suggestion.
 - **The Duck Forge reader** (section 8) reads every golden `.glb` and
   must find the same triangles and exact palette colours.
+- **The documents are tested.** The first recipe in the agent guide and
+  in the README must build to exactly the report printed beside it, and
+  every field the guide lists must be one the program knows.
 - **Shapes face outwards.** The same test Duck Forge has for its own
   meshes, for every shape and every example.
 - `cargo fmt` and `cargo clippy` with warnings as errors, clean at every
   commit.
 - One commit per step, in your order: workspace, recipes, shapes, parts
   and sockets, colour, export, inspect, import; then the examples, the
-  README and guide, and the report.
+  documents, and the report.
 
 ---
 
 ## 15. Left out on purpose
 
 Besides your list (GUI, rendering, booleans, rigging, animation, UVs,
-texture painting, sculpting), I am leaving these out of Phase 0. Each is
-a candidate for later, and none needs a change to what is designed here:
+texture painting, sculpting), these are left out of Phase 0. Each is a
+candidate for later, and none needs a change to what is designed here:
 
+- **Importing glTF** (section 12).
 - **Sockets in the `.glb`**, so a game can put a hat on a head at run
   time. A natural next step, as named empty points.
 - **Mirror copies** (one line that makes both arms). In Phase 0 `mirror`
@@ -845,28 +874,24 @@ a candidate for later, and none needs a change to what is designed here:
 
 ---
 
-## 16. Questions for you
+## 16. The decisions
 
-Please answer these before I start. Each has my recommendation, so "yes
-to all" is a complete answer.
+Before any code was written, this document ended with five questions.
+These are the answers that were given, and what each led to.
 
-1. **Which way does a model face?** I propose: forward, +z, so `front`
-   is +z and `left` is -x (section 3). The other choice is "towards the
-   default camera" (-z), which matches the comment in Duck Forge's cube
-   but makes a character's left arm sit on the side called right.
-   *Recommended: forward (+z).*
-2. **The Duck Forge side.** Phase 0 will give you a tested reader and a
-   document, but Duck Forge itself won't load a `.glb` until that reader
-   is added there, and this session can only write to Duck Mold. Is a
-   follow-up session in the Duck Forge repository the plan?
-   *Recommended: yes, right after Phase 0.*
-3. **Licence.** None of the three sibling projects has one, so there is
-   nothing to match. Shall I leave Duck Mold without one as well, or do
-   you want one added (and which)?
-   *Recommended: leave it out for now; decide for the whole suite at once.*
-4. **Importing glTF.** Keep OBJ in Phase 0 and treat glTF import as the
-   piece that moves to Phase 1 if time gets short (section 12)?
-   *Recommended: yes.*
-5. **The names.** `duck-mold inspect`, `export` and `guide`; fields
-   `parts`, `define`, `use`, `attach`, `to`, `turn`, `move`. Anything you
-   would rather call differently is cheapest to change now.
+1. **Which way does a model face?** *Forward, +z.* `front` is +z and
+   `left` is the model's own left, -x (section 3). The comment in Duck
+   Forge's cube that calls its -z face "front" disagrees in wording
+   only; `PHASE0_REPORT.md` and `docs/forge-handoff.md` note it for the
+   Duck Forge session to fix.
+2. **The Duck Forge side.** *A follow-up session in the Duck Forge
+   repository.* Phase 0 gives it a tested reader
+   (`docs/forge/duck_mold_glb.rs`) and a short note of exactly what the
+   loader must support (`docs/forge-handoff.md`).
+3. **Licence.** *Left out for now*, like the three sibling projects; to
+   be decided for the whole suite at once.
+4. **Importing glTF.** *OBJ stays in Phase 0; glTF import moves to
+   Phase 1* (section 12).
+5. **The names.** *`turn` became `rotate`; the rest stayed.* One field,
+   `rotate`, is a single number on an attached part and `[x, y, z]` on a
+   free one (section 4).
