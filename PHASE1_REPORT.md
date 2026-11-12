@@ -52,8 +52,8 @@ additions:
 - from step 7, a second test run and a second clippy run without the
   preview window (`--no-default-features`).
 
-Every step's push was green on both systems. The step 7 run was still
-going as this was written.
+Every step was green on both systems, the last one with and without
+the window.
 
 ### 2. `duck-mold render`
 
