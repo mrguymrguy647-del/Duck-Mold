@@ -1424,3 +1424,34 @@ fn files_are_named_from_the_recipes_folder() {
         warning.text
     );
 }
+
+#[test]
+fn a_json_recipe_is_edited_and_undone_the_same_way() {
+    let folder = folder("studio_json");
+    let recipe = folder.join("crate.json");
+    std::fs::copy(examples().join("crate.json"), &recipe).unwrap();
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    assert!(!studio.look_only());
+    let first = studio.outline()[0].path.clone();
+    assert!(studio.select(Some(&first)));
+    let facts = studio.facts().expect("a JSON recipe's parts can be edited");
+    assert_eq!(facts.shape.as_deref(), Some("box"));
+
+    studio
+        .add_to_socket(&first, "top", &Made::Shape("sphere".into()))
+        .unwrap();
+    assert_eq!(studio.selected(), Some("sphere"));
+    let after = std::fs::read_to_string(&recipe).unwrap();
+    assert!(after.contains("\"shape\": \"sphere\""), "{after}");
+    // It is still JSON, and what was there is still there, as it was.
+    let (gone, _) = changed(&before, &after);
+    assert!(
+        gone.len() <= 1,
+        "only the line the new part follows: {gone:?}"
+    );
+    assert!(!studio.has_mistakes(), "{:?}", studio.problems());
+
+    studio.undo().unwrap();
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), before);
+}
