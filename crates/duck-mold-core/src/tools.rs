@@ -15,7 +15,10 @@ use crate::glb::{read_glb, write_glb};
 use crate::inspect::{Inspection, MaterialUse, inspect};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
-use crate::model::Model;
+use crate::math::{Bounds, Transform, Vec3};
+use crate::mesh::{MeshFile, read_obj};
+use crate::model::{Face, Model, Part, PartKind};
+use crate::recipe::Loc;
 
 /// Why an operation gave nothing.
 #[derive(Debug, Clone, PartialEq)]
@@ -60,8 +63,8 @@ pub struct Built {
     pub materials: Vec<MaterialUse>,
 }
 
-/// Reads and builds a file: a recipe (`.toml`, `.json`), or a finished
-/// model to measure (a `.glb` that Duck Mold wrote).
+/// Reads and builds a file: a recipe (`.toml`, `.json`), or a model to
+/// measure (an `.obj` mesh, or a `.glb` that Duck Mold wrote).
 pub fn build(path: &Path) -> Result<Built, Failure> {
     let source = display_path(path);
     let ending = path
@@ -94,20 +97,85 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
                 materials: Vec::new(),
             })
         }
+        "obj" => {
+            let text = String::from_utf8(read_file(path)?).map_err(|_| {
+                Failure::Usage(Box::new(Issue::error(
+                    Code::Io,
+                    "",
+                    format!("can't read \"{source}\": it isn't text"),
+                )))
+            })?;
+            let mut issues = Vec::new();
+            match read_obj(&text, &source, &mut issues) {
+                Some(mesh) => Ok(Built {
+                    model: model_of_mesh(&mesh, path),
+                    source,
+                    warnings: Report::from_issues(issues).warnings,
+                    materials: mesh
+                        .material_counts()
+                        .into_iter()
+                        .map(|(name, triangles)| MaterialUse { name, triangles })
+                        .collect(),
+                }),
+                None => Err(Failure::Invalid(Report::from_issues(issues))),
+            }
+        }
         "gltf" => Err(Failure::Usage(Box::new(Issue::error(
             Code::Unsupported,
             "",
             format!(
-                "\"{source}\" is a glTF text file, which Duck Mold can't read yet. It reads recipes (.toml, .json) and the .glb files it writes"
+                "\"{source}\" is a glTF text file, which Duck Mold can't read yet. It reads recipes (.toml, .json), .obj meshes and the .glb files it writes"
             ),
         )))),
         _ => Err(Failure::Usage(Box::new(Issue::error(
             Code::Io,
             "",
             format!(
-                "\"{source}\" isn't something Duck Mold reads: give it a recipe (.toml or .json) or a .glb file it wrote"
+                "\"{source}\" isn't something Duck Mold reads: give it a recipe (.toml or .json), an .obj mesh or a .glb file it wrote"
             ),
         )))),
+    }
+}
+
+/// A mesh file as a model of one part, exactly as the file has it: not
+/// moved to the ground, not coloured.
+fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
+    let name = path
+        .file_stem()
+        .and_then(|stem| stem.to_str())
+        .unwrap_or("mesh")
+        .to_owned();
+    let faces: Vec<Face> = mesh
+        .triangles
+        .iter()
+        .map(|corners| Face {
+            corners: corners.map(|corner| Vec3::from(corner).tidied()).to_vec(),
+            color: None,
+        })
+        .collect();
+    let part = Part {
+        name: name.clone(),
+        path: name.clone(),
+        loc: Loc::default(),
+        kind: PartKind {
+            shape: "mesh".to_owned(),
+            uses: None,
+            file: None,
+        },
+        attached_to: None,
+        mirrored: false,
+        place: Transform::IDENTITY,
+        sockets: Vec::new(),
+        bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
+        faces: 0..faces.len(),
+        parts: Vec::new(),
+    };
+    Model {
+        name,
+        palette: Vec::new(),
+        faces,
+        parts: vec![part],
+        sockets: Vec::new(),
     }
 }
 

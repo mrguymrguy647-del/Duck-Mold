@@ -10,8 +10,10 @@
 //! Paths inside a recipe start from that recipe's folder.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use crate::issue::{Code, Issue};
+use crate::mesh::read_obj;
 use crate::recipe::{self, Loc, PaletteColor, PaletteDef, PartDef, Recipe, Source, hex};
 use crate::source::{self, Syntax};
 
@@ -291,7 +293,15 @@ impl Loader<'_> {
                     Source::Recipe(Box::new(recipe))
                 }
             }
-            "obj" => self.mesh_part(&path, written, &shown, loc),
+            "obj" => {
+                let Some(text) = self.read(&path, written, loc) else {
+                    return Source::Broken;
+                };
+                match read_obj(&text, &shown, self.issues) {
+                    Some(mesh) => Source::Mesh(Arc::new(mesh)),
+                    None => Source::Broken,
+                }
+            }
             "glb" | "gltf" => {
                 self.issues.push(loc.error(
                     Code::Unsupported,
@@ -311,15 +321,6 @@ impl Loader<'_> {
                 Source::Broken
             }
         }
-    }
-
-    /// Reads a mesh file to use as a part.
-    fn mesh_part(&mut self, _path: &Path, written: &str, _shown: &str, loc: &Loc) -> Source {
-        self.issues.push(loc.error(
-            Code::Unsupported,
-            format!("\"{written}\" is a mesh file, and importing meshes isn't available yet"),
-        ));
-        Source::Broken
     }
 }
 

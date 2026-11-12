@@ -42,7 +42,8 @@ enum Command {
     /// with mistakes gets every mistake listed, with its file, line and
     /// field, and exit code 1.
     Inspect {
-        /// A recipe (.toml or .json), or a .glb that Duck Mold wrote.
+        /// A recipe (.toml or .json), an .obj mesh, or a .glb that Duck
+        /// Mold wrote.
         file: PathBuf,
         /// Print the report as JSON, for agents.
         #[arg(long)]
