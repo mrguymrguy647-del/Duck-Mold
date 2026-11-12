@@ -1,0 +1,59 @@
+# A pine tree: three tiers of needles stacked on a trunk, each a smaller
+# copy of the same cone.
+#
+#   duck-mold inspect examples/tree.toml
+#
+# The tiers are pushed into each other on purpose, as on a real pine, and
+# `inspect` says so under "overlapping". Overlap is a fact in the report,
+# not a mistake.
+
+version = 0
+name = "tree"
+description = "A pine tree with three tiers."
+
+[palette]
+bark   = "#6B4A2B"
+needle = "#2F7D45"
+
+# One tier. Its socket `next` is a point inside the cone, a little above
+# its middle, facing up: where the next tier sits. `at` is an exact point
+# in the part's own space, whose zero is the part's middle.
+[define.tier]
+shape = "cone"
+radius = 0.7
+height = 0.9
+segments = 8
+color = "needle"
+
+[define.tier.sockets]
+next = { at = [0, 0.1, 0], facing = "up" }
+
+[[parts]]
+name = "trunk"
+shape = "cylinder"
+radius = 0.12
+height = 0.5
+segments = 8
+color = "bark"
+
+# `bottom` and `top` are sockets every part has.
+[[parts]]
+name = "low"
+use = "tier"
+attach = "bottom"
+to = "trunk.top"
+
+# `scale` makes a part bigger or smaller, its sockets with it.
+[[parts]]
+name = "middle"
+use = "tier"
+scale = 0.75
+attach = "bottom"
+to = "low.next"
+
+[[parts]]
+name = "high"
+use = "tier"
+scale = 0.5
+attach = "bottom"
+to = "middle.next"

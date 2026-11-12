@@ -1,0 +1,25 @@
+# A wooden crate: the smallest useful recipe.
+#
+#   duck-mold inspect examples/crate.toml
+#   duck-mold export examples/crate.toml
+#
+# examples/crate.json is the same recipe written as JSON; both give the
+# same .glb, byte for byte.
+
+version = 0
+name = "crate"
+description = "A wooden crate with darker planks on its top and bottom."
+
+# The colours, by name. A part's colour must be one of these names.
+[palette]
+wood  = "#B07A3F"
+plank = "#8A5A2B"
+
+# One part: a box, 1 metre each way. `color` paints all of it; `colors`
+# repaints single faces by name.
+[[parts]]
+name = "box"
+shape = "box"
+size = [1, 1, 1]
+color = "wood"
+colors = { top = "plank", bottom = "plank" }

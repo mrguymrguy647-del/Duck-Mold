@@ -1,0 +1,19 @@
+{
+  "version": 0,
+  "name": "crate",
+  "description": "A wooden crate with darker planks on its top and bottom.",
+  "note": "The same recipe as crate.toml, written as JSON. JSON has no comments, so a note field is the place for them.",
+  "palette": {
+    "wood": "#B07A3F",
+    "plank": "#8A5A2B"
+  },
+  "parts": [
+    {
+      "name": "box",
+      "shape": "box",
+      "size": [1, 1, 1],
+      "color": "wood",
+      "colors": { "top": "plank", "bottom": "plank" }
+    }
+  ]
+}
