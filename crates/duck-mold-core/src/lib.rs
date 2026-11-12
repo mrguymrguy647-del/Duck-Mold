@@ -15,6 +15,8 @@ pub const RECIPE_VERSION: i64 = 0;
 
 pub mod issue;
 pub mod load;
+pub mod math;
 pub mod mesh;
 pub mod recipe;
+pub mod shapes;
 pub mod source;
