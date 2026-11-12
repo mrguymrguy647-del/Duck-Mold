@@ -1254,9 +1254,23 @@ changed from this design, and what Phase 2 should start with.
 
 ## 18. Phase 2: the Studio
 
-**Status: proposed, waiting for approval.** Phase 2 adds a window, the
-*Studio*, where a person builds a model with the mouse instead of typing
-the recipe. Nine steps, one commit each, in the order of the brief.
+**Status: approved.** All five decisions at the end were answered yes,
+with one condition and four additions, folded in below:
+
+- *The condition:* when a part comes from a definition, the properties
+  panel says so and names every part that will change, before the edit.
+- *Placing a part anywhere on a surface:* an edit that declares a socket
+  on a part, and in the Studio a click on any point of a face makes a
+  socket there to join something to. Dragging a joined part along the
+  surface changes that socket's `shift`.
+- *Export and Render picture buttons* in the top bar, working without a
+  terminal.
+- *Two more edits:* `set-color`, and `duplicate --mirror`.
+- *All of them in the agent guide*, like the other edits.
+
+Phase 2 adds a window, the *Studio*, where a person builds a model with
+the mouse instead of typing the recipe. Nine steps, one commit each, in
+the order of the brief.
 
 ### The five rules, and how each is kept
 
@@ -1289,6 +1303,10 @@ duck-mold edit robot.toml rename hat cap
 duck-mold edit robot.toml duplicate cap --name cap_2 --to left_arm.grip
 duck-mold edit robot.toml remove cap_2
 duck-mold edit robot.toml add-color gold "#F2C84B"
+duck-mold edit robot.toml set-color gold "#E0B030"
+duck-mold edit robot.toml duplicate left_arm --mirror
+duck-mold edit robot.toml add-socket body badge --on front --shift 0.4,0.6,0
+duck-mold edit robot.toml set-socket body.badge --shift 0.2,0.6,0
 ```
 
 | Command | What it does |
@@ -1299,7 +1317,11 @@ duck-mold edit robot.toml add-color gold "#F2C84B"
 | `join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes which of its own sockets it joins by. |
 | `set <part> ...` | Changes a part: `--size x,y,z`, `--radius`, `--height`, `--segments`, `--shape`, `--color`, `--face-color top=plank`, `--twist`. Several at once are one edit. |
 | `duplicate <part>` | Copies a part, comments and all, right after it, under a new name (`--name`, or `hat_2`). It joins the same socket unless `--to` says another. |
+| `duplicate <part> --mirror` | The same, as a mirror image: a right arm from a left arm. The copy is flipped left to right, its twist is reversed, and it joins the socket with `left` and `right` swapped in its name (`body.right_arm` for `body.left_arm`) unless `--to` says another. Its name swaps them too. |
 | `add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
+| `set-color <name> <#RRGGBB>` | Changes a colour that is already in the palette. Everything painted with it changes. |
+| `add-socket <part> <name> --on <side>` | Declares a socket on a part, on one side of it, slid across that side by `--shift x,y,z`. It then sits on the surface, like any socket. |
+| `set-socket <part.socket>` | Moves a socket declared that way: `--shift`, and `--on` for another side. Whatever is joined to it moves with it. |
 
 Rules for all of them:
 
@@ -1402,7 +1424,7 @@ or removing a part there is refused with a sentence suggesting the usual
 
 ```text
 +------------------------------------------------------------------+
-| robot.toml    Undo  Redo    Add part v     Frame      384 tris   |
+| robot.toml  Undo Redo  Add part v  Frame  Export  Render picture  |
 +-------------+--------------------------------------+-------------+
 | PARTS       |                                      | head        |
 |  body       |                                      |  name  head |
@@ -1436,11 +1458,22 @@ or removing a part there is refused with a sentence suggesting the usual
   sizes, its colour (a list of the palette, with "new colour..."), what
   it is joined to, and its twist. Changing one is a `set`, `rename` or
   `join` edit.
+  - **A part that comes from a definition says so**, above its fields:
+    "From the definition `arm`. Changing it also changes:
+    `right_arm/hand`", naming every part, before any edit is made.
 - **Sockets** show as small markers on the selected part.
   - Clicking one opens a short list (the five shapes, the recipe's
     defined parts, the library), and choosing from it is an `add` edit.
+  - **Clicking any point of the selected part's surface** offers the
+    same list for a new socket there: an `add-socket` edit, then `add`.
   - Dragging the selected part shows every other part's sockets, and
-    dropping it on one is a `join` edit.
+    dropping it on one is a `join` edit. Dropping it on a part's surface
+    away from a marker makes a socket there and joins it.
+  - **Dragging a part that sits on a socket of its own along the
+    surface** slides that socket: `set-socket` edits, one undo step.
+- **Export** and **Render picture**, in the top bar, write the `.glb`
+  and the four-view picture next to the recipe, as `duck-mold export`
+  and `duck-mold render` do, and say where they went.
 - **Library**: a folder of recipes and model files (`parts/` beside the
   recipe, or one you choose). Each has a small picture, drawn by the
   same code as `render`. Choosing one for a socket is an `add --file`
@@ -1534,16 +1567,17 @@ As Duck Quill does:
   `duck-mold.exe`, the examples and a "read me first" note. No installer
   in this phase.
 
-### Decisions for you
+### The decisions
+
+These were the five questions; all were answered yes.
 
 1. **`preview` becomes the Studio in look-only mode**, and the Phase 1
-   window code goes. Or keep both windows?
-2. **Undo is the Studio's, and is forgotten when it closes.** Or should
-   the steps be kept on disk, or reachable from the command line?
+   window code goes.
+2. **Undo is the Studio's, and is forgotten when it closes.**
 3. **Editing a part that comes from a definition changes the
-   definition**, and so every part that uses it. Or should the Studio
-   make a private copy for that one part first?
+   definition**, and so every part that uses it. *On one condition:* the
+   properties panel says so and names every part that will change,
+   before the edit.
 4. **Whole-screen pictures are compared on Linux only**; the viewport's
-   pictures and all the clicking tests run on both. Enough?
-5. **A zip, not an installer**, and an icon I make (a small duck built
-   in Duck Mold itself) unless you have one.
+   pictures and all the clicking tests run on both.
+5. **A zip, not an installer**, and an icon made in Duck Mold itself.
