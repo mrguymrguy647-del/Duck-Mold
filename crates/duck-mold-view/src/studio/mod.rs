@@ -11,6 +11,7 @@
 //! after which it reads and builds the file again. When another program
 //! saves the file, it does the same.
 
+pub mod history;
 mod sockets;
 pub mod viewport;
 
@@ -106,6 +107,10 @@ pub struct Studio {
     view: (usize, usize),
     /// The part being dragged to another socket, by path.
     dragging: Option<String>,
+    /// The changes that can be undone, oldest first, and those that were
+    /// undone and can be made again.
+    undo: Vec<history::Step>,
+    redo: Vec<history::Step>,
 }
 
 impl Studio {
@@ -131,6 +136,8 @@ impl Studio {
             pointer: None,
             view: (1, 1),
             dragging: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
         };
         studio.reload();
         studio.frame();
@@ -191,7 +198,7 @@ impl Studio {
         &self.status
     }
 
-    pub(crate) fn say(&mut self, status: impl Into<String>) {
+    pub(super) fn say(&mut self, status: impl Into<String>) {
         self.status = status.into();
     }
 
@@ -704,13 +711,6 @@ fn problem(issue: &Issue, model: &Model) -> Problem {
             .and_then(|line| on_line(&model.parts, &issue.file, line))
             .map(|part| part.path.clone()),
     }
-}
-
-// Filled in by the next step: undo.
-impl Studio {
-    fn changed_outside(&mut self, _before: String) {}
-
-    fn edited(&mut self, _before: String, _summary: &str) {}
 }
 
 /// The same words, starting with a capital letter.

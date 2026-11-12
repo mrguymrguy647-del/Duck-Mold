@@ -131,6 +131,14 @@ round markers.
 
 Each of these is an `add`, `join`, `add-socket` or `set-socket` edit in
 the recipe file, the same ones `duck-mold edit` makes.
+
+**Undo and redo** (the buttons, or Ctrl+Z and Ctrl+Y) take back and
+repeat every change, one at a time, as far back as 500 steps. Because
+the Studio writes each change to the file at once, undo writes the
+earlier text back to the file. A change another program made while the
+Studio was open (an agent, a text editor) is a step too, called "Changed
+outside the Studio": undo always takes back the latest change to the
+file, whoever made it. The steps are forgotten when the Studio closes.
 **Export** writes the `.glb` and **Render picture** the four-view
 picture, next to the recipe. The Studio keeps no model of its own: it
 shows the recipe file, so when you (or an agent) save the recipe in

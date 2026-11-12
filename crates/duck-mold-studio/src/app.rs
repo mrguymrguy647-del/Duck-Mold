@@ -133,6 +133,31 @@ impl StudioApp {
                 {
                     open_another = true;
                 }
+                if !studio.look_only() {
+                    // What each would do is in its tip, and in the
+                    // status line once it is done.
+                    let back = studio.can_undo().map(str::to_owned);
+                    let undo = ui
+                        .add_enabled(back.is_some(), egui::Button::new("Undo"))
+                        .on_hover_text(match &back {
+                            Some(title) => format!("Undo: {title} (Ctrl+Z)"),
+                            None => "Nothing to undo".to_owned(),
+                        });
+                    if undo.clicked() {
+                        let _ = studio.undo();
+                    }
+                    let again = studio.can_redo().map(str::to_owned);
+                    let redo = ui
+                        .add_enabled(again.is_some(), egui::Button::new("Redo"))
+                        .on_hover_text(match &again {
+                            Some(title) => format!("Redo: {title} (Ctrl+Y)"),
+                            None => "Nothing to redo".to_owned(),
+                        });
+                    if redo.clicked() {
+                        let _ = studio.redo();
+                    }
+                    ui.separator();
+                }
                 if ui
                     .button("Frame")
                     .on_hover_text("Bring the whole model back into view")
@@ -189,6 +214,26 @@ impl StudioApp {
         egui::CentralPanel::no_frame().show(ui, |ui| {
             view::show(ui, studio, &mut self.view);
         });
+
+        // Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes, unless a
+        // text field is being typed in: there they belong to the typing.
+        if !studio.look_only() && !ui.ctx().egui_wants_keyboard_input() {
+            let (undo, redo) = ui.input_mut(|input| {
+                let redo = input.consume_key(egui::Modifiers::COMMAND, egui::Key::Y)
+                    || input.consume_key(
+                        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+                        egui::Key::Z,
+                    );
+                let undo = !redo && input.consume_key(egui::Modifiers::COMMAND, egui::Key::Z);
+                (undo, redo)
+            });
+            if undo {
+                let _ = studio.undo();
+            }
+            if redo {
+                let _ = studio.redo();
+            }
+        }
 
         // Escape lets go of the selection. With nothing selected, it
         // closes a window that is only for looking, as `preview` always

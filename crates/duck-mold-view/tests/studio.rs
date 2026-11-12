@@ -1010,3 +1010,221 @@ fn a_part_dropped_on_a_surface_slides_there() {
     );
     assert!(!studio.has_mistakes());
 }
+
+// ---- step 7: undo and redo ---------------------------------------------------
+
+fn colour(part: &str, color: &str) -> Edit {
+    set(
+        part,
+        Changes {
+            color: Some(color.into()),
+            ..Changes::default()
+        },
+    )
+}
+
+#[test]
+fn every_edit_can_be_undone_and_redone_to_the_byte() {
+    let recipe = copy_of("robot", "studio_undo");
+    let original = std::fs::read(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    assert_eq!(studio.can_undo(), None);
+    assert_eq!(studio.undo().unwrap_err(), "Nothing to undo");
+
+    // Three edits of different kinds.
+    studio.apply(&colour("head", "red")).unwrap();
+    let after_one = std::fs::read(&recipe).unwrap();
+    studio
+        .apply(&Edit::Rename {
+            part: "head".into(),
+            new_name: "skull".into(),
+        })
+        .unwrap();
+    let after_two = std::fs::read(&recipe).unwrap();
+    studio
+        .apply(&Edit::Remove {
+            part: "antenna_tip".into(),
+            with_attached: false,
+        })
+        .unwrap();
+    let after_three = std::fs::read(&recipe).unwrap();
+    assert_eq!(studio.can_undo(), Some("Removed \"antenna_tip\""));
+    assert_eq!(studio.can_redo(), None);
+
+    // Back, one at a time: the file is each earlier version exactly.
+    assert_eq!(studio.undo().unwrap(), "Undid: Removed \"antenna_tip\"");
+    assert_eq!(std::fs::read(&recipe).unwrap(), after_two);
+    assert!(
+        studio.part("antenna_tip").is_some(),
+        "the model is built again"
+    );
+    assert_eq!(
+        studio.undo().unwrap(),
+        "Undid: Renamed \"head\" to \"skull\""
+    );
+    assert_eq!(std::fs::read(&recipe).unwrap(), after_one);
+    assert_eq!(studio.undo().unwrap(), "Undid: Set \"head\": colour red");
+    assert_eq!(std::fs::read(&recipe).unwrap(), original);
+    assert_eq!(studio.can_undo(), None);
+    assert_eq!(studio.can_redo(), Some("Set \"head\": colour red"));
+
+    // And forward again.
+    assert_eq!(studio.redo().unwrap(), "Redid: Set \"head\": colour red");
+    assert_eq!(std::fs::read(&recipe).unwrap(), after_one);
+    studio.redo().unwrap();
+    studio.redo().unwrap();
+    assert_eq!(std::fs::read(&recipe).unwrap(), after_three);
+    assert_eq!(studio.redo().unwrap_err(), "Nothing to redo");
+
+    // A new edit after an undo: what was undone can't come back.
+    studio.undo().unwrap();
+    studio.apply(&colour("body", "red")).unwrap();
+    assert_eq!(studio.can_redo(), None);
+    assert_eq!(studio.can_undo(), Some("Set \"body\": colour red"));
+}
+
+#[test]
+fn edits_made_together_are_one_step() {
+    let recipe = copy_of("robot", "studio_undo_together");
+    let original = std::fs::read(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+
+    // A part added at a point of a surface is a socket and a part.
+    assert!(studio.select(Some("head")));
+    let bounds = studio.part("head").unwrap().bounds.unwrap();
+    let point = bounds.center()
+        + vec3(
+            bounds.half().x * 0.5,
+            bounds.half().y * -0.6,
+            bounds.half().z,
+        );
+    let Clicked::Surface { spot, .. } = studio.point_at(VIEW, seen(&studio, point)) else {
+        panic!("expected the head's surface");
+    };
+    studio
+        .add_to_surface("head", &spot, &Made::Shape("cone".into()))
+        .unwrap();
+    assert!(studio.part("cone").is_some());
+    studio.undo().unwrap();
+    assert_eq!(std::fs::read(&recipe).unwrap(), original);
+    assert_eq!(studio.can_undo(), None);
+
+    // A drag is one step too.
+    assert!(studio.select(Some("antenna_tip")));
+    let on_tip = seen(
+        &studio,
+        studio.part("antenna_tip").unwrap().bounds.unwrap().center(),
+    );
+    assert!(studio.drag_start(VIEW, on_tip));
+    let head = studio.part("head").unwrap().bounds.unwrap();
+    let target = head.center() + vec3(head.half().x, head.half().y * 0.6, head.half().z * 0.6);
+    studio.hover(VIEW, Some(seen(&studio, target)));
+    studio.drag_end().unwrap().unwrap();
+    assert_ne!(std::fs::read(&recipe).unwrap(), original);
+    studio.undo().unwrap();
+    assert_eq!(std::fs::read(&recipe).unwrap(), original);
+    // The part that was selected is still selected, back where it was.
+    assert_eq!(studio.selected(), Some("antenna_tip"));
+    assert_eq!(
+        studio.part("antenna_tip").unwrap().attached_to.as_deref(),
+        Some("antenna.top")
+    );
+}
+
+#[test]
+fn a_change_from_outside_is_a_step_to_undo_too() {
+    let recipe = copy_of("robot", "studio_undo_outside");
+    let original = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.apply(&colour("head", "red")).unwrap();
+    let ours = std::fs::read_to_string(&recipe).unwrap();
+
+    // An agent (or a text editor) saves the recipe.
+    let theirs = ours.replace("name = \"robot\"", "name = \"robot2\"");
+    save(&recipe, &theirs);
+    assert!(studio.check_files());
+    assert_eq!(studio.can_undo(), Some("Changed outside the Studio"));
+
+    // Undo takes back the latest change to the file, whoever made it.
+    assert_eq!(studio.undo().unwrap(), "Undid: Changed outside the Studio");
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), ours);
+    assert_eq!(studio.undo().unwrap(), "Undid: Set \"head\": colour red");
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), original);
+    // And both can be made again.
+    studio.redo().unwrap();
+    studio.redo().unwrap();
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), theirs);
+
+    // Saved from outside and undone before the Studio has looked: the
+    // outside change is seen first, and is what is taken back. Nothing
+    // is written over unseen.
+    let later = theirs.replace("name = \"robot2\"", "name = \"robot3\"");
+    save(&recipe, &later);
+    assert_eq!(studio.undo().unwrap(), "Undid: Changed outside the Studio");
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), theirs);
+    assert_eq!(studio.can_redo(), Some("Changed outside the Studio"));
+}
+
+#[test]
+fn undo_goes_back_through_a_version_with_mistakes() {
+    let recipe = copy_of("robot", "studio_undo_mistake");
+    let good = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    save(
+        &recipe,
+        &good.replace("shape = \"box\"", "shape = \"blob\""),
+    );
+    assert!(studio.check_files());
+    assert!(studio.has_mistakes());
+    studio.undo().unwrap();
+    assert!(!studio.has_mistakes());
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), good);
+    studio.redo().unwrap();
+    assert!(studio.has_mistakes());
+}
+
+#[test]
+fn when_only_looking_nothing_is_undone_and_old_steps_are_forgotten() {
+    let recipe = copy_of("robot", "studio_undo_look");
+    let mut looking = Studio::open(&recipe, true);
+    assert_eq!(
+        looking.undo().unwrap_err(),
+        "This window is only for looking: nothing was changed"
+    );
+
+    // Only the latest 500 steps are kept. (A small recipe, so that 510
+    // edits are quick.)
+    let small = recipe.with_file_name("small.toml");
+    std::fs::write(
+        &small,
+        "version = 0\n[[parts]]\nname = \"a\"\nshape = \"box\"\nsize = [1, 1, 1]\n",
+    )
+    .unwrap();
+    let mut studio = Studio::open(&small, false);
+    for step in 0..510 {
+        let tall = 1.0 + f64::from(step + 1) / 100.0;
+        studio
+            .apply(&set(
+                "a",
+                Changes {
+                    sizes: Sizes {
+                        size: Some([1.0, tall, 1.0]),
+                        ..Sizes::default()
+                    },
+                    ..Changes::default()
+                },
+            ))
+            .unwrap();
+    }
+    let mut undone = 0;
+    while studio.undo().is_ok() {
+        undone += 1;
+    }
+    assert_eq!(undone, duck_mold_view::studio::history::MOST_STEPS);
+    // The first ten edits are beyond reach: the box is 1.1 tall.
+    assert!(
+        std::fs::read_to_string(&small)
+            .unwrap()
+            .contains("size = [1, 1.1, 1]")
+    );
+}

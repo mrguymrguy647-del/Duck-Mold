@@ -1545,6 +1545,17 @@ viewport and the problems panel, with no editing. The window code from
 Phase 1 (Duck Forge's game window) is removed, so Duck Mold has one
 window library instead of two, and `preview` gains pan and the grid.
 
+*As built (step 7):* as designed. A step is the file's whole text
+before and after a change; undo writes the "before" back, but only if
+the file still holds the "after" (so nothing saved in that instant is
+written over; the Studio then says to try again). Before every undo and
+redo the Studio looks at the file, so a save from outside that it hadn't
+seen yet becomes the newest step, and is the one taken back. Edits made
+together (a socket and the part on it; a drag) are one step. Ctrl+Z and
+Ctrl+Y work unless a text field is being typed in, where they belong to
+the typing. There is no undo on the command line: an agent has
+`--dry-run` before and version control after.
+
 *As built (step 6):*
 
 - **A drag writes once, when the part is dropped**, not ten times a

@@ -729,6 +729,82 @@ fn dragging_the_selected_part_moves_it_and_dragging_elsewhere_turns_the_view() {
     assert_ne!(screen.state().studio().unwrap().orbit.round, before.round);
 }
 
+// ---- undo and redo -------------------------------------------------------------
+
+#[test]
+fn undo_and_redo_are_buttons_and_keys() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_undo", "head");
+    let original = std::fs::read(&recipe).unwrap();
+
+    // Two edits: a colour, and a part added on a socket.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Colour")
+        .click();
+    screen.run_steps(2);
+    screen.get_by_label("red").click();
+    screen.run_steps(3);
+    let coloured = std::fs::read(&recipe).unwrap();
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    screen.run_steps(2);
+    let on_right = socket_on_screen(&screen, "head", "right");
+    click_at(&mut screen, on_right);
+    screen.get_by_label("Box").click();
+    screen.run_steps(3);
+    let added = std::fs::read(&recipe).unwrap();
+    assert_ne!(added, coloured);
+
+    // The buttons.
+    screen.get_by_label("Undo").click();
+    screen.run_steps(3);
+    assert_eq!(std::fs::read(&recipe).unwrap(), coloured);
+    screen.get_by_label("Undid: Added \"box\" (box) on head.right");
+    screen.get_by_label("Undo").click();
+    screen.run_steps(3);
+    assert_eq!(std::fs::read(&recipe).unwrap(), original);
+    screen.get_by_label("Redo").click();
+    screen.run_steps(3);
+    assert_eq!(std::fs::read(&recipe).unwrap(), coloured);
+
+    // The keys: Ctrl+Y redoes, Ctrl+Z undoes, Ctrl+Shift+Z redoes.
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Y);
+    screen.run_steps(3);
+    assert_eq!(std::fs::read(&recipe).unwrap(), added);
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    screen.run_steps(3);
+    assert_eq!(std::fs::read(&recipe).unwrap(), coloured);
+    screen.key_press_modifiers(
+        egui::Modifiers::COMMAND | egui::Modifiers::SHIFT,
+        egui::Key::Z,
+    );
+    screen.run_steps(3);
+    assert_eq!(std::fs::read(&recipe).unwrap(), added);
+
+    // A change from outside is undone the same way.
+    let text = String::from_utf8(added.clone()).unwrap();
+    std::fs::write(
+        &recipe,
+        text.replace("name = \"robot\"", "name = \"robot2\""),
+    )
+    .unwrap();
+    assert!(screen.state_mut().studio_mut().unwrap().check_files());
+    screen.run_steps(2);
+    screen.get_by_label("Undo").click();
+    screen.run_steps(3);
+    assert_eq!(std::fs::read(&recipe).unwrap(), added);
+    screen.get_by_label("Undid: Changed outside the Studio");
+
+    // When only looking there is nothing to undo, and no buttons for it.
+    let mut looking = harness(StudioApp::with_file(&recipe, true), false);
+    looking.run_steps(2);
+    assert!(looking.query_by_label("Undo").is_none());
+    assert!(looking.query_by_label("Redo").is_none());
+}
+
 /// Pictures of whole screens, compared with the stored ones in
 /// `tests/screens/`. Linux only: see the top of this file.
 #[cfg(target_os = "linux")]
