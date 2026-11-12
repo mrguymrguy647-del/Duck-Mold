@@ -380,15 +380,15 @@ fn an_attached_part_is_not_moved_by_hand() {
 }
 
 #[test]
-fn rotate_is_one_number_when_attached_and_three_when_free() {
+fn a_joined_part_twists_and_a_free_part_rotates() {
     let (loaded, issues) = read(&with_part(
-        "shape = \"box\"\nattach = \"bottom\"\nto = \"b.top\"\nrotate = 90",
+        "shape = \"box\"\nattach = \"bottom\"\nto = \"b.top\"\ntwist = 90",
     ));
     assert_eq!(issues, Vec::new());
     assert!(matches!(
         &loaded.recipe.parts[0].placement,
-        Placement::Attached { rotate, to_part, to_socket, .. }
-            if *rotate == 90.0 && to_part == "b" && to_socket == "top"
+        Placement::Attached { twist, to_part, to_socket, .. }
+            if *twist == 90.0 && to_part == "b" && to_socket == "top"
     ));
 
     let (loaded, issues) = read(&with_part("shape = \"box\"\nrotate = [0, 90, 0]"));
@@ -401,13 +401,14 @@ fn rotate_is_one_number_when_attached_and_three_when_free() {
         }
     );
 
+    // `twist` is one number.
     let issues = issues_of(&with_part(
-        "shape = \"box\"\nattach = \"bottom\"\nto = \"b.top\"\nrotate = [0, 90, 0]",
+        "shape = \"box\"\nattach = \"bottom\"\nto = \"b.top\"\ntwist = [0, 90, 0]",
     ));
     assert!(
         only(&issues, Code::TypeMismatch)
             .message
-            .contains("like rotate = 90")
+            .contains("like 90")
     );
 
     let issues = issues_of(&with_part("shape = \"box\"\nrotate = 45"));
@@ -417,6 +418,52 @@ fn rotate_is_one_number_when_attached_and_three_when_free() {
         "{}",
         issue.message
     );
+}
+
+#[test]
+fn rotate_on_a_joined_part_is_an_error_that_shows_twist() {
+    // Phase 0's one-number form.
+    let issues = issues_of(&with_part(
+        "shape = \"box\"\nattach = \"bottom\"\nto = \"b.top\"\nrotate = 90",
+    ));
+    let issue = only(&issues, Code::Conflict);
+    assert_eq!(issue.path, "parts[0].rotate");
+    assert_eq!(
+        issue.message,
+        "a joined part turns around its join with \"twist\": write twist = 90"
+    );
+    assert_eq!(issue.suggestion.as_deref(), Some("twist = 90"));
+    assert_eq!(issue.line, Some(9));
+
+    // Three numbers on a joined part never worked; now it points to twist
+    // too.
+    let issues = issues_of(&with_part(
+        "shape = \"box\"\nattach = \"bottom\"\nto = \"b.top\"\nrotate = [0, 45, 0]",
+    ));
+    let issue = only(&issues, Code::Conflict);
+    assert!(
+        issue.message.contains("write twist = 90"),
+        "{}",
+        issue.message
+    );
+}
+
+#[test]
+fn twist_on_a_part_that_isnt_joined_is_an_error_that_shows_rotate() {
+    let issues = issues_of(&with_part("shape = \"box\"\ntwist = 30"));
+    let issue = only(&issues, Code::Conflict);
+    assert_eq!(issue.path, "parts[0].twist");
+    assert_eq!(
+        issue.message,
+        "this part isn't joined to anything, so there is nothing to twist it around: to turn it around the upright axis, write rotate = [0, 30, 0]"
+    );
+    assert_eq!(issue.suggestion.as_deref(), Some("rotate = [0, 30, 0]"));
+
+    // A defined part has no place of its own, so no twist either.
+    let issues = issues_of(
+        "version = 0\n[define.arm]\nshape = \"box\"\ntwist = 30\n[[parts]]\nuse = \"arm\"\n",
+    );
+    assert_eq!(only(&issues, Code::Conflict).path, "define.arm.twist");
 }
 
 #[test]

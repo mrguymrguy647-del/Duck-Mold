@@ -213,7 +213,8 @@ The other fields of a part:
 | `color` | A palette name: the part's colour. |
 | `colors` | Colours for single faces, by face name: `{ top = "grass" }`. |
 | `attach`, `to` | Join my socket `attach` to the socket `to = "part.socket"` of another part in the same list. |
-| `rotate` | With `attach`: one number, the degrees to twist the part around the join. Without `attach`: `[x, y, z]` degrees. |
+| `twist` | *(Phase 1.)* With `attach`: one number, the degrees to twist the part around the join. |
+| `rotate` | Without `attach`: `[x, y, z]` degrees. (In Phase 0 it was also the twist; see below.) |
 | `move` | Without `attach`: `[x, y, z]`, where the part's centre goes. |
 | `scale` | One number, or `[x, y, z]`. Must be above zero. |
 | `mirror` | `"x"`, `"y"` or `"z"`: flips the part across that direction, sockets too. `mirror = "x"` turns a left arm into a right arm. |
@@ -223,12 +224,14 @@ The other fields of a part:
 
 A part is placed in one of two ways. With `attach` and `to` it goes where
 the sockets say; `move` is refused (the message says to move the socket),
-and `rotate` is one number that twists it around the join. Without them
+and `twist` is one number that turns it around the join. Without them
 it sits at the centre of its list, moved and turned by `move` and
 `rotate = [x, y, z]`: the escape hatch for when you do want to type a
-position. (`rotate` was two fields in the first draft, `turn` and
-`rotate`; they became one name by decision 5. Writing the wrong form for
-the part's kind is an error that shows the right one.)
+position. (The first draft had two fields, `turn` and `rotate`; they
+became one name, `rotate`, by decision 5, with two forms. Phase 1 split
+them again as `twist` and `rotate`, since one field meaning two things
+surprised (section 17, step 4). Writing either on the wrong kind of part
+is an error that shows the right one.)
 
 ### The five shapes
 
@@ -331,10 +334,11 @@ my `bottom` meets the trunk's `top`, facing it.
   it turns around the upright axis, so it stays the right way up. If the
   sockets face up or down, it rolls over sideways instead, so its front
   still faces front. One fixed rule, so the result never depends on luck.
-- **`rotate`**, on a joined part, then twists it around the join by one
+- **`twist`**, on a joined part, then turns it around the join by one
   number of degrees, clockwise when you look at the join from the side
-  the other socket faces. For a socket that faces up, `rotate = 90` is
-  the same turn as `rotate = [0, 90, 0]` on a free part.
+  the other socket faces. For a socket that faces up, `twist = 90` is
+  the same turn as `rotate = [0, 90, 0]` on a free part. (Phase 0 called
+  it `rotate = 90`.)
 - `mirror` and `scale` happen to the part first, sockets included, so a
   mirrored arm's shoulder socket is on its other side, ready to join.
 
@@ -693,7 +697,7 @@ When the recipe has mistakes:
       "path": "parts[3].atach",
       "message": "there is no field \"atach\" here",
       "got": "atach",
-      "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "rotate", "move", "scale", "mirror", "sockets", "note"] },
+      "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
       "suggestion": "attach"
     }
   ],
@@ -917,8 +921,9 @@ These are the answers that were given, and what each led to.
 4. **Importing glTF.** *OBJ stays in Phase 0; glTF import moves to
    Phase 1* (section 12).
 5. **The names.** *`turn` became `rotate`; the rest stayed.* One field,
-   `rotate`, is a single number on an attached part and `[x, y, z]` on a
-   free one (section 4).
+   `rotate`, was a single number on an attached part and `[x, y, z]` on a
+   free one (section 4). Phase 1 gave the single number its own name,
+   `twist`.
 
 ---
 
@@ -1091,6 +1096,12 @@ the socket is exactly on the faces drawn, also for shapes with few
 The recipe `version` stays 0: Duck Mold hasn't been released, and an
 old recipe either still works or says exactly what to change. None of
 the examples uses `rotate`.
+
+*As built:* both errors are `conflict`s, like `move` on a joined part,
+and each carries its fix as the suggestion (`twist = 90`,
+`rotate = [0, 30, 0]`). `rotate = [x, y, z]` on a joined part, which
+was already an error, now points to `twist` as well. The example is the
+snowman's badge, twisted 45° into a diamond.
 
 ### Step 5. Sockets in the `.glb`
 

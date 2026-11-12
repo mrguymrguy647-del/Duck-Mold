@@ -3,7 +3,7 @@
 //! [`assemble`] takes a recipe that has been read ([`crate::load`]) and
 //! builds the [`Model`]. Every part is first built in its own space (a
 //! [`Body`]): a shape's faces, or, for an assembly, the parts inside it.
-//! Then it is placed in the list it belongs to, by `move` and `rotate` or
+//! Then it is placed in the list it belongs to, by `move` and `rotate`, or
 //! by joining one of its sockets to a socket of a part that is already
 //! placed. The tree of placed parts is kept to the end, when it is
 //! flattened into the model's faces.
@@ -1020,7 +1020,7 @@ impl Assembler<'_> {
             to_part,
             to_socket,
             to_loc,
-            rotate,
+            twist,
         } = &parts[at].placement
         else {
             return Join::Wait;
@@ -1087,7 +1087,7 @@ impl Assembler<'_> {
         // Turn as little as possible until my socket faces theirs, then
         // twist around the join.
         let face_it = Mat3::turning(my_facing, -theirs.facing);
-        let twist = Mat3::around(theirs.facing, *rotate);
+        let twist = Mat3::around(theirs.facing, *twist);
         let turn = twist * face_it;
         Join::Place(Transform {
             turn: turn * before,

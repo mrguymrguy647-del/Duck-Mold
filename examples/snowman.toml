@@ -148,7 +148,8 @@ attach = "bottom"
 to = "hat.top"
 
 # A cone's `front` is on its slant, halfway up, facing out of it: the
-# badge's back lies flat against the hat.
+# badge's back lies flat against the hat. `twist` turns a joined part
+# around its join: 45 degrees makes the square badge a diamond.
 [[parts]]
 name = "badge"
 shape = "box"
@@ -156,3 +157,4 @@ size = [0.07, 0.07, 0.01]
 color = "gold"
 attach = "back"
 to = "hat.front"
+twist = 45

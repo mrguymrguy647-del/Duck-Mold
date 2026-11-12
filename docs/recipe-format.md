@@ -94,7 +94,8 @@ Each entry of `parts`, and each entry of `define`, is a part.
 | `colors` | table | none | Colours for single faces, by face name: `{ top = "grass" }`. |
 | `attach` | text | none | The part's own socket to join. Needs `to`. |
 | `to` | text | none | `"part.socket"`: the socket of another part **in the same list** to join it to. Needs `attach`. |
-| `rotate` | number, or three | `0` | With `attach`: degrees to twist around the join. Without: `[x, y, z]` degrees, around x, then y, then z. |
+| `twist` | number | `0` | With `attach` only: degrees to turn the part around its join. -36000 to 36000. |
+| `rotate` | three numbers | `[0, 0, 0]` | Without `attach` only: `[x, y, z]` degrees, around x, then y, then z. -36000 to 36000. |
 | `move` | three numbers | `[0, 0, 0]` | Without `attach` only: where the part's middle goes. -10000 to 10000. |
 | `scale` | number, or three | `1` | How much bigger: one number, or `[x, y, z]`. 0.001 to 1000. |
 | `mirror` | text | none | `"x"`, `"y"` or `"z"`: flips the part across that direction, its sockets and face names with it. |
@@ -103,11 +104,16 @@ Each entry of `parts`, and each entry of `define`, is a part.
 | `bones`, `colliders`, `lods` | | | Reserved. |
 
 A part under `define` has no place of its own, so it can't have `name`,
-`attach`, `to`, `rotate`, `move`, `scale` or `mirror`. Those go on the
-part that uses it.
+`attach`, `to`, `twist`, `rotate`, `move`, `scale` or `mirror`. Those go
+on the part that uses it.
 
 **Order.** A part is mirrored, then scaled, then either turned and moved
-(`rotate`, `move`) or joined (`attach`, `to`, `rotate`).
+(`rotate`, `move`) or joined (`attach`, `to`, `twist`).
+
+`rotate` on a joined part, and `twist` on a part that isn't joined, are
+errors that show the other: `rotate = 90` on a joined part says to
+write `twist = 90`, and `twist = 30` on a free part says to write
+`rotate = [0, 30, 0]`. (Phase 0 wrote the twist as `rotate = 90`.)
 
 **Turning.** `rotate = [x, y, z]` turns around x, then y, then z, in
 Duck Forge's directions: a positive x angle turns forward towards up; a
@@ -222,7 +228,7 @@ other.
 - If the two sockets face the same way, the part must turn right round.
   It turns around the upright axis; if the sockets face up or down, it
   rolls over sideways around the front-to-back axis instead.
-- `rotate` then twists the part around the join, clockwise seen from
+- `twist` then turns the part around the join, clockwise seen from
   the side the other socket faces. On a socket that faces up it is the
   same turn as `rotate = [0, n, 0]` on a free part.
 - `mirror` and `scale` are done first, sockets included.

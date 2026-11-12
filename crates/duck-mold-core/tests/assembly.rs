@@ -309,7 +309,7 @@ fn sockets_that_face_the_same_way_follow_the_fixed_rule() {
 }
 
 #[test]
-fn rotate_twists_an_attached_part_around_its_join() {
+fn twist_turns_an_attached_part_around_its_join() {
     let plank = "[[parts]]\nname = \"plank\"\nshape = \"box\"\nsize = [1, 0.2, 0.4]\n";
     let straight = built(&after_a(&format!(
         "{plank}attach = \"bottom\"\nto = \"a.top\""
@@ -320,7 +320,7 @@ fn rotate_twists_an_attached_part_around_its_join() {
     );
 
     let twisted = built(&after_a(&format!(
-        "{plank}attach = \"bottom\"\nto = \"a.top\"\nrotate = 90"
+        "{plank}attach = \"bottom\"\nto = \"a.top\"\ntwist = 90"
     )));
     assert_eq!(
         bounds(&twisted, "plank").size().tidied(),
@@ -340,7 +340,7 @@ fn rotate_twists_an_attached_part_around_its_join() {
     // On a socket that faces right, a quarter twist seen from the right
     // is clockwise: up goes towards the front.
     let side = built(&after_a(&format!(
-        "{plank}attach = \"left\"\nto = \"a.right\"\nrotate = 90"
+        "{plank}attach = \"left\"\nto = \"a.right\"\ntwist = 90"
     )));
     assert_eq!(socket(&side, "plank", "top").1, vec3(0.0, 0.0, 1.0));
     assert_eq!(bounds(&side, "plank").min.x, 0.5);

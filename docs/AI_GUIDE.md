@@ -167,15 +167,16 @@ Its other fields:
 | `color` | A palette name: the colour of the whole part. |
 | `colors` | Colours for single faces: `{ top = "grass", sides = "dirt" }`. |
 | `attach`, `to` | Join my socket `attach` to `to = "part.socket"`, a socket of another part in the same list. Always both. |
-| `rotate` | **Attached part:** one number, degrees to twist around the join. **Free part:** `[x, y, z]` degrees, around x, then y, then z. |
+| `twist` | Attached part only: one number, degrees to twist it around the join. |
+| `rotate` | Free part only: `[x, y, z]` degrees, around x, then y, then z. |
 | `move` | Free part only: `[x, y, z]`, where its middle goes. |
 | `scale` | One number or `[x, y, z]`, above zero. |
 | `mirror` | `"x"`, `"y"` or `"z"`: flips the part, its sockets too. `mirror = "x"` makes a right arm from a left arm. |
 | `sockets` | The part's own named sockets (section 6). |
 | `note` | For people. Ignored. |
 
-A part in `define` has no `name`, `attach`, `to`, `move`, `rotate`,
-`scale` or `mirror`: those go on the part that uses it.
+A part in `define` has no `name`, `attach`, `to`, `twist`, `move`,
+`rotate`, `scale` or `mirror`: those go on the part that uses it.
 
 The shapes. All are centred on their own middle.
 
@@ -255,10 +256,12 @@ the same way, the part is turned right round the upright axis (it stays
 the right way up); if they face up or down, it rolls over sideways (its
 front stays in front).
 
-**`rotate` on a joined part** twists it around the join, clockwise seen
+**`twist` on a joined part** turns it around the join, clockwise seen
 from the side the other socket faces. On a socket that faces up,
-`rotate = 90` is the same turn as `rotate = [0, 90, 0]` on a free part:
-forward turns to the right.
+`twist = 90` is the same turn as `rotate = [0, 90, 0]` on a free part:
+forward turns to the right. A joined part has no `rotate`, and a free
+part no `twist`; writing one where the other belongs is an error that
+shows the right one.
 
 `mirror` and `scale` are done to a part before it is joined, sockets
 included: a mirrored arm's shoulder socket is on its other side.
@@ -447,8 +450,9 @@ whole model.
 - **`attach` without `to`** (or the other way round): they go together.
 - **`to` naming a part in another list**, or one with no `name`. Parts
   attach to parts in their own list.
-- **`rotate = [0, 90, 0]` on an attached part.** There it is one
-  number: `rotate = 90`.
+- **`rotate` on an attached part.** A joined part turns around its join
+  with one number: `twist = 90`. (Duck Mold's first version wrote that
+  as `rotate = 90`; it is now an error that shows `twist`.)
 - **A hex code in `color`.** Colours go in the palette, by name.
 - **`colour`.** The fields are spelt `color` and `colors`.
 - **Left and right swapped.** They are the model's own: left is -x,
