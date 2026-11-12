@@ -36,10 +36,12 @@ serde_json = "1"
 # Reads the command line and writes --help from the same comments.
 clap = { version = "4", features = ["derive"] }
 # Duck Forge, the game engine Duck Mold makes models for: its CPU renderer
-# draws `duck-mold render`'s pictures. Pinned to one commit on its main
-# branch, so a picture can't change unless this line does. Its window,
-# graphics-card and sound features are off: the renderer needs none.
-duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "76850ee214732d6b0cd4e244e5849fdd687e380b", default-features = false }
+# draws `duck-mold render`'s pictures, and its window shows
+# `duck-mold preview` (turned on by duck-mold-view's `preview` feature).
+# Pinned to one commit on its main branch, so a picture can't change unless
+# this line does; that commit has Duck Forge's loader for Duck Mold's .glb
+# files (reader version 3). Its graphics-card and sound features are off.
+duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "1228f77a216a0ce57270057f5abc8e197028fe56", default-features = false }
 # Writes the PNG pictures. The same library (and version) Duck Forge uses.
 png = "0.18"
 

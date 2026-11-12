@@ -12,6 +12,9 @@ duckforge = { workspace = true }
 png = { workspace = true }
 serde = { workspace = true }
 
+[dev-dependencies]
+serde_json = { workspace = true }
+
 [features]
 # The preview window: Duck Forge's window (winit and softbuffer; on Linux,
 # X11 is loaded when the window opens, so building needs no extra

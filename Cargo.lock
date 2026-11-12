@@ -378,12 +378,13 @@ dependencies = [
  "duckforge",
  "png",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
 name = "duckforge"
 version = "0.1.0"
-source = "git+https://github.com/mrguymrguy647-del/Duck-Forge?rev=76850ee214732d6b0cd4e244e5849fdd687e380b#76850ee214732d6b0cd4e244e5849fdd687e380b"
+source = "git+https://github.com/mrguymrguy647-del/Duck-Forge?rev=1228f77a216a0ce57270057f5abc8e197028fe56#1228f77a216a0ce57270057f5abc8e197028fe56"
 dependencies = [
  "gif",
  "png",
