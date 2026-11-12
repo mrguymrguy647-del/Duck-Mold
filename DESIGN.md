@@ -910,8 +910,12 @@ These are the answers that were given, and what each led to.
 
 ## 17. Phase 1
 
-**Status: proposed, waiting for approval.** Phase 1 adds seven things,
-built in this order, one commit each. Every step comes with tests, keeps
+**Status: approved, with three changes** (folded in below): Phase 1 is
+built on a new branch from `main`, with Duck Forge pinned to a commit on
+its `main`; an imported material with no colour in the recipe brings its
+own (step 6); and unnamed parts' sockets stay out of the `.glb`
+(step 5). Phase 1 adds seven things, built in this order, one commit
+each. Every step comes with tests, keeps
 fmt and clippy clean, regenerates the golden files if the output
 changes, updates the README, `docs/AI_GUIDE.md` and
 `docs/recipe-format.md`, and adds an example. When a step changes
@@ -1067,11 +1071,14 @@ A game can ask where a socket is and put something there: a hat on
 faces, in the model's own space.
 
 - The `.glb`'s `extras.duck_mold` gains `sockets`: every socket of every
-  part, built-in and declared, where it ended up after building, as
-  `{ "name": "head.top", "at": [x, y, z], "facing": [x, y, z] }`. The
+  named part, built-in and declared, where it ended up after building,
+  as `{ "name": "head.top", "at": [x, y, z], "facing": [x, y, z] }`. The
   model's own sockets have bare names (`top`), a part's are
   `part.socket` (`head.top`), and parts inside assemblies keep their
   paths (`left_arm/hand.bottom`, `left_arm.grip`).
+- **A part without a name has no sockets in the file**, and nor do the
+  parts inside it: a game can't ask for a part it can't name, and the
+  stand-in names (`#2`) change whenever the recipe's list does.
 - They are stored in glTF's directions, like the corners (x negated), so
   the reader turns them back the same way it turns the corners.
 - The robot has about 200 sockets, which makes its file roughly half as
@@ -1101,14 +1108,20 @@ move, exactly as `.obj` files do today. What it reads:
   corner numbers of any size.
 - Material names become face names for `colors`, as `usemtl` names do
   for OBJ: `colors = { glass = "yellow", base = "steel" }`.
+- **A material the recipe gives no colour keeps its own.** Its base
+  colour is added to the palette under the material's name, and a
+  warning lists those names, so nothing comes out grey by accident. To
+  choose the colours yourself, give the part a `color` or `colors`. (If
+  the palette already has a colour with that name, the palette's colour
+  is used, and the warning says so.)
 - A `.glb` that Duck Mold wrote keeps its colours, the way a recipe
   used as a part does.
 
 What it leaves out, with a note in the report rather than an error:
 textures, UVs, normals (Duck Mold works out its own), lines and points,
 bones and skins, animations, shape keys (morph targets), cameras and
-lights. The file's own colours are not used, except in Duck Mold's own
-files: colour comes from the palette, as for OBJ.
+lights. Textures are not read, so a material's colour is its base
+colour alone.
 
 What it refuses, with a sentence saying why: compressed meshes (Draco,
 meshopt, packed numbers), and any file that says it needs a glTF
