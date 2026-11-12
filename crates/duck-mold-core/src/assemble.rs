@@ -150,6 +150,11 @@ struct Body {
     /// True if it couldn't be built. The reason is already reported, so
     /// nothing that touches it is reported again.
     broken: bool,
+    /// True for a whole recipe (the model itself, or a recipe used as a
+    /// part): its own sockets stay on the box around it. They say how big
+    /// the model is and where the ground is; on the surface, a table's
+    /// `bottom` would be up under its top, between its legs.
+    whole: bool,
 }
 
 /// A part placed in the list it belongs to.
@@ -177,6 +182,7 @@ impl Body {
             sockets: Vec::new(),
             bounds: None,
             broken: true,
+            whole: false,
         }
     }
 
@@ -199,6 +205,7 @@ impl Body {
             sockets: Vec::new(),
             bounds: None,
             broken: false,
+            whole: false,
         };
         body.measure();
         body
@@ -221,6 +228,7 @@ impl Body {
             sockets: Vec::new(),
             bounds: None,
             broken,
+            whole: false,
         };
         body.measure();
         body
@@ -277,9 +285,7 @@ impl Body {
             .cloned()
     }
 
-    /// Whether it is one of the five built-in shapes, whose sockets sit
-    /// on its surface. A mesh from a file and an assembly keep theirs on
-    /// the box around them.
+    /// Whether it is one of the five built-in shapes.
     fn is_shape(&self) -> bool {
         !self.broken && self.nodes.is_empty() && Shape::NAMES.contains(&self.kind.shape.as_str())
     }
@@ -288,24 +294,36 @@ impl Body {
         self.is_shape() && self.kind.shape == "wedge"
     }
 
+    /// Every face in the body, its parts' included, in its own space.
+    fn all_faces(&self, place: &Transform, into: &mut Vec<Polygon>) {
+        into.extend(self.faces.iter().map(|face| face.transformed(place)));
+        for node in &self.nodes {
+            node.body.all_faces(&node.place.then(place), into);
+        }
+    }
+
     /// Where a socket at `point`, on the `side` of the box around the
-    /// body, goes on the shape itself: straight in from the box until it
-    /// touches the surface, facing out of the surface there. A socket
-    /// already on the surface doesn't move; the middle never does.
+    /// body, goes on the body itself: straight in from the box until it
+    /// touches a face, facing out of the surface there. That holds for a
+    /// shape, a mesh from a file and a part made of parts (through every
+    /// face inside it). A socket already on the surface doesn't move; the
+    /// middle never does; nor do a whole recipe's own sockets.
     fn land(&self, side: Side, point: Vec3) -> Landing {
         let Some(bounds) = self.bounds else {
             return Landing::Already;
         };
-        if side == Side::Center || !self.is_shape() {
+        if side == Side::Center || self.whole || self.broken {
             return Landing::Already;
         }
         let size = bounds.size();
-        shapes::land(
-            &self.faces,
-            point,
-            -Vec3::from(side.facing()),
-            size.x.max(size.y).max(size.z),
-        )
+        let size = size.x.max(size.y).max(size.z);
+        let inward = -Vec3::from(side.facing());
+        if self.nodes.is_empty() {
+            return shapes::land(&self.faces, point, inward, size);
+        }
+        let mut faces = Vec::new();
+        self.all_faces(&Transform::IDENTITY, &mut faces);
+        shapes::land(&faces, point, inward, size)
     }
 
     /// The names of its built-in sockets: the seven every part has, and a
@@ -469,6 +487,7 @@ impl Assembler<'_> {
         let scope = Scope::of(recipe);
         let nodes = self.list(&recipe.parts, &scope);
         let mut body = Body::assembly(nodes, None);
+        body.whole = true;
         self.declare_sockets(&mut body, &recipe.sockets);
         if body.broken {
             return body;
@@ -909,6 +928,12 @@ impl Assembler<'_> {
                             Some((point, chosen.unwrap_or(side.facing().into())))
                         }
                         Landing::Touches { at, facing } => Some((at, chosen.unwrap_or(facing))),
+                        // Beside a mesh or a part made of parts (in a
+                        // gap between its parts, say): it stays on the
+                        // box, as it always was.
+                        Landing::Misses if !body.is_shape() => {
+                            Some((point, chosen.unwrap_or(side.facing().into())))
+                        }
                         Landing::Misses => {
                             self.issues.push(def.loc.error(
                                 Code::OutOfRange,

@@ -1,0 +1,134 @@
+# Makes the Windows download: DuckMold-<version>-windows.zip.
+#
+# Three ways to make a release, none needing a terminal:
+# - Actions tab -> Release -> "Run workflow" (the "Make a release" button):
+#   reads the version from Cargo.toml, makes the tag vX.Y.Z on the chosen
+#   branch's newest commit, and publishes the release with the zip.
+# - Releases -> "Draft a new release" on the GitHub website with a new tag
+#   like v0.2.0: this workflow runs on the tag and adds the zip to it.
+# - Pushing a tag like v0.2.0.
+# If the release is already there, its zip is replaced (--clobber) instead
+# of failing. Changing this file (or the release/ folder) on a branch only
+# builds the zip and keeps it as a downloadable "artifact" on the run's
+# page, so it can be checked before any release is made. A copy of Duck
+# Quill's.
+name: Release
+
+on:
+  # The "Make a release" button in the Actions tab. (GitHub only shows it
+  # once this file is on the main branch.)
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+    branches: ["**"]
+    # Branch pushes only run when the release itself changed (tags always run).
+    paths: [".github/workflows/release.yml", "release/**"]
+  pull_request:
+    paths: [".github/workflows/release.yml", "release/**"]
+
+env:
+  RUST_VERSION: "1.97.0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    permissions:
+      contents: write # to publish the release
+    steps:
+      - uses: actions/checkout@v5
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Read the version
+        id: version
+        shell: bash
+        run: |
+          # The one place it's written: the workspace Cargo.toml.
+          version=$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n 1)
+          echo "Version: $version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if [[ "$GITHUB_REF" == refs/tags/* && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "The tag $GITHUB_REF_NAME doesn't match the version $version in Cargo.toml."
+            exit 1
+          fi
+          # The tag to publish under: the pushed tag, or v<version> for the button.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "tag=$GITHUB_REF_NAME" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        run: cargo build --release --workspace
+
+      - name: Put the zip together
+        shell: bash
+        run: |
+          name="DuckMold-${{ steps.version.outputs.version }}-windows"
+          folder="dist/Duck Mold"
+          mkdir -p "$folder/docs"
+          cp target/release/DuckMoldStudio.exe target/release/duck-mold.exe "$folder/"
+          cp -r examples "$folder/"
+          cp docs/AI_GUIDE.md docs/recipe-format.md "$folder/docs/"
+          cp "release/READ ME FIRST.txt" "release/Create desktop shortcut.bat" "$folder/"
+          cd dist
+          7z a -tzip "../$name.zip" "Duck Mold" > /dev/null
+          cd ..
+          ls -l "$name.zip"
+          echo "ZIP=$name.zip" >> "$GITHUB_ENV"
+
+      - name: Check what's in the zip
+        shell: bash
+        run: |
+          7z l -slt "$ZIP" | sed -n 's/^Path = //p' > contents.txt
+          echo "$(wc -l < contents.txt) entries; the top of the folder:"
+          grep -E '^Duck Mold(/|\\)[^/\\]+$' contents.txt
+          for wanted in DuckMoldStudio.exe duck-mold.exe "READ ME FIRST.txt" "Create desktop shortcut.bat" \
+                        examples/robot.toml examples/duck.toml examples/parts/lamp.gltf \
+                        docs/AI_GUIDE.md docs/recipe-format.md; do
+            grep -qxF "Duck Mold/$wanted" <(tr '\\' / < contents.txt) || { echo "missing: $wanted"; exit 1; }
+          done
+          # The programs start, know their version, and can read an example.
+          ver=$("dist/Duck Mold/duck-mold.exe" --version)
+          echo "$ver"
+          [[ "$ver" == "duck-mold ${{ steps.version.outputs.version }}" ]]
+          "dist/Duck Mold/duck-mold.exe" inspect "dist/Duck Mold/examples/robot.toml"
+          # The Studio is a window program: asked for its version, it
+          # must end at once without opening one.
+          "dist/Duck Mold/DuckMoldStudio.exe" --version
+          # And duck-mold finds the Studio next to it: with a file that
+          # isn't there it says so, rather than that the Studio is missing.
+          if "dist/Duck Mold/duck-mold.exe" studio nowhere.toml 2> said.txt; then exit 1; fi
+          cat said.txt
+          grep -q "there is no such file" said.txt
+
+      - name: Keep the zip on this run's page
+        uses: actions/upload-artifact@v5
+        with:
+          name: ${{ env.ZIP }}
+          path: ${{ env.ZIP }}
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            # Made on the website (or made before): add the zip, replacing
+            # an older one of the same name, instead of failing.
+            echo "The release $TAG is already there: adding the zip to it."
+            gh release upload "$TAG" "$ZIP" --clobber
+          else
+            # --target makes the tag on this run's commit if it doesn't exist.
+            gh release create "$TAG" "$ZIP" --target "$GITHUB_SHA" \
+              --title "Duck Mold ${{ steps.version.outputs.version }}" \
+              --notes "Download $ZIP below, unzip it, and double-click DuckMoldStudio.exe. READ ME FIRST.txt inside says the rest."
+          fi
+          echo "Published: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"

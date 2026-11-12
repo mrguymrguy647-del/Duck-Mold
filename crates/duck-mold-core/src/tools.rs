@@ -326,3 +326,49 @@ pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
         )))
     })
 }
+
+/// The recipe a new model starts as: one box, standing on the ground,
+/// with one colour.
+pub const STARTER: &str = r##"# A new Duck Mold model. Sizes are in metres.
+version = 0
+name = "model"
+
+[palette]
+duck = "#FFCC2E"
+
+[[parts]]
+name = "body"
+shape = "box"
+size = [1, 1, 1]
+color = "duck"
+"##;
+
+/// `duck-mold new`: writes the starter recipe to `path`, which must end
+/// in `.toml` and must not be there yet. Nothing is ever written over.
+pub fn new_file(path: &Path) -> Result<Inspection, Failure> {
+    let refuse = |why: String| Failure::Usage(Box::new(Issue::error(Code::Io, "", why)));
+    let is_toml = path
+        .extension()
+        .and_then(|ending| ending.to_str())
+        .is_some_and(|ending| ending.eq_ignore_ascii_case("toml"));
+    if !is_toml {
+        return Err(refuse(format!(
+            "\"{}\" can't be a new recipe: its name must end in .toml",
+            display_path(path)
+        )));
+    }
+    if path.exists() {
+        return Err(refuse(format!(
+            "\"{}\" is already there: new never writes over a file",
+            display_path(path)
+        )));
+    }
+    let name = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty() && !stem.contains(['"', '\\']))
+        .unwrap_or_else(|| "model".to_owned());
+    let text = STARTER.replacen("\"model\"", &format!("\"{name}\""), 1);
+    write_file(path, text.as_bytes())?;
+    inspect_file(path)
+}

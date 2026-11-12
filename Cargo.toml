@@ -14,11 +14,16 @@
 
 [workspace]
 resolver = "3"
-members = ["crates/duck-mold-core", "crates/duck-mold-view", "crates/duck-mold-cli"]
+members = [
+    "crates/duck-mold-core",
+    "crates/duck-mold-view",
+    "crates/duck-mold-cli",
+    "crates/duck-mold-studio",
+]
 
 # Settings shared by every crate.
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
 repository = "https://github.com/mrguymrguy647-del/Duck-Mold"
@@ -44,6 +49,17 @@ clap = { version = "4", features = ["derive"] }
 duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "1228f77a216a0ce57270057f5abc8e197028fe56", default-features = false }
 # Writes the PNG pictures. The same library (and version) Duck Forge uses.
 png = "0.18"
+# The Studio's window: egui is the interface library, eframe opens the
+# window. The same library and version as Duck Quill and Duck Forge's
+# Studio, so that Duck Mold's Studio can later be docked inside Duck
+# Forge's. Only the duck-mold-studio crate uses it: the command line and
+# the libraries build without it.
+eframe = "0.37"
+# The "Open" and "choose a folder" windows of the operating system.
+rfd = "0.17"
+# Runs the Studio's screens with no window, for tests: clicks things by
+# their label, and can save a picture of the screen.
+egui_kittest = { version = "0.37", features = ["wgpu", "snapshot", "eframe"] }
 
 [workspace.lints.rust]
 # No `unsafe` anywhere: nothing here needs it.

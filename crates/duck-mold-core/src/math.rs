@@ -362,6 +362,50 @@ impl Mat3 {
         }
     }
 
+    /// The same numbers with rows and columns swapped. For a plain turn
+    /// this is the turn back.
+    pub fn transposed(&self) -> Mat3 {
+        let r = self.rows;
+        Mat3 {
+            rows: [
+                [r[0][0], r[1][0], r[2][0]],
+                [r[0][1], r[1][1], r[2][1]],
+                [r[0][2], r[1][2], r[2][2]],
+            ],
+        }
+    }
+
+    /// What undoes it: `m.inverse() * (m * point)` is `point` again.
+    /// `None` if it squashes everything flat, so that nothing can undo
+    /// it.
+    pub fn inverse(&self) -> Option<Mat3> {
+        let determinant = self.determinant();
+        if determinant.abs() < 1e-18 {
+            return None;
+        }
+        let [a, b, c] = self.rows;
+        let rows = [
+            [
+                b[1] * c[2] - b[2] * c[1],
+                a[2] * c[1] - a[1] * c[2],
+                a[1] * b[2] - a[2] * b[1],
+            ],
+            [
+                b[2] * c[0] - b[0] * c[2],
+                a[0] * c[2] - a[2] * c[0],
+                a[2] * b[0] - a[0] * b[2],
+            ],
+            [
+                b[0] * c[1] - b[1] * c[0],
+                a[1] * c[0] - a[0] * c[1],
+                a[0] * b[1] - a[1] * b[0],
+            ],
+        ];
+        Some(Mat3 {
+            rows: rows.map(|row| row.map(|cell| cell / determinant)),
+        })
+    }
+
     /// Whether it flips things over (a mirror). Then a triangle's corners
     /// end up in the opposite order and have to be reversed.
     pub fn determinant(&self) -> f64 {

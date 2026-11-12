@@ -1,0 +1,58 @@
+DUCK MOLD
+Make 3D models for Duck Forge games from parts that join at sockets,
+with the mouse or from a text recipe.
+
+
+TO START
+  Double-click DuckMoldStudio.exe.
+
+  The first time, Windows may say "Windows protected your PC". That's
+  because the program isn't signed with a (paid) certificate yet, not
+  because something is wrong. Click "More info", then "Run anyway".
+  Windows only asks once.
+
+  For a desktop icon, double-click "Create desktop shortcut.bat".
+  Keep this folder where it is afterwards: the shortcut points into it.
+
+
+A FIRST LOOK
+  In the Studio, click "Open a model" and choose examples\robot.toml.
+  - Drag to turn the model, right-drag to slide it, roll the wheel to
+    come closer.
+  - Click a part to select it. Its properties are on the right: change
+    its size or colour there.
+  - Click one of the small round markers on the selected part and pick
+    a shape: a new part is joined there.
+  - Drag the selected part onto another marker to move it.
+  - "Export" writes the model as a .glb file next to the recipe, for a
+    Duck Forge game. "Render picture" writes a picture of it.
+  - Undo is Ctrl+Z.
+
+  "New model" starts a recipe of your own with one box in it.
+
+  You can also drop a recipe file on DuckMoldStudio.exe to open it.
+
+
+YOUR MODELS ARE TEXT FILES
+  A model is a recipe: a .toml file that lists its parts and where they
+  join. The Studio changes that file every time you change something,
+  so there is nothing to save, and the file is the model. You can open
+  it in Notepad, and an AI agent can read and change it too, while the
+  Studio is open: the Studio shows the change at once.
+
+
+WHAT'S IN THIS FOLDER
+  DuckMoldStudio.exe   the Studio: build models with the mouse
+  duck-mold.exe        Duck Mold on the command line, for AI agents and
+                       scripts: inspect, export, render and edit
+                       recipes without a window. "duck-mold guide"
+                       prints all an agent needs to know.
+  examples\            recipes to open, look at and change
+  docs\                the recipe format, and the guide for AI agents
+
+
+A NEW VERSION
+  Download the new zip, unzip it, and replace this folder with it. Keep
+  your own models somewhere else (your Documents folder, say), never in
+  this folder, so they are safe. Run "Create desktop shortcut.bat" again
+  if you moved the folder.

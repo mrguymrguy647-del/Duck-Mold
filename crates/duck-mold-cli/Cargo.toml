@@ -18,11 +18,5 @@ clap = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 
-[features]
-# The preview window (`duck-mold preview`). Build with
-# --no-default-features to leave it, and the window libraries, out.
-default = ["preview"]
-preview = ["duck-mold-view/preview"]
-
 [lints]
 workspace = true

@@ -26,8 +26,8 @@ use std::process::Command;
 #[path = "../../../docs/forge/duck_mold_glb.rs"]
 mod forge;
 
-const EXAMPLES: [&str; 7] = [
-    "crate", "table", "tree", "house", "robot", "snowman", "desk",
+const EXAMPLES: [&str; 8] = [
+    "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck",
 ];
 
 /// The top of the repository.
@@ -170,12 +170,13 @@ fn every_example_is_a_clean_model() {
         }
         assert_eq!(report["ground"]["rests_on_ground"], true, "{name}");
         assert_eq!(report["floating"], serde_json::json!([]), "{name}");
-        // Only the tree and the snowman overlap, and they mean to: the
-        // tree's tiers are pushed into each other, and the snowman's five
-        // lumps of coal are pressed into the snow.
+        // Only the tree, the snowman and the duck overlap, and they mean
+        // to: the tree's tiers are pushed into each other, the snowman's
+        // five lumps of coal are pressed into the snow, and the duck's
+        // two eyes into its head.
         let overlaps = report["overlapping"].as_array().unwrap().len();
         let meant = match name {
-            "tree" => 2,
+            "tree" | "duck" => 2,
             "snowman" => 5,
             _ => 0,
         };

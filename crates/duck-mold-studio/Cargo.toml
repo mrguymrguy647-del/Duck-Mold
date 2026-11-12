@@ -1,0 +1,30 @@
+[package]
+name = "duck-mold-studio"
+description = "Duck Mold Studio: the window where a model is built with the mouse. Every edit it makes is a `duck-mold edit` command."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+# The program is DuckMoldStudio, like DuckQuill and DuckForgeStudio.
+[[bin]]
+name = "DuckMoldStudio"
+path = "src/main.rs"
+
+[dependencies]
+duck-mold-core = { workspace = true }
+duck-mold-view = { workspace = true }
+eframe = { workspace = true }
+rfd = { workspace = true }
+
+# Puts the icon inside DuckMoldStudio.exe on Windows.
+[build-dependencies]
+winresource = "0.1"
+
+[dev-dependencies]
+egui_kittest = { workspace = true }
+# For the test that draws the icon from the duck recipe.
+png = { workspace = true }
+
+[lints]
+workspace = true

@@ -368,16 +368,180 @@ fn render_writes_nothing_for_a_bad_recipe_or_a_bad_size() {
 }
 
 #[test]
+fn edit_changes_the_recipe_and_prints_the_report() {
+    let folder = folder("cli_edit");
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "star",
+            "--shape",
+            "sphere",
+            "--radius",
+            "0.1",
+            "--to",
+            "leaves.top",
+            "--color",
+            "leaf",
+            "--twist",
+            "-30",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let said = stdout(&output);
+    assert!(
+        said.starts_with(
+            "edited tree.toml: added \"star\" (sphere) on leaves.top\ntree  (tree.toml)\n"
+        ),
+        "{said}"
+    );
+    assert!(said.contains("parts        3"), "{said}");
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        format!(
+            "{TREE}\n[[parts]]\nname = \"star\"\nshape = \"sphere\"\nradius = 0.1\ncolor = \"leaf\"\nattach = \"bottom\"\nto = \"leaves.top\"\ntwist = -30\n"
+        )
+    );
+
+    // As JSON: inspect's report, with what the edit did.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add-socket",
+            "trunk",
+            "knot",
+            "--on",
+            "front",
+            "--shift",
+            "-0.5,0.2,0",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["triangles"], 162);
+    assert_eq!(report["edit"]["command"], "add-socket");
+    assert_eq!(report["edit"]["written"], true);
+    assert_eq!(
+        report["edit"]["summary"],
+        "added the socket \"knot\" on the front of \"trunk\""
+    );
+
+    // A dry run says what would happen and writes nothing.
+    let before = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "rename", "star", "top", "--dry-run"],
+    );
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        stdout(&output).starts_with(
+            "would edit tree.toml: renamed \"star\" to \"top\" (a dry run: nothing was written)\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn an_edit_that_cant_be_made_says_why_and_writes_nothing() {
+    let folder = folder("cli_edit_refused");
+    // No such part: exit code 2, one line, with the likely fix.
+    let output = run(&folder, &["edit", "tree.toml", "remove", "trunc"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: tree.toml: there is no part \"trunc\" in the recipe. Did you mean \"trunk\"?\n"
+    );
+    // It would break the recipe: exit code 1, the mistakes, as JSON too.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--color",
+            "pink",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let report = json(&output);
+    assert_eq!(report["ok"], false);
+    assert_eq!(report["errors"][0]["code"], "unknown_color");
+    // The words themselves are wrong: exit code 2.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "trunk", "--size", "1,2"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--size needs three numbers"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "add", "x", "--to", "trunk.top"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--shape box"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        TREE
+    );
+}
+
+#[test]
+fn every_edit_has_a_command_and_is_in_the_guide() {
+    // The Studio builds `Edit` values; so does the command line. Every
+    // kind of edit must be reachable from both, and written down for
+    // agents.
+    let folder = folder("cli_edit_all");
+    let help = stdout(&run(&folder, &["edit", "--help"]));
+    let guide = guide();
+    for command in duck_mold_core::edit::Edit::COMMANDS {
+        assert!(
+            help.lines()
+                .any(|line| line.trim_start().starts_with(&format!("{command} "))),
+            "`duck-mold edit` has no command {command}:\n{help}"
+        );
+        let output = run(&folder, &["edit", "tree.toml", command, "--help"]);
+        assert_eq!(output.status.code(), Some(0), "{command}");
+        assert!(
+            guide.contains(&format!("`duck-mold edit <recipe> {command} ")),
+            "the guide doesn't describe `duck-mold edit <recipe> {command}`"
+        );
+    }
+}
+
+#[test]
 fn preview_needs_a_file_that_is_there() {
     // Only what fails before a window would open is tried here: a test
     // machine may have a screen, and a window would wait to be closed.
     let folder = folder("cli_preview");
-    let output = run(&folder, &["preview", "nowhere.toml"]);
-    assert_eq!(output.status.code(), Some(2));
-    assert_eq!(
-        stderr(&output),
-        "error: can't read \"nowhere.toml\": there is no such file\n"
-    );
+    for command in ["preview", "studio"] {
+        let output = run(&folder, &[command, "nowhere.toml"]);
+        assert_eq!(output.status.code(), Some(2));
+        assert_eq!(
+            stderr(&output),
+            "error: can't read \"nowhere.toml\": there is no such file.\n"
+        );
+    }
     let output = run(&folder, &["preview", "--help"]);
     assert_eq!(output.status.code(), Some(0));
     assert!(
@@ -474,6 +638,9 @@ fn help_and_version_explain_the_program() {
             "inspect",
             "export",
             "render",
+            "edit",
+            "new",
+            "studio",
             "preview",
             "guide",
             "Exit codes: 0 it worked, 1 the recipe has errors, 2",
@@ -492,6 +659,111 @@ fn help_and_version_explain_the_program() {
         "{help}"
     );
     assert!(help.contains("Nothing is written if the recipe has mistakes"));
+}
+
+#[test]
+fn studio_and_preview_start_the_studio_program_beside_duck_mold() {
+    let folder = folder("cli_studio");
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    std::fs::copy(examples.join("robot.toml"), folder.join("robot.toml")).unwrap();
+    let with_studio_at = |program: &Path, arguments: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_duck-mold"))
+            .current_dir(&folder)
+            .env("DUCK_MOLD_STUDIO", program)
+            .args(arguments)
+            .output()
+            .unwrap()
+    };
+
+    // The Studio is a program of its own. If it isn't there, say how to
+    // get it.
+    let output = with_studio_at(&folder.join("NoStudioHere"), &["studio", "robot.toml"]);
+    assert_eq!(output.status.code(), Some(2));
+    let said = stderr(&output);
+    assert!(
+        said.contains("the Studio program isn't here")
+            && said.contains("cargo build --release -p duck-mold-studio"),
+        "{said}"
+    );
+
+    // A program that is there is started, with the file (and --look for
+    // preview). `duck-mold` itself stands in for the Studio here: it
+    // doesn't know --look, so it ends at once, and that is reported.
+    let stand_in = Path::new(env!("CARGO_BIN_EXE_duck-mold"));
+    let output = with_studio_at(stand_in, &["preview", "robot.toml"]);
+    assert_eq!(output.status.code(), Some(2));
+    let said = stderr(&output);
+    assert!(said.contains("--look"), "{said}");
+    assert!(
+        said.contains("the Studio couldn't open its window"),
+        "{said}"
+    );
+    // With no --look, the stand-in is asked for "robot.toml", which it
+    // doesn't know as a command either.
+    let output = with_studio_at(stand_in, &["studio", "robot.toml"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("robot.toml"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn new_starts_a_recipe_and_never_writes_over_one() {
+    let folder = folder("cli_new");
+    let output = run(&folder, &["new", "crate.toml"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let said = stdout(&output);
+    assert!(
+        said.starts_with("wrote crate.toml\ncrate  (crate.toml)\n"),
+        "{said}"
+    );
+    assert!(said.contains("rests on the ground"), "{said}");
+    assert_eq!(stderr(&output), "", "a new recipe has no warnings");
+    let text = std::fs::read_to_string(folder.join("crate.toml")).unwrap();
+    assert!(text.contains("name = \"crate\""), "{text}");
+
+    // It can be changed at once, like any recipe.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "crate.toml",
+            "add",
+            "lid",
+            "--shape",
+            "box",
+            "--to",
+            "body.top",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+
+    // Never over a file that is there; only .toml.
+    let output = run(&folder, &["new", "crate.toml"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: \"crate.toml\" is already there: new never writes over a file.\n"
+    );
+    assert!(
+        std::fs::read_to_string(folder.join("crate.toml"))
+            .unwrap()
+            .contains("lid")
+    );
+    let output = run(&folder, &["new", "crate.json", "--json"]);
+    assert_eq!(output.status.code(), Some(2));
+    let report: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(report["ok"], false);
+    assert!(!folder.join("crate.json").exists());
+
+    let output = run(&folder, &["new", "second.toml", "--json"]);
+    assert_eq!(output.status.code(), Some(0));
+    let report: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["name"], "second");
+    assert_eq!(report["triangles"], 12);
 }
 
 // ---- the guide for agents ----------------------------------------------------

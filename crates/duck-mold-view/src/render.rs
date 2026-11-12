@@ -145,28 +145,34 @@ pub struct Sheet {
     pub views: Vec<ViewPlace>,
 }
 
+/// Pixels (row by row from the top, each `0x00RRGGBB`) as a PNG file: 8
+/// bits each of red, green and blue.
+pub fn png_of(width: usize, height: usize, pixels: &[u32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(pixels.len() * 3);
+    for &pixel in pixels {
+        let [_, r, g, b] = pixel.to_be_bytes();
+        bytes.extend_from_slice(&[r, g, b]);
+    }
+    let mut png = Vec::new();
+    let width = u32::try_from(width).expect("a picture is far narrower than that");
+    let height = u32::try_from(height).expect("a picture is far shorter than that");
+    let mut encoder = png::Encoder::new(&mut png, width, height);
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder
+        .write_header()
+        .expect("writing to memory can't fail");
+    writer
+        .write_image_data(&bytes)
+        .expect("there is one pixel for each place in the picture");
+    writer.finish().expect("writing to memory can't fail");
+    png
+}
+
 impl Sheet {
     /// The picture as a PNG file: 8 bits each of red, green and blue.
     pub fn to_png(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(self.pixels.len() * 3);
-        for &pixel in &self.pixels {
-            let [_, r, g, b] = pixel.to_be_bytes();
-            bytes.extend_from_slice(&[r, g, b]);
-        }
-        let mut png = Vec::new();
-        let width = u32::try_from(self.width).expect("a sheet is at most 4097 pixels wide");
-        let height = u32::try_from(self.height).expect("a sheet is at most 4200 pixels tall");
-        let mut encoder = png::Encoder::new(&mut png, width, height);
-        encoder.set_color(png::ColorType::Rgb);
-        encoder.set_depth(png::BitDepth::Eight);
-        let mut writer = encoder
-            .write_header()
-            .expect("writing to memory can't fail");
-        writer
-            .write_image_data(&bytes)
-            .expect("there is one pixel for each place in the picture");
-        writer.finish().expect("writing to memory can't fail");
-        png
+        png_of(self.width, self.height, &self.pixels)
     }
 
     /// The colour of one pixel, as `0xRRGGBB`.
@@ -287,6 +293,14 @@ fn draw_view(model: &Model, view: &View, size: usize) -> Canvas {
     };
     canvas.draw_mesh(&mesh, &Transform::default(), &camera);
     canvas
+}
+
+/// One small picture of a model, `size` pixels square: the three-quarter
+/// view of `render`'s sheet, with no caption. The Studio's parts library
+/// shows these. Each pixel is `0x00RRGGBB`, row by row from the top.
+pub fn render_small(model: &Model, size: usize) -> Vec<u32> {
+    let view = &VIEWS[VIEWS.len() - 1];
+    draw_view(model, view, size.max(1)).pixels().to_vec()
 }
 
 /// The model as a Duck Forge mesh, each corner moved by `place` first.

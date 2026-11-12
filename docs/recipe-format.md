@@ -201,8 +201,11 @@ and faces straight out of the surface there (on an edge between two
 faces, halfway between them). A socket already on the surface doesn't
 move. So a cone's `left`, `right`, `front` and `back` are halfway up
 its slant, and a wedge's `top` and `front` are the middle of its slope.
-An assembly, and a part made from a file, keep their sockets on the box
-around them.
+A part made of parts and a part made from a mesh file follow the same
+rule, through every face inside them; where nothing lies straight behind
+the box side, the socket stays on the box. A whole recipe's own sockets
+(the model's, and those of a recipe file used as a part) stay on the box
+around it: they say how big it is and where the ground is.
 
 **Declared.** Under `sockets`, each name is one of three forms:
 

@@ -1,12 +1,16 @@
 # Duck Mold
 
-Duck Mold makes game-ready 3D models from text. You describe a model in a
-short file, a **recipe**: which parts it has, which part joins which, and
-what colour each is. Duck Mold builds the model, tells you in words and
-numbers how it came out, and writes a `.glb` file for the
+<img src="crates/duck-mold-studio/assets/icon.png" alt="A duck, made in Duck Mold" width="96" align="right">
+
+Duck Mold makes game-ready 3D models from parts. You describe a model in
+a short file, a **recipe**: which parts it has, which part joins which,
+and what colour each is. You can type the recipe, or build it with the
+mouse in **Duck Mold Studio**, which writes the same file. Duck Mold
+builds the model, tells you in words and numbers how it came out, and
+writes a `.glb` file for the
 [Duck Forge](https://github.com/mrguymrguy647-del/Duck-Forge) game engine.
 
-It is not a modelling program. It is an assembler: you don't push points
+It is not a sculpting program. It is an assembler: you don't push points
 around, you name parts and say how they fit together. It belongs with
 [Duck Quill](https://github.com/mrguymrguy647-del/duck-quill) (2D art)
 and [Duck Echo](https://github.com/mrguymrguy647-del/Duck-Echo) (sound),
@@ -16,8 +20,25 @@ and like them it is made for two kinds of user: people who don't know
 **An AI agent?** Read [docs/AI_GUIDE.md](docs/AI_GUIDE.md), or run
 `duck-mold guide`: the whole tool on one page, from scratch.
 
-This is Phase 0: a command-line program and a library. There is no
-window yet.
+## Start the Studio on Windows, without a terminal
+
+- **From a download:** get `DuckMold-<version>-windows.zip` from the
+  [Releases](https://github.com/mrguymrguy647-del/Duck-Mold/releases)
+  page, unzip it, and double-click `DuckMoldStudio.exe`. `READ ME
+  FIRST.txt` in the folder says the rest. `Create desktop shortcut.bat`
+  puts the duck on your desktop.
+- **From a copy of this repository:** install Rust from
+  <https://rustup.rs>, then double-click `Start Duck Mold Studio.bat`.
+  It builds the Studio (a few minutes the first time) and starts it.
+  `Create desktop shortcut.bat` puts a shortcut on your desktop.
+
+The Studio opens on a page with **Open a model**, **New model** and the
+recipes you opened lately. You can also drop a recipe file on
+`DuckMoldStudio.exe`, or on its shortcut, to open it. No black console
+window opens behind it.
+
+The rest of this page builds a model by typing first, because that
+shows what a recipe is; the Studio comes at step 6 of the quick start.
 
 ## A first model
 
@@ -89,19 +110,82 @@ without opening a window:
 
 ![The robot from the front, the right, the back and three-quarter](tests/golden/robot.png)
 
-6. Or look at it in a window, from every side:
+6. Or open it in the Studio, the window where a model is built with the
+   mouse:
 
 ```bash
-target/release/duck-mold preview examples/robot.toml
+target/release/duck-mold studio examples/robot.toml
 ```
 
-Drag with the left mouse button to turn it, roll the wheel to come
-closer, Escape to quit. Leave the window open while you edit the recipe:
-every time you save, the model is built again. If the recipe has a
-mistake, the window says so in red and keeps showing the last version
-that built.
+Drag with the left mouse button to turn the model, with the right one
+to slide it, and roll the wheel to come closer. The parts are listed on
+the left, and what is wrong with the recipe (if anything) at the bottom.
+Click a part, in the picture or in the list, to select it: it lights up
+in both. (A part made of parts, like the robot's arm, is selected whole
+first; click again for the part inside.)
 
-![The preview window showing the robot](docs/preview.png)
+The selected part's **properties** are on the right: its name, what it
+is made of, its sizes, its colour (from the palette, or a new one), what
+it is joined to, and its twist, with buttons to duplicate it, make a
+mirror copy, or remove it. Changing a value changes the recipe file at
+once, and only where it has to: comments and layout stay. A part that
+comes from a definition says so first, and names every other part the
+change would reach:
+
+> Made from the definition "eye". Changing its shape, size or colour
+> also changes: right_eye.
+
+**Adding and moving parts.** The selected part's sockets show as small
+round markers.
+
+- Click a marker and pick what to add there: one of the five shapes, or
+  a part the recipe defines. The new part is about half the size of the
+  one it sits on, has its colour, and is selected, ready to change.
+- Click anywhere else on the selected part to add a part *at that
+  point*: the Studio declares a socket there (`on` a side, with a
+  `shift`) and joins the new part to it.
+- Drag the selected part to move it. The sockets of the parts it could
+  join light up; drop it on one to join it there. Drop it on a part's
+  surface and it goes to that point. A part that already has a socket
+  of its own on that part slides: its socket is moved, and no new one is
+  made.
+
+Each of these is an `add`, `join`, `add-socket` or `set-socket` edit in
+the recipe file, the same ones `duck-mold edit` makes.
+
+**The parts library.** Under the parts list is the library: every
+recipe and model file (`.obj`, `.gltf`, `.glb`) in the folder `parts`
+next to your recipe, each with a small picture. They are offered in the
+list that opens when you click a socket, below the shapes, and are added
+the same way. The recipe then names the file (`file =
+"parts/lamp.gltf"`): nothing is copied, and when the file changes, so
+does every model that uses it. **Folder** chooses another folder. Try it
+with `examples/desk.toml`, whose library is `examples/parts`.
+
+![The desk example: a click on a socket offers shapes, defined parts and the library](docs/studio-library.png)
+
+**Undo and redo** (the buttons, or Ctrl+Z and Ctrl+Y) take back and
+repeat every change, one at a time, as far back as 500 steps. Because
+the Studio writes each change to the file at once, undo writes the
+earlier text back to the file. A change another program made while the
+Studio was open (an agent, a text editor) is a step too, called "Changed
+outside the Studio": undo always takes back the latest change to the
+file, whoever made it. The steps are forgotten when the Studio closes.
+
+**Export** and **Render picture**, in the top bar, write the `.glb` and
+the four-view picture next to the recipe: no terminal needed.
+
+**The file is the model.** The Studio keeps no model of its own: it
+shows the recipe file, and every change you make is written to it at
+once, so there is nothing to save. When you (or an agent) save the
+recipe in another program, the Studio builds it again. If the recipe has
+a mistake, the Studio says so and keeps showing the last version that
+built.
+
+![The Studio showing the robot, with its left eye selected and its properties](docs/studio.png)
+
+`duck-mold preview examples/robot.toml` opens the same window to look
+only: nothing can be changed there.
 
 ## The commands
 
@@ -110,12 +194,15 @@ that built.
 | `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
-| `duck-mold preview <file>` | Opens a window showing the model: drag to orbit, wheel to zoom, Escape to quit. It builds the model again whenever the recipe, or a file it uses, is saved. |
+| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
+| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. Never writes over a file. |
+| `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
+| `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |
 | `duck-mold guide` | Prints the guide for AI agents. |
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
-Add `--json` to `inspect`, `export` or `render` to get the report as
-JSON, for an agent or a script.
+Add `--json` to `inspect`, `export`, `render`, `edit` or `new` to get the
+report as JSON, for an agent or a script.
 
 `render` draws with Duck Forge's own renderer, so the picture shows the
 model the way a Duck Forge game draws it. The same recipe always gives
@@ -206,6 +293,7 @@ A recipe can be written as TOML (the examples) or as JSON
 | [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
+| [duck.toml](examples/duck.toml) | A ball stretched into a body with a three-number `scale`, parts placed at points of a round surface, one wing used twice. Its picture is the Studio's icon. |
 
 Each is commented line by line.
 
@@ -244,14 +332,19 @@ see the handoff note.
 | [DESIGN.md](DESIGN.md) | Why Duck Mold is the way it is, decision by decision, in plain words. |
 | [PHASE0_REPORT.md](PHASE0_REPORT.md) | Phase 0: what works, what doesn't yet, and what comes next. |
 | [PHASE1_REPORT.md](PHASE1_REPORT.md) | Phase 1: pictures, the preview window, sockets on surfaces and in the `.glb`, `twist`, glTF import. |
+| [PHASE2_REPORT.md](PHASE2_REPORT.md) | Phase 2: the Studio, the edit commands, undo, the parts library, the Windows download. |
 
 ## Project layout
 
 ```
 Duck-Mold/
 ├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
-├── Cargo.toml                 the workspace: three crates, built together
-├── examples/                  seven recipes to read and change, and parts/ for files they use
+├── .github/workflows/release.yml  makes the Windows download (a zip)
+├── Start Duck Mold Studio.bat double-click: builds the Studio and starts it
+├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
+├── release/                   what goes in the download beside the programs
+├── Cargo.toml                 the workspace: four crates, built together
+├── examples/                  eight recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/
@@ -269,9 +362,12 @@ Duck-Mold/
     │   │   ├── model.rs       the built model: a tree of parts and their faces
     │   │   ├── glb.rs         writing (and reading back) .glb
     │   │   ├── inspect.rs     size, ground, floating and overlapping parts
+    │   │   ├── edit/          the edits: one change to a recipe's text, and nothing else
     │   │   └── tools.rs       what the commands do, for any front end
     │   └── tests/             one file of tests per step
-    ├── duck-mold-view/        pictures (`render`) and the window (`preview`), by Duck Forge
+    ├── duck-mold-view/        pictures (`render`), and all the Studio does, with no window
+    ├── duck-mold-studio/      the Studio's window (egui): the `DuckMoldStudio` program
+    │   └── assets/            its icon: a picture of examples/duck.toml
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 
@@ -291,16 +387,32 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 All three must pass before a commit. GitHub runs them again, on Windows
 and on Linux, for every push and pull request
-(`.github/workflows/ci.yml`), with the preview window and without it.
+(`.github/workflows/ci.yml`).
 
-The preview window comes from Duck Forge (the `preview` feature, on by
-default). On Linux it uses X11 and needs the `libxkbcommon-x11` library
-when the window opens (most desktops have it; on Ubuntu or Debian,
-`sudo apt install libxkbcommon-x11-0`). For a machine with no screen,
-build without it; everything else works the same:
+The Studio is a program of its own, `DuckMoldStudio`, so the `duck-mold`
+command holds no window library. `duck-mold studio` and `duck-mold
+preview` start the `DuckMoldStudio` that sits next to `duck-mold`, where
+`cargo build` puts both. A machine with no screen, or an agent, can
+build the command alone, which is much quicker:
 
 ```bash
-cargo build --release --no-default-features
+cargo build --release -p duck-mold-cli
+```
+
+The Studio's window is made with egui, like Duck Quill and Duck Forge's
+Studio. Its screens are tested with no window (`egui_kittest`): the
+tests click through the real screens on Windows and Linux
+(`tests/screens.rs`), and on Linux one more test compares pictures of
+whole screens with the ones stored in
+`crates/duck-mold-studio/tests/screens/` (`tests/pictures.rs`; it draws
+them one after another, because the software driver crashed when
+several were drawn at once). That needs a Vulkan driver;
+the software one will do (on Ubuntu or Debian, `sudo apt install
+mesa-vulkan-drivers`). After a change that is meant to be seen, store
+the new pictures with
+
+```bash
+UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures
 ```
 
 The tests include **golden files**: `tests/golden/` holds the exact

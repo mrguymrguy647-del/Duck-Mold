@@ -420,13 +420,13 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-const PART_FIELDS: [&str; 20] = [
+pub(crate) const PART_FIELDS: [&str; 20] = [
     "name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color",
     "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note",
 ];
 
 /// The fields at the top of a recipe.
-const TOP_FIELDS: [&str; 9] = [
+pub(crate) const TOP_FIELDS: [&str; 9] = [
     "version",
     "name",
     "description",

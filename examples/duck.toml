@@ -1,0 +1,140 @@
+# A duck, made the way a person makes one in Duck Mold Studio: a body, and
+# everything else clicked onto it at a socket or at a point of a surface.
+#
+#   duck-mold studio examples/duck.toml
+#
+# Its picture is the Studio's own icon: `crates/duck-mold-studio/assets`
+# holds that picture, drawn from this recipe (a test checks it still
+# is).
+#
+# It shows: `scale` with three numbers (a ball stretched into a body),
+# sockets declared at points of a round surface with `on` and `shift`,
+# and one wing used twice, the second time mirrored.
+
+version = 0
+name = "duck"
+description = "A small duck. Its picture is Duck Mold Studio's icon."
+
+[palette]
+duck = "#FFCC2E"
+wing = "#F2B600"
+beak = "#F28C28"
+ink  = "#1B1446"
+
+# ---- parts defined once ------------------------------------------------------
+
+[define.eye]
+shape = "sphere"
+radius = 0.04
+segments = 8
+color = "ink"
+
+# A wing: a flattened ball. `root` is where it meets the body.
+[define.wing]
+shape = "sphere"
+radius = 0.24
+segments = 12
+color = "wing"
+
+[define.wing.sockets]
+root = { on = "right" }
+
+[define.foot]
+shape = "box"
+size = [0.2, 0.05, 0.3]
+color = "beak"
+
+# ---- the duck ----------------------------------------------------------------
+
+# A ball, lower than it is wide and longer than both.
+[[parts]]
+name = "body"
+shape = "sphere"
+radius = 0.42
+segments = 16
+scale = [1, 0.85, 1.3]
+color = "duck"
+
+[parts.sockets]
+neck       = { on = "top", shift = [0, 0, 0.55] }
+tail       = { on = "back", shift = [0, 0.45, 0] }
+left_wing  = { on = "left", shift = [0, 0.15, -0.1] }
+right_wing = { on = "right", shift = [0, 0.15, -0.1] }
+left_foot  = { on = "bottom", shift = [-0.4, 0, 0.1] }
+right_foot = { on = "bottom", shift = [0.4, 0, 0.1] }
+
+[[parts]]
+name = "head"
+shape = "sphere"
+radius = 0.28
+segments = 16
+color = "duck"
+attach = "bottom"
+to = "body.neck"
+
+[parts.sockets]
+beak      = { on = "front", shift = [0, -0.1, 0] }
+left_eye  = { on = "front", shift = [-0.5, 0.35, 0] }
+right_eye = { on = "front", shift = [0.5, 0.35, 0] }
+
+# A cone, flattened: wide and low.
+[[parts]]
+name = "beak"
+shape = "cone"
+radius = 0.1
+height = 0.22
+segments = 8
+scale = [1.5, 1, 0.6]
+color = "beak"
+attach = "bottom"
+to = "head.beak"
+
+[[parts]]
+name = "left_eye"
+use = "eye"
+attach = "center"
+to = "head.left_eye"
+
+[[parts]]
+name = "right_eye"
+use = "eye"
+attach = "center"
+to = "head.right_eye"
+
+[[parts]]
+name = "left_wing"
+use = "wing"
+scale = [0.3, 0.75, 1.3]
+attach = "root"
+to = "body.left_wing"
+
+# The same wing, flipped: its root is now on its other side.
+[[parts]]
+name = "right_wing"
+use = "wing"
+scale = [0.3, 0.75, 1.3]
+mirror = "x"
+attach = "root"
+to = "body.right_wing"
+
+[[parts]]
+name = "tail"
+shape = "cone"
+radius = 0.14
+height = 0.3
+segments = 8
+color = "wing"
+attach = "bottom"
+to = "body.tail"
+
+[[parts]]
+name = "left_foot"
+use = "foot"
+attach = "top"
+to = "body.left_foot"
+
+[[parts]]
+name = "right_foot"
+use = "foot"
+attach = "top"
+to = "body.right_foot"

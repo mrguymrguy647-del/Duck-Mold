@@ -482,8 +482,11 @@ fn an_assembly_is_a_part_like_any_other() {
     let body = bounds(&model, "body");
     let left = bounds(&model, "left_arm");
     let right = bounds(&model, "right_arm");
-    assert_eq!(left.max.x, body.min.x);
-    assert_eq!(right.min.x, body.max.x);
+    // The shoulder socket is on the upper arm's own surface (since Phase
+    // 2: before, it was on the box around arm and hand, and the upper
+    // arm stopped short of the body by the hand's extra width).
+    assert_eq!(bounds(&model, "left_arm/upper").max.x, body.min.x);
+    assert_eq!(bounds(&model, "right_arm/upper").min.x, body.max.x);
     assert_eq!(left.min.x, -right.max.x);
     assert_eq!((left.min.y, left.max.y), (right.min.y, right.max.y));
     assert!(part(&model, "right_arm").mirrored);
@@ -542,7 +545,10 @@ fn an_assembly_can_pass_on_a_socket_of_an_inner_part() {
     // `grip` is the hand's underside, wherever the arm ended up.
     let (grip, facing) = socket(&model, "left_arm", "grip");
     let hand = bounds(&model, "left_arm/hand");
-    assert_eq!(grip, vec3(hand.center().x, hand.min.y, hand.center().z));
+    assert_eq!(
+        grip,
+        vec3(hand.center().x, hand.min.y, hand.center().z).tidied()
+    );
     assert_eq!(facing, vec3(0.0, -1.0, 0.0));
     // And something can be attached to it.
     let with_tool = format!(

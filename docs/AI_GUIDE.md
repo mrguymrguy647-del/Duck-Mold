@@ -22,9 +22,16 @@ duck-mold render lamp.toml            # draw it: lamp.png, four views on one she
 duck-mold inspect lamp.toml --sockets # also list every named socket: head.top, ...
 ```
 
-(`duck-mold preview lamp.toml` opens a window for a person to look
-around the model in, which builds it again on every save. It needs a
-screen and waits until the window is closed: as an agent, use `render`.)
+```bash
+duck-mold edit lamp.toml set shade --color glow --json   # change it without typing (section 10)
+```
+
+(`duck-mold studio lamp.toml` opens the Studio, a window where a person
+builds the model with the mouse, and `duck-mold preview lamp.toml` opens
+it to look only. Both need a screen and wait until the window is closed:
+as an agent, use `render` to see the model and `edit` to change it. The
+Studio makes the same edits you do, in the same file, and picks up every
+change you save while it is open.)
 
 ```bash
 duck-mold export lamp.toml            # write lamp.glb next to the recipe
@@ -229,8 +236,12 @@ touches the shape, and faces straight out of the surface. So a
 **cone**'s `left`, `right`, `front` and `back` are halfway up its slant,
 tilted up with it, and a **wedge**'s `top` and `front` are both the
 middle of its slope (the same place as `slope`). On a box, and on a
-cylinder's or sphere's sides, they are where the box is. An assembly, or
-a part made from a file, keeps its sockets on the box around it.
+cylinder's or sphere's sides, they are where the box is. A part made of parts, and a part made from a
+file, follow the same rule, through every face inside them; only where
+nothing lies straight behind the box side (a gap between two posts)
+does the socket stay on the box. **The whole model's own sockets stay
+on its box** (so do a recipe file's, used as a part): they say how big
+it is and where the ground is.
 
 Declare more in a part's `sockets` table, one of three ways:
 
@@ -466,7 +477,67 @@ compressed file is refused.
 puts it at a socket of one part instead of under the middle of the
 whole model.
 
-## 10. Mistakes to avoid
+## 10. Changing a recipe with `edit`
+
+You can always change the recipe's text yourself. `duck-mold edit` makes
+the common changes for you, safely: it changes only the characters it
+has to (comments, order and layout stay), builds the result before it
+writes, and prints the same report as `inspect`, so one command is the
+edit and the check. These are the edits a person makes with the mouse in
+Duck Mold Studio, one for one.
+
+```bash
+duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
+```
+
+| Command | What it does |
+|---|---|
+| `duck-mold edit <recipe> add <name> --to <part.socket>` | Adds a part joined to a socket. Made of `--shape box` (or `cylinder`, `sphere`, `cone`, `wedge`), `--use <defined part>` or `--file <recipe or mesh>`. Also takes `--attach <own socket>`, `--size x,y,z`, `--radius`, `--height`, `--segments`, `--color`, `--twist`. |
+| `duck-mold edit <recipe> remove <part>` | Removes a part. Refused, with their names, if other parts hang from it; `--with-attached` removes those too. |
+| `duck-mold edit <recipe> rename <part> <new-name>` | Renames a part, and every `to`, `from` and `origin` that names it. |
+| `duck-mold edit <recipe> join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes its own socket. A part placed with `move` loses it. |
+| `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--height`, `--segments`, `--color`, `--face-color top=plank` (repeatable), `--twist`. Several at once are one edit. A new shape drops the sizes and face colours it doesn't have. |
+| `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. |
+| `duck-mold edit <recipe> duplicate <part> --mirror` | A mirror image: a right arm from a left arm. The copy gets `mirror = "x"`, its twist is reversed, and `left` and `right` are swapped in its name and in the socket it joins (`body.left_arm` becomes `body.right_arm`), unless `--name` and `--to` say otherwise. |
+| `duck-mold edit <recipe> add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
+| `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
+| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
+| `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared that way: `--shift x,y,z`, `--on <side>`. Whatever is joined to it moves with it. |
+
+- **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,
+  or `#2` for a part with no name. `--to` takes the same
+  (`left_arm/hand.bottom`).
+- **`--json`** prints `inspect`'s report for the recipe after the edit,
+  plus `"edit"`: `{ "command": "add", "summary": "added \"hat\" (cone)
+  on head.top", "file": "robot.toml", "written": true, "lines": [198,
+  206] }` (`lines`: the first and last line that changed).
+- **`--dry-run`** does everything but write: read the report, then
+  decide.
+- **An edit that would leave the recipe with more mistakes than it had
+  is refused**: exit code 1, the mistakes listed, nothing written. An
+  edit that can't be carried out (no such part, a name already taken) is
+  exit code 2, with one line saying why and often the fix.
+- **A part inside a defined part** (`left_arm/hand`, where `left_arm` is
+  `use = "arm"`) is changed in the definition, so every part using it
+  changes. The report says so: `"definition": "arm", "also_changes":
+  ["right_arm/hand"]`.
+- **A part made from a defined part** (`left_eye`, which is `use =
+  "eye"`): `set --shape`, `--size`, `--radius`, `--height`,
+  `--segments`, `--color` and `--face-color` change the definition,
+  because that is where they are written, so every part using it
+  changes, and the report names them the same way. Its `--twist`, its
+  join and its name are its own.
+- **A part inside another recipe file** is refused: edit that file.
+- If the file was saved by someone else while the edit was being worked
+  out, the edit is worked out again on the new text, so neither change
+  is lost.
+- When `--attach` isn't given, a new part joins by the side opposite the
+  socket (`bottom` on a `top`), otherwise by its `bottom`.
+- Not edits: `move`, `rotate`, `scale`, `mirror` (except through
+  `duplicate --mirror`), sockets written with `at` or `from`, and
+  `define`. Type those in the recipe.
+
+## 11. Mistakes to avoid
 
 - **Typing positions when a socket would do.** A part placed with
   `move` floats or overlaps as soon as a size changes. Attach it.
@@ -489,19 +560,20 @@ whole model.
   assembly a plain `color`.
 - **Negative `scale`.** Use `mirror`.
 
-## 11. What it can't do yet
+## 12. What it can't do yet
 
 Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
 bones, animation, colliders or LODs (`bones`, `colliders` and `lods` are
-reserved names), no window.
+reserved names). There is a window, Duck Mold Studio, but it is for
+people: everything it does, you do with `edit`.
 
-## 12. Files for reference
+## 13. Files for reference
 
-- `examples/`: crate, table, tree, house, robot, snowman. Read
-  `robot.toml` for nested parts and `snowman.toml` for sockets on curved
-  surfaces.
+- `examples/`: crate, table, tree, house, robot, desk, snowman, duck.
+  Read `robot.toml` for nested parts, `snowman.toml` and `duck.toml` for
+  sockets on curved surfaces, and `desk.toml` for parts from files.
 - `docs/recipe-format.md`: every field, default and range.
 - `docs/forge-handoff.md`: what is in the `.glb`, and how Duck Forge
   reads it.
