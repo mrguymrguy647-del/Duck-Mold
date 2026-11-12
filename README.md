@@ -99,6 +99,9 @@ target/release/duck-mold studio examples/robot.toml
 Drag with the left mouse button to turn the model, with the right one
 to slide it, and roll the wheel to come closer. The parts are listed on
 the left, and what is wrong with the recipe (if anything) at the bottom.
+Click a part, in the picture or in the list, to select it: it lights up
+in both. (A part made of parts, like the robot's arm, is selected whole
+first; click again for the part inside.)
 **Export** writes the `.glb` and **Render picture** the four-view
 picture, next to the recipe. The Studio keeps no model of its own: it
 shows the recipe file, so when you (or an agent) save the recipe in
@@ -106,7 +109,7 @@ another program, the Studio builds it again. If the recipe has a
 mistake, the Studio says so and keeps showing the last version that
 built.
 
-![The Studio showing the robot](docs/studio.png)
+![The Studio showing the robot, with its left arm selected](docs/studio.png)
 
 `duck-mold preview examples/robot.toml` opens the same window to look
 only: nothing can be changed there.

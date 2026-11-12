@@ -327,6 +327,62 @@ impl Studio {
         self.selected.as_deref()
     }
 
+    /// Selects the part with this path, or nothing. True if that is now
+    /// what is selected; false if there is no such part (and the
+    /// selection is as it was).
+    pub fn select(&mut self, path: Option<&str>) -> bool {
+        match path {
+            None => {
+                self.selected = None;
+                true
+            }
+            Some(path) if self.part(path).is_some() => {
+                self.selected = Some(path.to_owned());
+                true
+            }
+            Some(_) => false,
+        }
+    }
+
+    /// A click in the viewport, at (`x`, `y`) pixels from the top left of
+    /// a picture `width` x `height`: selects the part under the pointer,
+    /// or nothing if the pointer is on none.
+    ///
+    /// A part made of parts is selected whole first. Clicking again, on
+    /// one of the parts inside what is selected, selects that one: so
+    /// the first click on a robot's hand selects its arm, and the second
+    /// the hand.
+    pub fn click(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<&str> {
+        let hit = self
+            .model()
+            .and_then(|model| viewport::pick(model, &self.orbit, size, at, None));
+        let Some(hit) = hit else {
+            self.selected = None;
+            return None;
+        };
+        // The parts the face is in, from the outermost in.
+        fn around<'a>(parts: &'a [Part], face: usize, chain: &mut Vec<&'a Part>) {
+            if let Some(part) = parts.iter().find(|part| part.faces.contains(&face)) {
+                chain.push(part);
+                around(&part.parts, face, chain);
+            }
+        }
+        let mut chain = Vec::new();
+        if let Some(model) = self.model() {
+            around(&model.parts, hit.face, &mut chain);
+        }
+        let already = chain
+            .iter()
+            .position(|part| Some(part.path.as_str()) == self.selected.as_deref());
+        let chosen = match already {
+            // One further in, if there is one; the innermost stays.
+            Some(at) => chain.get(at + 1).or(chain.get(at)),
+            None => chain.first(),
+        };
+        self.selected = chosen.map(|part| part.path.clone());
+        self.selected.as_deref()
+    }
+
     /// Brings the whole model back into view (or the selected part, if
     /// one is), without turning the camera.
     pub fn frame(&mut self) {

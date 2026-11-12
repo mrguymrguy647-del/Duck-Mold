@@ -311,3 +311,104 @@ fn a_model_file_is_opened_to_look_at_only() {
     // Nothing to show but the grid: it still draws.
     assert!(drawn(&missing.picture(64, 48)) > 0);
 }
+
+// ---- step 4: selecting -------------------------------------------------------
+
+/// Where the middle of a part is in a picture `size` x `size`.
+fn on_screen(studio: &Studio, part: &str, size: usize) -> (f64, f64) {
+    let middle = studio.part(part).unwrap().bounds.unwrap().center();
+    studio.orbit.on_screen(middle, size, size).unwrap()
+}
+
+#[test]
+fn a_part_is_selected_by_its_path() {
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    assert_eq!(studio.selected(), None);
+    assert!(studio.select(Some("head")));
+    assert_eq!(studio.selected(), Some("head"));
+    assert!(studio.select(Some("left_arm/hand")));
+    assert_eq!(studio.selected(), Some("left_arm/hand"));
+    // A part that isn't there leaves the selection alone.
+    assert!(!studio.select(Some("tail")));
+    assert_eq!(studio.selected(), Some("left_arm/hand"));
+    assert!(studio.select(None));
+    assert_eq!(studio.selected(), None);
+}
+
+#[test]
+fn a_click_selects_the_part_under_the_pointer() {
+    const SIZE: usize = 400;
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    let picture = (SIZE, SIZE);
+
+    // The red panel is on the body's front, in plain sight.
+    let panel = on_screen(&studio, "panel", SIZE);
+    assert_eq!(studio.click(picture, panel), Some("panel"));
+    // Clicking the same single part again keeps it.
+    assert_eq!(studio.click(picture, panel), Some("panel"));
+
+    // A part made of parts is selected whole first, then the part inside.
+    let foot = on_screen(&studio, "left_leg/foot", SIZE);
+    assert_eq!(studio.click(picture, foot), Some("left_leg"));
+    assert_eq!(studio.click(picture, foot), Some("left_leg/foot"));
+    assert_eq!(studio.click(picture, foot), Some("left_leg/foot"));
+    // From a part inside one leg to the other leg: whole first again.
+    let other = on_screen(&studio, "right_leg/foot", SIZE);
+    assert_eq!(studio.click(picture, other), Some("right_leg"));
+
+    // A click on nothing selects nothing.
+    assert_eq!(studio.click(picture, (3.0, 3.0)), None);
+    assert_eq!(studio.selected(), None);
+}
+
+#[test]
+fn the_selected_part_is_brightened_and_boxed() {
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    let plain = studio.picture(480, 360);
+    assert!(studio.select(Some("head")));
+    let selected = studio.picture(480, 360);
+    assert_ne!(plain, selected);
+    check_picture("studio-robot-head-selected", &selected);
+    // Only the head and the box round it changed: the feet are the same.
+    let changed = plain
+        .pixels
+        .iter()
+        .zip(&selected.pixels)
+        .enumerate()
+        .filter(|(_, (before, after))| before != after)
+        .map(|(at, _)| at / 480)
+        .collect::<Vec<_>>();
+    let (top, bottom) = (changed[0], changed[changed.len() - 1]);
+    assert!(top > 20 && bottom < 200, "rows {top} to {bottom} changed");
+
+    // Frame, with a part selected, brings that part into view.
+    let whole = studio.orbit;
+    studio.frame();
+    assert!(studio.orbit.distance < whole.distance);
+    assert_eq!(studio.orbit.round, whole.round);
+}
+
+#[test]
+fn the_selection_lasts_while_the_part_does() {
+    let recipe = copy_of("robot", "studio_selection_lasts");
+    let mut studio = Studio::open(&recipe, false);
+    assert!(studio.select(Some("antenna_tip")));
+
+    // Saved from outside with something else changed: still selected.
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    save(
+        &recipe,
+        &text.replace("name = \"robot\"", "name = \"robot2\""),
+    );
+    assert!(studio.check_files());
+    assert_eq!(studio.selected(), Some("antenna_tip"));
+
+    // Saved with the part renamed: it is gone, so nothing is selected.
+    save(
+        &recipe,
+        &text.replace("name = \"antenna_tip\"", "name = \"bulb\""),
+    );
+    assert!(studio.check_files());
+    assert_eq!(studio.selected(), None);
+    assert!(studio.part("bulb").is_some());
+}

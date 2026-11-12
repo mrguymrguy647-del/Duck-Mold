@@ -45,6 +45,10 @@ pub struct StudioApp {
     drawn: Option<Drawn>,
     /// The window's title as it was last set.
     titled: String,
+    /// The selection the parts list last showed, to scroll to a new one.
+    shown_selected: Option<String>,
+    /// Where on the screen the viewport was last drawn.
+    view_rect: Option<Rect>,
 }
 
 impl Default for StudioApp {
@@ -62,6 +66,8 @@ impl StudioApp {
             view: None,
             drawn: None,
             titled: String::new(),
+            shown_selected: None,
+            view_rect: None,
         }
     }
 
@@ -106,6 +112,12 @@ impl StudioApp {
     /// The same, to drive it.
     pub fn studio_mut(&mut self) -> Option<&mut Studio> {
         self.studio.as_mut()
+    }
+
+    /// Where on the screen the viewport was last drawn, and how many
+    /// pixels its picture has. The tests use it to click on a part.
+    pub fn viewport(&self) -> Option<(Rect, [usize; 2])> {
+        Some((self.view_rect?, self.drawn.as_ref()?.size))
     }
 
     /// What the window's title should be.
@@ -187,14 +199,22 @@ impl StudioApp {
             .resizable(true)
             .default_size(230.0)
             .min_size(140.0)
-            .show(ui, |ui| outliner(ui, studio));
+            .show(ui, |ui| outliner(ui, studio, &mut self.shown_selected));
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
+            self.view_rect = Some(ui.available_rect_before_wrap());
             viewport(ui, studio, &mut self.view, &mut self.drawn);
         });
 
-        if studio.look_only() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+        // Escape lets go of the selection. With nothing selected, it
+        // closes a window that is only for looking, as `preview` always
+        // did.
+        if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            if studio.selected().is_some() {
+                studio.select(None);
+            } else if studio.look_only() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
         }
         if open_another && let Some(path) = pick_file() {
             self.open(path, false);
@@ -282,14 +302,18 @@ fn pick_new_file() -> Option<PathBuf> {
         .save_file()
 }
 
-/// The parts, as a tree.
-fn outliner(ui: &mut egui::Ui, studio: &Studio) {
+/// The parts, as a tree. A click selects one; the selected one is
+/// marked, and scrolled to when it was selected somewhere else.
+fn outliner(ui: &mut egui::Ui, studio: &mut Studio, shown_selected: &mut Option<String>) {
     ui.add_space(4.0);
     ui.label(RichText::new("Parts").strong());
     if let Some(headline) = studio.headline() {
         ui.label(RichText::new(headline).weak().small());
     }
     ui.separator();
+    let selected = studio.selected().map(str::to_owned);
+    let newly_selected = selected != *shown_selected;
+    let mut clicked = None;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -298,20 +322,36 @@ fn outliner(ui: &mut egui::Ui, studio: &Studio) {
                 ui.label(RichText::new("No parts to show.").weak());
             }
             for row in rows {
+                let is_selected = selected.as_deref() == Some(row.path.as_str());
                 ui.horizontal(|ui| {
                     ui.add_space(row.depth as f32 * 14.0);
-                    ui.label(&row.name);
+                    let name = ui
+                        .selectable_label(is_selected, &row.name)
+                        .on_hover_text(format!("{}: {} triangles", row.path, row.triangles));
+                    if name.clicked() {
+                        clicked = Some(row.path.clone());
+                    }
+                    if is_selected && newly_selected {
+                        name.scroll_to_me(None);
+                    }
                     ui.label(RichText::new(&row.kind).weak().small());
-                })
-                .response
-                .on_hover_text(format!("{}: {} triangles", row.path, row.triangles));
+                });
             }
         });
+    *shown_selected = selected;
+    if let Some(path) = clicked {
+        // Clicking the selected part again lets go of it.
+        if studio.selected() == Some(path.as_str()) {
+            studio.select(None);
+        } else {
+            studio.select(Some(&path));
+        }
+    }
 }
 
 /// What is wrong with the file, or that nothing is.
-fn problems(ui: &mut egui::Ui, studio: &Studio) {
-    let problems = studio.problems();
+fn problems(ui: &mut egui::Ui, studio: &mut Studio) {
+    let problems = studio.problems().to_vec();
     ui.add_space(4.0);
     ui.horizontal(|ui| {
         ui.label(RichText::new("Problems").strong());
@@ -327,7 +367,7 @@ fn problems(ui: &mut egui::Ui, studio: &Studio) {
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
-            for problem in problems {
+            for problem in &problems {
                 let (colour, word) = if problem.is_error {
                     (theme::BAD, "mistake")
                 } else {
@@ -335,7 +375,20 @@ fn problems(ui: &mut egui::Ui, studio: &Studio) {
                 };
                 ui.horizontal_wrapped(|ui| {
                     ui.colored_label(colour, word);
-                    ui.label(&problem.text);
+                    match &problem.part {
+                        // A problem about a part selects it when clicked.
+                        Some(part) => {
+                            let line = ui
+                                .add(egui::Label::new(&problem.text).sense(Sense::click()))
+                                .on_hover_text(format!("Click to select {part}"));
+                            if line.clicked() {
+                                studio.select(Some(part));
+                            }
+                        }
+                        None => {
+                            ui.label(&problem.text);
+                        }
+                    }
                 });
             }
         });
@@ -367,6 +420,19 @@ fn viewport(
     {
         studio.orbit.pan(right, down, rect.height() as usize);
     }
+    if response.clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        // The pointer in the picture's own pixels, whatever size it is
+        // drawn at.
+        let across = f64::from((pointer.x - rect.min.x) / rect.width());
+        let along = f64::from((pointer.y - rect.min.y) / rect.height());
+        let (width, height) = picture_size(ui, rect);
+        studio.click(
+            (width, height),
+            (across * width as f64, along * height as f64),
+        );
+    }
     if response.hovered() {
         let rolled = ui.input(|input| input.smooth_scroll_delta.y);
         if rolled != 0.0 {
@@ -374,21 +440,13 @@ fn viewport(
         }
     }
 
-    // The picture has one pixel for each of the screen's, unless that
-    // would be too many to draw quickly.
-    let sharpness = ui.ctx().pixels_per_point();
-    let mut width = (rect.width() * sharpness).round() as usize;
-    let mut height = (rect.height() * sharpness).round() as usize;
-    while width * height > MOST_PIXELS {
-        width /= 2;
-        height /= 2;
-    }
+    let (width, height) = picture_size(ui, rect);
     let now = Drawn {
         builds: studio.builds(),
         orbit: studio.orbit,
         grid: studio.grid,
         selected: studio.selected().map(str::to_owned),
-        size: [width.max(1), height.max(1)],
+        size: [width, height],
     };
     if drawn.as_ref() != Some(&now) || view.is_none() {
         let picture = studio.picture(now.size[0], now.size[1]);
@@ -422,4 +480,17 @@ fn viewport(
             Color32::WHITE,
         );
     }
+}
+
+/// How many pixels the viewport's picture has: one for each of the
+/// screen's, unless that would be too many to draw quickly.
+fn picture_size(ui: &egui::Ui, rect: Rect) -> (usize, usize) {
+    let sharpness = ui.ctx().pixels_per_point();
+    let mut width = (rect.width() * sharpness).round() as usize;
+    let mut height = (rect.height() * sharpness).round() as usize;
+    while width * height > MOST_PIXELS {
+        width /= 2;
+        height /= 2;
+    }
+    (width.max(1), height.max(1))
 }

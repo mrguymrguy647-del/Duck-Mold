@@ -253,6 +253,114 @@ fn preview_only_looks() {
     screen.get_by_label("looking only");
 }
 
+/// The path of the selected part.
+fn selected(screen: &Harness<'static, StudioApp>) -> Option<String> {
+    let studio = screen.state().studio().unwrap();
+    studio.selected().map(str::to_owned)
+}
+
+/// Where the middle of a part is on the screen.
+fn on_screen(screen: &Harness<'static, StudioApp>, part: &str) -> egui::Pos2 {
+    let (rect, [width, height]) = screen.state().viewport().unwrap();
+    let studio = screen.state().studio().unwrap();
+    let middle = studio.part(part).unwrap().bounds.unwrap().center();
+    let (x, y) = studio.orbit.on_screen(middle, width, height).unwrap();
+    rect.min
+        + egui::vec2(
+            x as f32 * rect.width() / width as f32,
+            y as f32 * rect.height() / height as f32,
+        )
+}
+
+/// Presses and lets go of the left button without moving: a click.
+fn click_at(screen: &mut Harness<'static, StudioApp>, at: egui::Pos2) {
+    screen.hover_at(at);
+    screen.step();
+    screen.drag_at(at);
+    screen.step();
+    screen.event(egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    screen.run_steps(2);
+}
+
+#[test]
+fn a_part_is_selected_in_the_list_or_in_the_picture() {
+    let recipe = copy_of("robot.toml", "screens_select");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    assert_eq!(selected(&screen), None);
+
+    // In the list.
+    screen.get_by_label("head").click();
+    screen.run_steps(2);
+    assert_eq!(selected(&screen).as_deref(), Some("head"));
+    screen.get_by_label("antenna_tip").click();
+    screen.run_steps(2);
+    assert_eq!(selected(&screen).as_deref(), Some("antenna_tip"));
+    // Clicking the selected one lets go of it.
+    screen.get_by_label("antenna_tip").click();
+    screen.run_steps(2);
+    assert_eq!(selected(&screen), None);
+
+    // In the picture: the red panel on the robot's front.
+    let panel = on_screen(&screen, "panel");
+    click_at(&mut screen, panel);
+    assert_eq!(selected(&screen).as_deref(), Some("panel"));
+    // A leg is selected whole first, then the part of it that was clicked.
+    let foot = on_screen(&screen, "left_leg/foot");
+    click_at(&mut screen, foot);
+    assert_eq!(selected(&screen).as_deref(), Some("left_leg"));
+    click_at(&mut screen, foot);
+    assert_eq!(selected(&screen).as_deref(), Some("left_leg/foot"));
+
+    // Turning the view is a drag, not a click: the selection stays.
+    screen.hover_at(IN_VIEW);
+    screen.step();
+    screen.drag_at(IN_VIEW);
+    screen.step();
+    screen.hover_at(IN_VIEW + egui::vec2(40.0, 0.0));
+    screen.step();
+    screen.drop_at(IN_VIEW + egui::vec2(40.0, 0.0));
+    screen.run_steps(2);
+    assert_eq!(selected(&screen).as_deref(), Some("left_leg/foot"));
+
+    // Escape lets go; a click on the empty ground does too.
+    screen.key_press(egui::Key::Escape);
+    screen.run_steps(2);
+    assert_eq!(selected(&screen), None);
+    screen.get_by_label("head").click();
+    screen.run_steps(2);
+    let (rect, _) = screen.state().viewport().unwrap();
+    click_at(&mut screen, rect.min + egui::vec2(6.0, 6.0));
+    assert_eq!(selected(&screen), None);
+
+    // Selecting works when only looking, too.
+    let mut screen = harness(StudioApp::with_file(&recipe, true), false);
+    screen.run_steps(2);
+    screen.get_by_label("head").click();
+    screen.run_steps(2);
+    assert_eq!(selected(&screen).as_deref(), Some("head"));
+}
+
+#[test]
+fn clicking_a_problem_selects_the_part_it_is_about() {
+    let recipe = folder("screens_problem_click").join("grey.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\n[[parts]]\nname = \"a\"\nshape = \"box\"\n[[parts]]\nname = \"b\"\nshape = \"box\"\nmove = [0, 3, 0]\n",
+    )
+    .unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.get_by_label_contains("touches nothing").click();
+    screen.run_steps(2);
+    assert_eq!(selected(&screen).as_deref(), Some("b"));
+}
+
 /// Pictures of whole screens, compared with the stored ones in
 /// `tests/screens/`. Linux only: see the top of this file.
 #[cfg(target_os = "linux")]
@@ -288,6 +396,20 @@ mod picture {
         );
         screen.run_steps(3);
         check(&mut screen, "robot");
+    }
+
+    #[test]
+    fn a_part_selected() {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("robot.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen.get_by_label("left_arm").click();
+        screen.run_steps(2);
+        screen.remove_cursor();
+        screen.run_steps(2);
+        check(&mut screen, "selected");
     }
 
     #[test]
