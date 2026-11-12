@@ -219,7 +219,15 @@ Linux, on a pretend screen.
 **Tests:** pictures of whole screens are compared on Linux only, as
 agreed. They are drawn one after another by one test, because the
 software graphics driver on GitHub's machine crashed when several were
-drawn at once.
+drawn at once. That crash turned the Linux check red for steps 7 and 8
+(Windows stayed green, and no test had failed: the test program itself
+was killed). Since the change the check has been green on both systems.
+If it ever comes back, it is this, not your model.
+
+**The checks on GitHub** were green on Windows and Linux for the last
+commit of the phase, and the release workflow built the zip on Windows
+and passed its own checks (it published nothing: it only publishes from
+the "Run workflow" button or a version tag).
 
 ## What changed from the approved design
 
