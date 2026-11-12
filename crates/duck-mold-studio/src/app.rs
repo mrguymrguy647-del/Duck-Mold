@@ -9,46 +9,20 @@ use std::path::{Path, PathBuf};
 
 use duck_mold_core::tools;
 use duck_mold_view::studio::Studio;
-use duck_mold_view::studio::viewport::Orbit;
-use eframe::egui::{
-    self, Color32, ColorImage, PointerButton, Rect, RichText, Sense, TextureHandle, TextureOptions,
-    pos2,
-};
+use eframe::egui::{self, Rect, RichText, Sense};
 
-use crate::{properties, theme};
-
-/// The most pixels the viewport is drawn with. On a very large or very
-/// sharp screen the picture is drawn smaller and stretched, so turning
-/// the model stays smooth.
-const MOST_PIXELS: usize = 2_500_000;
-
-/// How far the wheel must roll for one step of zoom, in points.
-const WHEEL_STEP: f32 = 50.0;
-
-/// What the viewport's picture was last drawn from. When none of it has
-/// changed, the picture is still right and isn't drawn again.
-#[derive(Clone, PartialEq)]
-struct Drawn {
-    builds: usize,
-    orbit: Orbit,
-    grid: bool,
-    selected: Option<String>,
-    size: [usize; 2],
-}
+use crate::{properties, theme, view};
 
 /// The Studio's window: a file that is open, or the start page.
 pub struct StudioApp {
     studio: Option<Studio>,
     /// What the start page says went wrong, if something did.
     notice: Option<String>,
-    view: Option<TextureHandle>,
-    drawn: Option<Drawn>,
+    view: view::View,
     /// The window's title as it was last set.
     titled: String,
     /// The selection the parts list last showed, to scroll to a new one.
     shown_selected: Option<String>,
-    /// Where on the screen the viewport was last drawn.
-    view_rect: Option<Rect>,
     /// What is being typed in the properties panel.
     draft: properties::Draft,
 }
@@ -65,11 +39,9 @@ impl StudioApp {
         StudioApp {
             studio: None,
             notice: None,
-            view: None,
-            drawn: None,
+            view: view::View::default(),
             titled: String::new(),
             shown_selected: None,
-            view_rect: None,
             draft: properties::Draft::default(),
         }
     }
@@ -90,7 +62,7 @@ impl StudioApp {
         } else {
             self.notice = Some(format!("There is no file \"{}\".", path.display()));
         }
-        self.drawn = None;
+        self.view.reset();
     }
 
     /// Makes a new recipe (one box) at `path` and opens it.
@@ -120,7 +92,7 @@ impl StudioApp {
     /// Where on the screen the viewport was last drawn, and how many
     /// pixels its picture has. The tests use it to click on a part.
     pub fn viewport(&self) -> Option<(Rect, [usize; 2])> {
-        Some((self.view_rect?, self.drawn.as_ref()?.size))
+        self.view.place()
     }
 
     /// What the window's title should be.
@@ -215,15 +187,18 @@ impl StudioApp {
             });
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
-            self.view_rect = Some(ui.available_rect_before_wrap());
-            viewport(ui, studio, &mut self.view, &mut self.drawn);
+            view::show(ui, studio, &mut self.view);
         });
 
         // Escape lets go of the selection. With nothing selected, it
         // closes a window that is only for looking, as `preview` always
         // did.
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            if studio.selected().is_some() {
+            if self.view.is_adding() {
+                self.view.stop_adding();
+            } else if studio.dragging().is_some() {
+                // The viewport lets go of the part it was dragging.
+            } else if studio.selected().is_some() {
                 studio.select(None);
             } else if studio.look_only() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
@@ -405,105 +380,4 @@ fn problems(ui: &mut egui::Ui, studio: &mut Studio) {
                 });
             }
         });
-}
-
-/// The picture of the model, and the mouse on it: drag to orbit,
-/// right-drag (or middle-drag, or Shift and drag) to pan, the wheel to
-/// zoom.
-fn viewport(
-    ui: &mut egui::Ui,
-    studio: &mut Studio,
-    view: &mut Option<TextureHandle>,
-    drawn: &mut Option<Drawn>,
-) {
-    let rect = ui.available_rect_before_wrap();
-    let response = ui.allocate_rect(rect, Sense::click_and_drag());
-    if rect.width() < 2.0 || rect.height() < 2.0 {
-        return;
-    }
-
-    let moved = response.drag_delta();
-    let (right, down) = (f64::from(moved.x), f64::from(moved.y));
-    let shift = ui.input(|input| input.modifiers.shift);
-    if response.dragged_by(PointerButton::Primary) && !shift {
-        studio.orbit.turn(right, down);
-    } else if response.dragged_by(PointerButton::Primary)
-        || response.dragged_by(PointerButton::Secondary)
-        || response.dragged_by(PointerButton::Middle)
-    {
-        studio.orbit.pan(right, down, rect.height() as usize);
-    }
-    if response.clicked()
-        && let Some(pointer) = response.interact_pointer_pos()
-    {
-        // The pointer in the picture's own pixels, whatever size it is
-        // drawn at.
-        let across = f64::from((pointer.x - rect.min.x) / rect.width());
-        let along = f64::from((pointer.y - rect.min.y) / rect.height());
-        let (width, height) = picture_size(ui, rect);
-        studio.click(
-            (width, height),
-            (across * width as f64, along * height as f64),
-        );
-    }
-    if response.hovered() {
-        let rolled = ui.input(|input| input.smooth_scroll_delta.y);
-        if rolled != 0.0 {
-            studio.orbit.zoom(f64::from(rolled / WHEEL_STEP));
-        }
-    }
-
-    let (width, height) = picture_size(ui, rect);
-    let now = Drawn {
-        builds: studio.builds(),
-        orbit: studio.orbit,
-        grid: studio.grid,
-        selected: studio.selected().map(str::to_owned),
-        size: [width, height],
-    };
-    if drawn.as_ref() != Some(&now) || view.is_none() {
-        let picture = studio.picture(now.size[0], now.size[1]);
-        let image = ColorImage::new(
-            now.size,
-            picture
-                .pixels
-                .iter()
-                .map(|pixel| {
-                    Color32::from_rgb((pixel >> 16) as u8, (pixel >> 8) as u8, *pixel as u8)
-                })
-                .collect(),
-        );
-        match view {
-            Some(texture) => texture.set(image, TextureOptions::NEAREST),
-            None => {
-                *view = Some(ui.ctx().load_texture(
-                    "duck_mold_viewport",
-                    image,
-                    TextureOptions::NEAREST,
-                ));
-            }
-        }
-        *drawn = Some(now);
-    }
-    if let Some(texture) = view {
-        ui.painter_at(rect).image(
-            texture.id(),
-            rect,
-            Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
-            Color32::WHITE,
-        );
-    }
-}
-
-/// How many pixels the viewport's picture has: one for each of the
-/// screen's, unless that would be too many to draw quickly.
-fn picture_size(ui: &egui::Ui, rect: Rect) -> (usize, usize) {
-    let sharpness = ui.ctx().pixels_per_point();
-    let mut width = (rect.width() * sharpness).round() as usize;
-    let mut height = (rect.height() * sharpness).round() as usize;
-    while width * height > MOST_PIXELS {
-        width /= 2;
-        height /= 2;
-    }
-    (width.max(1), height.max(1))
 }

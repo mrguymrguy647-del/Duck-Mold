@@ -6,9 +6,10 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
 use duck_mold_core::edit::{Changes, Edit, Made, Sizes};
+use duck_mold_core::math::{Vec3, vec3};
 use duck_mold_view::render::BACKGROUND;
-use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::viewport::Picture;
+use duck_mold_view::studio::{Clicked, Studio};
 
 fn examples() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
@@ -640,4 +641,372 @@ fn an_edit_is_made_on_what_the_file_holds_now() {
     assert_eq!(studio.model().unwrap().name, "robot2");
     studio.select(Some("head"));
     assert_eq!(studio.facts().unwrap().color.as_deref(), Some("red"));
+}
+
+// ---- step 6: sockets ---------------------------------------------------------
+
+const VIEW: (usize, usize) = (640, 480);
+
+/// Where a point of the model is in the 640 x 480 picture.
+fn seen(studio: &Studio, point: Vec3) -> (f64, f64) {
+    studio.orbit.on_screen(point, VIEW.0, VIEW.1).unwrap()
+}
+
+/// Where a socket of a part is in the picture.
+fn socket_seen(studio: &Studio, part: &str, socket: &str) -> (f64, f64) {
+    let at = studio
+        .part(part)
+        .unwrap()
+        .sockets
+        .iter()
+        .find(|known| known.name == socket)
+        .unwrap()
+        .at;
+    seen(studio, at)
+}
+
+/// Where a socket of a part is in the model.
+fn socket_at(studio: &Studio, part: &str, socket: &str) -> Vec3 {
+    let part = studio.part(part).unwrap();
+    part.sockets
+        .iter()
+        .find(|known| known.name == socket)
+        .unwrap()
+        .at
+}
+
+#[test]
+fn the_selected_parts_sockets_show_as_markers() {
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    assert!(studio.markers().is_empty(), "nothing selected, no markers");
+    let plain = studio.picture(VIEW.0, VIEW.1);
+
+    assert!(studio.select(Some("head")));
+    let markers = studio.markers();
+    let names: Vec<&str> = markers
+        .iter()
+        .map(|marker| marker.socket.as_str())
+        .collect();
+    // Its six sides and the three it declares; not the one in its middle.
+    assert_eq!(
+        names,
+        [
+            "top",
+            "bottom",
+            "left",
+            "right",
+            "front",
+            "back",
+            "left_eye",
+            "right_eye",
+            "antenna"
+        ]
+    );
+    assert!(markers.iter().all(|marker| marker.part == "head"));
+
+    // The pointer on one makes it bigger.
+    let on_top = socket_seen(&studio, "head", "right");
+    studio.hover(VIEW, Some(on_top));
+    let hot = studio.picture(VIEW.0, VIEW.1);
+    check_picture("studio-robot-head-sockets", &hot);
+    studio.hover(VIEW, None);
+    let cold = studio.picture(VIEW.0, VIEW.1);
+    assert_ne!(hot, cold);
+    assert_ne!(cold, plain);
+
+    // When only looking there are none.
+    let mut looking = Studio::open(examples().join("robot.toml"), true);
+    assert!(looking.select(Some("head")));
+    assert!(looking.markers().is_empty());
+}
+
+#[test]
+fn a_click_on_a_socket_is_a_place_to_add_a_part() {
+    let recipe = copy_of("robot", "studio_socket_add");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    assert!(studio.select(Some("head")));
+
+    let on_right = socket_seen(&studio, "head", "right");
+    let clicked = studio.point_at(VIEW, on_right);
+    assert_eq!(
+        clicked,
+        Clicked::Socket {
+            part: "head".into(),
+            socket: "right".into()
+        }
+    );
+    // Finding the place changed nothing, and the head is still selected.
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), before);
+    assert_eq!(studio.selected(), Some("head"));
+
+    let said = studio
+        .add_to_socket("head", "right", &Made::Shape("cylinder".into()))
+        .unwrap();
+    assert_eq!(said, "Added \"cylinder\" (cylinder) on head.right");
+    let after = std::fs::read_to_string(&recipe).unwrap();
+    let (gone, new) = changed(&before, &after);
+    assert!(gone.is_empty(), "{gone:?}");
+    // Half the head's smallest side across, the head's colour, joined by
+    // the side that faces the socket.
+    assert_eq!(
+        new,
+        [
+            "",
+            "[[parts]]",
+            "name = \"cylinder\"",
+            "shape = \"cylinder\"",
+            "radius = 0.08",
+            "height = 0.16",
+            "color = \"steel\"",
+            "attach = \"left\"",
+            "to = \"head.right\"",
+        ]
+    );
+    assert_eq!(studio.selected(), Some("cylinder"));
+    assert!(!studio.has_mistakes());
+
+    // A second one gets the next free name; a defined part can be added
+    // the same way.
+    studio
+        .add_to_socket("head", "left", &Made::Shape("cylinder".into()))
+        .unwrap();
+    assert_eq!(studio.selected(), Some("cylinder_2"));
+    assert_eq!(studio.definitions(), ["arm", "leg", "eye"]);
+    studio
+        .add_to_socket("head", "back", &Made::Use("eye".into()))
+        .unwrap();
+    assert_eq!(studio.selected(), Some("eye"));
+    assert_eq!(
+        studio.part("eye").unwrap().attached_to.as_deref(),
+        Some("head.back")
+    );
+}
+
+#[test]
+fn a_click_on_the_selected_parts_surface_makes_a_socket_there() {
+    let recipe = copy_of("robot", "studio_surface_add");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    assert!(studio.select(Some("head")));
+
+    // A point on the head's front, up and to one side of the middle.
+    let bounds = studio.part("head").unwrap().bounds.unwrap();
+    let (middle, half) = (bounds.center(), bounds.half());
+    let point = middle + vec3(half.x * 0.5, half.y * -0.6, half.z);
+    let head_was_seen = seen(&studio, middle);
+    let clicked = studio.point_at(VIEW, seen(&studio, point));
+    let Clicked::Surface { part, spot } = clicked else {
+        panic!("expected the head's surface, got {clicked:?}");
+    };
+    assert_eq!(part, "head");
+    assert_eq!(spot.on, "front");
+    assert!((spot.shift[0] - 0.5).abs() < 0.02, "{spot:?}");
+    assert!((spot.shift[1] + 0.6).abs() < 0.02, "{spot:?}");
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), before);
+
+    let said = studio
+        .add_to_surface("head", &spot, &Made::Shape("cone".into()))
+        .unwrap();
+    assert!(
+        said.starts_with("Added the socket \"spot\" on the front of \"head\"")
+            && said.ends_with("then added \"cone\" (cone) on head.spot"),
+        "{said}"
+    );
+    // The cone is selected, and sits where the click was.
+    assert_eq!(studio.selected(), Some("cone"));
+    let cone = studio.part("cone").unwrap();
+    assert_eq!(cone.attached_to.as_deref(), Some("head.spot"));
+    // (Measured from the head: with a cone sticking out in front, the
+    // model's middle is somewhere else.)
+    let head_now = studio.part("head").unwrap().bounds.unwrap().center();
+    let landed = socket_at(&studio, "head", "spot") - head_now;
+    assert!(
+        (landed - (point - middle)).length() < 0.01,
+        "{landed:?} for {:?}",
+        point - middle
+    );
+    // The camera went with the model, so the picture didn't jump: the
+    // head is where it was on the screen.
+    let head_seen = seen(&studio, head_now);
+    assert!((head_seen.0 - head_was_seen.0).abs() < 0.5, "{head_seen:?}");
+    assert!((head_seen.1 - head_was_seen.1).abs() < 0.5, "{head_seen:?}");
+    let after = std::fs::read_to_string(&recipe).unwrap();
+    assert!(
+        after.contains("spot = { on = \"front\", shift = ["),
+        "{after}"
+    );
+    assert!(!studio.has_mistakes());
+
+    // A second socket on the same part gets the next name.
+    assert!(studio.select(Some("head")));
+    let middle = studio.part("head").unwrap().bounds.unwrap().center();
+    let other = middle + vec3(half.x * -0.5, half.y * -0.6, half.z);
+    let Clicked::Surface { spot, .. } = studio.point_at(VIEW, seen(&studio, other)) else {
+        panic!("expected the head's surface");
+    };
+    studio
+        .add_to_surface("head", &spot, &Made::Shape("box".into()))
+        .unwrap();
+    assert_eq!(
+        studio.part("box").unwrap().attached_to.as_deref(),
+        Some("head.spot_2")
+    );
+}
+
+#[test]
+fn a_part_is_dragged_to_another_socket() {
+    let recipe = copy_of("robot", "studio_drag_join");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+
+    // Nothing selected, or the pointer off the selected part: no drag,
+    // so the view turns as usual.
+    let on_tip = on_screen(&studio, "antenna_tip", VIEW.0);
+    let on_tip = (on_tip.0, on_tip.1 * VIEW.1 as f64 / VIEW.0 as f64);
+    let on_tip = {
+        let middle = studio.part("antenna_tip").unwrap().bounds.unwrap().center();
+        let _ = on_tip;
+        seen(&studio, middle)
+    };
+    assert!(!studio.drag_start(VIEW, on_tip));
+    assert!(studio.select(Some("antenna_tip")));
+    assert!(!studio.drag_start(VIEW, (5.0, 5.0)));
+    assert_eq!(studio.dragging(), None);
+
+    // On the selected part: the drag begins, and the sockets shown are
+    // those of the parts it could join.
+    assert!(studio.drag_start(VIEW, on_tip));
+    assert_eq!(studio.dragging(), Some("antenna_tip"));
+    let markers = studio.markers();
+    assert!(markers.iter().any(|marker| marker.part == "body"));
+    assert!(markers.iter().any(|marker| marker.part == "left_arm"));
+    assert!(
+        markers.iter().all(|marker| marker.part != "antenna_tip"),
+        "a part can't be joined to itself"
+    );
+
+    // Dropped on the body's right side socket.
+    studio.hover(VIEW, Some(socket_seen(&studio, "body", "right")));
+    let said = studio.drag_end().unwrap().unwrap();
+    assert_eq!(said, "Joined \"antenna_tip\" to body.right");
+    assert_eq!(studio.dragging(), None);
+    let after = std::fs::read_to_string(&recipe).unwrap();
+    assert_eq!(
+        changed(&before, &after),
+        (vec!["to = \"antenna.top\""], vec!["to = \"body.right\""])
+    );
+    assert_eq!(studio.selected(), Some("antenna_tip"));
+
+    // A part isn't offered the sockets of what hangs from it: the head
+    // can't be joined to its own antenna.
+    assert!(studio.select(Some("head")));
+    // (A point of its front that no eye covers.)
+    let head = studio.part("head").unwrap().bounds.unwrap();
+    let on_head = seen(
+        &studio,
+        head.center() + vec3(head.half().x * -0.1, head.half().y * -0.6, head.half().z),
+    );
+    assert!(studio.drag_start(VIEW, on_head));
+    let markers = studio.markers();
+    for hanging in ["antenna", "left_eye", "right_eye", "head"] {
+        assert!(
+            markers.iter().all(|marker| marker.part != hanging),
+            "{hanging}"
+        );
+    }
+    // Dropped on nothing: nothing changes.
+    studio.hover(VIEW, Some((4.0, 4.0)));
+    let why = studio.drag_end().unwrap().unwrap_err();
+    assert_eq!(why, "Not moved: drop it on a socket, or on another part");
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), after);
+    assert_eq!(studio.drag_end(), None, "nothing is being dragged now");
+
+    // When only looking, nothing can be dragged.
+    let mut looking = Studio::open(&recipe, true);
+    assert!(looking.select(Some("head")));
+    assert!(!looking.drag_start(VIEW, on_head));
+}
+
+#[test]
+fn a_part_dropped_on_a_surface_slides_there() {
+    let recipe = copy_of("robot", "studio_drag_slide");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+
+    // The red panel sits on the body's `chest` socket, which is its
+    // alone. Dragged along the body's front, that socket moves.
+    assert!(studio.select(Some("panel")));
+    let on_panel = seen(
+        &studio,
+        studio.part("panel").unwrap().bounds.unwrap().center(),
+    );
+    assert!(studio.drag_start(VIEW, on_panel));
+    let body = studio.part("body").unwrap().bounds.unwrap();
+    let target = body.center() + vec3(body.half().x * 0.5, body.half().y * -0.5, body.half().z);
+    studio.hover(VIEW, Some(seen(&studio, target)));
+    let said = studio.drag_end().unwrap().unwrap();
+    assert!(said.starts_with("Moved the socket body.chest"), "{said}");
+    let after = std::fs::read_to_string(&recipe).unwrap();
+    let (gone, new) = changed(&before, &after);
+    assert_eq!(
+        gone,
+        ["chest     = { on = \"front\", shift = [0, 0.3, 0] }"]
+    );
+    assert_eq!(new.len(), 1);
+    assert!(
+        new[0].starts_with("chest     = { on = \"front\", shift = [0.5, -0.5"),
+        "{new:?}"
+    );
+    // The panel's back is at that point now.
+    let landed = socket_at(&studio, "body", "chest");
+    assert!(
+        (landed - target).length() < 0.01,
+        "{landed:?} for {target:?}"
+    );
+    assert!(!studio.has_mistakes());
+
+    // The antenna's tip sits on the antenna's built-in `top`, which
+    // can't be moved. Dropped on the head, a socket is made there for it.
+    assert!(studio.select(Some("antenna_tip")));
+    let on_tip = seen(
+        &studio,
+        studio.part("antenna_tip").unwrap().bounds.unwrap().center(),
+    );
+    assert!(studio.drag_start(VIEW, on_tip));
+    let head = studio.part("head").unwrap().bounds.unwrap();
+    let target = head.center() + vec3(head.half().x, head.half().y * 0.6, head.half().z * 0.6);
+    studio.hover(VIEW, Some(seen(&studio, target)));
+    let said = studio.drag_end().unwrap().unwrap();
+    assert!(
+        said.starts_with("Added the socket \"spot\" on the right of \"head\"")
+            && said.ends_with("then joined \"antenna_tip\" to head.spot"),
+        "{said}"
+    );
+    let tip = studio.part("antenna_tip").unwrap();
+    assert_eq!(tip.attached_to.as_deref(), Some("head.spot"));
+    let landed = socket_at(&studio, "head", "spot");
+    assert!(
+        (landed - target).length() < 0.01,
+        "{landed:?} for {target:?}"
+    );
+
+    // Dragged again along the head, its own socket moves: no second one.
+    let on_tip = seen(
+        &studio,
+        studio.part("antenna_tip").unwrap().bounds.unwrap().center(),
+    );
+    assert!(studio.drag_start(VIEW, on_tip));
+    let target = head.center() + vec3(head.half().x, head.half().y * -0.6, head.half().z * -0.5);
+    studio.hover(VIEW, Some(seen(&studio, target)));
+    let said = studio.drag_end().unwrap().unwrap();
+    assert!(said.starts_with("Moved the socket head.spot"), "{said}");
+    let head_sockets = &studio.part("head").unwrap().sockets;
+    assert!(head_sockets.iter().all(|socket| socket.name != "spot_2"));
+    let landed = socket_at(&studio, "head", "spot");
+    assert!(
+        (landed - target).length() < 0.01,
+        "{landed:?} for {target:?}"
+    );
+    assert!(!studio.has_mistakes());
 }

@@ -16,6 +16,9 @@
 //! reads the file, changes its text, checks it and writes it back.
 
 pub mod doc;
+mod spot;
+
+pub use spot::{Spot, spot};
 
 use std::path::Path;
 
@@ -1212,6 +1215,29 @@ fn share(found: &Found, model: Option<&Model>, part: &str) -> Option<Shared> {
         definition,
         also_changes,
     })
+}
+
+/// The names of the parts the recipe defines, to `use`: what the Studio
+/// offers beside the five shapes when a part is added.
+pub fn definitions(text: &str, syntax: Syntax) -> Vec<String> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let Ok(doc) = Doc::parse(text, syntax) else {
+        return Vec::new();
+    };
+    doc.entries(&[key("define")])
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect()
+}
+
+/// A name that isn't taken yet: `base` itself, or `base_2`, `base_3`...
+pub fn unused_name(base: &str, taken: &[String]) -> String {
+    if taken.iter().any(|name| name == base) {
+        free_name(base, taken)
+    } else {
+        base.to_owned()
+    }
 }
 
 /// What the recipe says about one part: what the Studio's properties

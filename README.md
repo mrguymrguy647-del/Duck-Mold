@@ -113,6 +113,24 @@ change would reach:
 
 > Made from the definition "eye". Changing its shape, size or colour
 > also changes: right_eye.
+
+**Adding and moving parts.** The selected part's sockets show as small
+round markers.
+
+- Click a marker and pick what to add there: one of the five shapes, or
+  a part the recipe defines. The new part is about half the size of the
+  one it sits on, has its colour, and is selected, ready to change.
+- Click anywhere else on the selected part to add a part *at that
+  point*: the Studio declares a socket there (`on` a side, with a
+  `shift`) and joins the new part to it.
+- Drag the selected part to move it. The sockets of the parts it could
+  join light up; drop it on one to join it there. Drop it on a part's
+  surface and it goes to that point. A part that already has a socket
+  of its own on that part slides: its socket is moved, and no new one is
+  made.
+
+Each of these is an `add`, `join`, `add-socket` or `set-socket` edit in
+the recipe file, the same ones `duck-mold edit` makes.
 **Export** writes the `.glb` and **Render picture** the four-view
 picture, next to the recipe. The Studio keeps no model of its own: it
 shows the recipe file, so when you (or an agent) save the recipe in

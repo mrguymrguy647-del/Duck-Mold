@@ -11,5 +11,6 @@
 pub mod app;
 pub mod properties;
 pub mod theme;
+pub mod view;
 
 pub use app::StudioApp;

@@ -5,9 +5,11 @@
 use std::path::{Path, PathBuf};
 
 use duck_mold_core::edit::{
-    Applied, Changes, Edit, Made, Sizes, apply, describe, edit_file, shared, swap_in,
+    Applied, Changes, Edit, Made, Sizes, apply, definitions, describe, edit_file, shared, spot,
+    swap_in, unused_name,
 };
 use duck_mold_core::issue::Code;
+use duck_mold_core::math::vec3;
 use duck_mold_core::model::{Model, Part};
 use duck_mold_core::source::{Node, Syntax, Value, parse};
 use duck_mold_core::tools::Failure;
@@ -958,6 +960,136 @@ fn describe_reads_what_the_recipe_says_about_a_part() {
     assert_eq!(describe(recipe, Syntax::Toml, None, "wheel/tyre"), None);
     let wheel = describe(recipe, Syntax::Toml, None, "wheel").unwrap();
     assert_eq!(wheel.made, Some(Made::File("wheel.toml".into())));
+}
+
+#[test]
+fn a_point_on_a_surface_becomes_a_socket_right_there() {
+    // A point of the model, on a part's surface, is turned into the side
+    // and slide `add-socket` takes; the socket declared with them is at
+    // that point again. On a plain box, a twisted one, a round one, and
+    // a part that is turned, scaled and mirrored.
+    let recipe = r##"version = 0
+[[parts]]
+name = "block"
+shape = "box"
+size = [2, 1, 1]
+
+[[parts]]
+name = "post"
+shape = "box"
+size = [0.2, 1.5, 0.4]
+attach = "bottom"
+to = "block.top"
+twist = 30
+
+[[parts]]
+name = "ball"
+shape = "sphere"
+radius = 0.4
+segments = 16
+attach = "left"
+to = "block.right"
+
+[[parts]]
+name = "fin"
+shape = "wedge"
+size = [0.4, 0.6, 1]
+rotate = [20, 40, 10]
+move = [0, 0.5, 3]
+scale = [1, 2, 0.5]
+mirror = "x"
+"##;
+    let path = Path::new("test.toml");
+    let built = |text: &str| {
+        apply(
+            text,
+            Syntax::Toml,
+            path,
+            "test.toml",
+            &Edit::AddColor {
+                name: "c".into(),
+                hex: "#000000".into(),
+            },
+        )
+        .unwrap()
+        .model
+        .unwrap()
+    };
+    let model = built(recipe);
+    let mut checked = 0;
+    for name in ["block", "post", "ball", "fin"] {
+        let target = part(&model, name);
+        for face in &model.faces[target.faces.clone()] {
+            let Some(normal) = face.normal() else {
+                continue;
+            };
+            // A point inside the face: nearer its first corner than its
+            // middle, so it is nowhere special.
+            let middle = face
+                .corners
+                .iter()
+                .fold(vec3(0.0, 0.0, 0.0), |sum, &corner| sum + corner)
+                * (1.0 / face.corners.len() as f64);
+            let point = middle + (face.corners[0] - middle) * 0.3;
+            let found = spot(&model, target, point, normal).unwrap();
+            let edit = Edit::AddSocket {
+                part: name.into(),
+                name: "here".into(),
+                on: found.on.clone(),
+                shift: found.shift,
+            };
+            let after = done(recipe, Syntax::Toml, &edit).model.unwrap();
+            let socket = part(&after, name)
+                .sockets
+                .iter()
+                .find(|socket| socket.name == "here")
+                .unwrap()
+                .clone();
+            let off = (socket.at - point).length();
+            // The ball's sides curve away under the box side they are
+            // reached from, so a point there can be hidden behind a
+            // nearer face; everywhere else it is the same point.
+            if name != "ball" {
+                assert!(off < 0.005, "{name} {found:?}: {off} m off");
+                assert!(
+                    socket.facing.dot(normal) > 0.99,
+                    "{name} {found:?}: faces {:?}, not {normal:?}",
+                    socket.facing
+                );
+            } else {
+                assert!(off < 0.12, "{name} {found:?}: {off} m off");
+            }
+            checked += 1;
+        }
+    }
+    assert!(checked > 100, "{checked} faces were tried");
+
+    // The slide is written with at most three decimals, and is nothing
+    // along the side's own direction.
+    // The block is 2 wide, 1 tall and 1 deep: half a metre right of the
+    // middle of its front is half way to the edge, and a quarter up is
+    // half way to the top.
+    let block = part(&model, "block");
+    let middle = block.bounds.unwrap().center();
+    let found = spot(
+        &model,
+        block,
+        middle + vec3(0.5, 0.25, 0.5),
+        vec3(0.0, 0.0, 1.0),
+    )
+    .unwrap();
+    assert_eq!(found.on, "front");
+    assert_eq!(found.shift, [0.5, 0.5, 0.0]);
+}
+
+#[test]
+fn the_recipes_definitions_and_free_names_are_listed() {
+    assert_eq!(definitions(LAMP, Syntax::Toml), ["bulb"]);
+    assert_eq!(definitions(&to_json(LAMP), Syntax::Json), ["bulb"]);
+    assert!(definitions("version = 0\n", Syntax::Toml).is_empty());
+    let taken = ["box".to_owned(), "box_2".to_owned()];
+    assert_eq!(unused_name("cone", &taken), "cone");
+    assert_eq!(unused_name("box", &taken), "box_3");
 }
 
 #[test]

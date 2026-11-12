@@ -11,7 +11,10 @@
 //! after which it reads and builds the file again. When another program
 //! saves the file, it does the same.
 
+mod sockets;
 pub mod viewport;
+
+pub use sockets::Clicked;
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -20,6 +23,7 @@ use duck_mold_core::edit::{self, Edit, Facts};
 use duck_mold_core::inspect::{Inspection, PartReport, inspect};
 use duck_mold_core::issue::Issue;
 use duck_mold_core::load::display_path;
+use duck_mold_core::math::Vec3;
 use duck_mold_core::model::{Model, Part};
 use duck_mold_core::source::Syntax;
 use duck_mold_core::tools::{self, Failure};
@@ -96,6 +100,12 @@ pub struct Studio {
     status: String,
     since_check: f64,
     builds: usize,
+    /// Where the pointer is in the viewport, in pixels of a picture
+    /// `view` big.
+    pointer: Option<(f64, f64)>,
+    view: (usize, usize),
+    /// The part being dragged to another socket, by path.
+    dragging: Option<String>,
 }
 
 impl Studio {
@@ -118,6 +128,9 @@ impl Studio {
             status: String::new(),
             since_check: 0.0,
             builds: 0,
+            pointer: None,
+            view: (1, 1),
+            dragging: None,
         };
         studio.reload();
         studio.frame();
@@ -413,6 +426,13 @@ impl Studio {
     /// The selection follows the part: a renamed part stays selected, and
     /// a part that was added or copied becomes the selection.
     pub fn apply(&mut self, change: &Edit) -> Result<String, String> {
+        self.apply_all(std::slice::from_ref(change))
+    }
+
+    /// Makes several changes, one after the other, as one step to undo.
+    /// It stops at the first that can't be made (the ones before it
+    /// stay).
+    pub fn apply_all(&mut self, changes: &[Edit]) -> Result<String, String> {
         if self.look_only {
             let why = "This window is only for looking: nothing was changed".to_owned();
             self.say(why.clone());
@@ -422,12 +442,45 @@ impl Studio {
         // moment ago: if another program has just saved it, that is seen
         // first.
         self.check_files();
+        let before = self.text.clone();
+        let mut said: Vec<String> = Vec::new();
+        let mut failed = None;
+        for change in changes {
+            match self.apply_one(change) {
+                Ok(done) => said.extend(done),
+                Err(why) => {
+                    failed = Some(why);
+                    break;
+                }
+            }
+        }
+        // Capital first, as the other things the Studio says.
+        let summary = capital(&said.join(", then "));
+        if self.text != before {
+            self.edited(before, &summary);
+        }
+        match failed {
+            Some(why) => {
+                self.say(why.clone());
+                Err(why)
+            }
+            None => {
+                self.say(summary.clone());
+                Ok(summary)
+            }
+        }
+    }
+
+    /// One edit: written, built, the selection moved. Gives what it did
+    /// in words (nothing, if the file was already that way).
+    fn apply_one(&mut self, change: &Edit) -> Result<Option<String>, String> {
         let parts_before: Vec<String> = self.outline().into_iter().map(|row| row.path).collect();
+        let places_before = self.places();
         match edit::edit_file(&self.path, change, false) {
             Ok(edited) => {
-                let before = std::mem::take(&mut self.text);
                 let mut follow = self.selection_after(change);
                 self.reload();
+                self.keep_still(&places_before);
                 if matches!(change, Edit::Duplicate { .. }) {
                     // The copy is the part that wasn't there before.
                     follow = self
@@ -439,9 +492,6 @@ impl Studio {
                 if let Some(path) = follow {
                     self.select(Some(&path));
                 }
-                if edited.edit.written {
-                    self.edited(before, &edited.edit.summary);
-                }
                 let mut said = edited.edit.summary.clone();
                 if !edited.edit.also_changes.is_empty() {
                     said.push_str(&format!(
@@ -449,16 +499,56 @@ impl Studio {
                         edited.edit.also_changes.join(", ")
                     ));
                 }
-                // Capital first, as the other things the Studio says.
-                let said = capital(&said);
-                self.say(said.clone());
-                Ok(said)
+                Ok(Some(said))
             }
-            Err(failure) => {
-                let why = format!("Not changed: {}", first_error(&failure));
-                self.say(why.clone());
-                Err(why)
+            Err(failure) => Err(format!("Not changed: {}", first_error(&failure))),
+        }
+    }
+
+    /// Where every part is, by path.
+    fn places(&self) -> Vec<(String, Vec3)> {
+        fn gather(parts: &[Part], into: &mut Vec<(String, Vec3)>) {
+            for part in parts {
+                into.push((part.path.clone(), part.place.shift));
+                gather(&part.parts, into);
             }
+        }
+        let mut places = Vec::new();
+        if let Some(model) = self.model() {
+            gather(&model.parts, &mut places);
+        }
+        places
+    }
+
+    /// Keeps the picture still through an edit. A model's zero point is
+    /// the middle of its footprint, so a part added on one side moves
+    /// every other part the other way by half as much. The camera goes
+    /// with them, so the model doesn't jump: only what was edited moves.
+    fn keep_still(&mut self, before: &[(String, Vec3)]) {
+        let after = self.places();
+        // How far each part that is still there has moved, to the
+        // nearest thousandth of a millimetre.
+        let mut moves: Vec<(Vec3, usize)> = Vec::new();
+        let mut still_there = 0;
+        for (path, was) in before {
+            let Some((_, is)) = after.iter().find(|(other, _)| other == path) else {
+                continue;
+            };
+            still_there += 1;
+            let moved = (*is - *was).tidied();
+            match moves
+                .iter_mut()
+                .find(|(known, _)| (*known - moved).length() < 1e-6)
+            {
+                Some((_, count)) => *count += 1,
+                None => moves.push((moved, 1)),
+            }
+        }
+        // What most of them did is what the zero point did.
+        if let Some((moved, count)) = moves.into_iter().max_by_key(|(_, count)| *count)
+            && count * 2 > still_there
+        {
+            self.orbit.target = self.orbit.target + moved;
         }
     }
 
@@ -506,14 +596,37 @@ impl Studio {
 
     /// Draws the viewport, `width` x `height` pixels.
     pub fn picture(&self, width: usize, height: usize) -> Picture {
-        let markers = self.markers();
+        let mut markers = self.markers();
+        // What the pointer is on is drawn bigger: a marker, or the point
+        // of a surface where a socket would be made. (Only when the
+        // picture is the size the pointer was measured in.)
+        let aim = if self.view == (width, height) {
+            self.aim(&markers)
+        } else {
+            None
+        };
+        let hot = match aim {
+            Some(sockets::Aim::Marker(at)) => Some(at),
+            Some(sockets::Aim::Surface {
+                part, at, facing, ..
+            }) => {
+                markers.push(viewport::Marker {
+                    part,
+                    socket: String::new(),
+                    at,
+                    facing,
+                });
+                Some(markers.len() - 1)
+            }
+            None => None,
+        };
         viewport::draw(
             &Look {
                 model: self.model(),
                 orbit: &self.orbit,
                 selected: self.selected.as_deref().and_then(|path| self.part(path)),
                 markers: &markers,
-                hot: self.hot_marker(&markers),
+                hot,
                 grid: self.grid,
             },
             width,
@@ -593,16 +706,8 @@ fn problem(issue: &Issue, model: &Model) -> Problem {
     }
 }
 
-// Filled in by later steps: sockets shown in the viewport, and undo.
+// Filled in by the next step: undo.
 impl Studio {
-    fn markers(&self) -> Vec<viewport::Marker> {
-        Vec::new()
-    }
-
-    fn hot_marker(&self, _markers: &[viewport::Marker]) -> Option<usize> {
-        None
-    }
-
     fn changed_outside(&mut self, _before: String) {}
 
     fn edited(&mut self, _before: String, _summary: &str) {}

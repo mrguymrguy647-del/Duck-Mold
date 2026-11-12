@@ -564,6 +564,171 @@ fn when_only_looking_the_panel_changes_nothing() {
     assert!(new_lines(&recipe).is_empty());
 }
 
+// ---- sockets -------------------------------------------------------------------
+
+/// Where a socket of a part is on the screen.
+fn socket_on_screen(screen: &Harness<'static, StudioApp>, part: &str, socket: &str) -> egui::Pos2 {
+    let (rect, [width, height]) = screen.state().viewport().unwrap();
+    let studio = screen.state().studio().unwrap();
+    let at = studio
+        .part(part)
+        .unwrap()
+        .sockets
+        .iter()
+        .find(|known| known.name == socket)
+        .unwrap()
+        .at;
+    let (x, y) = studio.orbit.on_screen(at, width, height).unwrap();
+    rect.min
+        + egui::vec2(
+            x as f32 * rect.width() / width as f32,
+            y as f32 * rect.height() / height as f32,
+        )
+}
+
+/// Presses on one point, moves to another in a few steps, and lets go.
+fn drag(screen: &mut Harness<'static, StudioApp>, from: egui::Pos2, to: egui::Pos2) {
+    screen.hover_at(from);
+    screen.step();
+    screen.drag_at(from);
+    screen.step();
+    for part in 1..=4 {
+        screen.hover_at(from + (to - from) * (part as f32 / 4.0));
+        screen.step();
+    }
+    screen.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    screen.run_steps(3);
+}
+
+#[test]
+fn a_click_on_a_socket_offers_what_to_add_there() {
+    let (recipe, mut screen) = robot_with("screens_socket", "head");
+    let on_right = socket_on_screen(&screen, "head", "right");
+    click_at(&mut screen, on_right);
+    // The list: the five shapes, then the parts the recipe defines.
+    screen.get_by_label("Add a part on head.right");
+    for shape in ["Box", "Cylinder", "Sphere", "Cone", "Wedge"] {
+        screen.get_by_label(shape);
+    }
+    screen.get_by_label("Defined in this recipe");
+    assert!(new_lines(&recipe).is_empty(), "nothing is added yet");
+
+    screen.get_by_label("Sphere").click();
+    screen.run_steps(3);
+    assert!(screen.query_by_label("Add a part on head.right").is_none());
+    assert_eq!(selected(&screen).as_deref(), Some("sphere"));
+    assert_eq!(
+        new_lines(&recipe),
+        [
+            "",
+            "[[parts]]",
+            "name = \"sphere\"",
+            "shape = \"sphere\"",
+            "radius = 0.08",
+            "color = \"steel\"",
+            "attach = \"left\"",
+            "to = \"head.right\"",
+        ]
+    );
+
+    // Escape closes the list without adding anything.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    screen.run_steps(2);
+    let on_top = socket_on_screen(&screen, "head", "top");
+    click_at(&mut screen, on_top);
+    screen.get_by_label("Add a part on head.top");
+    screen.key_press(egui::Key::Escape);
+    screen.run_steps(2);
+    assert!(screen.query_by_label("Add a part on head.top").is_none());
+    assert_eq!(selected(&screen).as_deref(), Some("head"));
+}
+
+#[test]
+fn a_click_on_the_selected_parts_surface_adds_a_part_at_that_point() {
+    let (recipe, mut screen) = robot_with("screens_surface", "body");
+    // A point of the body's front, beside the red panel.
+    let (rect, [width, height]) = screen.state().viewport().unwrap();
+    let at = {
+        let studio = screen.state().studio().unwrap();
+        let body = studio.part("body").unwrap().bounds.unwrap();
+        let point = body.center()
+            + duck_mold_core::math::vec3(body.half().x * 0.75, body.half().y * -0.6, body.half().z);
+        let (x, y) = studio.orbit.on_screen(point, width, height).unwrap();
+        rect.min
+            + egui::vec2(
+                x as f32 * rect.width() / width as f32,
+                y as f32 * rect.height() / height as f32,
+            )
+    };
+    click_at(&mut screen, at);
+    screen.get_by_label("Add a part on the front of body");
+    screen.get_by_label("Cone").click();
+    screen.run_steps(3);
+    assert_eq!(selected(&screen).as_deref(), Some("cone"));
+    let studio = screen.state().studio().unwrap();
+    assert_eq!(
+        studio.part("cone").unwrap().attached_to.as_deref(),
+        Some("body.spot")
+    );
+    let lines = new_lines(&recipe);
+    assert!(
+        lines
+            .iter()
+            .any(|line| line.starts_with("spot = { on = \"front\", shift = [0.75, -0.6")),
+        "{lines:?}"
+    );
+    assert!(studio.problems().is_empty(), "{:?}", studio.problems());
+}
+
+#[test]
+fn dragging_the_selected_part_moves_it_and_dragging_elsewhere_turns_the_view() {
+    let (recipe, mut screen) = robot_with("screens_drag", "antenna_tip");
+    let before = screen.state().studio().unwrap().orbit;
+
+    // From the tip to the body's right side socket.
+    let from = on_screen(&screen, "antenna_tip");
+    let to = socket_on_screen(&screen, "body", "right");
+    drag(&mut screen, from, to);
+    assert_eq!(new_lines(&recipe), ["to = \"body.right\""]);
+    let studio = screen.state().studio().unwrap();
+    assert_eq!(studio.orbit.round, before.round, "the view didn't turn");
+    assert_eq!(studio.orbit.above, before.above);
+    assert_eq!(studio.status(), "Joined \"antenna_tip\" to body.right");
+    assert_eq!(selected(&screen).as_deref(), Some("antenna_tip"));
+
+    // A drag that starts off the part turns the view and moves nothing.
+    let (rect, _) = screen.state().viewport().unwrap();
+    let empty = rect.min + egui::vec2(30.0, 30.0);
+    drag(&mut screen, empty, empty + egui::vec2(60.0, 0.0));
+    let studio = screen.state().studio().unwrap();
+    assert_ne!(studio.orbit.round, before.round);
+    assert_eq!(new_lines(&recipe), ["to = \"body.right\""]);
+
+    // When only looking, a drag on the selected part turns the view too.
+    let recipe = copy_of("robot.toml", "screens_drag_look");
+    let mut screen = harness(StudioApp::with_file(&recipe, true), false);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    screen.run_steps(2);
+    let from = on_screen(&screen, "body");
+    drag(&mut screen, from, from + egui::vec2(50.0, 0.0));
+    assert!(new_lines(&recipe).is_empty());
+    assert_ne!(screen.state().studio().unwrap().orbit.round, before.round);
+}
+
 /// Pictures of whole screens, compared with the stored ones in
 /// `tests/screens/`. Linux only: see the top of this file.
 #[cfg(target_os = "linux")]
@@ -627,6 +792,25 @@ mod picture {
         screen.remove_cursor();
         screen.run_steps(2);
         check(&mut screen, "definition");
+    }
+
+    #[test]
+    fn the_add_list_on_a_socket() {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("robot.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(2);
+        let on_right = socket_on_screen(&screen, "head", "right");
+        click_at(&mut screen, on_right);
+        screen.run_steps(2);
+        check(&mut screen, "add-list");
     }
 
     #[test]

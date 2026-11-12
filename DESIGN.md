@@ -1545,6 +1545,38 @@ viewport and the problems panel, with no editing. The window code from
 Phase 1 (Duck Forge's game window) is removed, so Duck Mold has one
 window library instead of two, and `preview` gains pan and the grid.
 
+*As built (step 6):*
+
+- **A drag writes once, when the part is dropped**, not ten times a
+  second while it moves as first planned. While dragging, a marker under
+  the pointer shows where the part will go. That is one write, one undo
+  step, and no half-finished recipe for an agent to read in between.
+- **Dropping on a surface slides or makes a socket.** If the part sits
+  on a socket that was declared with `on` on that same part, and nothing
+  else sits on it, that socket is moved (`set-socket`). Otherwise a new
+  socket, `spot`, `spot_2`..., is declared at the point (`add-socket`)
+  and the part joined to it (`join`): two edits, one undo step. A socket
+  left behind with nothing on it stays in the recipe; there is no edit
+  yet that removes one.
+- **A point becomes "side and shift"** in the library
+  (`edit::spot`), next to the code that places declared sockets, and a
+  test checks on every face of four parts (a box, a twisted box, a ball,
+  and a wedge that is turned, scaled and mirrored) that the socket lands
+  on the point that was clicked. On a round part a point low on the side
+  can be hidden behind a nearer face from the box side it is reached
+  from; the socket then lands on that nearer face.
+- **Markers on the far side of a part are drawn small and can't be
+  clicked**: a click meant for the surface in front would hit them. Turn
+  the view to reach them.
+- **A part can't be dragged onto what hangs from it** (a head onto its
+  own antenna): those sockets aren't offered.
+- **The picture stays still through an edit.** A model's zero point is
+  the middle of its footprint, so adding a part on one side moves every
+  other part the other way. The camera goes with them.
+- A click on the selected part itself now means "add here", so a part
+  made of parts is still selected whole first, then the part inside,
+  and only then does a click on it open the list.
+
 *As built (step 5):* a part comes from a definition in two ways, and
 the panel says which. A part *inside* a definition (`left_arm/hand`):
 "Inside the definition "arm". Any change here also changes:
