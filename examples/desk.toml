@@ -1,0 +1,85 @@
+# A desk with two parts made elsewhere: a lamp from a glTF file and a
+# crate from a .glb that Duck Mold wrote.
+#
+#   duck-mold render examples/desk.toml
+#
+# A part made from a file (`file = "parts/lamp.gltf"`) is used as it is:
+# it can be joined, scaled and twisted like any part, but not changed
+# inside. Its material names are its face names, so `colors` can paint a
+# material from the palette. A material given no colour here keeps the
+# colour the file gives it, added to the palette under its own name, and
+# `inspect` lists those (here, the lamp's shade and bulb). A .glb that
+# Duck Mold wrote brings its palette with it, as a recipe used as a part
+# does (here, the crate's "wood" and "plank").
+
+version = 0
+name = "desk"
+description = "A desk with a lamp from a glTF file and a crate from a Duck Mold .glb."
+
+[palette]
+wood  = "#B07A3F"
+brass = "#C9A240"
+
+[define.leg]
+shape = "box"
+size = [0.06, 0.72, 0.06]
+color = "wood"
+
+# The top, with a socket for each leg at its corners, and one for the lamp
+# and the crate on top.
+[[parts]]
+name = "top"
+shape = "box"
+size = [1.2, 0.05, 0.6]
+color = "wood"
+
+[parts.sockets]
+leg_left_front  = { on = "bottom", shift = [-0.9, 0, 0.8] }
+leg_right_front = { on = "bottom", shift = [0.9, 0, 0.8] }
+leg_left_back   = { on = "bottom", shift = [-0.9, 0, -0.8] }
+leg_right_back  = { on = "bottom", shift = [0.9, 0, -0.8] }
+lamp            = { on = "top", shift = [-0.65, 0, -0.4] }
+crate           = { on = "top", shift = [0.55, 0, 0.1] }
+
+[[parts]]
+name = "leg_left_front"
+use = "leg"
+attach = "top"
+to = "top.leg_left_front"
+
+[[parts]]
+name = "leg_right_front"
+use = "leg"
+attach = "top"
+to = "top.leg_right_front"
+
+[[parts]]
+name = "leg_left_back"
+use = "leg"
+attach = "top"
+to = "top.leg_left_back"
+
+[[parts]]
+name = "leg_right_back"
+use = "leg"
+attach = "top"
+to = "top.leg_right_back"
+
+# The lamp's stand is painted brass from this palette; its shade and bulb
+# keep the file's own colours.
+[[parts]]
+name = "lamp"
+file = "parts/lamp.gltf"
+colors = { stand = "brass" }
+attach = "bottom"
+to = "top.lamp"
+twist = 20
+
+# The crate, a third of its size, turned a little.
+[[parts]]
+name = "crate"
+file = "parts/crate.glb"
+scale = 0.3
+attach = "bottom"
+to = "top.crate"
+twist = -15

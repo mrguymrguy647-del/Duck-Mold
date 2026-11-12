@@ -895,18 +895,18 @@ fn a_recipe_that_uses_itself_is_caught() {
 
 #[test]
 fn files_that_are_not_recipes_or_meshes_are_refused() {
+    // glTF is read since Phase 1: a .glb that isn't there is a missing
+    // file, not a kind Duck Mold refuses.
     let issues = issues_of("version = 0\n[[parts]]\nfile = \"duck.glb\"\n");
     assert!(
-        only(&issues, Code::Unsupported)
+        only(&issues, Code::FileNotFound)
             .message
-            .contains("glTF isn't available yet")
+            .contains("can't read \"duck.glb\"")
     );
     let issues = issues_of("version = 0\n[[parts]]\nfile = \"duck.png\"\n");
-    assert!(
-        only(&issues, Code::Unsupported)
-            .message
-            .contains(".toml or .json")
-    );
+    let issue = only(&issues, Code::Unsupported);
+    assert!(issue.message.contains(".toml or .json"));
+    assert!(issue.message.contains(".obj, .gltf or .glb"));
 }
 
 #[test]

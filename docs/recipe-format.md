@@ -82,7 +82,7 @@ Each entry of `parts`, and each entry of `define`, is a part.
 |---|---|---|
 | `shape` | text | One of the built-in shapes: `box`, `cylinder`, `sphere`, `cone`, `wedge`. |
 | `use` | text | A copy of the part with that name under `define` (in the same file). |
-| `file` | text | Another recipe (`.toml`, `.json`) or a mesh (`.obj`). The path starts from the recipe's folder. |
+| `file` | text | Another recipe (`.toml`, `.json`) or a mesh (`.obj`, `.gltf`, `.glb`). The path starts from the recipe's folder. |
 | `parts` | list of parts | An assembly: a part made of parts. |
 
 **Its other fields.**
@@ -155,6 +155,7 @@ multiple of 4, flat sides face left, right, front and back, and a
 | `cone` | `side`, `bottom` | 2 × segments − 2 |
 | `wedge` | `slope`, `bottom`, `back`, `left`, `right` | 8 |
 | an `.obj` file | its material names (`default` for faces before any material) | as in the file |
+| a `.gltf` or `.glb` file | its material names (`material_N` for one with no name, `default` for faces with no material); for a `.glb` Duck Mold wrote, its palette names | as in the file |
 
 A model can have at most 1,000,000 triangles, and parts can be nested
 32 deep.
@@ -250,7 +251,28 @@ attached in a ring, are errors.
   `scale` and `rotate` on the part. The file's own colours and textures
   are not used: colour it with `color`, and with `colors` by material
   name. `duck-mold inspect rock.obj` lists a file's size and materials.
-- glTF files can't be used as parts yet.
+- **A glTF file** (`file = "lamp.gltf"` or `file = "lamp.glb"`): every
+  mesh in the file's main scene, each placed, turned and sized as its
+  object says (by numbers or by a matrix), merged into one part.
+  Triangles in any of glTF's three layouts, corner numbers of any size
+  or none; a `.gltf`'s numbers in a `.bin` file beside it or written
+  inside it as base64. Read as y up, facing +z, x to the model's left,
+  which is what Duck Mold exports, so an exported model imported again
+  comes back where it was.
+  - **Colour:** `color` and `colors` (by material name) as for OBJ. A
+    material they leave uncoloured keeps the file's own base colour: it
+    is added to the palette under the material's name (or, if the
+    palette already has that name, the palette's colour is used), and a
+    `no_color` warning lists what was kept. A `.glb` Duck Mold wrote
+    brings its palette, as a recipe used as a part does: its face names
+    are its palette names.
+  - **Left out, with a note:** lines and points, skins, animations,
+    shape keys (morph targets), cameras and textures (a material's
+    colour is its base colour). Normals and texture coordinates are
+    passed over.
+  - **Refused, with a sentence:** a file that says it needs an extension
+    to be read (Draco or meshopt compression, for example), corners
+    packed into whole numbers, sparse accessors, and glTF 1.
 
 ## Numbers in the output
 

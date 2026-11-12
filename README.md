@@ -93,9 +93,9 @@ without opening a window:
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures an `.obj` mesh, or a `.glb` that Duck Mold wrote. `--sockets` also lists every named socket and where it is. |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
-| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws an `.obj` or `.glb` as it is, too. |
+| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
 | `duck-mold guide` | Prints the guide for AI agents. |
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
@@ -164,7 +164,8 @@ error: lamp.toml:26: parts[2].segments: 100 is too big. Allowed: 3 to 64.
   every time, and the same recipe always gives exactly the same file. So
   keep the recipe; the `.glb` can always be made again.
 - **Parts and sockets.** A part is a shape (box, cylinder, sphere, cone,
-  wedge), a mesh from an `.obj` file, or an assembly of other parts.
+  wedge), a mesh from a file (`.obj`, `.gltf` or `.glb`, from Blender or
+  any modelling program), or an assembly of other parts.
   Parts are joined socket to socket, by name. A part can declare sockets
   of its own: `neck = { on = "top" }`.
 - **Define once, use many times.** A part under `[define.leg]` can be
@@ -188,6 +189,7 @@ A recipe can be written as TOML (the examples) or as JSON
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
 | [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, windows and a chimney placed by sockets, and a skylight on the roof's `slope`. |
 | [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
+| [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
 
 Each is commented line by line.
@@ -246,6 +248,7 @@ Duck-Mold/
     │   │   ├── math.rs        points, turns, and an exact sine and cosine
     │   │   ├── shapes.rs      box, cylinder, sphere, cone, wedge
     │   │   ├── mesh.rs        reading .obj files
+    │   │   ├── gltf.rs        reading .gltf and .glb files
     │   │   ├── assemble.rs    parts, sockets, joins, nesting, colour
     │   │   ├── model.rs       the built model: a tree of parts and their faces
     │   │   ├── glb.rs         writing (and reading back) .glb

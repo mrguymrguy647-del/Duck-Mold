@@ -514,7 +514,7 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
             Issue::error(
                 Code::Unsupported,
                 "",
-                "this .glb wasn't written by Duck Mold. Importing other glTF files isn't available yet",
+                "this .glb wasn't written by Duck Mold, so it has no parts or palette to read back",
             )
             .in_file(file),
         ));

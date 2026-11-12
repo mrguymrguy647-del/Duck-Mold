@@ -43,7 +43,8 @@ right, from the front right and above). Every view is at the same scale.
 Under them is the model's name, size and triangle count. A light grey
 face is one nobody coloured. With `--json`, `views` says where each view
 is in the picture. It writes the PNG next to the recipe unless `-o`
-says where, and draws an `.obj` or `.glb` as it is, too.
+says where, and draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is,
+too.
 
 Exit codes: **0** it worked (warnings included), **1** the recipe has
 errors, **2** the command was wrong or a file couldn't be read or written.
@@ -160,7 +161,7 @@ A part (an entry of `parts`, or of `define`) gets its shape from
 |---|---|
 | `shape = "box"` | a built-in shape (table below) |
 | `use = "leg"` | a copy of a part from `define` |
-| `file = "wheel.toml"` | another recipe, or an `.obj` mesh. The path starts from the recipe's folder. |
+| `file = "wheel.toml"` | another recipe, or a mesh: `.obj`, `.gltf` or `.glb`. The path starts from the recipe's folder. |
 | `parts = [ ... ]` | an assembly: a list of parts of its own |
 
 Its other fields:
@@ -330,7 +331,7 @@ What to check, in this order:
    `origin` on purpose.
 6. **`parts`.** Each part's `bounds` says where it ended up, and
    `attached_to` what it is joined to. `kind` is its shape (`assembly`
-   for a part made of parts, `mesh` for an `.obj`); `uses` names its
+   for a part made of parts, `mesh` for a mesh file); `uses` names its
    `define`. A part inside another is named with a slash:
    `left_arm/hand`.
 7. **`palette`.** How many triangles each colour paints.
@@ -382,9 +383,9 @@ As JSON (`"ok": false`, with `errors` and `warnings`), each is:
 | `conflict` | Two fields that can't go together (`attach` with `move`; two sources of shape). The message says which to remove. |
 | `cycle` | A part that uses itself, or parts attached in a ring. The message shows the chain. |
 | `reserved` | `bones`, `colliders` and `lods` are kept for a later phase. Remove them. |
-| `unsupported` | Not available yet: see-through colours, glTF import. |
+| `unsupported` | Not available: see-through colours, compressed glTF. |
 | `file_not_found` | A file the recipe names can't be read. Paths start from the recipe's folder. |
-| `bad_mesh` | A mistake inside an `.obj` file, with its line. |
+| `bad_mesh` | A mistake inside a mesh file (an `.obj`'s with its line). |
 | `io` | The file on the command line can't be read or written. |
 
 Warnings (the model is still built; exit code 0):
@@ -445,10 +446,17 @@ joined part: join the socket that should touch.
 **Share a palette between models.** `palette = "palette.toml"`, where
 that file is a plain list of `name = "#RRGGBB"`.
 
-**Use a mesh made elsewhere.** `file = "rock.obj"`. Run
-`duck-mold inspect rock.obj` first: it lists the file's size and its
-material names, which are the face names for `colors`. Use `scale` if
-it was made in other units (`scale = 0.01` for centimetres).
+**Use a mesh made elsewhere.** `file = "rock.obj"`, `file = "lamp.gltf"`
+or `file = "lamp.glb"`. Run `duck-mold inspect lamp.gltf` first: it lists
+the file's size and its material names, which are the face names for
+`colors`. Use `scale` if it was made in other units (`scale = 0.01` for
+centimetres). A glTF material you give no colour keeps the file's own
+base colour, added to the palette under the material's name, with a
+`no_color` warning that lists them: give the part a `color`, or `colors`
+by material name, to choose your own. A `.glb` Duck Mold wrote brings its
+palette, so it looks as it did (`examples/desk.toml`). Only the mesh is
+read: animations, bones and textures are left out with a note, and a
+compressed file is refused.
 
 **Choose where the model's zero point is.** `origin = "pole.bottom"`
 puts it at a socket of one part instead of under the middle of the
@@ -483,7 +491,7 @@ Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
 bones, animation, colliders or LODs (`bones`, `colliders` and `lods` are
-reserved names), no glTF import (only `.obj`), no window.
+reserved names), no window.
 
 ## 12. Files for reference
 

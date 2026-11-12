@@ -2,7 +2,8 @@
 //!
 //! A recipe can name other files: a shared palette
 //! (`palette = "palette.toml"`), another recipe used as a part
-//! (`file = "wheel.toml"`) or a mesh (`file = "rock.obj"`). [`load`] reads
+//! (`file = "wheel.toml"`) or a mesh (`file = "rock.obj"`,
+//! `file = "lamp.gltf"`, `file = "lamp.glb"`). [`load`] reads
 //! them all, so that what comes out needs no more reading: every
 //! [`Source::File`] has become a recipe or a mesh, and the colours of
 //! every file are gathered into one palette for the model.
@@ -12,6 +13,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::gltf::read_gltf;
 use crate::issue::{Code, Issue};
 use crate::mesh::read_obj;
 use crate::recipe::{self, Loc, PaletteColor, PaletteDef, PartDef, Recipe, Source, hex};
@@ -303,19 +305,46 @@ impl Loader<'_> {
                 }
             }
             "glb" | "gltf" => {
-                self.issues.push(loc.error(
-                    Code::Unsupported,
-                    format!(
-                        "\"{written}\" is a glTF file, and importing glTF isn't available yet. For now, save the mesh as .obj"
-                    ),
-                ));
-                Source::Broken
+                let bytes = match std::fs::read(&path) {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        self.issues.push(loc.error(
+                            Code::FileNotFound,
+                            format!(
+                                "can't read \"{written}\": {}. Paths start from the recipe's own folder",
+                                reason(&error)
+                            ),
+                        ));
+                        return Source::Broken;
+                    }
+                };
+                let beside = path.parent().unwrap_or(folder);
+                match read_gltf(&bytes, &shown, beside, self.issues) {
+                    Some(mesh) => {
+                        // A model Duck Mold wrote brings its palette, as a
+                        // recipe used as a part does.
+                        if mesh.from_duck_mold {
+                            for (name, rgb) in mesh.materials.iter().zip(&mesh.colors) {
+                                if let Some(rgb) = rgb {
+                                    self.add_color(&PaletteColor {
+                                        name: name.clone(),
+                                        rgb: *rgb,
+                                        loc: loc.clone(),
+                                        own: false,
+                                    });
+                                }
+                            }
+                        }
+                        Source::Mesh(Arc::new(mesh))
+                    }
+                    None => Source::Broken,
+                }
             }
             _ => {
                 self.issues.push(loc.error(
                     Code::Unsupported,
                     format!(
-                        "\"{written}\" can't be used as a part: a part's file is a recipe (.toml or .json) or a mesh (.obj)"
+                        "\"{written}\" can't be used as a part: a part's file is a recipe (.toml or .json) or a mesh (.obj, .gltf or .glb)"
                     ),
                 ));
                 Source::Broken

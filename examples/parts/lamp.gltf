@@ -1,0 +1,319 @@
+{
+ "asset": {
+  "version": "2.0",
+  "generator": "written by hand for Duck Mold's import example"
+ },
+ "scene": 0,
+ "scenes": [
+  {
+   "name": "lamp",
+   "nodes": [
+    0
+   ]
+  }
+ ],
+ "nodes": [
+  {
+   "name": "lamp",
+   "children": [
+    1,
+    2,
+    3
+   ]
+  },
+  {
+   "name": "base",
+   "mesh": 0,
+   "translation": [
+    0,
+    0.015,
+    0
+   ]
+  },
+  {
+   "name": "pole",
+   "mesh": 1,
+   "matrix": [
+    0.025,
+    0,
+    0,
+    0,
+    0,
+    0.42,
+    0,
+    0,
+    0,
+    0,
+    0.025,
+    0,
+    0,
+    0.24,
+    0,
+    1
+   ]
+  },
+  {
+   "name": "arm",
+   "translation": [
+    0,
+    0.45,
+    0
+   ],
+   "rotation": [
+    -0.3007057995042731,
+    0,
+    0,
+    0.9537169507482269
+   ],
+   "children": [
+    4,
+    5
+   ]
+  },
+  {
+   "name": "shade",
+   "mesh": 2,
+   "translation": [
+    0,
+    0.0,
+    0.11
+   ]
+  },
+  {
+   "name": "bulb",
+   "mesh": 3,
+   "translation": [
+    0,
+    -0.03,
+    0.11
+   ],
+   "scale": [
+    1,
+    1.2,
+    1
+   ]
+  }
+ ],
+ "meshes": [
+  {
+   "name": "base",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 0
+     },
+     "indices": 1,
+     "material": 0
+    }
+   ]
+  },
+  {
+   "name": "pole",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 2
+     },
+     "indices": 3,
+     "material": 0
+    }
+   ]
+  },
+  {
+   "name": "shade",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 4
+     },
+     "indices": 5,
+     "mode": 6,
+     "material": 1
+    }
+   ]
+  },
+  {
+   "name": "bulb",
+   "primitives": [
+    {
+     "attributes": {
+      "POSITION": 6
+     },
+     "material": 2
+    }
+   ]
+  }
+ ],
+ "materials": [
+  {
+   "name": "stand",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.042311,
+     0.046665,
+     0.057805,
+     1.0
+    ],
+    "metallicFactor": 0.0
+   }
+  },
+  {
+   "name": "shade",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     0.027321,
+     0.205079,
+     0.147027,
+     1.0
+    ],
+    "metallicFactor": 0.0
+   }
+  },
+  {
+   "name": "bulb",
+   "pbrMetallicRoughness": {
+    "baseColorFactor": [
+     1.0,
+     0.814847,
+     0.391572,
+     1.0
+    ],
+    "metallicFactor": 0.0
+   }
+  }
+ ],
+ "accessors": [
+  {
+   "bufferView": 0,
+   "componentType": 5126,
+   "count": 8,
+   "type": "VEC3",
+   "min": [
+    -0.10999999940395355,
+    -0.014999999664723873,
+    -0.10999999940395355
+   ],
+   "max": [
+    0.10999999940395355,
+    0.014999999664723873,
+    0.10999999940395355
+   ]
+  },
+  {
+   "bufferView": 1,
+   "componentType": 5123,
+   "count": 36,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 2,
+   "componentType": 5126,
+   "count": 8,
+   "type": "VEC3",
+   "min": [
+    -0.5,
+    -0.5,
+    -0.5
+   ],
+   "max": [
+    0.5,
+    0.5,
+    0.5
+   ]
+  },
+  {
+   "bufferView": 3,
+   "componentType": 5121,
+   "count": 36,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 4,
+   "componentType": 5126,
+   "count": 11,
+   "type": "VEC3",
+   "min": [
+    -0.11999999731779099,
+    -0.07000000029802322,
+    -0.1141267791390419
+   ],
+   "max": [
+    0.11999999731779099,
+    0.07000000029802322,
+    0.1141267791390419
+   ]
+  },
+  {
+   "bufferView": 5,
+   "componentType": 5121,
+   "count": 12,
+   "type": "SCALAR"
+  },
+  {
+   "bufferView": 6,
+   "componentType": 5126,
+   "count": 24,
+   "type": "VEC3",
+   "min": [
+    -0.03500000014901161,
+    -0.03500000014901161,
+    -0.03500000014901161
+   ],
+   "max": [
+    0.03500000014901161,
+    0.03500000014901161,
+    0.03500000014901161
+   ]
+  }
+ ],
+ "bufferViews": [
+  {
+   "buffer": 0,
+   "byteOffset": 0,
+   "byteLength": 96,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 96,
+   "byteLength": 72,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 168,
+   "byteLength": 96,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 264,
+   "byteLength": 36,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 300,
+   "byteLength": 132,
+   "target": 34962
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 432,
+   "byteLength": 12,
+   "target": 34963
+  },
+  {
+   "buffer": 0,
+   "byteOffset": 444,
+   "byteLength": 288,
+   "target": 34962
+  }
+ ],
+ "buffers": [
+  {
+   "byteLength": 732,
+   "uri": "data:application/octet-stream;base64,rkfhvY/CdbyuR+G9rkfhPY/CdbyuR+G9rkfhPY/CdTyuR+G9rkfhvY/CdTyuR+G9rkfhvY/CdbyuR+E9rkfhPY/CdbyuR+E9rkfhPY/CdTyuR+E9rkfhvY/CdTyuR+E9BAAFAAYABAAGAAcAAQAAAAMAAQADAAIAAAAEAAcAAAAHAAMABQABAAIABQACAAYAAwAHAAYAAwAGAAIAAAABAAUAAAAFAAQAAAAAvwAAAL8AAAC/AAAAPwAAAL8AAAC/AAAAPwAAAD8AAAC/AAAAvwAAAD8AAAC/AAAAvwAAAL8AAAA/AAAAPwAAAL8AAAA/AAAAPwAAAD8AAAA/AAAAvwAAAD8AAAA/BAUGBAYHAQADAQMCAAQHAAcDBQECBQIGAwcGAwYCAAEFAAUEAAAAAClcjz0AAAAAj8L1PSlcj70AAAAA89LGPSlcj71AdJA9VuMXPSlcj71Nu+k9VuMXvSlcj71Nu+k989LGvSlcj71AdJA9j8L1vSlcj71ji4cj89LGvSlcj71AdJC9VuMXvSlcj71Nu+m9VuMXPSlcj71Nu+m989LGPSlcj71AdJC9AAEKCQgHBgUEAwIBAAAAAClcDz0AAAAAAAAAAAAAAAApXA89KVwPPQAAAAAAAAAAAAAAAClcD70AAAAAKVwPPQAAAAAAAAAAAAAAAAAAAAApXA89AAAAAClcDz0AAAAAKVwPvQAAAAAAAAAAAAAAAAAAAAApXA89AAAAAClcD70AAAAAAAAAAAAAAAApXA89KVwPvQAAAAAAAAAAAAAAAClcDz0AAAAAAAAAAAAAAAApXA+9KVwPvQAAAAAAAAAAAAAAAClcD70AAAAAKVwPvQAAAAAAAAAAAAAAAAAAAAApXA+9AAAAAClcDz0AAAAAKVwPPQAAAAAAAAAAAAAAAAAAAAApXA+9AAAAAClcD70AAAAAAAAAAAAAAAApXA+9KVwPPQAAAAAAAAAA"
+  }
+ ]
+}

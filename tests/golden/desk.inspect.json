@@ -1,0 +1,270 @@
+{
+  "ok": true,
+  "summary": "desk: 1.20 x 1.34 x 0.614 m, 114 triangles, 7 parts, 5 colours, rests on the ground, nothing floating, nothing overlapping",
+  "source": "examples/desk.toml",
+  "name": "desk",
+  "size": [
+    1.2,
+    1.340434,
+    0.61443
+  ],
+  "bounds": {
+    "min": [
+      -0.6,
+      0.0,
+      -0.307215
+    ],
+    "max": [
+      0.6,
+      1.340434,
+      0.307215
+    ]
+  },
+  "triangles": 114,
+  "vertices": 282,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "wood",
+      "hex": "#B07A3F",
+      "triangles": 68
+    },
+    {
+      "name": "brass",
+      "hex": "#C9A240",
+      "triangles": 24
+    },
+    {
+      "name": "plank",
+      "hex": "#8A5A2B",
+      "triangles": 4
+    },
+    {
+      "name": "shade",
+      "hex": "#2E7D6B",
+      "triangles": 10
+    },
+    {
+      "name": "bulb",
+      "hex": "#FFE9A8",
+      "triangles": 8
+    }
+  ],
+  "parts": [
+    {
+      "name": "top",
+      "kind": "box",
+      "triangles": 12,
+      "size": [
+        1.2,
+        0.05,
+        0.6
+      ],
+      "bounds": {
+        "min": [
+          -0.6,
+          0.72,
+          -0.292785
+        ],
+        "max": [
+          0.6,
+          0.77,
+          0.307215
+        ]
+      },
+      "colors": [
+        "wood"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "leg_left_front",
+      "kind": "box",
+      "uses": "leg",
+      "triangles": 12,
+      "size": [
+        0.06,
+        0.72,
+        0.06
+      ],
+      "bounds": {
+        "min": [
+          -0.57,
+          0.0,
+          0.217215
+        ],
+        "max": [
+          -0.51,
+          0.72,
+          0.277215
+        ]
+      },
+      "colors": [
+        "wood"
+      ],
+      "attached_to": "top.leg_left_front",
+      "parts": []
+    },
+    {
+      "name": "leg_right_front",
+      "kind": "box",
+      "uses": "leg",
+      "triangles": 12,
+      "size": [
+        0.06,
+        0.72,
+        0.06
+      ],
+      "bounds": {
+        "min": [
+          0.51,
+          0.0,
+          0.217215
+        ],
+        "max": [
+          0.57,
+          0.72,
+          0.277215
+        ]
+      },
+      "colors": [
+        "wood"
+      ],
+      "attached_to": "top.leg_right_front",
+      "parts": []
+    },
+    {
+      "name": "leg_left_back",
+      "kind": "box",
+      "uses": "leg",
+      "triangles": 12,
+      "size": [
+        0.06,
+        0.72,
+        0.06
+      ],
+      "bounds": {
+        "min": [
+          -0.57,
+          0.0,
+          -0.262785
+        ],
+        "max": [
+          -0.51,
+          0.72,
+          -0.202785
+        ]
+      },
+      "colors": [
+        "wood"
+      ],
+      "attached_to": "top.leg_left_back",
+      "parts": []
+    },
+    {
+      "name": "leg_right_back",
+      "kind": "box",
+      "uses": "leg",
+      "triangles": 12,
+      "size": [
+        0.06,
+        0.72,
+        0.06
+      ],
+      "bounds": {
+        "min": [
+          0.51,
+          0.0,
+          -0.262785
+        ],
+        "max": [
+          0.57,
+          0.72,
+          -0.202785
+        ]
+      },
+      "colors": [
+        "wood"
+      ],
+      "attached_to": "top.leg_right_back",
+      "parts": []
+    },
+    {
+      "name": "lamp",
+      "kind": "mesh",
+      "file": "examples/parts/lamp.gltf",
+      "triangles": 42,
+      "size": [
+        0.298302,
+        0.570434,
+        0.363922
+      ],
+      "bounds": {
+        "min": [
+          -0.55044,
+          0.77,
+          -0.307215
+        ],
+        "max": [
+          -0.252138,
+          1.340434,
+          0.056707
+        ]
+      },
+      "colors": [
+        "brass",
+        "shade",
+        "bulb"
+      ],
+      "attached_to": "top.lamp",
+      "parts": []
+    },
+    {
+      "name": "crate",
+      "kind": "mesh",
+      "file": "examples/parts/crate.glb",
+      "triangles": 12,
+      "size": [
+        0.367424,
+        0.3,
+        0.367423
+      ],
+      "bounds": {
+        "min": [
+          0.146288,
+          0.77,
+          -0.146496
+        ],
+        "max": [
+          0.513712,
+          1.07,
+          0.220927
+        ]
+      },
+      "colors": [
+        "wood",
+        "plank"
+      ],
+      "attached_to": "top.crate",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [],
+  "warnings": [
+    {
+      "severity": "warning",
+      "code": "no_color",
+      "file": "examples/desk.toml",
+      "line": 70,
+      "column": 1,
+      "path": "parts[5]",
+      "message": "the materials \"shade\" and \"bulb\" of \"examples/parts/lamp.gltf\" have no colour in the recipe, so they keep the file's own, added to the palette under their names: shade #2E7D6B, bulb #FFE9A8. To choose others, give the part a \"color\", or \"colors\" by material name"
+    }
+  ],
+  "errors": []
+}

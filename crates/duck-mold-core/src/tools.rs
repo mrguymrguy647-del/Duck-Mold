@@ -12,13 +12,14 @@ use serde::Serialize;
 
 use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
+use crate::gltf::{is_duck_mold_glb, read_gltf};
 use crate::inspect::{Inspection, MaterialUse, inspect, socket_report};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
 use crate::mesh::{MeshFile, read_obj};
 use crate::model::{Face, Model, Part, PartKind};
-use crate::recipe::Loc;
+use crate::recipe::{Loc, PaletteColor};
 
 /// Why an operation gave nothing.
 #[derive(Debug, Clone, PartialEq)]
@@ -64,7 +65,8 @@ pub struct Built {
 }
 
 /// Reads and builds a file: a recipe (`.toml`, `.json`), or a model to
-/// measure (an `.obj` mesh, or a `.glb` that Duck Mold wrote).
+/// measure (an `.obj` mesh, a `.gltf` or `.glb`: a `.glb` that Duck Mold
+/// wrote comes back with its parts and palette).
 pub fn build(path: &Path) -> Result<Built, Failure> {
     let source = display_path(path);
     let ending = path
@@ -86,7 +88,7 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
                 None => Err(Failure::Invalid(Report::from_issues(issues))),
             }
         }
-        "glb" => {
+        "glb" if is_duck_mold_glb(&read_file(path)?) => {
             let bytes = read_file(path)?;
             let model = read_glb(&bytes, &source)
                 .map_err(|issue| Failure::Invalid(Report::from_issues(vec![*issue])))?;
@@ -96,6 +98,24 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
                 warnings: Vec::new(),
                 materials: Vec::new(),
             })
+        }
+        "glb" | "gltf" => {
+            let bytes = read_file(path)?;
+            let mut issues = Vec::new();
+            let beside = path.parent().unwrap_or(Path::new("."));
+            match read_gltf(&bytes, &source, beside, &mut issues) {
+                Some(mesh) => Ok(Built {
+                    model: model_of_mesh(&mesh, path),
+                    source,
+                    warnings: Report::from_issues(issues).warnings,
+                    materials: mesh
+                        .material_counts()
+                        .into_iter()
+                        .map(|(name, triangles)| MaterialUse { name, triangles })
+                        .collect(),
+                }),
+                None => Err(Failure::Invalid(Report::from_issues(issues))),
+            }
         }
         "obj" => {
             let text = String::from_utf8(read_file(path)?).map_err(|_| {
@@ -120,26 +140,40 @@ pub fn build(path: &Path) -> Result<Built, Failure> {
                 None => Err(Failure::Invalid(Report::from_issues(issues))),
             }
         }
-        "gltf" => Err(Failure::Usage(Box::new(Issue::error(
-            Code::Unsupported,
-            "",
-            format!(
-                "\"{source}\" is a glTF text file, which Duck Mold can't read yet. It reads recipes (.toml, .json), .obj meshes and the .glb files it writes"
-            ),
-        )))),
         _ => Err(Failure::Usage(Box::new(Issue::error(
             Code::Io,
             "",
             format!(
-                "\"{source}\" isn't something Duck Mold reads: give it a recipe (.toml or .json), an .obj mesh or a .glb file it wrote"
+                "\"{source}\" isn't something Duck Mold reads: give it a recipe (.toml or .json) or a mesh (.obj, .gltf or .glb)"
             ),
         )))),
     }
 }
 
 /// A mesh file as a model of one part, exactly as the file has it: not
-/// moved to the ground, not coloured.
+/// moved to the ground, and coloured only by the colours its materials
+/// have in the file (a glTF's; an OBJ's aren't read).
 fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
+    let mut palette: Vec<PaletteColor> = Vec::new();
+    let color_of_material: Vec<Option<usize>> = (0..mesh.materials.len())
+        .map(|material| {
+            let rgb = mesh.color_of(material)?;
+            let name = &mesh.materials[material];
+            let at = palette
+                .iter()
+                .position(|color| color.name == *name)
+                .unwrap_or_else(|| {
+                    palette.push(PaletteColor {
+                        name: name.clone(),
+                        rgb,
+                        loc: Loc::default(),
+                        own: false,
+                    });
+                    palette.len() - 1
+                });
+            Some(at)
+        })
+        .collect();
     let name = path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -148,9 +182,10 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
     let faces: Vec<Face> = mesh
         .triangles
         .iter()
-        .map(|corners| Face {
+        .zip(&mesh.material_of)
+        .map(|(corners, &material)| Face {
             corners: corners.map(|corner| Vec3::from(corner).tidied()).to_vec(),
-            color: None,
+            color: color_of_material[material],
         })
         .collect();
     let part = Part {
@@ -172,7 +207,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
     };
     Model {
         name,
-        palette: Vec::new(),
+        palette,
         faces,
         parts: vec![part],
         sockets: Vec::new(),

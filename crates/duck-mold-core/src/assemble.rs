@@ -26,7 +26,7 @@ use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
 use crate::recipe::{
     Axis, Define, Loc, PaletteColor, PartDef, Placement, Recipe, Shape, Side, SocketDef,
-    SocketKind, SocketRef, Source, rgb_of,
+    SocketKind, SocketRef, Source, hex, rgb_of,
 };
 use crate::shapes::{self, Landing, Polygon};
 
@@ -47,7 +47,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     let recipe = &loaded.recipe;
     let mut assembler = Assembler {
         issues,
-        palette: &loaded.palette,
+        palette: loaded.palette.clone(),
         referenced: vec![false; loaded.palette.len()],
         paint: Vec::new(),
         entry: Vec::new(),
@@ -78,7 +78,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     }
 
     // Colours of the recipe's own palette that nothing names.
-    for (color, referenced) in loaded.palette.iter().zip(&assembler.referenced) {
+    for (color, referenced) in assembler.palette.iter().zip(&assembler.referenced) {
         if color.own && !referenced {
             assembler.issues.push(color.loc.warning(
                 Code::Unused,
@@ -104,7 +104,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     }
     Some(Model {
         name: recipe.name.clone(),
-        palette: loaded.palette.clone(),
+        palette: assembler.palette,
         faces,
         parts,
         sockets: body.all_sockets(&Transform::IDENTITY),
@@ -439,8 +439,9 @@ enum Whole {
 
 struct Assembler<'a> {
     issues: &'a mut Vec<Issue>,
-    /// The model's palette.
-    palette: &'a [PaletteColor],
+    /// The model's palette: the recipe's and its files', and the colours
+    /// of imported materials the recipe gives none.
+    palette: Vec<PaletteColor>,
     /// For each palette colour, whether anything names it.
     referenced: Vec<bool>,
     /// The colour layers of the parts being built, outermost first.
@@ -626,11 +627,46 @@ impl Assembler<'_> {
     /// Chooses a colour for every face of a shape or mesh that has just
     /// been built. `groups_of` says which groups of faces a face name
     /// stands for; `words` lists the face names there are, for messages.
+    /// The palette colour for an imported material the recipe gives no
+    /// colour: the palette's colour of that name if there is one,
+    /// otherwise the file's own, added to the palette under the
+    /// material's name. What was chosen goes in `kept`, for the warning,
+    /// unless it is simply the same colour the palette already has.
+    fn own_color(&mut self, name: &str, rgb: [u8; 3], kept: &mut Vec<Kept>) -> usize {
+        let note = |kept: &mut Vec<Kept>, what: Kept| {
+            if !kept.iter().any(|known| known.name() == name) {
+                kept.push(what);
+            }
+        };
+        if let Some(at) = self.palette.iter().position(|color| color.name == name) {
+            self.referenced[at] = true;
+            let palette = self.palette[at].rgb;
+            if palette != rgb {
+                note(kept, Kept::Palette(name.to_owned(), palette, rgb));
+            }
+            return at;
+        }
+        let loc = self.entry.last().cloned().unwrap_or_default();
+        self.palette.push(PaletteColor {
+            name: name.to_owned(),
+            rgb,
+            loc,
+            own: false,
+        });
+        self.referenced.push(true);
+        note(kept, Kept::Added(name.to_owned(), rgb));
+        self.palette.len() - 1
+    }
+
+    /// The palette colour of each face, from the nearest layer that names
+    /// one. `has_own` says which groups of faces have a colour of their own
+    /// in their file, which takes the place of the "no colour" warning.
     fn paint_faces(
         &mut self,
         faces: &[Polygon],
         groups_of: &dyn Fn(&str) -> Option<Vec<usize>>,
         words: &[String],
+        has_own: &dyn Fn(usize) -> bool,
     ) -> Vec<Option<usize>> {
         // A colour for a group of faces. `Some(None)` is a colour that
         // was written but isn't in the palette.
@@ -665,6 +701,9 @@ impl Assembler<'_> {
         // A whole-part colour for the faces that are left, from the
         // nearest layer that has one.
         let left = faces.iter().any(|face| !by_group.contains_key(&face.group));
+        let left_with_none = faces
+            .iter()
+            .any(|face| !by_group.contains_key(&face.group) && !has_own(face.group));
         let mut whole = Whole::None;
         if left {
             for layer in self.paint.iter_mut().rev() {
@@ -679,6 +718,7 @@ impl Assembler<'_> {
                 break;
             }
             if matches!(whole, Whole::None)
+                && left_with_none
                 && let Some(entry) = self.entry.last()
             {
                 self.issues.push(entry.warning(
@@ -710,8 +750,12 @@ impl Assembler<'_> {
                     .into_iter()
                     .map(str::to_owned)
                     .collect();
-                let colors =
-                    self.paint_faces(&faces, &|name| shapes::face_groups(shape, name), &words);
+                let colors = self.paint_faces(
+                    &faces,
+                    &|name| shapes::face_groups(shape, name),
+                    &words,
+                    &|_| false,
+                );
                 Body::solid(shape.name(), None, faces, colors)
             }
             Source::Use(named) => {
@@ -786,7 +830,23 @@ impl Assembler<'_> {
                         .position(|material| material == name)
                         .map(|at| vec![at])
                 };
-                let colors = self.paint_faces(&faces, &material, &mesh.materials);
+                let has_own = |group: usize| mesh.color_of(group).is_some();
+                let mut colors = self.paint_faces(&faces, &material, &mesh.materials, &has_own);
+                // Faces the recipe gives no colour keep the file's own.
+                let mut kept = Vec::new();
+                for (face, color) in faces.iter().zip(colors.iter_mut()) {
+                    if color.is_none()
+                        && let Some(rgb) = mesh.color_of(face.group)
+                    {
+                        *color = Some(self.own_color(&mesh.materials[face.group], rgb, &mut kept));
+                    }
+                }
+                if !kept.is_empty()
+                    && let Some(entry) = self.entry.last()
+                {
+                    let message = kept_colours_message(&mesh.file, &kept);
+                    self.issues.push(entry.warning(Code::NoColor, message));
+                }
                 Body::solid("mesh", Some(mesh.file.clone()), faces, colors)
             }
             // A file that couldn't be read, or a part that couldn't be:
@@ -1094,6 +1154,89 @@ impl Assembler<'_> {
             shift: theirs.at - turn * my_point,
         })
     }
+}
+
+/// What happened to an imported material that the recipe gives no
+/// colour, for the warning.
+enum Kept {
+    /// Its own colour in the file, added to the palette under its name.
+    Added(String, [u8; 3]),
+    /// The palette's colour of the same name (first), which isn't the
+    /// file's (second).
+    Palette(String, [u8; 3], [u8; 3]),
+}
+
+impl Kept {
+    fn name(&self) -> &str {
+        match self {
+            Kept::Added(name, _) | Kept::Palette(name, _, _) => name,
+        }
+    }
+}
+
+/// `"a"`, `"a" and "b"`, `"a", "b" and "c"`.
+fn quoted_list<'a>(names: impl Iterator<Item = &'a str>) -> String {
+    let names: Vec<String> = names.map(|name| format!("\"{name}\"")).collect();
+    match names.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The warning for an imported file's materials the recipe gives no
+/// colour.
+fn kept_colours_message(file: &str, kept: &[Kept]) -> String {
+    let (materials, have) = if kept.len() == 1 {
+        ("material", "has")
+    } else {
+        ("materials", "have")
+    };
+    let mut message = format!(
+        "the {materials} {} of \"{file}\" {have} no colour in the recipe",
+        quoted_list(kept.iter().map(Kept::name))
+    );
+    let all_added = kept.iter().all(|kept| matches!(kept, Kept::Added(..)));
+    if all_added {
+        let added: Vec<String> = kept
+            .iter()
+            .filter_map(|kept| match kept {
+                Kept::Added(name, rgb) => Some(format!("{name} {}", hex(*rgb))),
+                Kept::Palette(..) => None,
+            })
+            .collect();
+        message.push_str(&format!(
+            ", so {} the file's own, added to the palette under {}: {}",
+            if added.len() == 1 {
+                "it keeps"
+            } else {
+                "they keep"
+            },
+            if added.len() == 1 {
+                "its name"
+            } else {
+                "their names"
+            },
+            added.join(", ")
+        ));
+    } else {
+        for kept in kept {
+            message.push_str(&match kept {
+                Kept::Added(name, rgb) => format!(
+                    "; \"{name}\" keeps the file's own, {}, added to the palette under its name",
+                    hex(*rgb)
+                ),
+                Kept::Palette(name, palette, file_rgb) => format!(
+                    "; \"{name}\" takes the palette's colour of that name, {}, not the file's {}",
+                    hex(*palette),
+                    hex(*file_rgb)
+                ),
+            });
+        }
+    }
+    message
+        .push_str(". To choose others, give the part a \"color\", or \"colors\" by material name");
+    message
 }
 
 /// `[0, 0.9, 0.9]`: numbers as a recipe writes them.

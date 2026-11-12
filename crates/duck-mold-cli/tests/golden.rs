@@ -26,7 +26,9 @@ use std::process::Command;
 #[path = "../../../docs/forge/duck_mold_glb.rs"]
 mod forge;
 
-const EXAMPLES: [&str; 6] = ["crate", "table", "tree", "house", "robot", "snowman"];
+const EXAMPLES: [&str; 7] = [
+    "crate", "table", "tree", "house", "robot", "snowman", "desk",
+];
 
 /// The top of the repository.
 fn root() -> PathBuf {
@@ -158,7 +160,14 @@ fn every_example_is_a_clean_model() {
         .unwrap();
         assert_eq!(report["ok"], true, "{name}");
         assert_eq!(report["name"], name);
-        assert_eq!(report["warnings"], serde_json::json!([]), "{name}");
+        // The desk's lamp keeps two colours from its file, and says so.
+        let warnings = report["warnings"].as_array().unwrap();
+        if name == "desk" {
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0]["code"], "no_color");
+        } else {
+            assert_eq!(warnings.len(), 0, "{name}: {warnings:?}");
+        }
         assert_eq!(report["ground"]["rests_on_ground"], true, "{name}");
         assert_eq!(report["floating"], serde_json::json!([]), "{name}");
         // Only the tree and the snowman overlap, and they mean to: the

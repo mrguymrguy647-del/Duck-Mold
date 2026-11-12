@@ -707,7 +707,10 @@ fn a_command_that_cannot_be_carried_out_exits_with_2() {
             .contains("that folder doesn't exist")
     );
 
+    // glTF is read since Phase 1; a .gltf that isn't there is like any
+    // missing file.
     let gltf = tools::inspect_file(&folder.join("duck.gltf")).unwrap_err();
     assert_eq!(gltf.exit_code(), 2);
-    assert_eq!(gltf.report().errors[0].code, Code::Unsupported);
+    assert_eq!(gltf.report().errors[0].code, Code::Io);
+    assert!(gltf.report().errors[0].message.contains("no such file"));
 }

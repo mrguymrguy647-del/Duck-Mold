@@ -778,8 +778,8 @@ section planned both formats and advised keeping OBJ and letting glTF go
 first if time ran short. OBJ is small and well defined; glTF has many
 ways to store the same numbers, and reading other programs' files is
 where the time goes. What Phase 0 does read is its own `.glb`, for
-`inspect`. A `.glb` or `.gltf` named in a recipe gets a clear "not yet"
-message that suggests saving the mesh as `.obj`.
+`inspect`. (Phase 1 added glTF: section 17, step 6, and
+`docs/recipe-format.md`, "Files as parts".)
 
 ---
 
@@ -1181,6 +1181,27 @@ The example: a small lamp written as a `.gltf` by hand (two materials,
 two pieces with their own positions), not by Duck Mold, so the import is
 tested on a file Duck Mold didn't write, and a recipe that uses it
 alongside a Duck Mold `.glb`.
+
+*As built:* `crates/duck-mold-core/src/gltf.rs`, about 600 lines with no
+new library, reads into the same mesh type as OBJ, which now carries
+each material's colour. The example is `examples/desk.toml`: a desk with
+`parts/lamp.gltf` (three materials, four pieces: a box with 16-bit
+corner numbers, one with 8-bit ones placed by a matrix, a shade as a
+fan, a bulb with no corner numbers; the shade and bulb inside a tilted
+arm; written by `examples/parts/make_lamp.py`, not by Duck Mold, and
+checked clean by the Khronos validator) and `parts/crate.glb`. The
+recipe paints the lamp's stand and leaves its shade and bulb to keep the
+file's colours, so the desk is the one example with a warning, and the
+tests expect it. The colour rule, as approved: a material the recipe
+leaves uncoloured keeps its base colour, added to the palette under its
+name; if the palette already has that name, the palette's colour is
+used (and the warning says so, when the two differ). Faces with no
+material, like an OBJ's, stay grey with the usual warning. A `.glb` that
+Duck Mold wrote joins its palette to the model's at load time, exactly as
+a recipe used as a part does, conflicts included. Base colours turn into
+0-255 through Duck Mold's fixed sRGB table, so every computer gets the
+same palette. `inspect` and `render` take `.gltf` and other `.glb` files
+too.
 
 ### Step 7. The preview window
 
