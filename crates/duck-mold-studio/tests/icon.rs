@@ -78,16 +78,15 @@ fn duck(size: usize, finer: usize) -> Vec<u8> {
                 }
             }
             let all = (finer * finer) as u32;
-            if solid == 0 {
-                rgba.extend([0, 0, 0, 0]);
-            } else {
-                rgba.extend([
-                    (red / solid) as u8,
-                    (green / solid) as u8,
-                    (blue / solid) as u8,
-                    (solid * 255 / all) as u8,
-                ]);
-            }
+            // The colour is the average of the points on the duck; a
+            // pixel with none is see-through.
+            let average = |sum: u32| sum.checked_div(solid).unwrap_or(0) as u8;
+            rgba.extend([
+                average(red),
+                average(green),
+                average(blue),
+                (solid * 255 / all) as u8,
+            ]);
         }
     }
     rgba
