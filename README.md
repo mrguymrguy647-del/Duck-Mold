@@ -196,6 +196,7 @@ Forge needs to do.
 
 ```
 Duck-Mold/
+├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
 ├── Cargo.toml                 the workspace: two crates, built together
 ├── examples/                  five recipes to read and change
 ├── docs/                      the guide, the format, the Duck Forge handoff
@@ -233,7 +234,9 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-All three must pass before a commit.
+All three must pass before a commit. GitHub runs them again, on Windows
+and on Linux, for every push and pull request
+(`.github/workflows/ci.yml`).
 
 The tests include **golden files**: `tests/golden/` holds the exact
 `.glb` and the exact report for each example, and the tests compare

@@ -781,6 +781,7 @@ message that suggests saving the mesh as `.obj`.
 
 ```
 Duck-Mold/
+├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
 ├── Cargo.toml                 the workspace: both crates, shared settings
 ├── DESIGN.md                  this file
 ├── README.md                  for people
@@ -857,6 +858,9 @@ reader.
   meshes, for every shape and every example.
 - `cargo fmt` and `cargo clippy` with warnings as errors, clean at every
   commit.
+- **On Windows and Linux.** From Phase 1, GitHub runs the formatting
+  check, the build, every test and clippy on both, for every push and
+  pull request (`.github/workflows/ci.yml`, copied from Duck Quill's).
 - One commit per step, in your order: workspace, recipes, shapes, parts
   and sockets, colour, export, inspect, import; then the examples, the
   documents, and the report.
