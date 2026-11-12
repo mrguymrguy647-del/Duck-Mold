@@ -329,3 +329,22 @@ cargo run --release -- inspect examples/robot.toml --sockets
    Duck Forge's own, if you'd rather not wait for a disagreement.
 7. Then the bigger items `DESIGN.md` keeps room for: bones from socket
    joins, colliders and LODs.
+
+## After Phase 1
+
+Item 1 above is done:
+
+- **Merged, in order:** Duck-Mold #1 then #2, and Duck-Forge #9 then
+  #10, each as a merge commit after its checks were green.
+  - Duck-Mold #1 had no checks of its own, since CI only arrived in
+    Phase 1. Its code was already tested on Windows and Linux inside
+    #2's branch.
+- **The pin moved:** Duck Forge is now pinned to `1228f77`, the commit
+  on its `main` that merged #10. That commit has the loader and reader
+  version 3.
+- **Nothing changed in the output:** every golden file, pictures
+  included, is byte for byte the same with that commit.
+- **A new test** (`crates/duck-mold-view/tests/forge_loads.rs`) loads
+  every golden model with Duck Forge's own loader at the pinned commit,
+  the code games use. It checks the triangles, palette and sockets
+  against `inspect`'s report.
