@@ -15,6 +15,7 @@ pub const RECIPE_VERSION: i64 = 0;
 
 pub mod assemble;
 pub mod glb;
+pub mod inspect;
 pub mod issue;
 pub mod load;
 pub mod math;
@@ -23,3 +24,4 @@ pub mod model;
 pub mod recipe;
 pub mod shapes;
 pub mod source;
+pub mod tools;

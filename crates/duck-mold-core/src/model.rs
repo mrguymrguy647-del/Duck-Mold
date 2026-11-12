@@ -10,7 +10,7 @@
 use std::ops::Range;
 
 use crate::math::{Bounds, Transform, Vec3};
-use crate::recipe::PaletteColor;
+use crate::recipe::{Loc, PaletteColor};
 
 /// A finished model.
 #[derive(Debug, Clone, PartialEq)]
@@ -72,6 +72,9 @@ pub struct Part {
     pub name: String,
     /// Its name from the top of the model: `left_arm/hand`.
     pub path: String,
+    /// Where the recipe wrote it, so that a warning about it can name
+    /// the line. Empty for a model read from a `.glb` or mesh file.
+    pub loc: Loc,
     /// What it is.
     pub kind: PartKind,
     /// The socket it is joined to, as the recipe wrote it:

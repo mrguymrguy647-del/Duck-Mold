@@ -141,6 +141,8 @@ struct Body {
 /// A part placed in the list it belongs to.
 struct Node {
     name: String,
+    /// Where the recipe wrote the part.
+    loc: Loc,
     attached_to: Option<String>,
     /// From the part's own space to the space of its list.
     place: Transform,
@@ -893,6 +895,7 @@ impl Assembler<'_> {
             .enumerate()
             .map(|(at, body)| Node {
                 name: names[at].clone(),
+                loc: parts[at].loc.clone(),
                 attached_to: match &parts[at].placement {
                     Placement::Attached {
                         to_part, to_socket, ..
@@ -1054,6 +1057,7 @@ fn emit(nodes: &[Node], outer: &Transform, prefix: &str, faces: &mut Vec<Face>) 
             Part {
                 name: node.name.clone(),
                 path,
+                loc: node.loc.clone(),
                 kind: node.body.kind.clone(),
                 attached_to: node.attached_to.clone(),
                 mirrored: place.is_mirrored(),
