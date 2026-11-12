@@ -401,15 +401,18 @@ cargo build --release -p duck-mold-cli
 
 The Studio's window is made with egui, like Duck Quill and Duck Forge's
 Studio. Its screens are tested with no window (`egui_kittest`): the
-tests click through the real screens on Windows and Linux, and on Linux
-they also compare pictures of whole screens with the ones stored in
-`crates/duck-mold-studio/tests/screens/`. That needs a Vulkan driver;
+tests click through the real screens on Windows and Linux
+(`tests/screens.rs`), and on Linux one more test compares pictures of
+whole screens with the ones stored in
+`crates/duck-mold-studio/tests/screens/` (`tests/pictures.rs`; it draws
+them one after another, because the software driver crashed when
+several were drawn at once). That needs a Vulkan driver;
 the software one will do (on Ubuntu or Debian, `sudo apt install
 mesa-vulkan-drivers`). After a change that is meant to be seen, store
 the new pictures with
 
 ```bash
-UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test screens
+UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures
 ```
 
 The tests include **golden files**: `tests/golden/` holds the exact

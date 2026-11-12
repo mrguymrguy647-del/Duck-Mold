@@ -5,60 +5,18 @@
 //! need no display. The Studio underneath is the real one, working on a
 //! copy of an example recipe.
 //!
-//! The tests that click run on Windows and Linux. The pictures of whole
-//! screens (the `picture` module at the end) are compared with stored
-//! ones on Linux only: egui draws through the graphics driver, and
-//! drivers don't agree to the last pixel. To store new pictures after a
-//! change that is meant to be seen:
-//!
-//! ```sh
-//! UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test screens
-//! ```
+//! These run on Windows and Linux. Pictures of whole screens are in
+//! `pictures.rs`.
 
 use std::path::{Path, PathBuf};
 
-use duck_mold_studio::{StudioApp, theme};
+use duck_mold_studio::StudioApp;
 use eframe::egui;
 use egui_kittest::Harness;
 use egui_kittest::kittest::Queryable;
 
-fn examples() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
-}
-
-/// A fresh, empty folder for one test.
-fn folder(name: &str) -> PathBuf {
-    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join(name);
-    let _ = std::fs::remove_dir_all(&folder);
-    std::fs::create_dir_all(&folder).unwrap();
-    folder
-}
-
-/// A copy of an example recipe in a folder of its own, so a test can
-/// change it and write files next to it.
-fn copy_of(example: &str, test: &str) -> PathBuf {
-    let folder = folder(test);
-    let copy = folder.join(example);
-    std::fs::copy(examples().join(example), &copy).unwrap();
-    copy
-}
-
-/// The app on a pretend 1280 x 800 screen, run the way eframe runs it.
-fn harness(app: StudioApp, render: bool) -> Harness<'static, StudioApp> {
-    let builder = Harness::builder()
-        .with_size(egui::vec2(1280.0, 800.0))
-        .with_pixels_per_point(1.0)
-        .with_render_cursor(false)
-        .with_context_setup(|ctx| {
-            ctx.set_theme(egui::ThemePreference::Dark);
-            theme::apply_brand(ctx);
-        });
-    let builder = if render { builder.wgpu() } else { builder };
-    builder.build_eframe(|_| app)
-}
-
-/// The middle of the viewport on that screen.
-const IN_VIEW: egui::Pos2 = egui::pos2(760.0, 360.0);
+mod common;
+use common::*;
 
 #[test]
 fn the_start_page_offers_open_and_new() {
@@ -251,40 +209,6 @@ fn preview_only_looks() {
     screen.run_steps(2);
     screen.get_by_label("robot.glb");
     screen.get_by_label("looking only");
-}
-
-/// The path of the selected part.
-fn selected(screen: &Harness<'static, StudioApp>) -> Option<String> {
-    let studio = screen.state().studio().unwrap();
-    studio.selected().map(str::to_owned)
-}
-
-/// Where the middle of a part is on the screen.
-fn on_screen(screen: &Harness<'static, StudioApp>, part: &str) -> egui::Pos2 {
-    let (rect, [width, height]) = screen.state().viewport().unwrap();
-    let studio = screen.state().studio().unwrap();
-    let middle = studio.part(part).unwrap().bounds.unwrap().center();
-    let (x, y) = studio.orbit.on_screen(middle, width, height).unwrap();
-    rect.min
-        + egui::vec2(
-            x as f32 * rect.width() / width as f32,
-            y as f32 * rect.height() / height as f32,
-        )
-}
-
-/// Presses and lets go of the left button without moving: a click.
-fn click_at(screen: &mut Harness<'static, StudioApp>, at: egui::Pos2) {
-    screen.hover_at(at);
-    screen.step();
-    screen.drag_at(at);
-    screen.step();
-    screen.event(egui::Event::PointerButton {
-        pos: at,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: egui::Modifiers::NONE,
-    });
-    screen.run_steps(2);
 }
 
 #[test]
@@ -565,26 +489,6 @@ fn when_only_looking_the_panel_changes_nothing() {
 }
 
 // ---- sockets -------------------------------------------------------------------
-
-/// Where a socket of a part is on the screen.
-fn socket_on_screen(screen: &Harness<'static, StudioApp>, part: &str, socket: &str) -> egui::Pos2 {
-    let (rect, [width, height]) = screen.state().viewport().unwrap();
-    let studio = screen.state().studio().unwrap();
-    let at = studio
-        .part(part)
-        .unwrap()
-        .sockets
-        .iter()
-        .find(|known| known.name == socket)
-        .unwrap()
-        .at;
-    let (x, y) = studio.orbit.on_screen(at, width, height).unwrap();
-    rect.min
-        + egui::vec2(
-            x as f32 * rect.width() / width as f32,
-            y as f32 * rect.height() / height as f32,
-        )
-}
 
 /// Presses on one point, moves to another in a few steps, and lets go.
 fn drag(screen: &mut Harness<'static, StudioApp>, from: egui::Pos2, to: egui::Pos2) {
@@ -936,117 +840,4 @@ fn recipes_opened_lately_are_on_the_start_page() {
         screen.state_mut().start_new(&recipe);
     }
     assert_eq!(std::fs::read_to_string(&list).unwrap().lines().count(), 8);
-}
-
-/// Pictures of whole screens, compared with the stored ones in
-/// `tests/screens/`. Linux only: see the top of this file.
-#[cfg(target_os = "linux")]
-mod picture {
-    use super::*;
-    use egui_kittest::SnapshotOptions;
-
-    fn check(screen: &mut Harness<'static, StudioApp>, name: &str) {
-        let stored = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/screens");
-        screen.snapshot_options(
-            name,
-            &SnapshotOptions::new()
-                .threshold(2.0)
-                .max_failed_pixels(200)
-                .output_path(stored),
-        );
-    }
-
-    #[test]
-    fn the_start_page() {
-        let mut screen = harness(StudioApp::new(), true);
-        screen.run_steps(3);
-        check(&mut screen, "start");
-    }
-
-    #[test]
-    fn a_recipe_open() {
-        // Opened where it is, not from a copy: nothing is written, and
-        // the path isn't on the screen.
-        let mut screen = harness(
-            StudioApp::with_file(examples().join("robot.toml"), false),
-            true,
-        );
-        screen.run_steps(3);
-        check(&mut screen, "robot");
-    }
-
-    #[test]
-    fn a_part_selected() {
-        let mut screen = harness(
-            StudioApp::with_file(examples().join("robot.toml"), false),
-            true,
-        );
-        screen.run_steps(2);
-        screen.get_by_label("left_arm").click();
-        screen.run_steps(2);
-        screen.remove_cursor();
-        screen.run_steps(2);
-        check(&mut screen, "selected");
-    }
-
-    #[test]
-    fn a_part_from_a_definition_selected() {
-        let mut screen = harness(
-            StudioApp::with_file(examples().join("robot.toml"), false),
-            true,
-        );
-        screen.run_steps(2);
-        screen.get_by_label("left_eye").click();
-        screen.run_steps(2);
-        screen.remove_cursor();
-        screen.run_steps(2);
-        check(&mut screen, "definition");
-    }
-
-    #[test]
-    fn the_add_list_on_a_socket() {
-        let mut screen = harness(
-            StudioApp::with_file(examples().join("robot.toml"), false),
-            true,
-        );
-        screen.run_steps(2);
-        screen
-            .state_mut()
-            .studio_mut()
-            .unwrap()
-            .select(Some("head"));
-        screen.run_steps(2);
-        let on_right = socket_on_screen(&screen, "head", "right");
-        click_at(&mut screen, on_right);
-        screen.run_steps(2);
-        check(&mut screen, "add-list");
-    }
-
-    #[test]
-    fn the_library_in_the_add_list() {
-        // The desk example uses the examples' `parts` folder.
-        let mut screen = harness(
-            StudioApp::with_file(examples().join("desk.toml"), false),
-            true,
-        );
-        screen.run_steps(2);
-        screen.state_mut().studio_mut().unwrap().select(Some("top"));
-        screen.run_steps(2);
-        let at = socket_on_screen(&screen, "top", "top");
-        click_at(&mut screen, at);
-        screen.run_steps(2);
-        check(&mut screen, "library");
-    }
-
-    #[test]
-    fn a_recipe_with_a_mistake() {
-        let recipe = copy_of("house.toml", "screens_picture_mistake");
-        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
-        screen.run_steps(2);
-        let good = std::fs::read_to_string(&recipe).unwrap();
-        std::fs::write(&recipe, good.replace("shape = \"box\"", "shape = \"blob\"")).unwrap();
-        assert!(screen.state_mut().studio_mut().unwrap().check_files());
-        screen.run_steps(3);
-        check(&mut screen, "mistake");
-    }
 }
