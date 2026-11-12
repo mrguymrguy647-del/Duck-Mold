@@ -5,3 +5,9 @@
 # tests live in tests/golden and are kept.
 /examples/*.glb
 /out
+
+# Left by a screen test that failed: the picture it drew, the one it
+# replaced, and where they differ.
+/crates/duck-mold-studio/tests/screens/*.new.png
+/crates/duck-mold-studio/tests/screens/*.old.png
+/crates/duck-mold-studio/tests/screens/*.diff.png

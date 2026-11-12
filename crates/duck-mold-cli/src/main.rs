@@ -2,7 +2,8 @@
 //!
 //! This file only reads the command line and prints. All the work is done
 //! by the libraries: `duck-mold-core` ([`duck_mold_core::tools`]) and, for
-//! pictures, `duck-mold-view` ([`duck_mold_view::render`]).
+//! pictures, `duck-mold-view` ([`duck_mold_view::render`]). The Studio is
+//! a program of its own, which `studio` and `preview` start.
 //!
 //! Exit codes: 0 it worked (warnings included), 1 the recipe has errors,
 //! 2 the command line was wrong or a file couldn't be read or written.
@@ -21,6 +22,7 @@ use duck_mold_core::tools::{self, Failure};
 use duck_mold_view::render;
 
 mod edit;
+mod studio;
 
 /// Duck Mold makes game-ready 3D models for Duck Forge from text recipes.
 ///
@@ -93,8 +95,19 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Open a window that shows the model: drag to orbit, roll the wheel
-    /// to zoom, Escape to quit.
+    /// Open the Studio: the window where a model is built with the mouse.
+    ///
+    /// Click a part to select it, change it in the panel on the right,
+    /// click a socket to join a new part there. Every change is written
+    /// to the recipe at once, as the same edit `duck-mold edit` makes, and
+    /// a recipe saved by another program is picked up. Needs a screen.
+    Studio {
+        /// A recipe (.toml or .json) to edit. Without one, the Studio
+        /// opens on its start page.
+        file: Option<PathBuf>,
+    },
+    /// Open the Studio to look at a model, changing nothing: drag to
+    /// orbit, right-drag to pan, roll the wheel to zoom, Escape to quit.
     ///
     /// When the recipe, or a file it uses, is saved, the model is built
     /// again. Mistakes are shown in the window, and the last good model
@@ -102,6 +115,16 @@ enum Command {
     Preview {
         /// A recipe (.toml or .json), or a mesh (.obj, .gltf or .glb).
         file: PathBuf,
+    },
+    /// Start a new recipe: one box, standing on the ground.
+    ///
+    /// Never writes over a file that is already there.
+    New {
+        /// The recipe to make. Its name must end in .toml.
+        recipe: PathBuf,
+        /// Print the report as JSON, for agents.
+        #[arg(long)]
+        json: bool,
     },
     /// Make one change to a recipe without typing it: add, remove, rename,
     /// join, set, duplicate, add-color, set-color, add-socket, set-socket.
@@ -198,12 +221,25 @@ fn main() -> ExitCode {
             }
             Err(failure) => fail(&failure, json),
         },
-        Command::Preview { file } => match duck_mold_view::preview::run(&file) {
+        Command::Studio { file } => match studio::run(file.as_deref(), false) {
             Ok(()) => ExitCode::SUCCESS,
-            Err(error) => {
-                complain(&format!("error: {error}"));
-                ExitCode::from(2)
+            Err(failure) => fail(&failure, false),
+        },
+        Command::Preview { file } => match studio::run(Some(&file), true) {
+            Ok(()) => ExitCode::SUCCESS,
+            Err(failure) => fail(&failure, false),
+        },
+        Command::New { recipe, json } => match tools::new_file(&recipe) {
+            Ok(inspection) => {
+                if json {
+                    say_json(&inspection);
+                } else {
+                    say(&format!("wrote {}", inspection.source));
+                    say(inspection.to_text().trim_end());
+                }
+                ExitCode::SUCCESS
             }
+            Err(failure) => fail(&failure, json),
         },
         Command::Edit {
             recipe,

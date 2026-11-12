@@ -26,9 +26,12 @@ duck-mold inspect lamp.toml --sockets # also list every named socket: head.top, 
 duck-mold edit lamp.toml set shade --color glow --json   # change it without typing (section 10)
 ```
 
-(`duck-mold preview lamp.toml` opens a window for a person to look
-around the model in, which builds it again on every save. It needs a
-screen and waits until the window is closed: as an agent, use `render`.)
+(`duck-mold studio lamp.toml` opens the Studio, a window where a person
+builds the model with the mouse, and `duck-mold preview lamp.toml` opens
+it to look only. Both need a screen and wait until the window is closed:
+as an agent, use `render` to see the model and `edit` to change it. The
+Studio makes the same edits you do, in the same file, and picks up every
+change you save while it is open.)
 
 ```bash
 duck-mold export lamp.toml            # write lamp.glb next to the recipe

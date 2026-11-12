@@ -1,7 +1,6 @@
 # Builds and tests Duck Mold on Windows and Linux for every push and pull
 # request, checks the formatting, and runs clippy (Rust's checker for
-# common mistakes), with the preview window and without it. A copy of
-# Duck Quill's, plus the formatting check and the build without a window. A
+# common mistakes). A copy of Duck Quill's, plus the formatting check. A
 # red cross on GitHub means one of these steps failed: click it to see
 # which.
 name: CI
@@ -38,6 +37,14 @@ jobs:
           rustup default "$RUST_VERSION"
       # Keeps the compiled libraries between runs: minutes faster.
       - uses: Swatinem/rust-cache@v2
+      # The Studio's screen tests draw whole screens with no window and
+      # compare them with stored pictures, on Linux only. Drawing needs a
+      # Vulkan driver, and this is the one that runs on the processor.
+      - name: Install a software graphics driver
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y mesa-vulkan-drivers
       - name: Formatting
         run: cargo fmt --all -- --check
       - name: Build
@@ -46,9 +53,3 @@ jobs:
         run: cargo test --workspace
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      # The same without the preview window, the way a machine with no
-      # screen builds Duck Mold: everything else must still build and pass.
-      - name: Test without the window
-        run: cargo test --workspace --no-default-features
-      - name: Clippy without the window
-        run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings

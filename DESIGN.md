@@ -1545,6 +1545,15 @@ viewport and the problems panel, with no editing. The window code from
 Phase 1 (Duck Forge's game window) is removed, so Duck Mold has one
 window library instead of two, and `preview` gains pan and the grid.
 
+*As built (step 3):* the Phase 1 window code and its `preview` switch
+are gone, so every build is the same and CI no longer builds twice. The
+Studio is the program `DuckMoldStudio`; `duck-mold studio` and `duck-mold
+preview` look for it next to `duck-mold` and start it, and wait until
+its window is closed, as `preview` always did. One command was added
+that the design didn't list: `duck-mold new <recipe>` writes the starter
+recipe (one box). The start page's "New model" calls the same function,
+so that making a model is something an agent can do too.
+
 ### Step 2: surface sockets for assemblies and parts from files
 
 The Phase 1 rule ("a socket that would float moves straight in onto the

@@ -89,19 +89,27 @@ without opening a window:
 
 ![The robot from the front, the right, the back and three-quarter](tests/golden/robot.png)
 
-6. Or look at it in a window, from every side:
+6. Or open it in the Studio, the window where a model is built with the
+   mouse:
 
 ```bash
-target/release/duck-mold preview examples/robot.toml
+target/release/duck-mold studio examples/robot.toml
 ```
 
-Drag with the left mouse button to turn it, roll the wheel to come
-closer, Escape to quit. Leave the window open while you edit the recipe:
-every time you save, the model is built again. If the recipe has a
-mistake, the window says so in red and keeps showing the last version
-that built.
+Drag with the left mouse button to turn the model, with the right one
+to slide it, and roll the wheel to come closer. The parts are listed on
+the left, and what is wrong with the recipe (if anything) at the bottom.
+**Export** writes the `.glb` and **Render picture** the four-view
+picture, next to the recipe. The Studio keeps no model of its own: it
+shows the recipe file, so when you (or an agent) save the recipe in
+another program, the Studio builds it again. If the recipe has a
+mistake, the Studio says so and keeps showing the last version that
+built.
 
-![The preview window showing the robot](docs/preview.png)
+![The Studio showing the robot](docs/studio.png)
+
+`duck-mold preview examples/robot.toml` opens the same window to look
+only: nothing can be changed there.
 
 ## The commands
 
@@ -111,11 +119,13 @@ that built.
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
-| `duck-mold preview <file>` | Opens a window showing the model: drag to orbit, wheel to zoom, Escape to quit. It builds the model again whenever the recipe, or a file it uses, is saved. |
+| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. Never writes over a file. |
+| `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
+| `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |
 | `duck-mold guide` | Prints the guide for AI agents. |
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
-Add `--json` to `inspect`, `export`, `render` or `edit` to get the
+Add `--json` to `inspect`, `export`, `render`, `edit` or `new` to get the
 report as JSON, for an agent or a script.
 
 `render` draws with Duck Forge's own renderer, so the picture shows the
@@ -251,7 +261,7 @@ see the handoff note.
 ```
 Duck-Mold/
 ├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
-├── Cargo.toml                 the workspace: three crates, built together
+├── Cargo.toml                 the workspace: four crates, built together
 ├── examples/                  seven recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
@@ -270,9 +280,11 @@ Duck-Mold/
     │   │   ├── model.rs       the built model: a tree of parts and their faces
     │   │   ├── glb.rs         writing (and reading back) .glb
     │   │   ├── inspect.rs     size, ground, floating and overlapping parts
+    │   │   ├── edit/          the edits: one change to a recipe's text, and nothing else
     │   │   └── tools.rs       what the commands do, for any front end
     │   └── tests/             one file of tests per step
-    ├── duck-mold-view/        pictures (`render`) and the window (`preview`), by Duck Forge
+    ├── duck-mold-view/        pictures (`render`), and all the Studio does, with no window
+    ├── duck-mold-studio/      the Studio's window (egui): the `DuckMoldStudio` program
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 
@@ -292,16 +304,29 @@ cargo clippy --workspace --all-targets -- -D warnings
 
 All three must pass before a commit. GitHub runs them again, on Windows
 and on Linux, for every push and pull request
-(`.github/workflows/ci.yml`), with the preview window and without it.
+(`.github/workflows/ci.yml`).
 
-The preview window comes from Duck Forge (the `preview` feature, on by
-default). On Linux it uses X11 and needs the `libxkbcommon-x11` library
-when the window opens (most desktops have it; on Ubuntu or Debian,
-`sudo apt install libxkbcommon-x11-0`). For a machine with no screen,
-build without it; everything else works the same:
+The Studio is a program of its own, `DuckMoldStudio`, so the `duck-mold`
+command holds no window library. `duck-mold studio` and `duck-mold
+preview` start the `DuckMoldStudio` that sits next to `duck-mold`, where
+`cargo build` puts both. A machine with no screen, or an agent, can
+build the command alone, which is much quicker:
 
 ```bash
-cargo build --release --no-default-features
+cargo build --release -p duck-mold-cli
+```
+
+The Studio's window is made with egui, like Duck Quill and Duck Forge's
+Studio. Its screens are tested with no window (`egui_kittest`): the
+tests click through the real screens on Windows and Linux, and on Linux
+they also compare pictures of whole screens with the ones stored in
+`crates/duck-mold-studio/tests/screens/`. That needs a Vulkan driver;
+the software one will do (on Ubuntu or Debian, `sudo apt install
+mesa-vulkan-drivers`). After a change that is meant to be seen, store
+the new pictures with
+
+```bash
+UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test screens
 ```
 
 The tests include **golden files**: `tests/golden/` holds the exact
