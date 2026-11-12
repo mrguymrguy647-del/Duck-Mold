@@ -4,7 +4,8 @@
 why, in plain words. It was written before any code, approved with five
 decisions (section 16), and has been kept in step with what was built:
 where the building changed a detail, the text here was changed to match,
-and `PHASE0_REPORT.md` lists those changes.
+and `PHASE0_REPORT.md` lists those changes. Section 17 is the design
+for Phase 1.
 
 Duck Mold turns a text file (a *recipe*) into a game-ready 3D model for
 Duck Forge. It is an assembler, not a modelling program: you name parts,
@@ -904,3 +905,248 @@ These are the answers that were given, and what each led to.
 5. **The names.** *`turn` became `rotate`; the rest stayed.* One field,
    `rotate`, is a single number on an attached part and `[x, y, z]` on a
    free one (section 4).
+
+---
+
+## 17. Phase 1
+
+**Status: proposed, waiting for approval.** Phase 1 adds seven things,
+built in this order, one commit each. Every step comes with tests, keeps
+fmt and clippy clean, regenerates the golden files if the output
+changes, updates the README, `docs/AI_GUIDE.md` and
+`docs/recipe-format.md`, and adds an example. When a step changes
+something an earlier section describes, that section is changed to
+match, as in Phase 0. Not in Phase 1: editing in the window, booleans,
+bones, animation, UVs, textures.
+
+### Step 1. Tests on Windows and Linux for every push
+
+A copy of Duck Quill's `.github/workflows/ci.yml`. On every push and
+every pull request, on Windows and on Linux, with the same pinned Rust
+(1.97.0), it builds everything, runs every test, and runs clippy with
+warnings counted as errors. Two additions: a formatting check
+(`cargo fmt --check`), and, from step 7 on, a second build and test run
+with the window left out, the way a machine with no screen builds it.
+
+Anything Windows finds is fixed in this step. Line endings are already
+handled: `.gitattributes` keeps text files' Unix endings on Windows, and
+step 2 adds pictures to its "not text" list.
+
+### Step 2. `duck-mold render`
+
+```bash
+duck-mold render robot.toml                # writes robot.png next to the recipe
+duck-mold render robot.toml -o sheet.png --size 384
+```
+
+**One picture, four views**, two by two, each view a square (256 pixels
+unless `--size` says otherwise):
+
+| | |
+|---|---|
+| **front**: looking the model in the face | **right**: from the model's right, so it faces right in the picture |
+| **back** | **three-quarter**: from the front right, 45° round and 30° above |
+
+Each view has its name in a corner, and a line under them gives the
+model's name, triangle count and size, as `inspect` says them. All four
+views use the same distance and zoom, so the model is the same size in
+each. The camera is far away and zoomed in (a 20° view, where Duck Forge
+games usually use 60°), so the views look nearly flat, like drawings,
+and parts can be compared by eye. The light comes from above and over
+your shoulder, the same in every view. The background is a dark
+blue-grey, so the light grey of an uncoloured face shows.
+
+**Reusing Duck Forge's CPU renderer.** It is clean to reuse: it draws
+into a picture in memory, needs no window and no graphics card, uses no
+threads, and already saves PNGs. Duck Mold gets it the ordinary Rust
+way: a dependency on the Duck Forge repository on GitHub, pinned to one
+exact commit, with Duck Forge's window, graphics card and sound turned
+off. Nothing is copied. The costs: the first build downloads Duck Forge
+(with two small libraries of its own, for PNG and GIF files), and moving
+to a newer Duck Forge is a deliberate one-line change, after which the
+test pictures are checked again.
+
+So that Duck Mold's library stays free of any game engine, the drawing
+goes in a new small crate, `duck-mold-view`, which the command line
+uses. The library (`duck-mold-core`) doesn't change and still builds
+without Duck Forge.
+
+**The same recipe always gives the same picture**, byte for byte, like
+the `.glb`:
+
+- Duck Mold turns the model for each view itself, with its own sine and
+  cosine (the ones that already make every computer write the same
+  `.glb`), and leaves Duck Forge's camera looking straight ahead, so Duck
+  Forge does no turning of its own.
+- Everything else Duck Forge does to draw is plain arithmetic, which
+  gives the same answer on every computer. There is one exception: it
+  works out its zoom with the computer's own `tan`, which could differ in
+  the last digit between Windows and Linux and move an edge by a pixel.
+- So the pictures of the five examples are kept in the repository, and
+  the tests compare them byte for byte, on Windows and Linux, on every
+  push. If the two ever disagree, the fix is a few lines in Duck Forge
+  (a `tan` of its own, as Duck Mold has its own sine and cosine). I'd
+  rather not change Duck Forge before that is shown to be needed.
+
+`--json` prints where the picture went and what each view shows. The AI
+guide tells agents to look at the picture to check a model.
+
+### Step 3. Sockets that know the shape
+
+**The rule: a built-in socket never floats.** A socket that is already
+on the shape's surface doesn't move or turn. A socket that was in the
+air beside the shape moves straight in until it touches the shape, and
+turns to face straight out of the surface there.
+
+That moves exactly these:
+
+- **A cone's `left`, `right`, `front` and `back`**: from the box onto
+  the slanted side, halfway up, tilted to face out of the slant (about
+  27° above level on the default cone).
+- **A wedge's `top` and `front`**: both onto the middle of the slope,
+  facing out of it. The wedge also gets a new name for that place,
+  **`slope`**, which says what it is.
+- **Sockets made with `on` and `shift`** on a curved or sloped side:
+  `shift` picks a point on the side of the box as before, then the
+  socket moves straight in onto the surface. Eyes declared
+  `on = "front", shift = [-0.4, 0.3, 0]` on a sphere now sit on the
+  sphere and look out of it, instead of floating in front of it.
+
+On a box, on a cylinder's top and bottom, on a wedge's back and
+bottom, and wherever else the box and the shape already meet, nothing
+changes. To stand something upright on a slope (a chimney on a roof),
+use an exact socket: `at = [...]` with `facing = "up"`.
+
+Parts made from files (OBJ, glTF, other recipes) keep their sockets on
+the box for now, as assemblies do; a later phase can give them the same
+rule.
+
+**What breaks**: recipes that join something to a socket that was in
+the air.
+
+1. Anything joined to a cone's `left`, `right`, `front` or `back`: it
+   moves in onto the slant and tilts.
+2. Anything joined to a wedge's `top` or `front`: it moves onto the
+   slope and tilts (by 45° on a wedge as deep as it is tall).
+3. Anything joined to an `on` + `shift` socket on a sphere, on a
+   cylinder's round side, on a cone's sides or on a wedge's slope: it
+   moves in onto the surface and tilts to match it.
+4. A `shift` that puts a socket where the shape isn't at all (a corner
+   of a cone's box, or high up on a wedge's side, above the slope) used
+   to float; now it is an error that says how far that shift can go.
+5. A wedge that declares a socket of its own called `slope` is now an
+   error, since the name is built in.
+
+None of the five examples changes: their `.glb` files stay byte for
+byte the same, and the tests check that. Two of Duck Mold's own tests
+join to a wedge's `top`, and are updated. `inspect` stops reporting
+parts joined to those sockets as floating.
+
+### Step 4. `twist` for a joined part
+
+- `twist = 90` turns a joined part around its join, as `rotate = 90`
+  did, in the same direction.
+- `rotate` is always `[x, y, z]`, and only on a part that isn't joined
+  to anything.
+- `rotate = 90` on a joined part is an error that shows the new form:
+  *"a joined part turns around its join with `twist`: write
+  `twist = 90`"*.
+- `twist` on a part that isn't joined is an error too: *"this part
+  isn't joined to anything, so there is nothing to twist around; to
+  turn it, write `rotate = [0, 90, 0]`"*.
+
+The recipe `version` stays 0: Duck Mold hasn't been released, and an
+old recipe either still works or says exactly what to change. None of
+the examples uses `rotate`.
+
+### Step 5. Sockets in the `.glb`
+
+A game can ask where a socket is and put something there: a hat on
+`head.top`, a sword in `right_arm.grip`. In Duck Forge:
+`model.socket("head.top")` gives a point and the direction the socket
+faces, in the model's own space.
+
+- The `.glb`'s `extras.duck_mold` gains `sockets`: every socket of every
+  part, built-in and declared, where it ended up after building, as
+  `{ "name": "head.top", "at": [x, y, z], "facing": [x, y, z] }`. The
+  model's own sockets have bare names (`top`), a part's are
+  `part.socket` (`head.top`), and parts inside assemblies keep their
+  paths (`left_arm/hand.bottom`, `left_arm.grip`).
+- They are stored in glTF's directions, like the corners (x negated), so
+  the reader turns them back the same way it turns the corners.
+- The robot has about 200 sockets, which makes its file roughly half as
+  big again (about 15 KB of text). Small enough not to need a switch.
+- The `version` inside the file stays 0: like `assemblies`, the new
+  field changes the meaning of nothing old, and an older reader skips
+  it.
+- **The reader goes to version 3**, which reads `sockets` (none in older
+  files). As the handoff note describes: change it here, raise the
+  version in both marker lines, copy it into Duck Forge, and regenerate
+  Duck Forge's test files. Duck Forge also gains `GlbModel::socket`, and
+  its turntable example puts a hat on the robot's `head.top` while it
+  turns. Then a pull request in each repository.
+- `duck-mold inspect --sockets` lists every socket and where it is, to
+  find the names to ask for.
+
+### Step 6. Importing glTF and `.glb`
+
+`file = "lamp.glb"` or `file = "lamp.gltf"` makes a part that doesn't
+move, exactly as `.obj` files do today. What it reads:
+
+- `.glb` (one file) and `.gltf` (JSON text, with its numbers in a
+  separate `.bin` file or written inside it as text).
+- Every mesh in the file's main scene, each placed, turned and sized as
+  the file says, merged into one part.
+- Triangles in all three of glTF's layouts (separate, strips, fans), and
+  corner numbers of any size.
+- Material names become face names for `colors`, as `usemtl` names do
+  for OBJ: `colors = { glass = "yellow", base = "steel" }`.
+- A `.glb` that Duck Mold wrote keeps its colours, the way a recipe
+  used as a part does.
+
+What it leaves out, with a note in the report rather than an error:
+textures, UVs, normals (Duck Mold works out its own), lines and points,
+bones and skins, animations, shape keys (morph targets), cameras and
+lights. The file's own colours are not used, except in Duck Mold's own
+files: colour comes from the palette, as for OBJ.
+
+What it refuses, with a sentence saying why: compressed meshes (Draco,
+meshopt, packed numbers), and any file that says it needs a glTF
+extension Duck Mold doesn't know.
+
+glTF's directions are the ones Duck Mold exports, so a model exported
+and imported again comes back exactly where it was. A glTF metre is a
+Duck Mold unit. No new libraries: Duck Mold already reads JSON, and
+reading numbers written as text (base64) takes a few lines.
+
+The example: a small lamp written as a `.gltf` by hand (two materials,
+two pieces with their own positions), not by Duck Mold, so the import is
+tested on a file Duck Mold didn't write, and a recipe that uses it
+alongside a Duck Mold `.glb`.
+
+### Step 7. The preview window
+
+`duck-mold preview robot.toml` opens a window showing the model.
+
+- Drag with the left mouse button to orbit; roll the wheel to zoom;
+  Escape quits.
+- Twice a second it checks whether the recipe, or any file the recipe
+  uses, has been saved (by its time and size). If so, it rebuilds. If
+  the new version has mistakes, they are shown in the window and the
+  last good model stays up, so a half-typed recipe never blanks it.
+- A line at the bottom gives the same summary as `render`.
+- Nothing else: no editing, no menus.
+
+Duck Forge runs the window, as it does for a game, through its `window`
+feature, and draws with the same CPU renderer as `render`, so no
+graphics card is needed. The preview is in the program by default;
+building with `--no-default-features` leaves it out (and the window
+libraries with it) for machines with no screen, and `render` still
+works there. Duck Forge's own window keys come too, so F12 saves a
+screenshot.
+
+It is tested without a window by Duck Forge's `Simulation`, which feeds
+it mouse drags, wheel turns and changed files and checks what it draws.
+
+Phase 1 ends with `PHASE1_REPORT.md`: what works, known limits, what
+changed from this design, and what Phase 2 should start with.
