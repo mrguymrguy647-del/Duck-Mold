@@ -242,7 +242,8 @@ see the handoff note.
 | [docs/recipe-format.md](docs/recipe-format.md) | Every field of a recipe, with its default and range. |
 | [docs/forge-handoff.md](docs/forge-handoff.md) | What is inside a `.glb`, and what Duck Forge must do to load one. |
 | [DESIGN.md](DESIGN.md) | Why Duck Mold is the way it is, decision by decision, in plain words. |
-| [PHASE0_REPORT.md](PHASE0_REPORT.md) | What works, what doesn't yet, and what comes next. |
+| [PHASE0_REPORT.md](PHASE0_REPORT.md) | Phase 0: what works, what doesn't yet, and what comes next. |
+| [PHASE1_REPORT.md](PHASE1_REPORT.md) | Phase 1: pictures, the preview window, sockets on surfaces and in the `.glb`, `twist`, glTF import. |
 
 ## Project layout
 
@@ -250,7 +251,7 @@ see the handoff note.
 Duck-Mold/
 ├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
 ├── Cargo.toml                 the workspace: three crates, built together
-├── examples/                  five recipes to read and change
+├── examples/                  seven recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/

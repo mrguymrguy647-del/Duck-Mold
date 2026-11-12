@@ -793,6 +793,7 @@ Duck-Mold/
 ├── DESIGN.md                  this file
 ├── README.md                  for people
 ├── PHASE0_REPORT.md           what works, known limits, what comes next
+├── PHASE1_REPORT.md           the same for Phase 1
 ├── docs/
 │   ├── AI_GUIDE.md            for agents: the CLI from scratch (also `duck-mold guide`)
 │   ├── recipe-format.md       every field, default and range
@@ -931,7 +932,9 @@ These are the answers that were given, and what each led to.
 
 ## 17. Phase 1
 
-**Status: approved, with three changes** (folded in below): Phase 1 is
+**Status: approved, with three changes, and built** (`PHASE1_REPORT.md`
+says what came of it; the *As built* notes below say where the building
+changed a detail). The three changes are folded in below: Phase 1 is
 built on a new branch from `main`, with Duck Forge pinned to a commit on
 its `main`; an imported material with no colour in the recipe brings its
 own (step 6); and unnamed parts' sockets stay out of the `.glb`
