@@ -2509,7 +2509,8 @@ The version becomes 0.3.0.
 
 ## 20. Phase 4: shaping by hand
 
-**Status: proposed, waiting for approval.** Nothing below is built yet.
+**Status: approved**, with all twelve decisions at the end as
+recommended.
 
 The first complaint about the Studio was "I can't form it in any way".
 Phase 3 answered half of it: a part can now be moved, turned, resized,
