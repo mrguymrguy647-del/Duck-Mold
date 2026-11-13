@@ -454,6 +454,10 @@ impl StudioApp {
                         studio.face_tool = tool;
                     }
                 }
+            } else if studio.mode() == Mode::Corner {
+                if key(egui::Key::G) {
+                    studio.face_tool = FaceTool::Move;
+                }
             } else if studio.mode() == Mode::Edge {
                 for (pressed, tool) in [
                     (egui::Key::G, FaceTool::Move),
@@ -482,6 +486,9 @@ impl StudioApp {
             }
             if key(egui::Key::E) {
                 asked = Some(Action::EdgeMode);
+            }
+            if key(egui::Key::C) {
+                asked = Some(Action::CornerMode);
             }
             if let Some(action) = actions::keys(ui) {
                 asked = Some(action);
@@ -589,6 +596,9 @@ impl StudioApp {
                 Action::EdgeMode => {
                     // What it did, or why not, is in the status line.
                     let _ = studio.toggle_edge_mode();
+                }
+                Action::CornerMode => {
+                    let _ = studio.toggle_corner_mode();
                 }
                 Action::Unjoin => {
                     let _ = studio.unjoin_selected();

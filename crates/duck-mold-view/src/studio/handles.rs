@@ -1536,11 +1536,25 @@ impl Studio {
                 let label = format!("{} {} m", axis_names[which], short(moved));
                 if moved == 0.0 {
                     (Vec::new(), label)
-                } else if self.mode == Mode::Edge {
+                } else if self.mode == Mode::Edge
+                    || (self.mode == Mode::Corner
+                        && faces.iter().any(|name| name.matches('+').count() < 2))
+                {
+                    // (A corner whose faces have only two names between
+                    // them is where those faces meet: an edge's name.)
                     (
                         vec![Edit::MoveEdge {
                             part,
                             edges: faces,
+                            by,
+                        }],
+                        label,
+                    )
+                } else if self.mode == Mode::Corner {
+                    (
+                        vec![Edit::MoveCorner {
+                            part,
+                            corners: faces,
                             by,
                         }],
                         label,

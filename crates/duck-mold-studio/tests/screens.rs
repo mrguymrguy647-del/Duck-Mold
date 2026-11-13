@@ -2372,3 +2372,34 @@ fn e_shows_the_edges_k_takes_the_cut_and_a_click_cuts_round_the_box() {
     screen.run_steps(2);
     assert_eq!(mode(&screen), Mode::Part);
 }
+
+#[test]
+fn c_shows_the_corners_and_a_click_picks_one() {
+    use duck_mold_view::studio::Mode;
+    use egui::Key;
+    let (_, mut screen) = yard("screens_corners");
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    screen.key_press(Key::C);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().mode(), Mode::Corner);
+    screen.get_by_label("Shaping: Corner mode");
+    assert_eq!(screen.query_all_by_label("Cut").count(), 0);
+    let corner = screen
+        .state()
+        .studio()
+        .unwrap()
+        .corner_point("top+front+left")
+        .unwrap();
+    let corner = picture_on_screen(&screen, corner);
+    click_at(&mut screen, corner);
+    assert_eq!(
+        screen.state().studio().unwrap().selected_faces(),
+        ["top+front+left"]
+    );
+    screen.get_by_label("top+front+left");
+    screen.get_by_label("at -0.25, 0.25, 0.25");
+    screen.key_press(Key::C);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().mode(), Mode::Part);
+}

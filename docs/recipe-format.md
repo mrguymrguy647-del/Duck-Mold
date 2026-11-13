@@ -202,6 +202,7 @@ Each change is a table with one of these, and the fields it takes:
 | `turn` | `turn` (a face name, or a list), `by` (`[x, y, z]` degrees, not all 0) | Turns the faces about their middle (the middle of them all, for several): around x, then y, then z. Faces round them may bend: a bent four-sided face is drawn as two triangles, folded the way that bulges out, and keeps its name. |
 | `scale` | `scale` (a face name, or a list), `by` (one number above 0, or `[x, y, z]`; not 1) | Makes the faces bigger or smaller about their middle. |
 | `move` of an edge | `move` (an edge: `"top+front"`, the faces that meet there, in any order; or a list), `by` (`[x, y, z]`) | Moves the edge; the faces on both sides follow. |
+| `move` of a corner | `move` (a corner: `"top+front+left"`, three or more faces that meet there; or a list), `by` (`[x, y, z]`) | Moves the corner; the faces round it follow. A four-sided face that bends is drawn as two triangles, folded the way that bulges out, and keeps its name. |
 | `cut` | `cut` (a side: `top`, `bottom`, `left`, `right`, `front` or `back`), `at` (0 to just under 1), `name` (optional) | Cuts all the way round with a flat cut facing that side, `at` of the way from the box's middle to that side (a share of the size, so it stays near the side when the box is resized). Every face it crosses becomes two; nothing moves. |
 
 Amounts are metres, in the part's own directions, before its `scale`,

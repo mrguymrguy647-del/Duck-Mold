@@ -340,6 +340,10 @@ pub fn show(
         "Let go to make the change. Escape lets go without changing anything."
     } else if shaping && studio.face_tool == FaceTool::Cut {
         "Point at an edge: the ring shows where the cut goes, all the way round. Click to cut. Ctrl: not in tenths."
+    } else if studio.mode() == Mode::Corner && studio.selected_faces().is_empty() {
+        "Click a corner of the box (a dot) to move it. Shift+click adds a corner. C goes back to parts."
+    } else if studio.mode() == Mode::Corner {
+        "Drag an arrow to move the corner: the faces round it follow, bending if they must."
     } else if studio.mode() == Mode::Edge && studio.selected_faces().is_empty() {
         "Click an edge of the box to move it. Shift+click adds an edge. K cuts. E goes back to parts."
     } else if studio.mode() == Mode::Edge {
@@ -438,11 +442,18 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
             "Edge",
             "The selected box's edges: click one and move it, or cut round the box (E)",
         ),
+        (
+            Mode::Corner,
+            "Corner",
+            "The selected box's corners: click one and move it (C)",
+        ),
     ];
     for (at, (mode, name, tip)) in modes.into_iter().enumerate() {
+        let widths = [44.0, 44.0, 44.0, 56.0];
+        let left: f32 = widths[..at].iter().sum::<f32>() + at as f32 * 4.0;
         let place = Rect::from_min_size(
-            within.left_top() + egui::vec2(8.0 + at as f32 * 52.0, 8.0),
-            egui::vec2(48.0, 24.0),
+            within.left_top() + egui::vec2(8.0 + left, 8.0),
+            egui::vec2(widths[at], 24.0),
         );
         ui.painter_at(within)
             .rect_filled(place, 4.0, Color32::from_black_alpha(150));
@@ -456,6 +467,7 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
                 }
                 Mode::Face => studio.face_mode(),
                 Mode::Edge => studio.edge_mode(),
+                Mode::Corner => studio.corner_mode(),
             };
         }
     }
@@ -505,11 +517,13 @@ fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
                 "A ring round the part where you point: click to cut there, so there are more faces to shape",
             ),
         ];
-        // Edge mode has Move and Cut.
+        // Edge mode has Move and Cut; Corner mode, Move.
         let tools: Vec<_> = face_tools
             .into_iter()
-            .filter(|(tool, ..)| {
-                studio.mode() == Mode::Face || matches!(tool, FaceTool::Move | FaceTool::Cut)
+            .filter(|(tool, ..)| match studio.mode() {
+                Mode::Edge => matches!(tool, FaceTool::Move | FaceTool::Cut),
+                Mode::Corner => *tool == FaceTool::Move,
+                _ => true,
             })
             .collect();
         for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {

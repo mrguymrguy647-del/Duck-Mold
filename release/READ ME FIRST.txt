@@ -39,7 +39,9 @@ A FIRST LOOK
     say) and drag its arrow to pull it out, or push it in. I gives a
     knob instead: drag it in to make a smaller face inside, with a
     frame round it (a window). The panel lists every change, to change
-    a number or take one away. Tab goes back to parts.
+    a number or take one away. Tab goes back to parts. E shows the
+    edges and C the corners, to move one; K cuts round the box, for
+    more faces to shape.
   - Shift+click selects several parts, to move or colour together.
     Right-click a part for its menu. Delete removes it; Ctrl+D copies
     it; H hides it so you can get at what is behind (Shift+H shows it

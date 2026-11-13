@@ -102,6 +102,35 @@ fn faces_section(ui: &mut egui::Ui, studio: &Studio) {
     let Some((part, shaped)) = studio.shaped_selected() else {
         return;
     };
+    if studio.mode() == Mode::Corner {
+        ui.label(RichText::new("Shaping: Corner mode").strong())
+            .on_hover_text("C, or Part above the tools, goes back to parts");
+        let corners = studio.selected_faces();
+        if corners.is_empty() {
+            ui.label(RichText::new("Click a corner of the box to select it.").weak());
+        }
+        for name in corners {
+            let points = shaped.corners_named_or_none(name);
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(name).monospace());
+                if let [one] = points.as_slice() {
+                    let at = shaped.corners[*one];
+                    ui.label(format!("at {:.2}, {:.2}, {:.2}", at.x, at.y, at.z))
+                        .on_hover_text(
+                            "Where it is in the box's own measurements, from its middle",
+                        );
+                } else {
+                    ui.label(
+                        RichText::new(format!("{} corners", points.len()))
+                            .weak()
+                            .small(),
+                    );
+                }
+            });
+        }
+        ui.add_space(6.0);
+        return;
+    }
     if studio.mode() == Mode::Edge {
         ui.label(RichText::new("Shaping: Edge mode").strong())
             .on_hover_text("E, or Part above the tools, goes back to parts");

@@ -2690,6 +2690,11 @@ fn every_kind_of_edit_has_a_name() {
             at: 0.0,
             name: None,
         },
+        Edit::MoveCorner {
+            part: String::new(),
+            corners: Vec::new(),
+            by: [0.0; 3],
+        },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
     assert_eq!(names, Edit::COMMANDS);

@@ -101,6 +101,99 @@ impl Studio {
             .map(|(_, name)| name)
     }
 
+    /// The corners of the box being shaped that look this way (one of
+    /// the faces round them does), each with its name and where the
+    /// picture shows it.
+    fn seen_corners(&self) -> Vec<(String, Vec3)> {
+        let Some((part, shaped)) = self.shaped_selected() else {
+            return Vec::new();
+        };
+        let eye = self.orbit.eye();
+        (0..shaped.corners.len())
+            .filter_map(|corner| {
+                let at = self.seen_point(part, shaped.corners[corner]);
+                let looks = shaped.faces.iter().enumerate().any(|(face, known)| {
+                    known.corners.contains(&corner)
+                        && shaped
+                            .normal(face)
+                            .is_some_and(|normal| part.place.facing(normal).dot(eye - at) > 0.0)
+                });
+                looks.then(|| (shaped.corner_name(corner), at))
+            })
+            .collect()
+    }
+
+    /// The corner of the box being shaped under the pointer, by name.
+    pub fn corner_at(&self, size: (usize, usize), at: (f64, f64)) -> Option<String> {
+        if self.mode != Mode::Corner {
+            return None;
+        }
+        self.seen_corners()
+            .into_iter()
+            .filter_map(|(name, point)| {
+                let (x, y) = self.orbit.on_screen(point, size.0, size.1)?;
+                Some((((x - at.0).powi(2) + (y - at.1).powi(2)).sqrt(), name))
+            })
+            .filter(|(distance, _)| *distance <= EDGE_REACH + 2.0)
+            .min_by(|a, b| a.0.total_cmp(&b.0))
+            .map(|(_, name)| name)
+    }
+
+    /// Corner mode's dots: every corner that looks this way; the one
+    /// under the pointer, and those selected, bigger.
+    pub(super) fn corner_marks(&self) -> Vec<Mark> {
+        let hot = match (&self.grab, self.pointer) {
+            (None, Some(pointer)) => self.corner_at(self.view, pointer),
+            _ => None,
+        };
+        let mut small = Vec::new();
+        let mut big = Vec::new();
+        for (name, at) in self.seen_corners() {
+            if self.faces.contains(&name) {
+                big.push(Mark::Disc {
+                    at,
+                    radius: 5.0,
+                    color: CHOSEN,
+                });
+            } else if hot.as_ref() == Some(&name) {
+                big.push(Mark::Disc {
+                    at,
+                    radius: 5.0,
+                    color: HOT,
+                });
+            } else {
+                small.push(Mark::Disc {
+                    at,
+                    radius: 3.0,
+                    color: LINE,
+                });
+            }
+        }
+        // The edges, thin, so the dots read as corners of something.
+        let mut marks: Vec<Mark> = self
+            .seen_edges()
+            .into_iter()
+            .map(|(_, [from, to])| Mark::Thin {
+                from,
+                to,
+                color: LINE,
+            })
+            .collect();
+        marks.extend(small);
+        marks.extend(big);
+        marks
+    }
+
+    /// Where on the screen a corner of the box being shaped is drawn.
+    /// For tests.
+    pub fn corner_point(&self, name: &str) -> Option<(f64, f64)> {
+        let (_, at) = self
+            .seen_corners()
+            .into_iter()
+            .find(|(known, _)| known == name)?;
+        self.orbit.on_screen(at, self.view.0, self.view.1)
+    }
+
     /// Edge mode's lines: every edge that looks this way, thin; the one
     /// under the pointer, and those selected, thick.
     pub(super) fn edge_marks(&self) -> Vec<Mark> {

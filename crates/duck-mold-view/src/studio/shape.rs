@@ -32,6 +32,9 @@ pub enum Mode {
     /// The edges of the selected box: a click selects an edge, the
     /// arrows move it.
     Edge,
+    /// The corners of the selected box: a click selects a corner, the
+    /// arrows move it.
+    Corner,
 }
 
 /// The tool in hand in Face mode.
@@ -133,7 +136,7 @@ impl Studio {
     /// Tab: into Face mode, or back to Part mode.
     pub fn toggle_face_mode(&mut self) -> Result<String, String> {
         match self.mode {
-            Mode::Part | Mode::Edge => self.face_mode(),
+            Mode::Part | Mode::Edge | Mode::Corner => self.face_mode(),
             Mode::Face => {
                 self.part_mode();
                 Ok(self.status().to_owned())
@@ -160,6 +163,36 @@ impl Studio {
         );
         self.say(said.clone());
         Ok(said)
+    }
+
+    /// Goes into Corner mode, to move the selected box's corners (C).
+    /// Says why not if it can't be shaped.
+    pub fn corner_mode(&mut self) -> Result<String, String> {
+        if let Some(why) = self.why_not_shaped() {
+            self.say(why.clone());
+            return Err(why);
+        }
+        self.cancel_drag();
+        self.mode = Mode::Corner;
+        self.faces.clear();
+        self.face_tool = FaceTool::Move;
+        let said = format!(
+            "The corners of \"{}\": click one, then drag its arrows. C goes back to parts",
+            self.selected.as_deref().unwrap_or_default()
+        );
+        self.say(said.clone());
+        Ok(said)
+    }
+
+    /// C: into Corner mode, or back to Part mode.
+    pub fn toggle_corner_mode(&mut self) -> Result<String, String> {
+        match self.mode {
+            Mode::Corner => {
+                self.part_mode();
+                Ok(self.status().to_owned())
+            }
+            _ => self.corner_mode(),
+        }
     }
 
     /// E: into Edge mode, or back to Part mode.
@@ -238,17 +271,20 @@ impl Studio {
         at: (f64, f64),
         adding: bool,
     ) -> Option<String> {
-        let edges = self.mode == Mode::Edge;
-        let face = if edges {
-            self.edge_at(size, at)
-        } else {
-            self.face_at(size, at)
+        let edges = self.mode != Mode::Face;
+        let face = match self.mode {
+            Mode::Edge => self.edge_at(size, at),
+            Mode::Corner => self.corner_at(size, at),
+            _ => self.face_at(size, at),
         };
         self.select_face(face.as_deref(), adding);
         if let Some(face) = &face {
             let said = match (self.faces.len(), edges) {
                 (0, true) => "No edge selected".to_owned(),
                 (0, false) => "No face selected".to_owned(),
+                (1, true) if self.mode == Mode::Corner => {
+                    format!("The corner \"{face}\": drag its arrows to move it")
+                }
                 (1, true) => format!("The edge \"{face}\": drag its arrows to move it"),
                 (1, false) => format!("The face \"{face}\": drag its arrow to pull it"),
                 (count, true) => format!("{count} edges: they move together"),
@@ -353,6 +389,7 @@ impl Studio {
     pub(super) fn face_marks(&self) -> Vec<Mark> {
         let mut marks = match self.mode {
             Mode::Edge => self.edge_marks(),
+            Mode::Corner => self.corner_marks(),
             _ => self.face_outlines(),
         };
         marks.extend(self.cut_marks());
@@ -410,9 +447,8 @@ impl Studio {
     /// The middle of the faces selected and the way they face together,
     /// in the part's own space: `None` if none is selected.
     pub(super) fn faces_middle(&self, shaped: &Shaped) -> Option<(Vec3, Vec3)> {
-        if self.mode == Mode::Edge {
-            // The middle of the edges' corners; they face the way the
-            // faces round them do.
+        if matches!(self.mode, Mode::Edge | Mode::Corner) {
+            // The middle of the edges' (or corners') points.
             let corners: std::collections::BTreeSet<usize> = self
                 .faces
                 .iter()

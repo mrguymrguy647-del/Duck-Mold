@@ -3680,3 +3680,38 @@ fn the_cut_ring_follows_the_pointer_and_a_click_cuts_there() {
     studio.undo().unwrap();
     assert_eq!(file(&recipe), BOXES);
 }
+
+// ---- Phase 4, step 5: corners ---------------------------------------------------------
+
+#[test]
+fn a_corner_is_picked_as_a_dot_and_moved_with_its_arrows() {
+    let (recipe, mut studio) = boxes("corner_move");
+    studio.corner_mode().unwrap();
+    assert_eq!(studio.mode(), Mode::Corner);
+    let corner = studio.corner_point("top+front+left").unwrap();
+    assert_eq!(
+        studio.corner_at(VIEW, corner).as_deref(),
+        Some("top+front+left")
+    );
+    studio.click_face(VIEW, corner, false);
+    assert_eq!(studio.selected_faces(), ["top+front+left"]);
+    check_picture("studio-corner-mode", &studio.picture(VIEW.0, VIEW.1));
+    pull(
+        &mut studio,
+        Grip::Arrow(1),
+        |from| from + vec3(0.0, 0.2, 0.0),
+        false,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Moved the corner \"top+front+left\" of \"crate\" by [0, 0.2, 0]"
+    );
+    assert!(file(&recipe).contains("  { move = \"top+front+left\", by = [0, 0.2, 0] },\n"));
+    // The top's two triangles now fold; every name is still there.
+    let shaped = studio.part("crate").unwrap().shaped.clone().unwrap();
+    assert_eq!(shaped.faces_named("top").len(), 1);
+    // C again: back to parts.
+    studio.toggle_corner_mode().unwrap();
+    assert_eq!(studio.mode(), Mode::Part);
+}

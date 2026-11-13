@@ -582,8 +582,17 @@ fn every_list_of_changes_gives_a_whole_shape_or_names_the_change_that_broke_it()
                 faces.push(names[dice.below(names.len())].clone());
             }
             let small = size[0].min(size[1]).min(size[2]);
-            let kind = dice.below(7);
-            let change = if kind == 5 {
+            let kind = dice.below(8);
+            let change = if kind == 7 {
+                // A corner of the corners there are.
+                let corner = dice.below(shaped.corners.len());
+                let mut by = [0.0; 3];
+                by[dice.below(3)] = dice.between(-small, small) / 2.0;
+                Change::Move {
+                    faces: vec![shaped.corner_name(corner)],
+                    by,
+                }
+            } else if kind == 5 {
                 let sides = [
                     Side::Top,
                     Side::Bottom,
@@ -1586,4 +1595,80 @@ fn edges_and_cuts_are_written_by_their_edits() {
             "{bad:?}"
         );
     }
+}
+
+// ---- Phase 4, step 5: corners --------------------------------------------------------
+
+#[test]
+fn a_box_cut_through_its_middle_three_ways_has_26_corners_to_move() {
+    let cuts = [
+        cut(Side::Right, 0.0),
+        cut(Side::Top, 0.0),
+        cut(Side::Front, 0.0),
+    ];
+    let rock = shape_box([1.0; 3], [1.0; 2], &cuts, None).unwrap();
+    assert_eq!(rock.corners.len(), 26);
+    assert_eq!(rock.faces.len(), 24);
+    whole(&rock).unwrap();
+    // The corner the cuts left alone keeps the box's names; the others
+    // are named by the slices that meet there.
+    let names: Vec<String> = (0..26).map(|corner| rock.corner_name(corner)).collect();
+    assert!(names.contains(&"bottom+back+left".to_owned()), "{names:?}");
+    assert!(
+        names.contains(&"top_right_front+front_right_top+right_top_front".to_owned()),
+        "{names:?}"
+    );
+    // Moved in and out, it is a rock.
+    let mut changes = cuts.to_vec();
+    changes.push(moved(&["bottom+back+left"], [0.1, 0.1, 0.05]));
+    changes.push(moved(
+        &["top_right_front+front_right_top+right_top_front"],
+        [-0.1, -0.05, -0.1],
+    ));
+    let shaped = shape_box([1.0; 3], [1.0; 2], &changes, None);
+    match shaped {
+        Ok(rock) => whole(&rock).unwrap(),
+        Err(mistake) => panic!("{mistake:?}"),
+    }
+    // Too far, through the middle: refused, naming the corner.
+    let mut too_far = cuts.to_vec();
+    too_far.push(moved(&["bottom+back+left"], [1.2, 1.2, 1.2]));
+    let mistake = shape_box([1.0; 3], [1.0; 2], &too_far, Some("rock")).unwrap_err();
+    assert_eq!(mistake.change, 3);
+    assert_eq!(mistake.code, Code::BadShape);
+    assert!(
+        mistake
+            .message
+            .starts_with("moving the corner \"bottom+back+left\" by [1.2, 1.2, 1.2]"),
+        "{}",
+        mistake.message
+    );
+}
+
+#[test]
+fn a_corner_is_moved_by_its_edit_and_a_second_move_adds_to_it() {
+    let start = wall("");
+    let corner = Edit::MoveCorner {
+        part: "wall".into(),
+        corners: vec!["top+front+left".into()],
+        by: [0.0, -0.1, 0.0],
+    };
+    let once = done(&start, Syntax::Toml, &corner);
+    assert_eq!(
+        once.summary,
+        "moved the corner \"top+front+left\" of \"wall\" by [0, -0.1, 0]"
+    );
+    let twice = done(&once.text, Syntax::Toml, &corner);
+    assert!(
+        twice
+            .text
+            .contains("  { move = \"top+front+left\", by = [0, -0.2, 0] },\n")
+    );
+    // Two names aren't a corner.
+    let bad = Edit::MoveCorner {
+        part: "wall".into(),
+        corners: vec!["top+front".into()],
+        by: [0.0, 0.1, 0.0],
+    };
+    assert!(apply(&start, Syntax::Toml, Path::new("t.toml"), "t.toml", &bad).is_err());
 }

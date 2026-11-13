@@ -365,6 +365,17 @@ pub enum Edit {
         /// How far along x, y and z.
         by: [f64; 3],
     },
+    /// Moves corners of a box (`top+front+left`: where those faces
+    /// meet) by x, y and z metres: a `move` in its `changes`. Right after
+    /// a move of the same corners, it adds to that one.
+    MoveCorner {
+        /// The part.
+        part: String,
+        /// The corners, by name: `top+front+left`.
+        corners: Vec<String>,
+        /// How far along x, y and z.
+        by: [f64; 3],
+    },
     /// Cuts all the way round a box with a flat cut facing a side, `at`
     /// of the way from the middle to that side: a `cut` in its
     /// `changes`.
@@ -414,7 +425,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 24] = [
+    pub const COMMANDS: [&'static str; 25] = [
         "add",
         "remove",
         "rename",
@@ -439,6 +450,7 @@ impl Edit {
         "scale-face",
         "move-edge",
         "cut",
+        "move-corner",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -468,6 +480,7 @@ impl Edit {
             Edit::ScaleFace { .. } => "scale-face",
             Edit::MoveEdge { .. } => "move-edge",
             Edit::Cut { .. } => "cut",
+            Edit::MoveCorner { .. } => "move-corner",
         }
     }
 }
@@ -2118,14 +2131,21 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 touched: Some(found),
             })
         }
-        Edit::MoveEdge { part, edges, by } => {
-            joined_val(edges, "edge")?;
+        Edit::MoveEdge { part, edges, by }
+        | Edit::MoveCorner {
+            part,
+            corners: edges,
+            by,
+        } => {
+            let corner = matches!(edit, Edit::MoveCorner { .. });
+            joined_val(edges, if corner { "corner" } else { "edge" })?;
             let (found, definition, joined) =
                 add_or_join(doc, part, "move", edges, *by, Together::Add)?;
-            let what = if edges.len() == 1 {
-                "the edge"
-            } else {
-                "the edges"
+            let what = match (corner, edges.len()) {
+                (true, 1) => "the corner",
+                (true, _) => "the corners",
+                (false, 1) => "the edge",
+                (false, _) => "the edges",
             };
             let mut summary = format!(
                 "moved {what} {} of \"{part}\" by {}",
@@ -2947,6 +2967,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::TurnFace { part, .. }
         | Edit::ScaleFace { part, .. }
         | Edit::MoveEdge { part, .. }
+        | Edit::MoveCorner { part, .. }
         | Edit::Cut { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }

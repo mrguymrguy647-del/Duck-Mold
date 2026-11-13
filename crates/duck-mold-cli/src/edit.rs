@@ -283,6 +283,19 @@ pub enum Change {
         #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
         by: String,
     },
+    /// Move corners of a box (where three faces or more meet:
+    /// top+front+left) by x,y,z metres, in its own directions.
+    ///
+    /// Right after a move of the same corners, it adds to that one.
+    MoveCorner {
+        /// The part.
+        part: String,
+        /// The corners: top+front+left, or several with commas.
+        corners: String,
+        /// How far along x, y and z, in metres.
+        #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
+        by: String,
+    },
     /// Cut all the way round a box, with a flat cut facing a side: every
     /// face it crosses becomes two, to shape further.
     Cut {
@@ -672,6 +685,11 @@ impl Change {
             Change::MoveEdge { part, edges, by } => Edit::MoveEdge {
                 part: part.clone(),
                 edges: face_list(edges),
+                by: three("--by", by)?,
+            },
+            Change::MoveCorner { part, corners, by } => Edit::MoveCorner {
+                part: part.clone(),
+                corners: face_list(corners),
                 by: three("--by", by)?,
             },
             Change::Cut {
