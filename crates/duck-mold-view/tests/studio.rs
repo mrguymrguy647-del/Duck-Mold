@@ -3175,3 +3175,85 @@ fn the_palette_gets_a_colour_changes_one_and_loses_one() {
     }
     assert_eq!(file(&recipe), YARD);
 }
+
+// ---- sockets the Studio made are cleared away when nothing uses them ------------
+
+#[test]
+fn a_socket_the_studio_made_goes_when_its_part_does() {
+    let (recipe, mut studio) = yard("tidy_auto");
+    // A cone added at a point of the crate's top: a socket is made
+    // there for it.
+    studio.select(Some("crate"));
+    let (part, spot) = studio.spot_at(VIEW, top_of(&studio, "crate")).unwrap();
+    assert_eq!(part, "crate");
+    studio
+        .add_to_surface(&part, &spot, &Made::Shape("cone".into()))
+        .unwrap();
+    let with_cone = file(&recipe);
+    assert!(with_cone.contains("spot = { on = \"top\""), "{with_cone}");
+    assert!(with_cone.contains("to = \"crate.spot\""), "{with_cone}");
+
+    // Removing the cone takes the socket with it, in the same step.
+    studio.select(Some("cone"));
+    let said = studio.remove_selected(false).unwrap();
+    assert_eq!(
+        said,
+        "Removed \"cone\", then removed the socket \"crate.spot\""
+    );
+    assert_eq!(file(&recipe), YARD);
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), with_cone);
+
+    // Joined somewhere else, or unjoined, the socket it left goes too.
+    for change in [
+        Edit::Join {
+            part: "cone".into(),
+            to: "post.front".into(),
+            attach: None,
+        },
+        Edit::Unjoin {
+            part: "cone".into(),
+        },
+    ] {
+        studio.apply(&change).unwrap();
+        let now = file(&recipe);
+        assert!(!now.contains("spot"), "{change:?}:\n{now}");
+        assert!(studio.part("cone").is_some());
+        studio.undo().unwrap();
+        assert_eq!(file(&recipe), with_cone);
+    }
+
+    // A second part on the same socket keeps it there.
+    studio
+        .add_to_socket("crate", "spot", &Made::Shape("sphere".into()))
+        .unwrap();
+    studio.select(Some("cone"));
+    studio.remove_selected(false).unwrap();
+    assert!(file(&recipe).contains("spot = { on = \"top\""));
+    // A socket a person named stays, used or not.
+    studio
+        .apply(&Edit::RenameSocket {
+            socket: "crate.spot".into(),
+            new_name: "lid".into(),
+        })
+        .unwrap();
+    studio.select(Some("sphere"));
+    studio.remove_selected(false).unwrap();
+    assert!(file(&recipe).contains("lid = { on = \"top\""));
+    // What the panel is told about the crate's sockets.
+    studio.select(Some("crate"));
+    assert_eq!(studio.facts().unwrap().sockets, [("lid".to_owned(), 0)]);
+
+    // Tidy sockets, asked for by hand, takes only the Studio's names.
+    studio
+        .apply(&Edit::AddSocket {
+            part: "post".into(),
+            name: "spot_3".into(),
+            on: "front".into(),
+            shift: [0.0; 3],
+        })
+        .unwrap();
+    let said = studio.apply(&Edit::TidySockets).unwrap();
+    assert_eq!(said, "Removed 1 socket nothing uses: post.spot_3");
+    assert!(file(&recipe).contains("lid = "));
+}

@@ -1730,6 +1730,35 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 8):* tidy sockets, with these things settled in the
+building:
+
+- **What counts as using a socket**: a part joined to it (`to`), the
+  part's own join if it joins by it (`attach`), and a socket of what
+  the part is inside that passes it on (`from`). `rename-socket`
+  changes all three; `remove-socket` is refused while there is any,
+  and says which.
+- **Only declared sockets** can be renamed or removed: the seven every
+  part has, and a wedge's `slope`, are built in.
+- **The Studio clears away its own sockets by itself.** When an edit
+  removes a part, joins it somewhere else or unjoins it, and that
+  leaves a socket called `spot` (or `spot_2`...) with nothing on it,
+  a `remove-socket` for it is added to the same step. The status line
+  says so, and one undo brings the part and the socket back together.
+  A socket with any other name stays: a person named it.
+- **`tidy-sockets`** does the same for the whole recipe at once: it
+  removes every unused socket with one of the Studio's names, and says
+  which. Run again it changes nothing.
+- **Removing a part's last socket** takes the empty `sockets` table
+  with it, and the blank line above it, so the file is as it was
+  before the socket came.
+- **In the panel** each declared socket is a line: its name in a field
+  to type in, how many things use it, and a "remove socket" button
+  that only works when nothing does.
+- **The "remove them too?" question** became a small window in the
+  middle: with the palette under the properties, it could end up
+  scrolled out of sight at the bottom of the panel.
+
 *As built (step 7):* the palette panel and the Paint tool, with these
 things settled in the building:
 

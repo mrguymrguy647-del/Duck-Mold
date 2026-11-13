@@ -466,6 +466,9 @@ impl StudioApp {
                     studio.show_all();
                 }
                 Action::SelectAll => studio.select_all(),
+                Action::TidySockets => {
+                    let _ = studio.apply(&duck_mold_core::edit::Edit::TidySockets);
+                }
             }
         }
 

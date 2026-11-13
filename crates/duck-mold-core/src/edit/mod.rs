@@ -278,6 +278,21 @@ pub enum Edit {
         /// How far it is slid across the side, -1 to 1 each way.
         shift: [f64; 3],
     },
+    /// Renames a socket a part declares, and everything that names it.
+    RenameSocket {
+        /// The socket: `body.spot`.
+        socket: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Removes a socket a part declares. Refused if anything uses it.
+    RemoveSocket {
+        /// The socket: `body.spot`.
+        socket: String,
+    },
+    /// Removes the sockets the Studio made (`spot`, `spot_2`...) that
+    /// nothing uses any more.
+    TidySockets,
     /// Makes a joined part free, exactly where it stands.
     Unjoin {
         /// The part.
@@ -298,7 +313,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 12] = [
+    pub const COMMANDS: [&'static str; 15] = [
         "add",
         "remove",
         "rename",
@@ -310,6 +325,9 @@ impl Edit {
         "remove-color",
         "add-socket",
         "set-socket",
+        "rename-socket",
+        "remove-socket",
+        "tidy-sockets",
         "unjoin",
     ];
 
@@ -327,6 +345,9 @@ impl Edit {
             Edit::RemoveColor { .. } => "remove-color",
             Edit::AddSocket { .. } => "add-socket",
             Edit::SetSocket { .. } => "set-socket",
+            Edit::RenameSocket { .. } => "rename-socket",
+            Edit::RemoveSocket { .. } => "remove-socket",
+            Edit::TidySockets => "tidy-sockets",
             Edit::Unjoin { .. } => "unjoin",
         }
     }
@@ -601,6 +622,130 @@ fn shape_words(shape: &str) -> Option<(&'static [&'static str], &'static [&'stat
     Shape::NAMES
         .contains(&shape)
         .then(|| (Shape::size_fields(shape), Shape::face_words(shape)))
+}
+
+/// Where a socket of the part `found` is named, besides where it is
+/// declared: the `to` of every part joined to it, the part's own
+/// `attach`, and the `from` of a socket that what the list belongs to
+/// passes on. Each with what to call it in a message.
+fn socket_uses(doc: &Doc, found: &Found, socket: &str) -> Vec<(TreePath, String)> {
+    let mut uses = Vec::new();
+    let items = doc.items(&found.list).unwrap_or_default();
+    let own = with(&found.list, Step::Index(found.at));
+    if let Some(item) = items.get(found.at)
+        && text_of(item, "attach") == Some(socket)
+    {
+        uses.push((
+            with(&own, key("attach")),
+            "the part itself, which joins by it".to_owned(),
+        ));
+    }
+    // Only a part with a name can be joined to, or passed on from.
+    let Some(name) = &found.name else {
+        return uses;
+    };
+    let full = format!("{name}.{socket}");
+    for (at, item) in items.iter().enumerate() {
+        if text_of(item, "to") == Some(full.as_str()) {
+            let called = text_of(item, "name").map_or_else(|| format!("#{at}"), str::to_owned);
+            uses.push((with(&with(&found.list, Step::Index(at)), key("to")), called));
+        }
+    }
+    let owner = &found.list[..found.list.len().saturating_sub(1)];
+    let passed = with(owner, key("sockets"));
+    for entry in doc.entries(&passed).unwrap_or_default() {
+        if text_of(&entry.node, "from") == Some(full.as_str()) {
+            uses.push((
+                with(&with(&passed, key(&entry.key)), key("from")),
+                format!("the socket \"{}\", which passes it on", entry.key),
+            ));
+        }
+    }
+    uses
+}
+
+/// The sockets a part declares, by name.
+fn declared_sockets(doc: &Doc, found: &Found) -> Vec<String> {
+    doc.entries(&with(&found.path(), key("sockets")))
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect()
+}
+
+/// A declared socket of a part, or why there is none by that name.
+fn declared(doc: &Doc, part: &str, name: &str) -> Result<Found, Stop> {
+    let found = find(doc, part)?;
+    let names = declared_sockets(doc, &found);
+    if names.iter().any(|known| known == name) {
+        return Ok(found);
+    }
+    Err(problem(
+        Code::UnknownSocket,
+        if Side::from_name(name).is_some() || name == "slope" {
+            format!("\"{name}\" is built in: every part has it, and it can't be renamed or removed")
+        } else {
+            format!("\"{part}\" declares no socket called \"{name}\"")
+        },
+    )
+    .got(name)
+    .one_of(name, names))
+}
+
+/// True for the names the Studio gives the sockets it makes: `spot`,
+/// `spot_2`, `spot_3`...
+pub fn is_studio_socket(name: &str) -> bool {
+    match name.strip_prefix("spot") {
+        Some("") => true,
+        Some(rest) => rest
+            .strip_prefix('_')
+            .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit())),
+        None => false,
+    }
+}
+
+/// Every list of parts in the recipe: the model's own, each definition's,
+/// and those of the parts inside them.
+fn part_lists(doc: &Doc) -> Vec<TreePath> {
+    fn inside(doc: &Doc, list: TreePath, into: &mut Vec<TreePath>) {
+        let Some(items) = doc.items(&list) else {
+            return;
+        };
+        let count = items.len();
+        into.push(list.clone());
+        for at in 0..count {
+            inside(doc, with(&with(&list, Step::Index(at)), key("parts")), into);
+        }
+    }
+    let mut lists = Vec::new();
+    inside(doc, vec![key("parts")], &mut lists);
+    let defined: Vec<String> = doc
+        .entries(&[key("define")])
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect();
+    for name in defined {
+        inside(
+            doc,
+            vec![key("define"), key(&name), key("parts")],
+            &mut lists,
+        );
+    }
+    lists
+}
+
+/// Takes a socket out of a part's `sockets`, and the table with it if
+/// that leaves it empty.
+fn drop_socket(doc: &mut Doc, part: &[Step], name: &str) -> Result<(), Stop> {
+    let sockets = with(part, key("sockets"));
+    doc.remove_field(&sockets, name).map_err(cant)?;
+    if doc.entries(&sockets).is_some_and(<[_]>::is_empty) {
+        // An empty table left behind is harmless, so if it can't be
+        // taken out as it is written, it stays.
+        let _ = doc.remove_field(part, "sockets");
+    }
+    Ok(())
 }
 
 fn set(doc: &mut Doc, table: &[Step], name: &str, value: Val) -> Result<(), Stop> {
@@ -1147,6 +1292,108 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             Ok(Outcome {
                 summary: format!("set \"{part}\": {}", said.join(", ")),
                 touched: Some(touched),
+            })
+        }
+        Edit::RenameSocket { socket, new_name } => {
+            let (part, name) = split_socket(socket)?;
+            check_name(new_name)?;
+            let found = declared(doc, part, name)?;
+            if Side::from_name(new_name).is_some() || new_name == "slope" {
+                return Err(problem(
+                    Code::DuplicateName,
+                    format!("\"{new_name}\" is a built-in socket's name: choose another"),
+                )
+                .got(new_name.as_str()));
+            }
+            if declared_sockets(doc, &found).contains(new_name) {
+                return Err(problem(
+                    Code::DuplicateName,
+                    format!("\"{part}\" already has a socket called \"{new_name}\""),
+                )
+                .got(new_name.as_str()));
+            }
+            // Everything that names it, first; then the socket itself.
+            let uses = socket_uses(doc, &found, name);
+            let own_name = found.name.clone().unwrap_or_default();
+            for (path, _) in &uses {
+                let last = path.last();
+                let value = if matches!(last, Some(Step::Key(field)) if field == "attach") {
+                    text(new_name)
+                } else {
+                    text(&format!("{own_name}.{new_name}"))
+                };
+                doc.set_value(path, &value).map_err(cant)?;
+            }
+            doc.rename_field(&with(&found.path(), key("sockets")), name, new_name)
+                .map_err(cant)?;
+            Ok(Outcome {
+                summary: format!("renamed the socket \"{part}.{name}\" to \"{new_name}\""),
+                touched: Some(found),
+            })
+        }
+        Edit::RemoveSocket { socket } => {
+            let (part, name) = split_socket(socket)?;
+            let found = declared(doc, part, name)?;
+            let uses = socket_uses(doc, &found, name);
+            if !uses.is_empty() {
+                let what: Vec<String> = uses.into_iter().map(|(_, called)| called).collect();
+                return Err(problem(
+                    Code::Conflict,
+                    format!(
+                        "the socket \"{part}.{name}\" is in use by: {}. Join that somewhere else first, or remove it",
+                        what.join(", ")
+                    ),
+                )
+                .got(name));
+            }
+            drop_socket(doc, &found.path(), name)?;
+            Ok(Outcome {
+                summary: format!("removed the socket \"{part}.{name}\""),
+                touched: Some(found),
+            })
+        }
+        Edit::TidySockets => {
+            // Found first, removed after: removing one changes nothing
+            // about where the others are.
+            let mut unused: Vec<(TreePath, String, String)> = Vec::new();
+            for list in part_lists(doc) {
+                let count = doc.items(&list).map_or(0, <[_]>::len);
+                for at in 0..count {
+                    let part = with(&list, Step::Index(at));
+                    let name = doc.text_at(&part, "name").map(str::to_owned);
+                    let found = Found {
+                        list: list.clone(),
+                        at,
+                        name: name.clone(),
+                        definition: None,
+                        inside: String::new(),
+                    };
+                    for socket in declared_sockets(doc, &found) {
+                        if is_studio_socket(&socket) && socket_uses(doc, &found, &socket).is_empty()
+                        {
+                            let called = name.clone().unwrap_or_else(|| format!("#{at}"));
+                            unused.push((
+                                part.clone(),
+                                socket.clone(),
+                                format!("{called}.{socket}"),
+                            ));
+                        }
+                    }
+                }
+            }
+            for (part, socket, _) in &unused {
+                drop_socket(doc, part, socket)?;
+            }
+            let names: Vec<String> = unused.into_iter().map(|(_, _, called)| called).collect();
+            Ok(Outcome {
+                summary: match names.len() {
+                    0 => {
+                        "found no sockets to tidy away: every \"spot\" socket is in use".to_owned()
+                    }
+                    1 => format!("removed 1 socket nothing uses: {}", names[0]),
+                    count => format!("removed {count} sockets nothing uses: {}", names.join(", ")),
+                },
+                touched: None,
             })
         }
         Edit::Unjoin { part } => {
@@ -1724,6 +1971,10 @@ pub struct Facts {
     /// The colours its single faces have: `colors = { top = "grass" }`,
     /// its own or its definition's.
     pub face_colors: Vec<(String, String)>,
+    /// The sockets it declares, by name, each with how many things use
+    /// it (parts joined to it, its own join, a socket that passes it
+    /// on).
+    pub sockets: Vec<(String, usize)>,
     /// The socket it is joined to: `body.neck`.
     pub to: Option<String>,
     /// Its own socket that joins there.
@@ -1892,6 +2143,13 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
                 .unwrap_or_default(),
             _ => Vec::new(),
         },
+        sockets: declared_sockets(&doc, &found)
+            .into_iter()
+            .map(|socket| {
+                let uses = socket_uses(&doc, &found, &socket).len();
+                (socket, uses)
+            })
+            .collect(),
         to: text_of(own, "to").map(str::to_owned),
         attach: text_of(own, "attach").map(str::to_owned),
         twist: number(own, "twist").unwrap_or(0.0),
@@ -1964,8 +2222,13 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::Duplicate { part, .. }
         | Edit::Unjoin { part }
         | Edit::AddSocket { part, .. } => part,
-        Edit::SetSocket { socket, .. } => socket.rsplit_once('.').map_or("", |(part, _)| part),
-        Edit::AddColor { .. } | Edit::SetColor { .. } | Edit::RemoveColor { .. } => "",
+        Edit::SetSocket { socket, .. }
+        | Edit::RenameSocket { socket, .. }
+        | Edit::RemoveSocket { socket } => socket.rsplit_once('.').map_or("", |(part, _)| part),
+        Edit::AddColor { .. }
+        | Edit::SetColor { .. }
+        | Edit::RemoveColor { .. }
+        | Edit::TidySockets => "",
     }
 }
 

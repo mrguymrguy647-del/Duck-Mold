@@ -783,6 +783,71 @@ fn a_colour_is_removed_and_a_faces_colour_taken_away_from_the_command_line() {
 }
 
 #[test]
+fn sockets_are_renamed_removed_and_tidied_from_the_command_line() {
+    let folder = folder("cli_edit_sockets");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    // Two sockets on the trunk, and a bird on one of them.
+    for name in ["spot", "spot_2"] {
+        let output = edit(&["add-socket", "trunk", name, "--on", "front"]);
+        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    }
+    let output = edit(&[
+        "add",
+        "bird",
+        "--shape",
+        "sphere",
+        "--radius",
+        "0.05",
+        "--color",
+        "leaf",
+        "--to",
+        "trunk.spot",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+
+    // Renamed: the bird's join follows.
+    let output = edit(&["rename-socket", "trunk.spot", "perch"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output)
+            .starts_with("edited tree.toml: renamed the socket \"trunk.spot\" to \"perch\"\n"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(text().contains("perch = { on = \"front\" }"), "{}", text());
+    assert!(text().contains("to = \"trunk.perch\""), "{}", text());
+
+    // In use: it can't be removed, and the line says what uses it.
+    let output = edit(&["remove-socket", "trunk.perch"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: tree.toml: the socket \"trunk.perch\" is in use by: bird. Join that somewhere else first, or remove it.\n"
+    );
+    // Tidy takes the Studio's unused one, and leaves the rest.
+    let output = edit(&["tidy-sockets", "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "tidy-sockets");
+    assert_eq!(
+        report["edit"]["summary"],
+        "removed 1 socket nothing uses: trunk.spot_2"
+    );
+    assert!(!text().contains("spot_2"), "{}", text());
+    assert!(text().contains("perch = "), "{}", text());
+    // With the bird gone, the socket can go.
+    assert_eq!(edit(&["remove", "bird"]).status.code(), Some(0));
+    let output = edit(&["remove-socket", "trunk.perch"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(text(), TREE);
+}
+
+#[test]
 fn an_edit_that_cant_be_made_says_why_and_writes_nothing() {
     let folder = folder("cli_edit_refused");
     // No such part: exit code 2, one line, with the likely fix.
@@ -852,8 +917,10 @@ fn every_edit_has_a_command_and_is_in_the_guide() {
         );
         let output = run(&folder, &["edit", "tree.toml", command, "--help"]);
         assert_eq!(output.status.code(), Some(0), "{command}");
+        // (Followed by its words, or by nothing at all.)
         assert!(
-            guide.contains(&format!("`duck-mold edit <recipe> {command} ")),
+            guide.contains(&format!("`duck-mold edit <recipe> {command} "))
+                || guide.contains(&format!("`duck-mold edit <recipe> {command}`")),
             "the guide doesn't describe `duck-mold edit <recipe> {command}`"
         );
     }

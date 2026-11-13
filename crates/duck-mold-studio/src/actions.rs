@@ -43,6 +43,8 @@ pub enum Action {
     ShowAll,
     /// Select every part.
     SelectAll,
+    /// Remove the sockets the Studio made that nothing uses.
+    TidySockets,
     /// Take back the last change.
     Undo,
     /// Make the change that was taken back again.
@@ -149,6 +151,7 @@ pub fn menus(ui: &mut egui::Ui, studio: &Studio) -> Option<Action> {
         pick(ui, edits && any, "Unjoin", "", Action::Unjoin);
         pick(ui, edits && any, "Remove", "Delete", Action::Remove);
         ui.separator();
+        pick(ui, edits, "Tidy sockets", "", Action::TidySockets);
         pick(ui, true, "Select all", "Ctrl+A", Action::SelectAll);
     });
     ui.menu_button("View", |ui| {

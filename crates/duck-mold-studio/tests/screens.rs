@@ -13,7 +13,7 @@ use std::path::{Path, PathBuf};
 use duck_mold_studio::StudioApp;
 use eframe::egui;
 use egui_kittest::Harness;
-use egui_kittest::kittest::Queryable;
+use egui_kittest::kittest::{NodeT, Queryable};
 
 mod common;
 use common::*;
@@ -1780,4 +1780,119 @@ fn the_palette_panel_picks_a_colour_and_the_paint_tool_paints_with_it() {
     looking.get_by_label("Palette");
     assert!(looking.query_by_label("New colour").is_none());
     assert_eq!(looking.query_all_by_label("remove").count(), 0);
+}
+
+// ---- sockets: the list in the panel, and tidying -----------------------------------
+
+#[test]
+fn the_panel_lists_a_parts_sockets_to_rename_and_remove() {
+    use duck_mold_core::edit::Edit;
+    let (recipe, mut screen) = yard("screens_sockets");
+    // The crate gets two sockets, and a ball on one of them.
+    for name in ["spot", "spot_2"] {
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .apply(&Edit::AddSocket {
+                part: "crate".into(),
+                name: name.into(),
+                on: "top".into(),
+                shift: [0.0; 3],
+            })
+            .unwrap();
+    }
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .apply(&Edit::Join {
+            part: "cap".into(),
+            to: "crate.spot".into(),
+            attach: None,
+        })
+        .unwrap();
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("crate"));
+    screen.run_steps(3);
+
+    // The panel lists them, with how much each is used.
+    screen.get_by_label("Sockets");
+    screen.get_by_label("1 use");
+    screen.get_by_label("not used");
+    // The one in use can't be removed; the other can.
+    assert_eq!(screen.query_all_by_label("remove socket").count(), 2);
+    screen
+        .query_all_by_label("remove socket")
+        .next()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert!(text_of(&recipe).contains("spot = { on = \"top\" }"));
+    screen
+        .query_all_by_label("remove socket")
+        .nth(1)
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(!now.contains("spot_2"), "{now}");
+    assert!(now.contains("spot = { on = \"top\" }"), "{now}");
+    screen.get_by_label_contains("Removed the socket \"crate.spot_2\"");
+
+    // Renamed by typing: the ball's join follows.
+    // (The field itself is the text input among what holds "spot".)
+    let field = |screen: &Harness<'static, StudioApp>| {
+        screen
+            .query_all_by_value("spot")
+            .find(|node| node.accesskit_node().role() == egui::accesskit::Role::TextInput)
+            .expect("a field with the socket's name")
+            .rect()
+            .center()
+    };
+    let at = field(&screen);
+    click_at(&mut screen, at);
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    screen.run_steps(2);
+    screen
+        .query_all_by_value("spot")
+        .find(|node| node.accesskit_node().role() == egui::accesskit::Role::TextInput)
+        .unwrap()
+        .type_text("lid");
+    screen.run_steps(2);
+    screen.key_press(egui::Key::Enter);
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(now.contains("lid = { on = \"top\" }"), "{now}");
+    assert!(now.contains("to = \"crate.lid\""), "{now}");
+    assert!(!screen.state().studio().unwrap().has_mistakes());
+
+    // Edit > Tidy sockets takes the Studio's unused ones.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .apply(&Edit::AddSocket {
+            part: "post".into(),
+            name: "spot".into(),
+            on: "front".into(),
+            shift: [0.0; 3],
+        })
+        .unwrap();
+    screen.run_steps(2);
+    screen.get_by_label("Edit").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("Tidy sockets")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(!now.contains("spot"), "{now}");
+    assert!(now.contains("lid = "), "{now}");
+    screen.get_by_label_contains("Removed 1 socket nothing uses: post.spot");
 }

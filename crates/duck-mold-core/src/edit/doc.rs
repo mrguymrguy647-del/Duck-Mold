@@ -536,7 +536,18 @@ impl Doc {
                 ));
             }
             Form::Root | Form::Header => {
-                self.line_start(entry.key_span.start)..self.line_end(entry.node.span.end)
+                let mut start = self.line_start(entry.key_span.start);
+                // A table under a header of its own takes the blank line
+                // above the header with it.
+                if self.text[start..].trim_start().starts_with('[') {
+                    let above = &self.text[..start];
+                    if above.ends_with("\r\n\r\n") {
+                        start -= 2;
+                    } else if above.ends_with("\n\n") {
+                        start -= 1;
+                    }
+                }
+                start..self.line_end(entry.node.span.end)
             }
             Form::Inline => {
                 if at + 1 < entries.len() {
@@ -549,6 +560,19 @@ impl Doc {
             }
         };
         self.splice(range, "")
+    }
+
+    /// Renames a field of a table where it stands: its value, and
+    /// everything round it, stays as it is.
+    pub fn rename_field(&mut self, table: &[Step], name: &str, new: &str) -> Done {
+        let Some(entry) = self.entry(table, name) else {
+            return cant(format!("there is no {name} in {}", show(table)));
+        };
+        let written = match self.syntax {
+            Syntax::Toml => toml_key(new),
+            Syntax::Json => quoted(new),
+        };
+        self.splice(entry.key_span.clone(), &written)
     }
 
     /// Adds a table under a header of its own (TOML) or as a field

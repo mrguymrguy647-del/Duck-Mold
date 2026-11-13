@@ -226,6 +226,15 @@ In the file these are `set --face-color`, `set --color`, `set-color`,
 definition paints the definition, so every part made from it; the
 status line names them.
 
+**Sockets.** A part that declares sockets of its own lists them in the
+properties panel, each with how many things use it. Type in a socket's
+name to rename it: everything joined to it follows. "remove socket"
+takes away one nothing uses. The sockets the Studio makes itself, when
+you add or drop a part at a point of a surface (`spot`, `spot_2`...),
+are cleared away in the same step that leaves them with nothing on
+them; Edit > Tidy sockets does that for any that are left. In the file
+these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
+
 **Views and look.** In the top bar:
 
 - **Front**, **Side**, **Top** and **3/4** turn the camera to look from
@@ -244,7 +253,7 @@ status line names them.
 
 **The menus.** File (New model, Open, Export, Render picture, Back to
 the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
-Unjoin, Remove, Select all), View (the four views, Frame, Grid,
+Unjoin, Remove, Tidy sockets, Select all), View (the four views, Frame, Grid,
 Wireframe, Shadow, Hide, Show everything hidden) and Help (The keys,
 About). Every line shows its key.
 

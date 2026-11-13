@@ -52,6 +52,8 @@ pub struct Draft {
     /// Set to put the typing in the Name field: F2, or "Rename" in a
     /// menu.
     focus_name: bool,
+    /// The names of the part's sockets, as they are being typed.
+    socket_names: Vec<String>,
 }
 
 impl Draft {
@@ -73,6 +75,7 @@ impl Draft {
         self.scale = facts.scale;
         self.recolor = None;
         self.confirm_remove = None;
+        self.socket_names = facts.sockets.iter().map(|(name, _)| name.clone()).collect();
     }
 }
 
@@ -160,34 +163,45 @@ fn definition_notice(ui: &mut egui::Ui, facts: &Facts) {
 }
 
 /// Asks whether the parts that hang from the selected ones go too, when
-/// "Remove" found some.
+/// "Remove" found some: in a window of its own, in the middle, so it is
+/// seen wherever the panel is scrolled to.
 fn confirm_remove(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     let Some(count) = draft.confirm_remove else {
         return;
     };
     let several = studio.selection().len() > 1;
-    ui.add_space(4.0);
-    egui::Frame::group(ui.style()).show(ui, |ui| {
-        ui.label(match (count, several) {
-            (1, false) => "Another part hangs from this one. Remove it too?".to_owned(),
-            (1, true) => "Another part hangs from these. Remove it too?".to_owned(),
-            (count, false) => {
-                format!("{count} other parts hang from this one. Remove them too?")
-            }
-            (count, true) => format!("{count} other parts hang from these. Remove them too?"),
-        });
-        ui.horizontal(|ui| {
-            if ui.button("Remove them all").clicked() {
-                if let Err(why) = studio.remove_selected(true) {
-                    draft.failed = Some(why);
+    let mut open = true;
+    let mut close = false;
+    egui::Window::new("Remove")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .open(&mut open)
+        .show(ui.ctx(), |ui| {
+            ui.label(match (count, several) {
+                (1, false) => "Another part hangs from this one. Remove it too?".to_owned(),
+                (1, true) => "Another part hangs from these. Remove it too?".to_owned(),
+                (count, false) => {
+                    format!("{count} other parts hang from this one. Remove them too?")
                 }
-                draft.confirm_remove = None;
-            }
-            if ui.button("Keep them").clicked() {
-                draft.confirm_remove = None;
-            }
+                (count, true) => format!("{count} other parts hang from these. Remove them too?"),
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button("Remove them all").clicked() {
+                    if let Err(why) = studio.remove_selected(true) {
+                        draft.failed = Some(why);
+                    }
+                    close = true;
+                }
+                if ui.button("Keep them").clicked() {
+                    close = true;
+                }
+            });
         });
-    });
+    if close || !open {
+        draft.confirm_remove = None;
+    }
 }
 
 /// The panel when several parts are selected: what can be set for all
@@ -838,6 +852,55 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     ui.end_row();
                 }
             });
+
+        // ---- the sockets it declares
+        if !facts.sockets.is_empty() && draft.socket_names.len() == facts.sockets.len() {
+            ui.add_space(8.0);
+            ui.label(RichText::new("Sockets").strong()).on_hover_text(
+                "The sockets this part declares: named points other parts join to. Its seven built-in ones (top, bottom...) aren't listed",
+            );
+            for (at, (name, uses)) in facts.sockets.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let field = ui
+                        .add(
+                            TextEdit::singleline(&mut draft.socket_names[at]).desired_width(100.0),
+                        )
+                        .on_hover_text("Type a new name: everything joined to it follows");
+                    if field.lost_focus()
+                        && !draft.socket_names[at].is_empty()
+                        && draft.socket_names[at] != *name
+                    {
+                        edits.push(Edit::RenameSocket {
+                            socket: format!("{path}.{name}"),
+                            new_name: draft.socket_names[at].clone(),
+                        });
+                    }
+                    ui.label(
+                        RichText::new(match uses {
+                            0 => "not used".to_owned(),
+                            1 => "1 use".to_owned(),
+                            count => format!("{count} uses"),
+                        })
+                        .weak()
+                        .small(),
+                    );
+                    let remove = ui
+                        .add_enabled(
+                            *uses == 0,
+                            egui::Button::new(RichText::new("remove socket").small()),
+                        )
+                        .on_hover_text("Take this socket away")
+                        .on_disabled_hover_text(
+                            "Something is joined to it: move that away first, or remove it",
+                        );
+                    if remove.clicked() {
+                        edits.push(Edit::RemoveSocket {
+                            socket: format!("{path}.{name}"),
+                        });
+                    }
+                });
+            }
+        }
 
         // ---- a new colour
         if let Some(new) = &mut draft.new_color {

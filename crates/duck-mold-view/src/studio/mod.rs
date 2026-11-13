@@ -539,6 +539,11 @@ impl Studio {
         self.check_files();
         let before = self.text.clone();
         let parts_before: Vec<String> = self.outline().into_iter().map(|row| row.path).collect();
+        // A socket the Studio made, left with nothing on it by these
+        // changes, goes in the same step.
+        let mut all = changes.to_vec();
+        all.extend(self.sockets_left_unused(changes));
+        let changes = all.as_slice();
         match edit::edit_file_many(&self.path, changes, false) {
             Ok(edited) => {
                 // The selection follows the last change that moves it.
@@ -605,6 +610,67 @@ impl Studio {
                 Err(why)
             }
         }
+    }
+
+    /// The `remove-socket` edits for the sockets the Studio made
+    /// (`spot`, `spot_2`...) that `changes` would leave with nothing on
+    /// them: the socket a removed part sat on, or one a part was moved
+    /// away from.
+    fn sockets_left_unused(&self, changes: &[Edit]) -> Vec<Edit> {
+        let Some(syntax) = Syntax::from_path(&self.path) else {
+            return Vec::new();
+        };
+        // The socket each part these changes take away is on now.
+        let mut candidates: Vec<String> = Vec::new();
+        for change in changes {
+            let part = match change {
+                Edit::Remove { part, .. } | Edit::Join { part, .. } | Edit::Unjoin { part } => part,
+                _ => continue,
+            };
+            let mut leaving = vec![part.clone()];
+            if matches!(
+                change,
+                Edit::Remove {
+                    with_attached: true,
+                    ..
+                }
+            ) {
+                leaving.extend(self.hanging_from(part));
+            }
+            for path in leaving {
+                let Some(to) = self.part(&path).and_then(|part| part.attached_to.clone()) else {
+                    continue;
+                };
+                let Some((target, socket)) = to.rsplit_once('.') else {
+                    continue;
+                };
+                if !edit::is_studio_socket(socket) {
+                    continue;
+                }
+                // The part it sits on is in the same list.
+                let on = match path.rsplit_once('/') {
+                    Some((around, _)) => format!("{around}/{target}.{socket}"),
+                    None => format!("{target}.{socket}"),
+                };
+                if !candidates.contains(&on) {
+                    candidates.push(on);
+                }
+            }
+        }
+        // Each is kept only if, after the changes, it can go: nothing
+        // else is on it.
+        let mut tidy: Vec<Edit> = Vec::new();
+        for socket in candidates {
+            let mut tried = changes.to_vec();
+            tried.extend(tidy.iter().cloned());
+            tried.push(Edit::RemoveSocket {
+                socket: socket.clone(),
+            });
+            if edit::apply_many(&self.text, syntax, &self.path, &self.shown_as, &tried).is_ok() {
+                tidy.push(Edit::RemoveSocket { socket });
+            }
+        }
+        tidy
     }
 
     /// How far the picture shows the model moved sideways. A model's zero

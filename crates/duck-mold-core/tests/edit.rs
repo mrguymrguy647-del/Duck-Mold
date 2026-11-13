@@ -887,6 +887,175 @@ fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
 // ---- parts inside definitions and files ---------------------------------------
 
 #[test]
+fn a_socket_is_renamed_with_everything_that_names_it() {
+    let rename = |socket: &str, new_name: &str| Edit::RenameSocket {
+        socket: socket.into(),
+        new_name: new_name.into(),
+    };
+    // The base declares `pole`, and the pole is joined to it.
+    let applied = done(LAMP, Syntax::Toml, &rename("base.pole", "mast"));
+    assert_eq!(
+        changed(LAMP, &applied.text),
+        (
+            vec![
+                "pole = { on = \"top\" }",
+                "",
+                "[[parts]]",
+                "name = \"pole\"",
+                "shape = \"box\"",
+                "size = [0.05, 1.0, 0.05]",
+                "color = \"steel\"",
+                "attach = \"bottom\"",
+                "to = \"base.pole\""
+            ],
+            vec![
+                "mast = { on = \"top\" }",
+                "",
+                "[[parts]]",
+                "name = \"pole\"",
+                "shape = \"box\"",
+                "size = [0.05, 1.0, 0.05]",
+                "color = \"steel\"",
+                "attach = \"bottom\"",
+                "to = \"base.mast\""
+            ]
+        )
+    );
+    assert_eq!(
+        applied.summary,
+        "renamed the socket \"base.pole\" to \"mast\""
+    );
+    // The model is the same.
+    let before = done(LAMP, Syntax::Toml, &add_colour_x()).model.unwrap();
+    assert!(same_shape(&before, applied.model.as_ref().unwrap()));
+    // What the recipe says about the base names its socket, and that
+    // one thing uses it.
+    let facts = describe(&applied.text, Syntax::Toml, applied.model.as_ref(), "base").unwrap();
+    assert_eq!(facts.sockets, [("mast".to_owned(), 1)]);
+
+    // A built-in socket can't be renamed.
+    let report = refused(LAMP, &rename("base.top", "lid")).report();
+    assert_eq!(report.errors[0].code, Code::UnknownSocket);
+    assert!(
+        report.errors[0].message.contains("is built in"),
+        "{}",
+        report.errors[0].message
+    );
+    // A name that is taken, or a built-in one, is refused.
+    let two = done(
+        LAMP,
+        Syntax::Toml,
+        &Edit::AddSocket {
+            part: "base".into(),
+            name: "knob".into(),
+            on: "front".into(),
+            shift: [0.0; 3],
+        },
+    );
+    for taken in ["knob", "top", "slope"] {
+        let report = refused(&two.text, &rename("base.pole", taken)).report();
+        assert_eq!(report.errors[0].code, Code::DuplicateName, "{taken}");
+    }
+    let report = refused(LAMP, &rename("base.pol", "mast")).report();
+    assert_eq!(report.errors[0].suggestion.as_deref(), Some("pole"));
+}
+
+#[test]
+fn a_socket_is_removed_once_nothing_uses_it_and_unused_ones_are_tidied_away() {
+    let remove = |socket: &str| Edit::RemoveSocket {
+        socket: socket.into(),
+    };
+    let socket = |part: &str, name: &str| Edit::AddSocket {
+        part: part.into(),
+        name: name.into(),
+        on: "front".into(),
+        shift: [0.5, 0.0, 0.0],
+    };
+    // In use: refused, naming what sits on it.
+    let report = refused(LAMP, &remove("base.pole")).report();
+    assert_eq!(report.errors[0].code, Code::Conflict);
+    assert_eq!(
+        report.errors[0].message,
+        "the socket \"base.pole\" is in use by: pole. Join that somewhere else first, or remove it"
+    );
+    // Not in use: it goes, and the file is as it was before it came.
+    let with = done(LAMP, Syntax::Toml, &socket("base", "knob"));
+    let without = done(&with.text, Syntax::Toml, &remove("base.knob"));
+    assert_eq!(without.text, LAMP);
+    assert_eq!(without.summary, "removed the socket \"base.knob\"");
+    // The last socket of a part takes the table with it.
+    let only = done(LAMP, Syntax::Toml, &socket("pole", "hook"));
+    assert!(
+        only.text.contains("[parts.sockets]\nhook = "),
+        "{}",
+        only.text
+    );
+    let none = done(&only.text, Syntax::Toml, &remove("pole.hook"));
+    assert!(!none.text.contains("hook"), "{}", none.text);
+    assert!(none.model.is_some());
+
+    // Tidy: only the Studio's own names, and only those nothing uses.
+    let mut text = LAMP.to_owned();
+    for (part, name) in [
+        ("base", "spot"),
+        ("base", "spot_2"),
+        ("pole", "spot"),
+        ("base", "knob"),
+        ("base", "spotty"),
+    ] {
+        text = done(&text, Syntax::Toml, &socket(part, name)).text;
+    }
+    // Something sits on base.spot_2.
+    text = done(
+        &text,
+        Syntax::Toml,
+        &Edit::Add {
+            name: "bead".into(),
+            made: Made::Shape("sphere".into()),
+            to: Some("base.spot_2".into()),
+            attach: None,
+            sizes: Sizes {
+                radius: Some(0.02),
+                ..Sizes::default()
+            },
+            color: Some("glow".into()),
+            twist: None,
+            free: Free::default(),
+        },
+    )
+    .text;
+    let tidied = done(&text, Syntax::Toml, &Edit::TidySockets);
+    assert_eq!(
+        tidied.summary,
+        "removed 2 sockets nothing uses: base.spot, pole.spot"
+    );
+    for kept in [
+        "spot_2 = ",
+        "knob = ",
+        "spotty = ",
+        "pole = { on = \"top\" }",
+    ] {
+        assert!(tidied.text.contains(kept), "{kept} went:\n{}", tidied.text);
+    }
+    assert_eq!(tidied.text.matches("spot = ").count(), 0, "{}", tidied.text);
+    // Again there is nothing to do, and nothing changes.
+    let again = done(&tidied.text, Syntax::Toml, &Edit::TidySockets);
+    assert_eq!(again.text, tidied.text);
+    assert_eq!(
+        again.summary,
+        "found no sockets to tidy away: every \"spot\" socket is in use"
+    );
+    // The same in JSON.
+    let json = to_json(&text);
+    let tidied = done(&json, Syntax::Json, &Edit::TidySockets);
+    assert_eq!(
+        tidied.summary,
+        "removed 2 sockets nothing uses: base.spot, pole.spot"
+    );
+    assert!(tidied.model.is_some());
+}
+
+#[test]
 fn a_part_inside_a_definition_is_edited_there_and_the_others_are_named() {
     let edit = set_with(
         "left_bulb/glass",
@@ -2461,6 +2630,14 @@ fn every_kind_of_edit_has_a_name() {
             on: None,
             shift: None,
         },
+        Edit::RenameSocket {
+            socket: String::new(),
+            new_name: String::new(),
+        },
+        Edit::RemoveSocket {
+            socket: String::new(),
+        },
+        Edit::TidySockets,
         Edit::Unjoin {
             part: String::new(),
         },

@@ -121,6 +121,25 @@ pub enum Change {
         #[arg(long, value_name = "N or X,Y,Z")]
         scale: Option<String>,
     },
+    /// Rename a socket a part declares. Everything that names it follows.
+    RenameSocket {
+        /// The socket, like body.spot.
+        #[arg(value_name = "PART.SOCKET")]
+        socket: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Remove a socket a part declares.
+    ///
+    /// Refused if anything uses it, saying what.
+    RemoveSocket {
+        /// The socket, like body.spot.
+        #[arg(value_name = "PART.SOCKET")]
+        socket: String,
+    },
+    /// Remove the sockets the Studio made (spot, spot_2...) that nothing
+    /// uses any more.
+    TidySockets,
     /// Make a joined part free, exactly where it stands: its join becomes
     /// a `move` and a `rotate`.
     Unjoin {
@@ -411,6 +430,14 @@ impl Change {
                     .transpose()?,
                 },
             },
+            Change::RenameSocket { socket, new_name } => Edit::RenameSocket {
+                socket: socket.clone(),
+                new_name: new_name.clone(),
+            },
+            Change::RemoveSocket { socket } => Edit::RemoveSocket {
+                socket: socket.clone(),
+            },
+            Change::TidySockets => Edit::TidySockets,
             Change::Unjoin { part } => Edit::Unjoin { part: part.clone() },
             Change::Duplicate {
                 part,

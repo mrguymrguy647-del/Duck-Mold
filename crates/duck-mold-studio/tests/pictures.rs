@@ -266,6 +266,23 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "palette-remove"));
     }
 
+    // Sockets: a part that declares some, listed in the panel with how
+    // much each is used.
+    {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("duck.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "sockets"));
+    }
+
     // The look: wireframe, the view from the top, and the View menu.
     {
         let mut screen = harness(
