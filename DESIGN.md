@@ -1730,6 +1730,50 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 5):* the right-click menu, the keys, several parts and
+hiding, with these things settled in the building:
+
+- **Which parts a group edit moves.** The free parts in the same list
+  as the part selected last get an edit each. A part joined to one of
+  them (or to one joined to one of them), and a part inside one of
+  them, goes along with no edit. Any other selected part stays, and
+  the status line names it: "Not moved: flag (joined to a part that
+  isn't selected, or inside another part)".
+- **Scale with several parts has one handle**, the box in the middle:
+  bigger or smaller all round, and further from or nearer to the
+  middle of them. Scaling several parts along one direction would need
+  each part's own sides to line up with it, which they needn't.
+- **A turn carries each part round the middle of the group** as well
+  as turning it, so the group turns as one thing. The middle is the
+  middle of the box round the parts that move.
+- **Selecting a part and a part inside it** would move the inner one
+  twice. Shift+clicking one takes the other out.
+- **A copy of a free part stands beside the original**, one step past
+  its width along x, because a copy in exactly the same place can't be
+  seen or told apart. (This is the copy the first trial of the Studio
+  couldn't move.) Several copied together keep their places relative
+  to each other. A copy of a joined part is still on the same socket:
+  drag it to where it goes.
+- **Remove asks only about parts that aren't selected.** If what hangs
+  from the selected parts is itself selected, nothing is asked.
+- **The status line says a group edit in a few words** ("Moved 3
+  parts: x +0.3 m"), and so does Undo's tip. The recipe still gets one
+  `set` for each part.
+- **Hide** is by part: a part joined to a hidden part is still drawn.
+  The eye is the word "hide" (or "show") at the end of the part's line
+  in the list, not a picture of an eye: the font the Studio ships has
+  none that reads well at that size. A hidden part can't be clicked in
+  the picture, isn't selected by Ctrl+A, and is in every export.
+- **The right-click menu is the same in the picture and in the list.**
+  From the picture, "Add a part here" adds at the point that was
+  clicked; from the list, on the part's `top`.
+- **Shift+A opens a small window** in the middle of the picture with
+  the same choices as the Add menu, rather than the menu itself.
+- **Looking only** (`duck-mold preview`, and model files): Frame, Hide
+  and Select all work; nothing that changes the model does.
+- The File, Edit, View and Help menus come with the views, in step 6,
+  from the same list of actions the keys and the right-click menu use.
+
 *As built (step 4):* the seven shapes, `bevel`, `bevel_steps` and
 `taper`, as designed, with these things settled in the building:
 

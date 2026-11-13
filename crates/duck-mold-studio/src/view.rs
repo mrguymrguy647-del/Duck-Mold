@@ -2,7 +2,9 @@
 //!
 //! - Drag turns the view; right-drag (or middle-drag, or Shift and drag)
 //!   slides it; the wheel zooms.
-//! - A click selects the part under the pointer.
+//! - A click selects the part under the pointer. Shift+click adds a
+//!   part to the selection, or takes it out. A right-click opens the
+//!   menu for the part under the pointer.
 //! - With a part selected, its sockets show as dots, and the handles of
 //!   the tool in hand: arrows, rings or boxes. A click on a dot opens a
 //!   short list of what to add there.
@@ -13,8 +15,9 @@
 //! The picture is drawn by Duck Forge's CPU renderer
 //! ([`Studio::picture`]) and shown as one image.
 
+use crate::actions::{self, Action};
 use crate::library::Thumbs;
-use duck_mold_core::edit::Made;
+use duck_mold_core::edit::{Made, Spot};
 use duck_mold_core::recipe::Shape;
 use duck_mold_view::studio::handles::Tool;
 use duck_mold_view::studio::viewport::Orbit;
@@ -39,7 +42,8 @@ struct Drawn {
     builds: usize,
     orbit: Orbit,
     grid: bool,
-    selected: Option<String>,
+    selected: Vec<String>,
+    hidden: Vec<String>,
     tool: Tool,
     size: [usize; 2],
     /// Where the pointer is, when that changes what is drawn (a part is
@@ -51,7 +55,10 @@ struct Drawn {
 /// Where a part is about to be added.
 #[derive(Clone, PartialEq)]
 enum Place {
+    /// On a socket of a part.
     Socket { part: String, socket: String },
+    /// On the ground, joined to nothing.
+    Ground,
 }
 
 /// The "add a part here" list, while it is open.
@@ -71,6 +78,9 @@ pub struct View {
     /// True while the selected part is being dragged to a new place.
     moving: bool,
     adding: Option<Adding>,
+    /// The point of a part's surface the right-click menu was opened
+    /// at: where "Add a part here" adds.
+    menu_spot: Option<(String, Spot)>,
 }
 
 impl View {
@@ -97,6 +107,28 @@ impl View {
     pub fn stop_adding(&mut self) {
         self.adding = None;
     }
+
+    /// Opens the list of what can be added on the ground, in the middle
+    /// of the viewport: Shift+A.
+    pub fn add_on_ground(&mut self) {
+        let at = self.rect.map_or(pos2(200.0, 120.0), |rect| {
+            rect.center() - egui::vec2(90.0, 150.0)
+        });
+        self.adding = Some(Adding {
+            place: Place::Ground,
+            at,
+        });
+    }
+
+    /// The point of a part the right-click menu was opened at, once.
+    pub fn take_menu_spot(&mut self) -> Option<(String, Spot)> {
+        self.menu_spot.take()
+    }
+
+    /// Forgets that point: the menu was opened from the parts list.
+    pub fn clear_menu_spot(&mut self) {
+        self.menu_spot = None;
+    }
 }
 
 /// How many pixels the viewport's picture has: one for each of the
@@ -112,13 +144,19 @@ fn picture_size(ui: &egui::Ui, rect: Rect) -> (usize, usize) {
     (width.max(1), height.max(1))
 }
 
-/// Draws the viewport and handles the mouse on it.
-pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mut Thumbs) {
+/// Draws the viewport and handles the mouse on it. Gives what was asked
+/// for in its right-click menu, if something was.
+pub fn show(
+    ui: &mut egui::Ui,
+    studio: &mut Studio,
+    view: &mut View,
+    thumbs: &mut Thumbs,
+) -> Option<Action> {
     let rect = ui.available_rect_before_wrap();
     view.rect = Some(rect);
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     if rect.width() < 2.0 || rect.height() < 2.0 {
-        return;
+        return None;
     }
     let size = picture_size(ui, rect);
     // A point of the screen in the picture's own pixels, whatever size
@@ -175,14 +213,38 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
     if response.clicked()
         && let Some(pointer) = response.interact_pointer_pos()
     {
-        view.adding = match studio.point_at(size, in_picture(pointer)) {
-            Clicked::Socket { part, socket } => Some(Adding {
-                place: Place::Socket { part, socket },
-                at: pointer,
-            }),
-            Clicked::Selected(_) | Clicked::Nothing => None,
-        };
+        if shift {
+            // Shift+click: the part joins the selection, or leaves it.
+            studio.click_adding(size, in_picture(pointer));
+            view.adding = None;
+        } else {
+            view.adding = match studio.point_at(size, in_picture(pointer)) {
+                Clicked::Socket { part, socket } => Some(Adding {
+                    place: Place::Socket { part, socket },
+                    at: pointer,
+                }),
+                Clicked::Selected(_) | Clicked::Nothing => None,
+            };
+        }
     }
+    // A right-click (not a right-drag, which slides the view) opens the
+    // menu for the part under the pointer. A part that isn't selected
+    // becomes the selection first.
+    if response.secondary_clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let at = in_picture(pointer);
+        view.menu_spot = None;
+        if let Some(part) = studio.part_under(size, at) {
+            if !studio.is_selected(&part) {
+                studio.select(Some(&part));
+            }
+            view.menu_spot = studio.spot_at(size, at);
+        }
+        view.adding = None;
+    }
+    let mut asked = None;
+    response.context_menu(|ui| asked = actions::part_menu(ui, studio, thumbs));
     if response.hovered() {
         let rolled = ui.input(|input| input.smooth_scroll_delta.y);
         if rolled != 0.0 {
@@ -195,7 +257,8 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
         builds: studio.builds(),
         orbit: studio.orbit,
         grid: studio.grid,
-        selected: studio.selected().map(str::to_owned),
+        selected: studio.selection().into_iter().map(str::to_owned).collect(),
+        hidden: studio.hidden().to_vec(),
         tool: studio.tool,
         size: [size.0, size.1],
         pointer: pointer
@@ -243,8 +306,10 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
     let handles = shows_markers && studio.facts().is_some();
     let hint = if view.moving {
         "Let go to make the change. Escape lets go without changing anything."
+    } else if studio.selection().len() > 1 {
+        "Drag a handle, or one of the parts, to change them together. Shift+click adds or takes out a part."
     } else if handles {
-        "Drag an arrow, a ring or a box, or the part itself. Click a dot to add a part there."
+        "Drag an arrow, a ring or a box, or the part itself. Click a dot to add a part there. Right-click for more."
     } else {
         "Drag to turn, right-drag to slide, roll the wheel to zoom. Click a part to select it."
     };
@@ -281,6 +346,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
 
     tool_strip(ui, studio, rect);
     add_list(ui, studio, view, thumbs, rect);
+    asked
 }
 
 /// The tools, down the left edge of the viewport: one is in hand.
@@ -340,8 +406,10 @@ fn add_list(
     let Some(adding) = &view.adding else {
         return;
     };
-    let Place::Socket { part, socket } = &adding.place;
-    let title = format!("Add a part on {part}.{socket}");
+    let title = match &adding.place {
+        Place::Socket { part, socket } => format!("Add a part on {part}.{socket}"),
+        Place::Ground => "Add a part on the ground".to_owned(),
+    };
     let mut chosen: Option<Made> = None;
     let mut open = true;
     // Kept inside the viewport, beside the click.
@@ -362,7 +430,10 @@ fn add_list(
         });
     if let Some(made) = chosen {
         // What it did, or why not, is in the status line.
-        let _ = studio.add_to_socket(part, socket, &made);
+        let _ = match &adding.place {
+            Place::Socket { part, socket } => studio.add_to_socket(part, socket, &made),
+            Place::Ground => studio.add_free(&made),
+        };
         view.adding = None;
     } else if !open {
         view.adding = None;

@@ -1172,3 +1172,348 @@ fn the_panel_has_a_row_for_every_size_and_option_of_the_newer_shapes() {
     );
     assert!(!screen.state().studio().unwrap().has_mistakes());
 }
+
+// ---- several parts, the right-click menu, the keys, hiding ----------------------
+
+const YARD: &str = "version = 0\nname = \"yard\"\n\n[palette]\nstone = \"#C0C0C0\"\nred = \"#D0453A\"\nblue = \"#3A6FD0\"\n\n[[parts]]\nname = \"floor\"\nshape = \"box\"\nsize = [4, 0.2, 4]\ncolor = \"stone\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.5, 0.5, 0.5]\ncolor = \"red\"\nmove = [0.8, 0.35, 0.6]\n\n[[parts]]\nname = \"post\"\nshape = \"cylinder\"\nradius = 0.1\nheight = 1\ncolor = \"blue\"\nmove = [-0.8, 0.6, 0.5]\n\n[[parts]]\nname = \"cap\"\nshape = \"sphere\"\nradius = 0.15\ncolor = \"red\"\nattach = \"bottom\"\nto = \"post.top\"\n";
+
+fn yard(test: &str) -> (PathBuf, Harness<'static, StudioApp>) {
+    let recipe = folder(test).join("yard.toml");
+    std::fs::write(&recipe, YARD).unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    (recipe, screen)
+}
+
+fn text_of(recipe: &Path) -> String {
+    std::fs::read_to_string(recipe).unwrap()
+}
+
+#[test]
+fn shift_click_selects_several_and_the_panel_is_for_them_all() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = yard("screens_several");
+    // In the picture.
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    assert_eq!(selection(&screen), ["crate"]);
+    let post_at = on_screen(&screen, "post");
+    shift_click_at(&mut screen, post_at);
+    assert_eq!(selection(&screen), ["crate", "post"]);
+    screen.get_by_label("2 parts");
+    screen.get_by_label("crate, post");
+    // And in the list: Shift+click takes the crate out, and puts it back.
+    for now in [vec!["post"], vec!["post", "crate"]] {
+        let row = screen
+            .get_by_role_and_label(Role::Button, "crate")
+            .rect()
+            .center();
+        shift_click_at(&mut screen, row);
+        assert_eq!(selection(&screen), now);
+    }
+
+    // One colour for both.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Colour")
+        .click();
+    screen.run_steps(2);
+    screen.get_by_label("stone").click();
+    screen.run_steps(3);
+    assert_eq!(text_of(&recipe).matches("color = \"stone\"").count(), 3);
+    screen.get_by_label_contains("Coloured 2 parts stone");
+    assert_eq!(selection(&screen), ["post", "crate"]);
+
+    // The arrows move both: one write, one step to undo.
+    use duck_mold_core::math::vec3;
+    use duck_mold_view::studio::handles::Grip;
+    let from = screen
+        .state()
+        .studio()
+        .unwrap()
+        .grip_at(Grip::Arrow(0))
+        .unwrap();
+    let (start, end) = (
+        point_on_screen(&screen, from),
+        point_on_screen(&screen, from + vec3(0.5, 0.0, 0.0)),
+    );
+    drag(&mut screen, start, end);
+    let now = text_of(&recipe);
+    assert!(now.contains("move = [1.3, 0.35, 0.6]"), "{now}");
+    assert!(now.contains("move = [-0.3, 0.6, 0.5]"), "{now}");
+    assert_eq!(
+        screen.state().studio().unwrap().status(),
+        "Moved 2 parts: x +0.5 m"
+    );
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    assert_eq!(text_of(&recipe), YARD);
+
+    // A plain click on one of them selects just that one again.
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    assert_eq!(selection(&screen), ["crate"]);
+}
+
+#[test]
+fn the_keys_copy_remove_hide_frame_and_select() {
+    use egui::{Key, Modifiers};
+    let (recipe, mut screen) = yard("screens_keys");
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("crate"));
+    screen.run_steps(2);
+
+    // Ctrl+D: a copy, beside it, selected.
+    screen.key_press_modifiers(Modifiers::COMMAND, Key::D);
+    screen.run_steps(3);
+    assert_eq!(selection(&screen), ["crate_2"]);
+    assert!(text_of(&recipe).contains("move = [1.4, 0.35, 0.6]"));
+    // Delete: gone again. Nothing hangs from it, so nothing is asked.
+    screen.key_press(Key::Delete);
+    screen.run_steps(3);
+    assert!(selection(&screen).is_empty());
+    assert_eq!(text_of(&recipe), YARD);
+
+    // Delete on a part that another hangs from asks first, in the panel.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("post"));
+    screen.run_steps(2);
+    screen.key_press(Key::Backspace);
+    screen.run_steps(3);
+    assert_eq!(text_of(&recipe), YARD);
+    screen.get_by_label("Another part hangs from this one. Remove it too?");
+    screen.get_by_label("Keep them").click();
+    screen.run_steps(2);
+    assert_eq!(text_of(&recipe), YARD);
+    screen.key_press(Key::Delete);
+    screen.run_steps(3);
+    screen.get_by_label("Remove them all").click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(!now.contains("post") && !now.contains("cap"), "{now}");
+    screen.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    screen.run_steps(3);
+    assert_eq!(text_of(&recipe), YARD);
+
+    // Ctrl+A selects every part; H hides them; the bar says how many,
+    // and Shift+H shows them again.
+    screen.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    screen.run_steps(2);
+    assert_eq!(selection(&screen), ["floor", "crate", "post", "cap"]);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("crate"));
+    screen.run_steps(2);
+    screen.key_press(Key::H);
+    screen.run_steps(3);
+    assert!(screen.state().studio().unwrap().is_hidden("crate"));
+    assert!(selection(&screen).is_empty());
+    screen.get_by_label("1 hidden");
+    // The recipe knows nothing of it.
+    assert_eq!(text_of(&recipe), YARD);
+    screen.key_press_modifiers(Modifiers::SHIFT, Key::H);
+    screen.run_steps(3);
+    assert!(!screen.state().studio().unwrap().is_hidden("crate"));
+    assert!(screen.query_by_label("1 hidden").is_none());
+
+    // The eye at the end of a line of the list does the same for one.
+    let eyes: Vec<_> = screen.query_all_by_label("hide").collect();
+    assert_eq!(eyes.len(), 4, "one for each part");
+    eyes[1].click();
+    screen.run_steps(3);
+    assert!(screen.state().studio().unwrap().is_hidden("crate"));
+    screen.get_by_label("show").click();
+    screen.run_steps(3);
+    assert!(!screen.state().studio().unwrap().is_hidden("crate"));
+
+    // F brings the selected part into view: closer than the whole yard.
+    let far = screen.state().studio().unwrap().orbit.distance;
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("crate"));
+    screen.run_steps(2);
+    screen.key_press(Key::F);
+    screen.run_steps(3);
+    assert!(screen.state().studio().unwrap().orbit.distance < far * 0.6);
+
+    // Shift+A opens the list of what to add on the ground.
+    screen.key_press_modifiers(Modifiers::SHIFT, Key::A);
+    screen.run_steps(3);
+    screen.get_by_label("Add a part on the ground");
+    screen
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Torus")
+        .click();
+    screen.run_steps(3);
+    assert_eq!(selection(&screen), ["torus"]);
+    assert!(text_of(&recipe).contains("shape = \"torus\""));
+    assert!(screen.query_by_label("Add a part on the ground").is_none());
+
+    // F2 puts the typing in the Name field; keys then belong to the
+    // typing, so "h" is a letter, not Hide.
+    screen.key_press(Key::F2);
+    screen.run_steps(3);
+    let name = screen.get_by_role_and_label(egui::accesskit::Role::TextInput, "Name");
+    assert!(name.is_focused(), "F2 should put the typing in Name");
+    screen.key_press_modifiers(Modifiers::COMMAND, Key::A);
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(egui::accesskit::Role::TextInput, "Name")
+        .type_text("hoop");
+    screen.run_steps(2);
+    assert!(!screen.state().studio().unwrap().is_hidden("torus"));
+    screen.key_press(Key::Enter);
+    screen.run_steps(3);
+    assert_eq!(selection(&screen), ["hoop"]);
+}
+
+#[test]
+fn a_right_click_opens_the_menu_for_the_part_under_the_pointer() {
+    let (recipe, mut screen) = yard("screens_menu");
+    // Nothing is selected: the right-click selects the crate, and opens
+    // its menu.
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    assert_eq!(selection(&screen), ["crate"]);
+    for line in [
+        "Mirror copy",
+        "Rename",
+        "Join to",
+        "Add a part here",
+        "Frame",
+    ] {
+        // (A line with a key has the key in its label too.)
+        assert!(
+            screen.query_all_by_label_contains(line).count() >= 1,
+            "the menu should have {line}"
+        );
+    }
+    // Duplicate, from the menu (the later of the two on the screen: the
+    // other is the panel's button).
+    screen
+        .query_all_by_label_contains("Duplicate")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(selection(&screen), ["crate_2"]);
+    // The menu has closed.
+    assert_eq!(screen.query_all_by_label("Mirror copy").count(), 1);
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    assert_eq!(text_of(&recipe), YARD);
+
+    // "Add a part here" adds at the point that was clicked: on the
+    // crate's surface, joined to a socket made there.
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    screen.get_by_label("Add a part here").click();
+    screen.run_steps(3);
+    screen
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Cone")
+        .click();
+    screen.run_steps(3);
+    assert_eq!(selection(&screen), ["cone"]);
+    let now = text_of(&recipe);
+    assert!(now.contains("spot = { on = "), "{now}");
+    assert!(now.contains("to = \"crate.spot\""), "{now}");
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    assert_eq!(text_of(&recipe), YARD);
+
+    // "Join to": the crate onto the top of the post.
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    screen.get_by_label("Join to").click();
+    screen.run_steps(3);
+    // (The later "post": the earlier is its line in the parts list.)
+    screen.query_all_by_label("post").last().unwrap().click();
+    screen.run_steps(3);
+    screen.query_all_by_label("left").last().unwrap().click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(now.contains("to = \"post.left\""), "{now}");
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+
+    // In the list too: a right-click on a line selects that part and
+    // opens the same menu. Hide, from it.
+    let row = screen
+        .get_by_role_and_label(egui::accesskit::Role::Button, "post")
+        .rect()
+        .center();
+    right_click_at(&mut screen, row);
+    assert_eq!(selection(&screen), ["post"]);
+    screen
+        .query_all_by_label_contains("Hide")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert!(screen.state().studio().unwrap().is_hidden("post"));
+    assert_eq!(text_of(&recipe), YARD);
+
+    // With several selected, a right-click on one of them keeps them
+    // all, and the menu is for them all.
+    screen.state_mut().studio_mut().unwrap().show_all();
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("crate"));
+    screen.state_mut().studio_mut().unwrap().toggle("post");
+    screen.run_steps(2);
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    assert_eq!(selection(&screen), ["crate", "post"]);
+    screen
+        .query_all_by_label_contains("Remove")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    // The cap hangs from the post and wasn't selected: asked first.
+    screen.get_by_label("Another part hangs from these. Remove it too?");
+    screen.get_by_label("Remove them all").click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(
+        !now.contains("crate") && !now.contains("post") && !now.contains("cap"),
+        "{now}"
+    );
+    assert_eq!(screen.state().studio().unwrap().status(), "Removed 2 parts");
+}
+
+#[test]
+fn looking_only_nothing_is_copied_or_removed_but_parts_can_be_hidden() {
+    use egui::{Key, Modifiers};
+    let recipe = copy_of("robot.toml", "screens_look_keys");
+    let before = text_of(&recipe);
+    let mut screen = harness(StudioApp::with_file(&recipe, true), false);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    screen.run_steps(2);
+    screen.key_press_modifiers(Modifiers::COMMAND, Key::D);
+    screen.key_press(Key::Delete);
+    screen.run_steps(3);
+    assert_eq!(text_of(&recipe), before);
+    assert!(screen.state().studio().unwrap().part("head").is_some());
+    screen.key_press(Key::H);
+    screen.run_steps(3);
+    assert!(screen.state().studio().unwrap().is_hidden("head"));
+    assert_eq!(text_of(&recipe), before);
+}

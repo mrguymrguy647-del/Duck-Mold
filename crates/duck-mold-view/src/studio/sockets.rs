@@ -201,7 +201,8 @@ impl Studio {
         };
         match (&self.dragging, &self.selected) {
             (Some(dragged), _) => self.could_join(dragged).into_iter().flat_map(of).collect(),
-            (None, Some(selected)) if self.facts().is_some() => {
+            // (Not with several parts selected: the dots are one part's.)
+            (None, Some(selected)) if self.also.is_empty() && self.facts().is_some() => {
                 self.part(selected).map(of).unwrap_or_default()
             }
             _ => Vec::new(),
@@ -243,15 +244,9 @@ impl Studio {
         // part here" is in the right-click menu.)
         let dragged = self.dragging.as_ref()?;
         // Through the dragged part, to what is behind it.
-        let skip = self.part(dragged)?.faces.clone();
-        let hit = viewport::pick(
-            model,
-            &self.orbit,
-            self.offset(),
-            self.view,
-            (x, y),
-            Some(&skip),
-        )?;
+        let mut skip = self.unseen();
+        skip.push(self.part(dragged)?.faces.clone());
+        let hit = viewport::pick(model, &self.orbit, self.offset(), self.view, (x, y), &skip)?;
         let part = self
             .could_join(dragged)
             .into_iter()
@@ -284,13 +279,53 @@ impl Studio {
         }
     }
 
+    /// What a part could be joined to: each part of its list that
+    /// doesn't hang from it, by name, with the names of its sockets.
+    pub fn joinable(&self, path: &str) -> Vec<(String, Vec<String>)> {
+        self.could_join(path)
+            .into_iter()
+            .map(|part| {
+                (
+                    part.name.clone(),
+                    part.sockets
+                        .iter()
+                        .map(|socket| socket.name.clone())
+                        .collect(),
+                )
+            })
+            .collect()
+    }
+
+    /// The part under the pointer, for a right-click: one of the selected
+    /// parts if the pointer is on one, and otherwise the whole part the
+    /// pointer is on. `None` over empty space.
+    pub fn part_under(&self, size: (usize, usize), at: (f64, f64)) -> Option<String> {
+        let model = self.model()?;
+        let hit = viewport::pick(model, &self.orbit, self.offset(), size, at, &self.unseen())?;
+        let on = |path: &str| {
+            self.part(path)
+                .is_some_and(|part| part.faces.contains(&hit.face))
+        };
+        self.selection()
+            .into_iter()
+            .find(|path| on(path))
+            .map(str::to_owned)
+            .or_else(|| {
+                model
+                    .parts
+                    .iter()
+                    .find(|part| part.faces.contains(&hit.face))
+                    .map(|part| part.path.clone())
+            })
+    }
+
     /// The point of a part's surface under the pointer, written the way a
     /// socket is declared: for "add a part here". The part is the
     /// selected one if the pointer is on it, and otherwise the whole
     /// part the pointer is on.
     pub fn spot_at(&self, size: (usize, usize), at: (f64, f64)) -> Option<(String, Spot)> {
         let model = self.model()?;
-        let hit = viewport::pick(model, &self.orbit, self.offset(), size, at, None)?;
+        let hit = viewport::pick(model, &self.orbit, self.offset(), size, at, &self.unseen())?;
         let part = self
             .selected
             .as_deref()

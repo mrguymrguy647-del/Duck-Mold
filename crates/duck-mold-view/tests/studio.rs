@@ -2441,3 +2441,421 @@ fn a_ring_and_a_pill_have_knobs_for_their_sizes() {
     studio.release().unwrap().unwrap();
     assert!(file(&recipe).contains("size = [1, 1, 2]"));
 }
+
+// ---- several parts, hiding, and what is done to a selection ---------------------
+
+const YARD: &str = r##"# A yard.
+version = 0
+name = "yard"
+
+[palette]
+stone = "#C0C0C0"
+red   = "#D0453A"
+blue  = "#3A6FD0"
+
+[[parts]]
+name = "floor"
+shape = "box"
+size = [4, 0.2, 4]
+color = "stone"
+
+[[parts]]
+name = "crate"
+shape = "box"
+size = [0.5, 0.5, 0.5]
+color = "red"
+move = [0.5, 0.35, 0]
+
+[[parts]]
+name = "post"
+shape = "cylinder"
+radius = 0.1
+height = 1
+color = "blue"
+move = [-0.5, 0.6, 0.5]
+
+# On the post: it goes where the post goes.
+[[parts]]
+name = "cap"
+shape = "sphere"
+radius = 0.15
+color = "red"
+attach = "bottom"
+to = "post.top"
+
+# On the floor.
+[[parts]]
+name = "flag"
+shape = "box"
+size = [0.3, 0.3, 0.05]
+color = "blue"
+attach = "bottom"
+to = "floor.top"
+"##;
+
+fn yard(test: &str) -> (PathBuf, Studio) {
+    let recipe = folder(test).join("yard.toml");
+    std::fs::write(&recipe, YARD).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    (recipe, studio)
+}
+
+/// The middle of a part's box, in the model.
+fn middle(studio: &Studio, part: &str) -> Vec3 {
+    studio.part(part).unwrap().bounds.unwrap().center()
+}
+
+#[test]
+fn several_parts_are_selected_one_after_the_other() {
+    let (_, mut studio) = yard("group_select");
+    assert!(studio.selection().is_empty());
+    assert!(studio.select(Some("crate")));
+    assert!(studio.toggle("post"));
+    // The one added last is the one the panel shows.
+    assert_eq!(studio.selection(), ["crate", "post"]);
+    assert_eq!(studio.selected(), Some("post"));
+    assert!(studio.is_selected("crate") && studio.is_selected("post"));
+    assert!(!studio.is_selected("floor"));
+    // Again takes it out.
+    assert!(!studio.toggle("post"));
+    assert_eq!(studio.selection(), ["crate"]);
+    assert!(!studio.toggle("nothing"));
+    // A plain selection is one part again.
+    studio.toggle("post");
+    studio.select(Some("floor"));
+    assert_eq!(studio.selection(), ["floor"]);
+    // Every part of the model's own list.
+    studio.select_all();
+    assert_eq!(
+        studio.selection(),
+        ["floor", "crate", "post", "cap", "flag"]
+    );
+
+    // In the picture: Shift+click on the crate, then on the post.
+    studio.select(None);
+    let on =
+        |studio: &Studio, part: &str| at_screen(studio, middle(studio, part) + studio.offset());
+    let crate_at = {
+        let top = studio.part("crate").unwrap().bounds.unwrap();
+        at_screen(
+            &studio,
+            vec3(top.center().x, top.max.y, top.center().z) + studio.offset(),
+        )
+    };
+    studio.click_adding(VIEW, crate_at);
+    let post_at = on(&studio, "post");
+    studio.click_adding(VIEW, post_at);
+    assert_eq!(studio.selection(), ["crate", "post"]);
+    // On nothing: nothing changes.
+    studio.click_adding(VIEW, (2.0, 2.0));
+    assert_eq!(studio.selection(), ["crate", "post"]);
+    // A plain click on nothing lets go of them all.
+    studio.click(VIEW, (2.0, 2.0));
+    assert!(studio.selection().is_empty());
+}
+
+#[test]
+fn several_parts_move_turn_and_grow_together() {
+    let (recipe, mut studio) = yard("group_handles");
+    studio.select(Some("crate"));
+    studio.toggle("post");
+    studio.toggle("flag");
+    let cap_was = middle(&studio, "cap");
+
+    // Move: three arrows in the middle of them. The flag is joined to
+    // the floor, which isn't selected: it stays, and the Studio says so.
+    assert_eq!(
+        studio.grips(),
+        [Grip::Arrow(0), Grip::Arrow(1), Grip::Arrow(2)]
+    );
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + vec3(0.3, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("x +0.3 m"));
+    // Nothing is written until it is let go.
+    assert_eq!(file(&recipe), YARD);
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Moved 2 parts: x +0.3 m. Not moved: flag (joined to a part that isn't selected, or inside another part)"
+    );
+    let now = file(&recipe);
+    assert_eq!(
+        changed(YARD, &now),
+        (
+            vec![
+                "move = [0.5, 0.35, 0]",
+                "",
+                "[[parts]]",
+                "name = \"post\"",
+                "shape = \"cylinder\"",
+                "radius = 0.1",
+                "height = 1",
+                "color = \"blue\"",
+                "move = [-0.5, 0.6, 0.5]"
+            ],
+            vec![
+                "move = [0.8, 0.35, 0]",
+                "",
+                "[[parts]]",
+                "name = \"post\"",
+                "shape = \"cylinder\"",
+                "radius = 0.1",
+                "height = 1",
+                "color = \"blue\"",
+                "move = [-0.2, 0.6, 0.5]"
+            ]
+        )
+    );
+    // The cap is on the post, so it went along without an edit.
+    assert!((middle(&studio, "cap") - cap_was - vec3(0.3, 0.0, 0.0)).length() < 1e-9);
+    // They are all still selected, and it was one step.
+    assert_eq!(studio.selection(), ["crate", "post", "flag"]);
+    assert_eq!(studio.can_undo(), Some(said.as_str()));
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+
+    // Dragging one of them slides them all over the ground.
+    studio.select(Some("crate"));
+    studio.toggle("post");
+    // (By the foot of its front, clear of the arrows in the middle.)
+    let hold = {
+        let around = studio.part("crate").unwrap().bounds.unwrap();
+        vec3(around.center().x + 0.15, around.min.y + 0.1, around.max.z) + studio.offset()
+    };
+    assert_eq!(
+        studio.grab(VIEW, at_screen(&studio, hold)),
+        Some(Grip::Body)
+    );
+    studio.drag(VIEW, at_screen(&studio, hold + vec3(-0.4, 0.0, 0.2)), false);
+    assert_eq!(studio.drag_label(), Some("x -0.4 m, z +0.2 m"));
+    studio.release().unwrap().unwrap();
+    let now = file(&recipe);
+    assert!(now.contains("move = [0.1, 0.35, 0.2]"), "{now}");
+    assert!(now.contains("move = [-0.9, 0.6, 0.7]"), "{now}");
+    studio.undo().unwrap();
+
+    // Rotate: a quarter turn about the upright line through the middle
+    // of the two. Each is turned, and carried round the middle.
+    studio.tool = Tool::Rotate;
+    assert_eq!(
+        studio.grips(),
+        [Grip::Ring(0), Grip::Ring(1), Grip::Ring(2)]
+    );
+    let (crate_was, post_was) = (middle(&studio, "crate"), middle(&studio, "post"));
+    // The middle of the rings is the middle of the box round both.
+    let middle_of_ring = {
+        let (a, b) = (
+            studio.part("crate").unwrap().bounds.unwrap(),
+            studio.part("post").unwrap().bounds.unwrap(),
+        );
+        (a.min.min(b.min) + a.max.max(b.max)) * 0.5 + studio.offset()
+    };
+    pull(
+        &mut studio,
+        Grip::Ring(1),
+        |from| middle_of_ring + Mat3::around_y(90.0) * (from - middle_of_ring),
+        false,
+    );
+    let label = studio.drag_label().unwrap().to_owned();
+    assert!(label == "90°" || label == "-90°", "{label}");
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, format!("Turned 2 parts: {label}"));
+    let (crate_is, post_is) = (middle(&studio, "crate"), middle(&studio, "post"));
+    // As far apart as they were, and as far from the middle, but each a
+    // quarter turn round it.
+    let flat = |v: Vec3| vec3(v.x, 0.0, v.z);
+    let mid = middle_of_ring - studio.offset();
+    for (was, is) in [(crate_was, crate_is), (post_was, post_is)] {
+        let (a, b) = (flat(was - mid), flat(is - mid));
+        assert!((a.length() - b.length()).abs() < 1e-3, "{a:?} {b:?}");
+        assert!(a.dot(b).abs() < 1e-3, "not a quarter turn: {a:?} {b:?}");
+        assert!((was.y - is.y).abs() < 1e-9);
+    }
+    let now = file(&recipe);
+    assert_eq!(now.matches("rotate = [0, ").count(), 2, "{now}");
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+
+    // Scale: one box in the middle. Twice as big, and twice as far
+    // from the middle of the two.
+    studio.tool = Tool::Scale;
+    assert_eq!(studio.grips(), [Grip::Middle]);
+    let from = studio.grip_at(Grip::Middle).unwrap();
+    let press = at_screen(&studio, from);
+    assert_eq!(studio.grab(VIEW, press), Some(Grip::Middle));
+    studio.drag(VIEW, (press.0 + 120.0, press.1), false);
+    assert_eq!(studio.drag_label(), Some("x 2"));
+    assert_eq!(studio.release().unwrap().unwrap(), "Scaled 2 parts: x 2");
+    let now = file(&recipe);
+    assert_eq!(now.matches("scale = 2\n").count(), 2, "{now}");
+    let apart_was = flat(crate_was - post_was).length();
+    let apart_is = flat(middle(&studio, "crate") - middle(&studio, "post")).length();
+    assert!(
+        (apart_is - apart_was * 2.0).abs() < 1e-3,
+        "{apart_was} {apart_is}"
+    );
+
+    // The Size tool is for one shape: no knobs on several.
+    studio.tool = Tool::Size;
+    assert!(studio.grips().is_empty());
+}
+
+#[test]
+fn a_hidden_part_isnt_drawn_or_clicked_but_stays_in_the_model() {
+    let (recipe, mut studio) = yard("hide");
+    let shown = studio.picture(VIEW.0, VIEW.1);
+    let crate_at = {
+        let top = studio.part("crate").unwrap().bounds.unwrap();
+        at_screen(
+            &studio,
+            vec3(top.center().x, top.max.y, top.center().z) + studio.offset(),
+        )
+    };
+    studio.select(Some("crate"));
+    assert_eq!(studio.hide_selected(), 1);
+    assert_eq!(
+        studio.status(),
+        "Hid \"crate\". It is still in the model, and in what Export writes"
+    );
+    // It is no longer selected, nor drawn, nor in the way of a click.
+    assert!(studio.selection().is_empty());
+    assert!(studio.is_hidden("crate"));
+    assert_eq!(studio.hidden_count(), 1);
+    let hidden = studio.picture(VIEW.0, VIEW.1);
+    assert_ne!(hidden.pixels, shown.pixels);
+    assert_eq!(studio.click(VIEW, crate_at), Some("floor"));
+    let row = |studio: &Studio, path: &str| {
+        studio
+            .outline()
+            .into_iter()
+            .find(|row| row.path == path)
+            .unwrap()
+    };
+    assert!(row(&studio, "crate").hidden);
+    assert!(!row(&studio, "post").hidden);
+    // The recipe knows nothing of it, and the model has every part.
+    assert_eq!(file(&recipe), YARD);
+    assert!(studio.part("crate").is_some());
+    let exported = studio.export().unwrap();
+    assert!(exported.starts_with("Wrote yard.glb"), "{exported}");
+    let glb = recipe.with_extension("glb");
+    let model = duck_mold_core::glb::read_glb(&std::fs::read(glb).unwrap(), "yard.glb").unwrap();
+    assert!(model.parts.iter().any(|part| part.name == "crate"));
+
+    // Hiding a part hides what is inside it; select all leaves it out.
+    studio.select_all();
+    assert_eq!(studio.selection(), ["floor", "post", "cap", "flag"]);
+    // An edit elsewhere doesn't bring it back.
+    studio.select(Some("post"));
+    studio.duplicate_selected(false).unwrap();
+    assert!(studio.is_hidden("crate"));
+    // Showing everything does.
+    assert_eq!(studio.show_all(), 1);
+    assert_eq!(studio.status(), "Showing the hidden part again");
+    assert!(!studio.is_hidden("crate"));
+    studio.undo().unwrap();
+    assert_eq!(studio.picture(VIEW.0, VIEW.1).pixels, shown.pixels);
+
+    // One at a time, by name.
+    studio.set_hidden("post", true);
+    studio.set_hidden("flag", true);
+    assert_eq!(studio.status(), "Hid \"flag\": 2 hidden");
+    studio.set_hidden("post", false);
+    assert_eq!(studio.status(), "Showing \"post\" again: 1 still hidden");
+    assert_eq!(studio.hidden_count(), 1);
+}
+
+#[test]
+fn a_selection_is_copied_removed_coloured_and_unjoined_in_one_step() {
+    let (recipe, mut studio) = yard("group_actions");
+
+    // A copy of a free part stands beside it, selected.
+    studio.select(Some("crate"));
+    let said = studio.duplicate_selected(false).unwrap();
+    assert!(
+        said.starts_with("Copied \"crate\" as \"crate_2\""),
+        "{said}"
+    );
+    assert_eq!(studio.selection(), ["crate_2"]);
+    let now = file(&recipe);
+    assert!(
+        now.contains("name = \"crate_2\"\nshape = \"box\"\nsize = [0.5, 0.5, 0.5]\ncolor = \"red\"\nmove = [1.1, 0.35, 0]"),
+        "{now}"
+    );
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+
+    // A copy of a joined part is joined to the same socket.
+    studio.select(Some("cap"));
+    studio.duplicate_selected(false).unwrap();
+    assert_eq!(studio.selection(), ["cap_2"]);
+    assert_eq!(
+        studio.part("cap_2").unwrap().attached_to.as_deref(),
+        Some("post.top")
+    );
+    studio.undo().unwrap();
+
+    // Two at once: both copies are selected, beside the two.
+    studio.select(Some("crate"));
+    studio.toggle("post");
+    assert_eq!(studio.duplicate_selected(false).unwrap(), "Copied 2 parts");
+    assert_eq!(studio.selection(), ["crate_2", "post_2"]);
+    let apart = middle(&studio, "crate_2") - middle(&studio, "crate");
+    assert!((apart - (middle(&studio, "post_2") - middle(&studio, "post"))).length() < 1e-9);
+    assert!(apart.x > 1.0 && apart.y.abs() < 1e-9 && apart.z.abs() < 1e-9);
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+
+    // One colour for all of them.
+    studio.select(Some("crate"));
+    studio.toggle("post");
+    studio.toggle("flag");
+    assert_eq!(
+        studio.colour_selected("stone").unwrap(),
+        "Coloured 3 parts stone"
+    );
+    assert_eq!(file(&recipe).matches("color = \"stone\"").count(), 4);
+    assert_eq!(studio.selection(), ["crate", "post", "flag"]);
+    studio.undo().unwrap();
+
+    // Unjoin: only the joined ones, each right where it stands.
+    studio.select(Some("cap"));
+    studio.toggle("flag");
+    studio.toggle("crate");
+    let (cap_was, flag_was) = (middle(&studio, "cap"), middle(&studio, "flag"));
+    studio.unjoin_selected().unwrap();
+    for (part, was) in [("cap", cap_was), ("flag", flag_was)] {
+        assert_eq!(studio.part(part).unwrap().attached_to, None, "{part}");
+        assert!((middle(&studio, part) - was).length() < 1e-6, "{part}");
+    }
+    studio.undo().unwrap();
+    studio.select(Some("crate"));
+    assert!(studio.unjoin_selected().is_err());
+
+    // Remove: the cap hangs from the post and isn't selected, so the
+    // Studio can ask first.
+    studio.select(Some("post"));
+    studio.toggle("crate");
+    assert_eq!(studio.hanging_from_selection(), 1);
+    assert!(studio.remove_selected(false).is_err());
+    assert_eq!(file(&recipe), YARD);
+    assert_eq!(studio.remove_selected(true).unwrap(), "Removed 2 parts");
+    assert!(studio.selection().is_empty());
+    for gone in ["post", "crate", "cap"] {
+        assert!(studio.part(gone).is_none(), "{gone}");
+    }
+    assert!(studio.part("flag").is_some());
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+    // With the cap selected too, nothing is left hanging: no question.
+    studio.select(Some("post"));
+    studio.toggle("cap");
+    assert_eq!(studio.hanging_from_selection(), 0);
+    studio.remove_selected(false).unwrap();
+    assert!(studio.part("post").is_none() && studio.part("cap").is_none());
+}

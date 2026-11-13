@@ -205,6 +205,42 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "shape-torus"));
     }
 
+    // Several parts selected, with the arrows that move them together
+    // and the panel for them all; the right-click menu; and a hidden
+    // part, struck through in the list and counted in the bar.
+    {
+        let recipe = folder("pictures_several").join("yard.toml");
+        std::fs::write(
+            &recipe,
+            "version = 0\nname = \"yard\"\n\n[palette]\nstone = \"#C0C0C0\"\nred = \"#D0453A\"\nblue = \"#3A6FD0\"\n\n[[parts]]\nname = \"floor\"\nshape = \"box\"\nsize = [4, 0.2, 4]\ncolor = \"stone\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.5, 0.5, 0.5]\ncolor = \"red\"\nmove = [0.8, 0.35, 0.6]\n\n[[parts]]\nname = \"post\"\nshape = \"cylinder\"\nradius = 0.1\nheight = 1\ncolor = \"blue\"\nmove = [-0.8, 0.6, 0.5]\n\n[[parts]]\nname = \"cap\"\nshape = \"sphere\"\nradius = 0.15\ncolor = \"red\"\nattach = \"bottom\"\nto = \"post.top\"\n",
+        )
+        .unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("crate"));
+        screen.state_mut().studio_mut().unwrap().toggle("post");
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "several"));
+        let at = on_screen(&screen, "crate");
+        right_click_at(&mut screen, at);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "menu"));
+        screen.key_press(egui::Key::Escape);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("post"));
+        screen.key_press(egui::Key::H);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "hidden"));
+    }
+
     // A recipe saved with a mistake: the problems, and the last good
     // model still up.
     {

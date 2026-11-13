@@ -12,6 +12,7 @@ use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::handles::Tool;
 use eframe::egui::{self, Rect, RichText, Sense};
 
+use crate::actions::{self, Action};
 use crate::recent::Recent;
 use crate::{library, properties, theme, view};
 
@@ -136,6 +137,8 @@ impl StudioApp {
             .request_repaint_after(std::time::Duration::from_millis(250));
 
         let mut open_another = false;
+        // What a menu or a key asked for, carried out at the end.
+        let mut asked: Option<Action> = None;
         egui::Panel::top("duck_mold_bar").show(ui, |ui| {
             ui.add_space(2.0);
             ui.horizontal(|ui| {
@@ -203,6 +206,16 @@ impl StudioApp {
                 }
                 ui.toggle_value(&mut studio.grid, "Grid")
                     .on_hover_text("The grid on the ground: one square is one metre");
+                if studio.hidden_count() > 0
+                    && ui
+                        .button(format!("{} hidden", studio.hidden_count()))
+                        .on_hover_text(
+                            "Parts that aren't drawn. They are still in the model. Click to show them all (Shift+H)",
+                        )
+                        .clicked()
+                {
+                    asked = Some(Action::ShowAll);
+                }
                 ui.separator();
                 if ui
                     .button("Export")
@@ -244,7 +257,13 @@ impl StudioApp {
                         .min_size(80.0)
                         .show(ui, |ui| library::panel(ui, studio, &mut self.thumbs));
                 }
-                outliner(ui, studio, &mut self.shown_selected);
+                if let Some(action) =
+                    outliner(ui, studio, &mut self.shown_selected, &mut self.thumbs)
+                {
+                    // From the list there is no point of a surface.
+                    self.view.clear_menu_spot();
+                    asked = Some(action);
+                }
             });
 
         egui::Panel::right("duck_mold_properties")
@@ -258,7 +277,9 @@ impl StudioApp {
             });
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
-            view::show(ui, studio, &mut self.view, &mut self.thumbs);
+            if let Some(action) = view::show(ui, studio, &mut self.view, &mut self.thumbs) {
+                asked = Some(action);
+            }
         });
 
         // Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes, unless a
@@ -289,6 +310,73 @@ impl StudioApp {
                 if ui.input(|input| input.modifiers.is_none() && input.key_pressed(key)) {
                     studio.tool = tool;
                 }
+            }
+            if let Some(action) = actions::keys(ui) {
+                asked = Some(action);
+            }
+        }
+        // Looking only, the keys that change nothing still work.
+        if studio.look_only() && !ui.ctx().egui_wants_keyboard_input() {
+            asked = asked.or(actions::keys(ui).filter(|action| {
+                matches!(
+                    action,
+                    Action::Frame | Action::Hide | Action::ShowAll | Action::SelectAll
+                )
+            }));
+        }
+        if let Some(action) = asked {
+            match action {
+                Action::Duplicate => {
+                    let _ = studio.duplicate_selected(false);
+                }
+                Action::MirrorCopy => {
+                    let _ = studio.duplicate_selected(true);
+                }
+                Action::Rename => {
+                    if studio.selection().len() == 1 {
+                        self.draft.rename();
+                    }
+                }
+                Action::Remove => {
+                    if !studio.selection().is_empty() {
+                        self.draft.remove(studio);
+                    }
+                }
+                Action::Unjoin => {
+                    let _ = studio.unjoin_selected();
+                }
+                Action::JoinTo(to) => {
+                    if let Some(part) = studio.selected().map(str::to_owned) {
+                        let _ = studio.apply(&duck_mold_core::edit::Edit::Join {
+                            part,
+                            to,
+                            attach: None,
+                        });
+                    }
+                }
+                Action::AddHere(made) => {
+                    // At the point the menu was opened at; from the
+                    // list, on the part's top.
+                    let _ = match self.view.take_menu_spot() {
+                        Some((part, spot)) => studio.add_to_surface(&part, &spot, &made),
+                        None => match studio.selected().map(str::to_owned) {
+                            Some(part) => studio.add_to_socket(&part, "top", &made),
+                            None => studio.add_free(&made),
+                        },
+                    };
+                }
+                Action::AddFree(made) => {
+                    let _ = studio.add_free(&made);
+                }
+                Action::OpenAdd => self.view.add_on_ground(),
+                Action::Frame => studio.frame(),
+                Action::Hide => {
+                    studio.hide_selected();
+                }
+                Action::ShowAll => {
+                    studio.show_all();
+                }
+                Action::SelectAll => studio.select_all(),
             }
         }
 
@@ -419,9 +507,17 @@ fn pick_new_file() -> Option<PathBuf> {
         .save_file()
 }
 
-/// The parts, as a tree. A click selects one; the selected one is
-/// marked, and scrolled to when it was selected somewhere else.
-fn outliner(ui: &mut egui::Ui, studio: &mut Studio, shown_selected: &mut Option<String>) {
+/// The parts, as a tree. A click selects one, Shift+click adds one to
+/// the selection or takes it out, and a right-click opens the menu. The
+/// eye at the end of a line hides the part, or shows it again. The
+/// selected ones are marked, and the one selected last is scrolled to
+/// when it was selected somewhere else. Gives what the menu asked for.
+fn outliner(
+    ui: &mut egui::Ui,
+    studio: &mut Studio,
+    shown_selected: &mut Option<String>,
+    thumbs: &mut library::Thumbs,
+) -> Option<Action> {
     ui.add_space(4.0);
     ui.label(RichText::new("Parts").strong());
     if let Some(headline) = studio.headline() {
@@ -430,7 +526,11 @@ fn outliner(ui: &mut egui::Ui, studio: &mut Studio, shown_selected: &mut Option<
     ui.separator();
     let selected = studio.selected().map(str::to_owned);
     let newly_selected = selected != *shown_selected;
+    let shift = ui.input(|input| input.modifiers.shift);
     let mut clicked = None;
+    let mut menu_for = None;
+    let mut eye = None;
+    let mut asked = None;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
         .show(ui, |ui| {
@@ -439,31 +539,73 @@ fn outliner(ui: &mut egui::Ui, studio: &mut Studio, shown_selected: &mut Option<
                 ui.label(RichText::new("No parts to show.").weak());
             }
             for row in rows {
-                let is_selected = selected.as_deref() == Some(row.path.as_str());
+                let is_selected = studio.is_selected(&row.path);
                 ui.horizontal(|ui| {
                     ui.add_space(row.depth as f32 * 14.0);
+                    let words = if row.hidden {
+                        RichText::new(&row.name).weak().strikethrough()
+                    } else {
+                        RichText::new(&row.name)
+                    };
                     let name = ui
-                        .selectable_label(is_selected, &row.name)
+                        .selectable_label(is_selected, words)
                         .on_hover_text(format!("{}: {} triangles", row.path, row.triangles));
                     if name.clicked() {
                         clicked = Some(row.path.clone());
                     }
-                    if is_selected && newly_selected {
+                    if name.secondary_clicked() {
+                        menu_for = Some(row.path.clone());
+                    }
+                    name.context_menu(|ui| {
+                        if let Some(action) = actions::part_menu(ui, studio, thumbs) {
+                            asked = Some(action);
+                        }
+                    });
+                    if selected.as_deref() == Some(row.path.as_str()) && newly_selected {
                         name.scroll_to_me(None);
                     }
                     ui.label(RichText::new(&row.kind).weak().small());
+                    // The eye: at the right of the line.
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (mark, tip) = if row.hidden {
+                            ("show", "Hidden: click to show it again")
+                        } else {
+                            ("hide", "Click to hide it. It stays in the model")
+                        };
+                        let button =
+                            egui::Button::new(RichText::new(mark).small().weak()).frame(row.hidden);
+                        if ui
+                            .add(button)
+                            .on_hover_text(format!("{tip} ({})", row.path))
+                            .clicked()
+                        {
+                            eye = Some((row.path.clone(), !row.hidden));
+                        }
+                    });
                 });
             }
         });
     *shown_selected = selected;
+    if let Some(path) = menu_for
+        && !studio.is_selected(&path)
+    {
+        // A right-click on a part that isn't selected selects it first.
+        studio.select(Some(&path));
+    }
     if let Some(path) = clicked {
-        // Clicking the selected part again lets go of it.
-        if studio.selected() == Some(path.as_str()) {
+        if shift {
+            studio.toggle(&path);
+        } else if studio.selection() == [path.as_str()] {
+            // Clicking the only selected part again lets go of it.
             studio.select(None);
         } else {
             studio.select(Some(&path));
         }
     }
+    if let Some((path, hidden)) = eye {
+        studio.set_hidden(&path, hidden);
+    }
+    asked
 }
 
 /// What is wrong with the file, or that nothing is.

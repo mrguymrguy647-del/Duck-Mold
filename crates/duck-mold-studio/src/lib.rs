@@ -8,6 +8,7 @@
 //! inside Duck Forge's Studio: [`StudioApp::ui`] draws into whatever space
 //! it is given.
 
+pub mod actions;
 pub mod app;
 pub mod library;
 pub mod properties;

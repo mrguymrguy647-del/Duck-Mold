@@ -253,6 +253,8 @@ pub struct Look<'a> {
     pub offset: Vec3,
     /// The selected parts: brightened, with the box round each drawn.
     pub selected: &'a [&'a Part],
+    /// The faces that aren't drawn: those of hidden parts.
+    pub hidden: &'a [Range<usize>],
     /// The sockets to show.
     pub markers: &'a [Marker],
     /// Which of `markers` the pointer is on.
@@ -397,7 +399,7 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
             .iter()
             .map(|part| part.faces.clone())
             .collect();
-        let mesh = mesh_of(model, orbit, offset, &lit);
+        let mesh = mesh_of(model, orbit, offset, &lit, look.hidden);
         // The light comes from over the viewer's left shoulder, whichever
         // way the model is turned.
         canvas.set_lighting(Lighting {
@@ -493,10 +495,19 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
 }
 
 /// The model as a Duck Forge mesh, already turned for the camera. The
-/// faces in `lit` are brightened.
-fn mesh_of(model: &Model, orbit: &Orbit, offset: Vec3, lit: &[Range<usize>]) -> Mesh {
+/// faces in `lit` are brightened; those in `hidden` are left out.
+fn mesh_of(
+    model: &Model,
+    orbit: &Orbit,
+    offset: Vec3,
+    lit: &[Range<usize>],
+    hidden: &[Range<usize>],
+) -> Mesh {
     let mut mesh = Mesh::new();
     for (at, face) in model.faces.iter().enumerate() {
+        if hidden.iter().any(|hidden| hidden.contains(&at)) {
+            continue;
+        }
         let mut rgb = face
             .color
             .and_then(|color| model.palette.get(color))
@@ -551,13 +562,13 @@ pub fn pick(
     offset: Vec3,
     size: (usize, usize),
     at: (f64, f64),
-    skip: Option<&Range<usize>>,
+    skip: &[Range<usize>],
 ) -> Option<Hit> {
     // The line from the eye through the pointer, as the camera sees it.
     let ray = ray_through(size, at);
     let mut nearest: Option<(f64, usize)> = None;
     for (at, face) in model.faces.iter().enumerate() {
-        if skip.is_some_and(|skip| skip.contains(&at)) {
+        if skip.iter().any(|skip| skip.contains(&at)) {
             continue;
         }
         let seen: Vec<Vec3> = face

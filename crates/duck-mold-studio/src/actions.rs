@@ -1,0 +1,160 @@
+//! The things a person can ask for from a menu or a key, and the menu a
+//! right-click opens.
+//!
+//! A menu line and a key both give an [`Action`]; the window carries it
+//! out in one place. Every action that changes the model is an edit an
+//! agent can run too: this only chooses which.
+
+use duck_mold_core::edit::Made;
+use duck_mold_view::studio::Studio;
+use eframe::egui::{self, RichText};
+
+use crate::library::Thumbs;
+use crate::view;
+
+/// Something asked for.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Action {
+    /// A copy of each selected part.
+    Duplicate,
+    /// A mirror image of each selected part.
+    MirrorCopy,
+    /// Type a new name for the selected part.
+    Rename,
+    /// Remove the selected parts.
+    Remove,
+    /// Make the selected parts that are joined free.
+    Unjoin,
+    /// Join the selected part to this socket: `body.neck`.
+    JoinTo(String),
+    /// Add a part where the menu was opened: at that point of the part's
+    /// surface, or on its top.
+    AddHere(Made),
+    /// Add a part on the ground, joined to nothing.
+    AddFree(Made),
+    /// Open the list of what can be added on the ground.
+    OpenAdd,
+    /// Bring what is selected (or everything) into view.
+    Frame,
+    /// Stop drawing the selected parts.
+    Hide,
+    /// Draw every hidden part again.
+    ShowAll,
+    /// Select every part.
+    SelectAll,
+}
+
+/// A line of a menu, with its key at the right. True when clicked.
+fn line(ui: &mut egui::Ui, enabled: bool, words: &str, key: &str) -> bool {
+    let button = egui::Button::new(words).shortcut_text(key);
+    ui.add_enabled(enabled, button).clicked()
+}
+
+/// The menu for the selected parts: what a right-click on a part opens,
+/// in the picture or in the list. Gives what was chosen. `here` says
+/// whether the menu was opened at a point of a part ("Add a part here"
+/// then means that point).
+pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) -> Option<Action> {
+    let mut chosen = None;
+    let selection: Vec<String> = studio.selection().into_iter().map(str::to_owned).collect();
+    let one = (selection.len() == 1).then(|| selection[0].clone());
+    let any = !selection.is_empty();
+    let edits = any && !studio.look_only();
+    ui.set_min_width(190.0);
+    let title = match (&one, selection.len()) {
+        (Some(path), _) => path.clone(),
+        (None, 0) => "Nothing selected".to_owned(),
+        (None, count) => format!("{count} parts"),
+    };
+    ui.label(RichText::new(title).weak().small());
+    if line(ui, edits, "Duplicate", "Ctrl+D") {
+        chosen = Some(Action::Duplicate);
+    }
+    if line(ui, edits, "Mirror copy", "") {
+        chosen = Some(Action::MirrorCopy);
+    }
+    if line(ui, edits && one.is_some(), "Rename", "F2") {
+        chosen = Some(Action::Rename);
+    }
+    if line(ui, edits, "Remove", "Delete") {
+        chosen = Some(Action::Remove);
+    }
+    ui.separator();
+    // What it could be joined to, part by part, socket by socket.
+    let joinable = one
+        .as_deref()
+        .filter(|_| edits)
+        .map(|path| studio.joinable(path))
+        .unwrap_or_default();
+    ui.add_enabled_ui(!joinable.is_empty(), |ui| {
+        ui.menu_button("Join to", |ui| {
+            for (part, sockets) in &joinable {
+                ui.menu_button(part, |ui| {
+                    for socket in sockets {
+                        if ui.button(socket).clicked() {
+                            chosen = Some(Action::JoinTo(format!("{part}.{socket}")));
+                        }
+                    }
+                });
+            }
+        });
+    });
+    let joined = selection.iter().any(|path| {
+        studio
+            .part(path)
+            .is_some_and(|part| part.attached_to.is_some())
+    });
+    if line(ui, edits && joined, "Unjoin", "") {
+        chosen = Some(Action::Unjoin);
+    }
+    ui.add_enabled_ui(edits && one.is_some(), |ui| {
+        ui.menu_button("Add a part here", |ui| {
+            if let Some(made) = view::choices(ui, studio, thumbs) {
+                chosen = Some(Action::AddHere(made));
+            }
+        });
+    });
+    ui.separator();
+    if line(ui, true, "Frame", "F") {
+        chosen = Some(Action::Frame);
+    }
+    if line(ui, any, "Hide", "H") {
+        chosen = Some(Action::Hide);
+    }
+    if studio.hidden_count() > 0 && line(ui, true, "Show everything hidden", "Shift+H") {
+        chosen = Some(Action::ShowAll);
+    }
+    if chosen.is_some() {
+        ui.close();
+    }
+    chosen
+}
+
+/// The keys that ask for something, when no field is being typed in.
+/// (Undo, redo and the tools' keys are the window's own.)
+pub fn keys(ui: &egui::Ui) -> Option<Action> {
+    use egui::{Key, Modifiers};
+    ui.input_mut(|input| {
+        let mut pressed = |modifiers: Modifiers, key: Key| input.consume_key(modifiers, key);
+        if pressed(Modifiers::COMMAND, Key::D) {
+            Some(Action::Duplicate)
+        } else if pressed(Modifiers::COMMAND, Key::A) {
+            Some(Action::SelectAll)
+        } else if pressed(Modifiers::SHIFT, Key::A) {
+            Some(Action::OpenAdd)
+        } else if pressed(Modifiers::SHIFT, Key::H) {
+            Some(Action::ShowAll)
+        } else if pressed(Modifiers::NONE, Key::H) {
+            Some(Action::Hide)
+        } else if pressed(Modifiers::NONE, Key::F) {
+            Some(Action::Frame)
+        } else if pressed(Modifiers::NONE, Key::F2) {
+            Some(Action::Rename)
+        } else if pressed(Modifiers::NONE, Key::Delete) || pressed(Modifiers::NONE, Key::Backspace)
+        {
+            Some(Action::Remove)
+        } else {
+            None
+        }
+    })
+}

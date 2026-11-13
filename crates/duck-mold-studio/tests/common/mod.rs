@@ -144,3 +144,54 @@ pub fn point_on_screen(
             y as f32 * rect.height() / height as f32,
         )
 }
+
+/// A click with another button, or with a key held: presses and lets
+/// go without moving.
+pub fn click_with(
+    screen: &mut Harness<'static, StudioApp>,
+    at: egui::Pos2,
+    button: egui::PointerButton,
+    modifiers: egui::Modifiers,
+) {
+    screen.hover_at(at);
+    screen.step();
+    for pressed in [true, false] {
+        screen.event_modifiers(
+            egui::Event::PointerButton {
+                pos: at,
+                button,
+                pressed,
+                modifiers,
+            },
+            modifiers,
+        );
+        screen.step();
+    }
+    screen.run_steps(2);
+}
+
+/// A click of the right button.
+pub fn right_click_at(screen: &mut Harness<'static, StudioApp>, at: egui::Pos2) {
+    click_with(
+        screen,
+        at,
+        egui::PointerButton::Secondary,
+        egui::Modifiers::NONE,
+    );
+}
+
+/// A click with Shift held.
+pub fn shift_click_at(screen: &mut Harness<'static, StudioApp>, at: egui::Pos2) {
+    click_with(
+        screen,
+        at,
+        egui::PointerButton::Primary,
+        egui::Modifiers::SHIFT,
+    );
+}
+
+/// The paths of the selected parts.
+pub fn selection(screen: &Harness<'static, StudioApp>) -> Vec<String> {
+    let studio = screen.state().studio().unwrap();
+    studio.selection().into_iter().map(str::to_owned).collect()
+}

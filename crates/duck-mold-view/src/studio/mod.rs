@@ -11,6 +11,7 @@
 //! after which it reads and builds the file again. When another program
 //! saves the file, it does the same.
 
+mod group;
 pub mod handles;
 pub mod history;
 pub mod library;
@@ -80,6 +81,8 @@ pub struct Row {
     pub depth: usize,
     /// How many triangles it has.
     pub triangles: usize,
+    /// Whether it is hidden in the picture (itself, or what it is in).
+    pub hidden: bool,
 }
 
 /// The Studio: one open file, the view of it, and what is known about it.
@@ -98,8 +101,14 @@ pub struct Studio {
     pub orbit: Orbit,
     /// Whether the grid on the ground is drawn.
     pub grid: bool,
-    /// The part that is selected, by path.
+    /// The part that is selected, by path. When several are, this is
+    /// the one selected last: the one the panel shows.
     pub(crate) selected: Option<String>,
+    /// The other selected parts, by path, in the order they were added.
+    pub(crate) also: Vec<String>,
+    /// The parts that aren't drawn, by path. Only the picture knows:
+    /// the recipe doesn't, and a hidden part is exported like any other.
+    pub(crate) hidden: Vec<String>,
     status: String,
     since_check: f64,
     builds: usize,
@@ -140,6 +149,8 @@ impl Studio {
             orbit: Orbit::framing(None),
             grid: true,
             selected: None,
+            also: Vec::new(),
+            hidden: Vec::new(),
             status: String::new(),
             since_check: 0.0,
             builds: 0,
@@ -294,12 +305,23 @@ impl Studio {
                 ..problem
             })
             .collect();
-        // A selected part that is gone is no longer selected.
+        // A selected part that is gone is no longer selected, nor a
+        // hidden one hidden.
+        let also = std::mem::take(&mut self.also);
+        self.also = also
+            .into_iter()
+            .filter(|path| self.part(path).is_some())
+            .collect();
         if let Some(selected) = &self.selected
             && self.part(selected).is_none()
         {
-            self.selected = None;
+            self.selected = self.also.pop();
         }
+        let hidden = std::mem::take(&mut self.hidden);
+        self.hidden = hidden
+            .into_iter()
+            .filter(|path| self.part(path).is_some())
+            .collect();
     }
 
     /// True if a watched file has been saved, made or removed since it
@@ -368,6 +390,7 @@ impl Studio {
                     kind,
                     depth,
                     triangles: part.triangles,
+                    hidden: false,
                 });
                 walk(&part.parts, depth + 1, rows);
             }
@@ -378,6 +401,7 @@ impl Studio {
         }
         for row in &mut rows {
             row.kind = self.shorten(&row.kind);
+            row.hidden = self.is_hidden(&row.path);
         }
         rows
     }
@@ -394,10 +418,12 @@ impl Studio {
         match path {
             None => {
                 self.selected = None;
+                self.also.clear();
                 true
             }
             Some(path) if self.part(path).is_some() => {
                 self.selected = Some(path.to_owned());
+                self.also.clear();
                 true
             }
             Some(_) => false,
@@ -413,9 +439,10 @@ impl Studio {
     /// the first click on a robot's hand selects its arm, and the second
     /// the hand.
     pub fn click(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<&str> {
-        let hit = self
-            .model()
-            .and_then(|model| viewport::pick(model, &self.orbit, self.offset(), size, at, None));
+        let hit = self.model().and_then(|model| {
+            viewport::pick(model, &self.orbit, self.offset(), size, at, &self.unseen())
+        });
+        self.also.clear();
         let Some(hit) = hit else {
             self.selected = None;
             return None;
@@ -479,6 +506,17 @@ impl Studio {
     /// checked once, written once, and one step to undo. If one of them
     /// can't be made, none is.
     pub fn apply_all(&mut self, changes: &[Edit]) -> Result<String, String> {
+        self.apply_as(changes, None)
+    }
+
+    /// [`Studio::apply_all`], said in the words given instead of the
+    /// edits' own: for many edits that are one thing to the person
+    /// ("Moved 3 parts").
+    pub(crate) fn apply_as(
+        &mut self,
+        changes: &[Edit],
+        say: Option<String>,
+    ) -> Result<String, String> {
         if self.look_only {
             let why = "This window is only for looking: nothing was changed".to_owned();
             self.say(why.clone());
@@ -497,22 +535,45 @@ impl Studio {
                     .iter()
                     .rev()
                     .find_map(|change| self.selection_after(change));
+                let selected_before = self.selection_owned();
                 self.reload();
+                let mut copies = Vec::new();
                 if changes
                     .iter()
                     .any(|change| matches!(change, Edit::Duplicate { .. }))
                 {
-                    // The copy is the part that wasn't there before.
-                    follow = self
+                    // The copies are the parts that weren't there before
+                    // (and not the parts inside them).
+                    let new: Vec<String> = self
                         .outline()
                         .into_iter()
                         .map(|row| row.path)
-                        .find(|path| !parts_before.contains(path));
+                        .filter(|path| !parts_before.contains(path))
+                        .collect();
+                    copies = new
+                        .iter()
+                        .filter(|path| {
+                            path.rsplit_once('/')
+                                .is_none_or(|(around, _)| !new.iter().any(|other| other == around))
+                        })
+                        .cloned()
+                        .collect();
+                    follow = copies.pop();
                 }
                 if let Some(path) = follow {
                     self.select(Some(&path));
+                    // Several copies are all selected.
+                    self.also = copies;
+                } else if selected_before.len() > 1 {
+                    // Several parts changed together stay selected.
+                    let mut still: Vec<String> = selected_before
+                        .into_iter()
+                        .filter(|path| self.part(path).is_some())
+                        .collect();
+                    self.selected = still.pop();
+                    self.also = still;
                 }
-                let mut said = edited.edit.summary.clone();
+                let mut said = say.unwrap_or_else(|| edited.edit.summary.clone());
                 if !edited.edit.also_changes.is_empty() {
                     said.push_str(&format!(
                         " (also changed: {})",
@@ -599,10 +660,13 @@ impl Studio {
     /// one is), without turning the camera.
     pub fn frame(&mut self) {
         let bounds = self
-            .selected
-            .as_deref()
-            .and_then(|path| self.part(path))
-            .and_then(|part| part.bounds)
+            .selection()
+            .into_iter()
+            .filter_map(|path| self.part(path)?.bounds)
+            .reduce(|all, one| Bounds {
+                min: all.min.min(one.min),
+                max: all.max.max(one.max),
+            })
             .or_else(|| self.model().and_then(Model::bounds));
         if let Some(bounds) = bounds {
             let offset = self.offset();
@@ -640,20 +704,22 @@ impl Studio {
             None => None,
         };
         let model = self.shown_model();
-        // The selected part as it is in what is shown.
+        // The selected parts as they are in what is shown.
         let selected: Vec<&Part> = self
-            .selected
-            .as_deref()
-            .and_then(|path| part_in(&model?.parts, path))
+            .selection()
             .into_iter()
+            .filter(|path| !self.is_hidden(path))
+            .filter_map(|path| part_in(&model?.parts, path))
             .collect();
         let marks = self.marks(width, height);
+        let hidden = self.unseen_in(model);
         viewport::draw(
             &Look {
                 model,
                 orbit: &self.orbit,
                 offset: self.offset(),
                 selected: &selected,
+                hidden: &hidden,
                 markers: &markers,
                 hot,
                 marks: &marks,

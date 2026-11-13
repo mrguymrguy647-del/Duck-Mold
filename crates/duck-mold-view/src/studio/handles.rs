@@ -122,6 +122,29 @@ struct Gizmo {
     joined: Option<Joined>,
     /// The Size tool's knobs, on the faces of a shape.
     knobs: Vec<Knob>,
+    /// Set when several parts are selected: the handles hold them all.
+    group: Option<Group>,
+}
+
+/// Several parts held together.
+#[derive(Debug, Clone, PartialEq)]
+struct Group {
+    /// The parts the handles move, by an edit each: the free ones in the
+    /// same list as the part selected last.
+    moved: Vec<Member>,
+    /// The selected parts that stay where they are: joined to a part
+    /// that isn't selected, or in another list.
+    stayed: Vec<String>,
+}
+
+/// One of the parts held together.
+#[derive(Debug, Clone, PartialEq)]
+struct Member {
+    path: String,
+    /// What the recipe said about it when the handles were made.
+    facts: Facts,
+    /// Where its `move` places it, in the model.
+    at: Vec3,
 }
 
 /// Which of a shape's own sizes a knob changes.
@@ -281,6 +304,61 @@ impl Studio {
             list[at] = column * (1.0 / units[at]);
             own[at] = part.place.turn.column(at).normalized()?;
         }
+        if !self.also.is_empty() {
+            // Several parts: the free ones in this list are moved, each
+            // by its own edit. What is joined to one of them, or inside
+            // one, goes along. The rest stay.
+            let syntax = Syntax::from_path(&self.path)?;
+            let mut moved = Vec::new();
+            let mut stayed = Vec::new();
+            for member in self.selection() {
+                let same_list = member.rsplit_once('/').map(|(around, _)| around) == around;
+                let named = !member.rsplit('/').next()?.starts_with('#');
+                let held = part_in(&model.parts, member)
+                    .zip(edit::describe(&self.text, syntax, self.model(), member))
+                    .filter(|(_, facts)| same_list && named && facts.to.is_none());
+                match held {
+                    Some((held, facts)) => moved.push(Member {
+                        path: member.to_owned(),
+                        facts,
+                        at: held.place.shift,
+                    }),
+                    None => stayed.push(member.to_owned()),
+                }
+            }
+            let carried: Vec<String> = moved
+                .iter()
+                .flat_map(|member| self.hanging_from(&member.path))
+                .collect();
+            stayed.retain(|path| {
+                !carried.contains(path)
+                    && !moved.iter().any(|member| {
+                        path.strip_prefix(member.path.as_str())
+                            .is_some_and(|rest| rest.starts_with('/'))
+                    })
+            });
+            let around_all = moved
+                .iter()
+                .filter_map(|member| part_in(&model.parts, &member.path)?.bounds)
+                .reduce(|all, one| duck_mold_core::math::Bounds {
+                    min: all.min.min(one.min),
+                    max: all.max.max(one.max),
+                })?;
+            let centre = around_all.center() + offset;
+            let away = self.orbit.to_view(centre).z.max(0.05);
+            return Some(Gizmo {
+                part: path.to_owned(),
+                centre,
+                reach: LENGTH * away / viewport::focal(self.view.1.max(1)),
+                list,
+                units,
+                own: list,
+                sense: if frame.determinant() < 0.0 { -1.0 } else { 1.0 },
+                joined: None,
+                knobs: Vec::new(),
+                group: Some(Group { moved, stayed }),
+            });
+        }
         let joined = part.attached_to.as_deref().and_then(|to| {
             let (target, socket) = to.rsplit_once('.')?;
             let target_path = match around {
@@ -334,6 +412,7 @@ impl Studio {
             sense: if frame.determinant() < 0.0 { -1.0 } else { 1.0 },
             joined,
             knobs,
+            group: None,
         })
     }
 
@@ -422,6 +501,37 @@ impl Studio {
         };
         let arrow = |along: Vec3| vec![centre + along * (reach * 0.3), centre + along * reach];
         let mut handles = Vec::new();
+        if gizmo.group.is_some() {
+            // Several parts: arrows and rings along the list's own
+            // directions, and one box for bigger or smaller all round.
+            match self.tool {
+                Tool::Move => {
+                    for (at, color) in AXIS_COLORS.into_iter().enumerate() {
+                        handles.push(Handle {
+                            grip: Grip::Arrow(at),
+                            points: arrow(gizmo.list[at]),
+                            color,
+                        });
+                    }
+                }
+                Tool::Rotate => {
+                    for (at, color) in AXIS_COLORS.into_iter().enumerate() {
+                        handles.push(Handle {
+                            grip: Grip::Ring(at),
+                            points: ring(gizmo.list[at]),
+                            color,
+                        });
+                    }
+                }
+                Tool::Scale => handles.push(Handle {
+                    grip: Grip::Middle,
+                    points: vec![centre],
+                    color: MIDDLE,
+                }),
+                Tool::Size | Tool::Paint => {}
+            }
+            return handles;
+        }
         match (self.tool, &gizmo.joined) {
             (Tool::Move, None) => {
                 for (at, color) in AXIS_COLORS.into_iter().enumerate() {
@@ -669,11 +779,25 @@ impl Studio {
                     return None;
                 }
                 let model = self.model()?;
-                let hit = viewport::pick(model, &self.orbit, offset, size, at, None)?;
-                if !self.part(&gizmo.part)?.faces.contains(&hit.face) {
-                    return None;
+                let hit = viewport::pick(model, &self.orbit, offset, size, at, &self.unseen())?;
+                let on = |path: &str| {
+                    self.part(path)
+                        .is_some_and(|part| part.faces.contains(&hit.face))
+                };
+                match &gizmo.group {
+                    // Any of the parts held together.
+                    Some(group) => {
+                        if !group.moved.iter().any(|member| on(&member.path)) {
+                            return None;
+                        }
+                    }
+                    None => {
+                        if !on(&gizmo.part) {
+                            return None;
+                        }
+                        self.dragging = Some(gizmo.part.clone());
+                    }
                 }
-                self.dragging = Some(gizmo.part.clone());
                 (Grip::Body, 0.0, hit.point + offset)
             }
         };
@@ -716,6 +840,13 @@ impl Studio {
         let (eye, ray) = self.pointer_ray(at);
         let step = self.snap_step();
         let gizmo = &grab.gizmo;
+        if let Some(group) = &gizmo.group {
+            let Some((edits, label)) = self.group_drag(grab, group, eye, ray, at, free) else {
+                return;
+            };
+            self.hold_edits(edits, label);
+            return;
+        }
         let part = gizmo.part.clone();
         let set = |changes: Changes| Edit::Set {
             part: part.clone(),
@@ -955,6 +1086,171 @@ impl Studio {
         self.hold_edits(edits, label);
     }
 
+    /// The edits a drag of the handles makes when several parts are held
+    /// together: one `set` for each part, and what to say by the
+    /// pointer. Every part moves the same way; a turn or a new size
+    /// also carries each part round, or away from, the middle of them
+    /// all.
+    fn group_drag(
+        &self,
+        grab: &Grab,
+        group: &Group,
+        eye: Vec3,
+        ray: Vec3,
+        at: (f64, f64),
+        free: bool,
+    ) -> Option<(Vec<Edit>, String)> {
+        let gizmo = &grab.gizmo;
+        let step = self.snap_step();
+        let tidy = |number: f64| (number * 10_000.0).round() / 10_000.0 + 0.0;
+        let signed = |number: f64| {
+            if number > 0.0 {
+                format!("+{}", short(number))
+            } else {
+                short(number)
+            }
+        };
+        let axis_names = ["x", "y", "z"];
+        // From the middle of them all to a part, measured in the list.
+        let middle = gizmo.centre - self.offset();
+        let arm = |member: &Member| {
+            let across = member.at - middle;
+            vec3(
+                across.dot(gizmo.list[0]) / gizmo.units[0],
+                across.dot(gizmo.list[1]) / gizmo.units[1],
+                across.dot(gizmo.list[2]) / gizmo.units[2],
+            )
+        };
+        let set = |member: &Member, changes: Changes| Edit::Set {
+            part: member.path.clone(),
+            changes,
+        };
+        let shifted = |member: &Member, by: Vec3| {
+            let at = Vec3::from(member.facts.position) + by;
+            Some(at.to_array().map(tidy))
+        };
+        Some(match grab.grip {
+            Grip::Arrow(which) => {
+                let now = nearest_on_line(gizmo.centre, gizmo.list[which], eye, ray)?;
+                let by = snapped((now - grab.hold) / gizmo.units[which], step, free);
+                let mut along = [0.0; 3];
+                along[which] = by;
+                (
+                    group
+                        .moved
+                        .iter()
+                        .map(|member| {
+                            set(
+                                member,
+                                Changes {
+                                    move_to: shifted(member, along.into()),
+                                    ..Changes::default()
+                                },
+                            )
+                        })
+                        .collect(),
+                    format!("{} {} m", axis_names[which], signed(by)),
+                )
+            }
+            Grip::Body => {
+                let now = on_plane(grab.point, gizmo.list[1], eye, ray)?;
+                let moved = now - grab.point;
+                let across = |which: usize| {
+                    snapped(
+                        moved.dot(gizmo.list[which]) / gizmo.units[which],
+                        step,
+                        free,
+                    )
+                };
+                let by = vec3(across(0), 0.0, across(2));
+                (
+                    group
+                        .moved
+                        .iter()
+                        .map(|member| {
+                            set(
+                                member,
+                                Changes {
+                                    move_to: shifted(member, by),
+                                    ..Changes::default()
+                                },
+                            )
+                        })
+                        .collect(),
+                    format!("x {} m, z {} m", signed(by.x), signed(by.z)),
+                )
+            }
+            Grip::Ring(which) => {
+                let turned = self.ring_turn(grab, gizmo.list[which], eye, ray, at)?;
+                // Counted the way the recipe's `rotate` counts (see the
+                // ring of one part).
+                let mut quarter = [0.0; 3];
+                quarter[which] = 90.0;
+                let mut unit = [0.0; 3];
+                unit[which] = 1.0;
+                let probe = vec3(0.3, 0.5, 0.7);
+                let same = (Mat3::around(unit.into(), 90.0) * probe
+                    - Mat3::from_rotate(quarter) * probe)
+                    .length()
+                    < 1e-6;
+                let turned = turned * gizmo.sense * if same { 1.0 } else { -1.0 };
+                let turned = snapped(turned, TURN_STEP, free);
+                let mut by = [0.0; 3];
+                by[which] = turned;
+                let turn = Mat3::from_rotate(by);
+                (
+                    group
+                        .moved
+                        .iter()
+                        .map(|member| {
+                            let out = arm(member);
+                            set(
+                                member,
+                                Changes {
+                                    rotate: Some(
+                                        (turn * Mat3::from_rotate(member.facts.rotation))
+                                            .to_rotate(),
+                                    ),
+                                    move_to: shifted(member, turn * out - out),
+                                    ..Changes::default()
+                                },
+                            )
+                        })
+                        .collect(),
+                    format!("{}°", short(turned)),
+                )
+            }
+            Grip::Middle => {
+                let pulled = (at.0 - grab.pressed.0) - (at.1 - grab.pressed.1);
+                let least = if free { 0.01 } else { SCALE_STEP };
+                let factor = snapped((1.0 + pulled / 120.0).max(0.05), SCALE_STEP, free).max(least);
+                (
+                    group
+                        .moved
+                        .iter()
+                        .map(|member| {
+                            set(
+                                member,
+                                Changes {
+                                    scale: Some(
+                                        member
+                                            .facts
+                                            .scale
+                                            .map(|side| tidy(side * factor).max(0.001)),
+                                    ),
+                                    move_to: shifted(member, arm(member) * (factor - 1.0)),
+                                    ..Changes::default()
+                                },
+                            )
+                        })
+                        .collect(),
+                    format!("x {}", short(factor)),
+                )
+            }
+            _ => return None,
+        })
+    }
+
     /// How far a ring has been turned, in degrees, counted as
     /// [`Mat3::around`] counts around `axis`.
     fn ring_turn(
@@ -1084,6 +1380,22 @@ impl Studio {
         };
         let was = height(self);
         drop(before);
+        if let Some(group) = &grab.gizmo.group {
+            // Several parts: said in a few words, with what stayed.
+            let what = match grab.grip {
+                Grip::Ring(_) => "Turned",
+                Grip::Middle => "Scaled",
+                _ => "Moved",
+            };
+            let mut said = format!("{what} {} parts: {}", group.moved.len(), grab.label);
+            if !group.stayed.is_empty() {
+                said.push_str(&format!(
+                    ". Not moved: {} (joined to a part that isn't selected, or inside another part)",
+                    group.stayed.join(", ")
+                ));
+            }
+            return Some(self.apply_as(&grab.edits, Some(said)));
+        }
         let done = self.apply_all(&grab.edits);
         if done.is_ok()
             && grab.grip == Grip::Arrow(1)

@@ -186,6 +186,47 @@ Each of these is a `set`, `add`, `join`, `unjoin`, `add-socket` or
 `set-socket` edit in the recipe file, the same ones `duck-mold edit`
 makes.
 
+**Several parts at once.** Shift+click a part, in the picture or in
+the list, to add it to the selection (or take it out); Ctrl+A selects
+them all. The handles then stand in the middle of them: the arrows move
+them together, a ring turns them about their middle, and the box of the
+Scale tool makes them bigger or smaller and further apart. A part that
+is joined to one of them goes along. A part that is joined to
+something else stays where it is, and the Studio says which. The panel
+shows what can be set for all of them: a colour, and Duplicate, Mirror
+copy, Unjoin, Hide and Remove. However many parts, it is one step to
+undo; in the file it is the same edit, once for each part.
+
+**Right-click a part** (in the picture or in the list) for its menu:
+Duplicate, Mirror copy, Rename, Remove, Join to (another part's
+socket), Unjoin, Add a part here (at the point you clicked), Frame and
+Hide.
+
+**Hiding.** Hide stops drawing a part so you can get at what is behind
+it. Nothing else changes: the recipe doesn't know, and a hidden part
+is exported like any other. The top bar says how many are hidden;
+click that, or the "show" at the end of the part's line in the list,
+to bring them back.
+
+**The keys.**
+
+| Key | Does |
+|---|---|
+| G, R, S, T | The Move, Rotate, Scale and Size tools |
+| Ctrl held while dragging | No snapping |
+| Delete or Backspace | Remove what is selected |
+| Ctrl+D | Duplicate it. A copy of a free part stands beside it; a copy of a joined part is on the same socket |
+| Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z | Undo; redo |
+| F | Frame: bring what is selected (or everything) into view |
+| H; Shift+H | Hide what is selected; show everything again |
+| F2 | Rename |
+| Shift+A | Add a part on the ground |
+| Shift+click | Add a part to the selection, or take it out |
+| Ctrl+A | Select every part |
+| Escape | Let go: of a drag, then of a list, then of the selection |
+
+Keys don't fire while you are typing in a field.
+
 **The parts library.** Under the parts list is the library: every
 recipe and model file (`.obj`, `.gltf`, `.glb`) in the folder `parts`
 next to your recipe, each with a small picture. They are offered in the

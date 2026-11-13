@@ -562,6 +562,10 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   is lost.
 - When `--attach` isn't given, a new part joins by the side opposite the
   socket (`bottom` on a `top`), otherwise by its `bottom`.
+- In the Studio a person can select several parts and move, turn,
+  scale, colour, copy or remove them together. In the file that is
+  the same edit, once for each part: run the command once for each.
+  Hiding a part in the Studio changes nothing in the file.
 - Not edits: `mirror` (except through `duplicate --mirror`), sockets
   written with `at` or `from`, and `define`. Type those in the recipe.
 
