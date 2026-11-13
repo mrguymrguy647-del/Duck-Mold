@@ -241,6 +241,27 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "hidden"));
     }
 
+    // The look: wireframe, the view from the top, and the View menu.
+    {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("temple.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen.key_press(egui::Key::Z);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "wireframe"));
+        screen.key_press(egui::Key::Z);
+        screen.key_press(egui::Key::Num3);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "view-top"));
+        screen.key_press(egui::Key::Num4);
+        screen.run_steps(2);
+        screen.get_by_label("View").click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "menu-view"));
+    }
+
     // A recipe saved with a mistake: the problems, and the last good
     // model still up.
     {

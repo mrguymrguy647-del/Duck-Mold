@@ -208,7 +208,29 @@ is exported like any other. The top bar says how many are hidden;
 click that, or the "show" at the end of the part's line in the list,
 to bring them back.
 
-**The keys.**
+**Views and look.** In the top bar:
+
+- **Front**, **Side**, **Top** and **3/4** turn the camera to look from
+  that side (keys 1, 2, 3 and 4), with what is selected, or the whole
+  model, in view. **Frame** (F) brings it back into view without
+  turning.
+- **Grid** is the ground: fine lines every 10 cm near the model,
+  heavier ones every metre, a red line along x and a blue one along z
+  through the recipe's zero.
+- **Wire** (Z) draws only the outline of each face, so you can see
+  through the model to what is inside or behind.
+- **Shadow** darkens the ground straight under the model, darkest where
+  something stands on it, so you can see what touches the ground and
+  what hangs over it. It is the Studio's only: `render`'s pictures and
+  the exported model have none.
+
+**The menus.** File (New model, Open, Export, Render picture, Back to
+the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
+Unjoin, Remove, Select all), View (the four views, Frame, Grid,
+Wireframe, Shadow, Hide, Show everything hidden) and Help (The keys,
+About). Every line shows its key.
+
+**The keys.** (Help > The keys shows this list in the Studio.)
 
 | Key | Does |
 |---|---|
@@ -218,12 +240,15 @@ to bring them back.
 | Ctrl+D | Duplicate it. A copy of a free part stands beside it; a copy of a joined part is on the same socket |
 | Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z | Undo; redo |
 | F | Frame: bring what is selected (or everything) into view |
+| 1, 2, 3, 4 | Look from the front, the side, the top, three-quarter |
+| Z | Wireframe on and off |
 | H; Shift+H | Hide what is selected; show everything again |
 | F2 | Rename |
 | Shift+A | Add a part on the ground |
 | Shift+click | Add a part to the selection, or take it out |
 | Ctrl+A | Select every part |
 | Escape | Let go: of a drag, then of a list, then of the selection |
+| Ctrl+N, Ctrl+O, Ctrl+E | New model, Open, Export |
 
 Keys don't fire while you are typing in a field.
 

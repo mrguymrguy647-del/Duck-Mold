@@ -1730,6 +1730,36 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 6):* views, wireframe, the shadow and the menus, with
+these things settled in the building:
+
+- **The shadow is a grid of cells on the ground**, 96 along the model's
+  longer side. Every face darkens the cells straight under it, the
+  more the nearer it is to the ground (a foot on the ground is darkest,
+  a roof four metres up palest), and the edges are softened by
+  averaging each cell with its neighbours three times. It is drawn as
+  flat squares before the grid's lines, so the lines stay on top. From
+  below the ground it isn't drawn. It is worked out again only when the
+  picture is.
+- **Wireframe draws each face's outline** in the face's own colour made
+  lighter (a selected part's lighter still). A click still finds the
+  part: the faces are there, only not filled.
+- **The four views keep what is selected in view**, or the whole model
+  when nothing is: they turn the camera and then frame, as F does.
+  "Three-quarter" is how the Studio opens (30 degrees round, 20 up),
+  so key 4 is the way back. From the top, the model's front is at the
+  bottom of the picture.
+- **The status line moved** from the top bar to the right end of the
+  Problems row, as the design's sketch has it: the top bar needed the
+  room for the views and the switches.
+- **The top bar wraps** to a second row on a narrow window.
+- **File > Open an example and Opened lately** come with the start
+  page (step 9); **Edit > Tidy sockets** with step 8; **Help > Show
+  the tips again** with step 10.
+- **Ctrl+N, Ctrl+O and Ctrl+E** work when looking only too, as Frame,
+  the views, the switches and hiding do: none of them changes the
+  model.
+
 *As built (step 5):* the right-click menu, the keys, several parts and
 hiding, with these things settled in the building:
 

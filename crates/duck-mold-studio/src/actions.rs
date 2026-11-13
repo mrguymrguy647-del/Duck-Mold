@@ -7,6 +7,7 @@
 
 use duck_mold_core::edit::Made;
 use duck_mold_view::studio::Studio;
+use duck_mold_view::studio::viewport::Viewpoint;
 use eframe::egui::{self, RichText};
 
 use crate::library::Thumbs;
@@ -42,6 +43,154 @@ pub enum Action {
     ShowAll,
     /// Select every part.
     SelectAll,
+    /// Take back the last change.
+    Undo,
+    /// Make the change that was taken back again.
+    Redo,
+    /// Look from the front, the side, the top or three-quarter.
+    LookFrom(Viewpoint),
+    /// Turn the grid on or off.
+    Grid,
+    /// Turn the wireframe on or off.
+    Wireframe,
+    /// Turn the ground shadow on or off.
+    Shadow,
+    /// Start a new recipe.
+    NewModel,
+    /// Open another file.
+    Open,
+    /// Write the `.glb` next to the recipe.
+    Export,
+    /// Write the four-view picture next to the recipe.
+    RenderPicture,
+    /// Close the file and go back to the start page.
+    StartPage,
+    /// Show the list of keys.
+    ShowKeys,
+    /// Show what this program is.
+    About,
+}
+
+/// Every key and what it does, for Help's list and the README's.
+pub const KEYS: [(&str, &str); 21] = [
+    ("G, R, S, T", "The Move, Rotate, Scale and Size tools"),
+    ("Ctrl held while dragging", "No snapping"),
+    ("Delete or Backspace", "Remove what is selected"),
+    ("Ctrl+D", "Duplicate what is selected"),
+    ("Ctrl+Z", "Undo"),
+    ("Ctrl+Y or Ctrl+Shift+Z", "Redo"),
+    (
+        "F",
+        "Frame: bring what is selected, or everything, into view",
+    ),
+    (
+        "1, 2, 3, 4",
+        "Look from the front, the side, the top, three-quarter",
+    ),
+    ("Z", "Wireframe on and off"),
+    ("H", "Hide what is selected"),
+    ("Shift+H", "Show everything hidden"),
+    ("F2", "Rename"),
+    ("Shift+A", "Add a part on the ground"),
+    ("Shift+click", "Add a part to the selection, or take it out"),
+    ("Ctrl+A", "Select every part"),
+    ("Escape", "Let go: of a drag, a list, then the selection"),
+    ("Ctrl+N", "New model"),
+    ("Ctrl+O", "Open"),
+    ("Ctrl+E", "Export the .glb"),
+    ("Drag, right-drag, wheel", "Turn, slide and zoom the view"),
+    ("Right-click a part", "Its menu"),
+];
+
+/// The File, Edit, View and Help menus of the top bar. Every line shows
+/// its key, so the menus teach the keys. Gives what was chosen.
+pub fn menus(ui: &mut egui::Ui, studio: &Studio) -> Option<Action> {
+    let mut chosen = None;
+    let edits = !studio.look_only();
+    let any = !studio.selection().is_empty();
+    let one = studio.selection().len() == 1;
+    let mut pick = |ui: &mut egui::Ui, enabled: bool, words: &str, key: &str, action: Action| {
+        if line(ui, enabled, words, key) {
+            chosen = Some(action);
+            ui.close();
+        }
+    };
+    ui.menu_button("File", |ui| {
+        pick(ui, true, "New model...", "Ctrl+N", Action::NewModel);
+        pick(ui, true, "Open...", "Ctrl+O", Action::Open);
+        ui.separator();
+        pick(ui, true, "Export", "Ctrl+E", Action::Export);
+        pick(ui, true, "Render picture", "", Action::RenderPicture);
+        ui.separator();
+        pick(ui, true, "Back to the start page", "", Action::StartPage);
+    });
+    ui.menu_button("Edit", |ui| {
+        pick(
+            ui,
+            edits && studio.can_undo().is_some(),
+            "Undo",
+            "Ctrl+Z",
+            Action::Undo,
+        );
+        pick(
+            ui,
+            edits && studio.can_redo().is_some(),
+            "Redo",
+            "Ctrl+Y",
+            Action::Redo,
+        );
+        ui.separator();
+        pick(ui, edits && any, "Duplicate", "Ctrl+D", Action::Duplicate);
+        pick(ui, edits && any, "Mirror copy", "", Action::MirrorCopy);
+        pick(ui, edits && one, "Rename", "F2", Action::Rename);
+        pick(ui, edits && any, "Unjoin", "", Action::Unjoin);
+        pick(ui, edits && any, "Remove", "Delete", Action::Remove);
+        ui.separator();
+        pick(ui, true, "Select all", "Ctrl+A", Action::SelectAll);
+    });
+    ui.menu_button("View", |ui| {
+        for (from, key) in Viewpoint::ALL.into_iter().zip(["1", "2", "3", "4"]) {
+            let words = match from {
+                Viewpoint::Front => "Front",
+                Viewpoint::Side => "Side",
+                Viewpoint::Top => "Top",
+                Viewpoint::ThreeQuarter => "Three-quarter",
+            };
+            pick(ui, true, words, key, Action::LookFrom(from));
+        }
+        pick(ui, true, "Frame", "F", Action::Frame);
+        ui.separator();
+        let tick = |on: bool, words: &str| {
+            if on {
+                format!("{words}: on")
+            } else {
+                format!("{words}: off")
+            }
+        };
+        pick(ui, true, &tick(studio.grid, "Grid"), "", Action::Grid);
+        pick(
+            ui,
+            true,
+            &tick(studio.wire, "Wireframe"),
+            "Z",
+            Action::Wireframe,
+        );
+        pick(ui, true, &tick(studio.shadow, "Shadow"), "", Action::Shadow);
+        ui.separator();
+        pick(ui, any, "Hide", "H", Action::Hide);
+        pick(
+            ui,
+            studio.hidden_count() > 0,
+            "Show everything hidden",
+            "Shift+H",
+            Action::ShowAll,
+        );
+    });
+    ui.menu_button("Help", |ui| {
+        pick(ui, true, "The keys", "", Action::ShowKeys);
+        pick(ui, true, "About Duck Mold Studio", "", Action::About);
+    });
+    chosen
 }
 
 /// A line of a menu, with its key at the right. True when clicked.
@@ -136,7 +285,23 @@ pub fn keys(ui: &egui::Ui) -> Option<Action> {
     use egui::{Key, Modifiers};
     ui.input_mut(|input| {
         let mut pressed = |modifiers: Modifiers, key: Key| input.consume_key(modifiers, key);
-        if pressed(Modifiers::COMMAND, Key::D) {
+        if pressed(Modifiers::COMMAND, Key::N) {
+            Some(Action::NewModel)
+        } else if pressed(Modifiers::COMMAND, Key::O) {
+            Some(Action::Open)
+        } else if pressed(Modifiers::COMMAND, Key::E) {
+            Some(Action::Export)
+        } else if pressed(Modifiers::NONE, Key::Num1) {
+            Some(Action::LookFrom(Viewpoint::Front))
+        } else if pressed(Modifiers::NONE, Key::Num2) {
+            Some(Action::LookFrom(Viewpoint::Side))
+        } else if pressed(Modifiers::NONE, Key::Num3) {
+            Some(Action::LookFrom(Viewpoint::Top))
+        } else if pressed(Modifiers::NONE, Key::Num4) {
+            Some(Action::LookFrom(Viewpoint::ThreeQuarter))
+        } else if pressed(Modifiers::NONE, Key::Z) {
+            Some(Action::Wireframe)
+        } else if pressed(Modifiers::COMMAND, Key::D) {
             Some(Action::Duplicate)
         } else if pressed(Modifiers::COMMAND, Key::A) {
             Some(Action::SelectAll)

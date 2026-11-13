@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use duck_mold_core::tools;
 use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::handles::Tool;
+use duck_mold_view::studio::viewport::Viewpoint;
 use eframe::egui::{self, Rect, RichText, Sense};
 
 use crate::actions::{self, Action};
@@ -32,6 +33,15 @@ pub struct StudioApp {
     thumbs: library::Thumbs,
     /// The recipes opened lately, for the start page.
     recent: Recent,
+    /// Which of Help's windows is open, if one is.
+    showing: Option<Showing>,
+}
+
+/// One of Help's windows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Showing {
+    Keys,
+    About,
 }
 
 impl Default for StudioApp {
@@ -52,6 +62,7 @@ impl StudioApp {
             draft: properties::Draft::default(),
             thumbs: library::Thumbs::default(),
             recent: Recent::nowhere(),
+            showing: None,
         }
     }
 
@@ -136,25 +147,22 @@ impl StudioApp {
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(250));
 
-        let mut open_another = false;
         // What a menu or a key asked for, carried out at the end.
         let mut asked: Option<Action> = None;
         egui::Panel::top("duck_mold_bar").show(ui, |ui| {
             ui.add_space(2.0);
-            ui.horizontal(|ui| {
+            // One row on a wide window; it wraps to two on a narrow one.
+            ui.horizontal_wrapped(|ui| {
                 ui.label(RichText::new(studio.title()).strong());
                 if studio.look_only() {
                     ui.label(RichText::new("looking only").weak())
                         .on_hover_text("Nothing can be changed here. Open the recipe in the Studio to edit it.");
                 }
                 ui.separator();
-                if ui
-                    .button("Open")
-                    .on_hover_text("Open another recipe or model file")
-                    .clicked()
-                {
-                    open_another = true;
+                if let Some(action) = actions::menus(ui, studio) {
+                    asked = Some(action);
                 }
+                ui.separator();
                 if !studio.look_only() {
                     // What each would do is in its tip, and in the
                     // status line once it is done.
@@ -166,7 +174,7 @@ impl StudioApp {
                             None => "Nothing to undo".to_owned(),
                         });
                     if undo.clicked() {
-                        let _ = studio.undo();
+                        asked = Some(Action::Undo);
                     }
                     let again = studio.can_redo().map(str::to_owned);
                     let redo = ui
@@ -176,7 +184,7 @@ impl StudioApp {
                             None => "Nothing to redo".to_owned(),
                         });
                     if redo.clicked() {
-                        let _ = studio.redo();
+                        asked = Some(Action::Redo);
                     }
                     ui.separator();
                     // A new part that is joined to nothing: it stands on
@@ -185,27 +193,46 @@ impl StudioApp {
                     ui.menu_button("Add", |ui| {
                         ui.label(RichText::new("A new part, on the ground").weak().small());
                         if let Some(made) = view::choices(ui, studio, thumbs) {
-                            // What it did, or why not, is in the status
-                            // line.
-                            let _ = studio.add_free(&made);
+                            asked = Some(Action::AddFree(made));
                             ui.close();
                         }
                     })
                     .response
                     .on_hover_text(
-                        "Add a part that stands on the ground, joined to nothing. (To add one joined to another part, click a dot on that part.)",
+                        "Add a part that stands on the ground, joined to nothing (Shift+A). To add one joined to another part, click a dot on that part.",
                     );
                     ui.separator();
                 }
+                // The four sides to look from.
+                for (from, key) in Viewpoint::ALL.into_iter().zip(["1", "2", "3", "4"]) {
+                    let tip = match from {
+                        Viewpoint::Front => "Look at the front",
+                        Viewpoint::Side => "Look at the right side",
+                        Viewpoint::Top => "Look down from the top",
+                        Viewpoint::ThreeQuarter => "Look from the front right, a little above",
+                    };
+                    if ui
+                        .button(from.name())
+                        .on_hover_text(format!("{tip} ({key})"))
+                        .clicked()
+                    {
+                        asked = Some(Action::LookFrom(from));
+                    }
+                }
                 if ui
                     .button("Frame")
-                    .on_hover_text("Bring the whole model back into view")
+                    .on_hover_text("Bring what is selected, or the whole model, into view (F)")
                     .clicked()
                 {
-                    studio.frame();
+                    asked = Some(Action::Frame);
                 }
+                ui.separator();
                 ui.toggle_value(&mut studio.grid, "Grid")
                     .on_hover_text("The grid on the ground: one square is one metre");
+                ui.toggle_value(&mut studio.wire, "Wire")
+                    .on_hover_text("Wireframe: only the outline of each face, to see through the model (Z)");
+                ui.toggle_value(&mut studio.shadow, "Shadow")
+                    .on_hover_text("Darken the ground under the model, darkest where something stands on it");
                 if studio.hidden_count() > 0
                     && ui
                         .button(format!("{} hidden", studio.hidden_count()))
@@ -219,21 +246,18 @@ impl StudioApp {
                 ui.separator();
                 if ui
                     .button("Export")
-                    .on_hover_text("Write the model as a .glb file next to the recipe")
+                    .on_hover_text("Write the model as a .glb file next to the recipe (Ctrl+E)")
                     .clicked()
                 {
-                    let _ = studio.export();
+                    asked = Some(Action::Export);
                 }
                 if ui
                     .button("Render picture")
                     .on_hover_text("Write a picture of the model (four views) next to the recipe")
                     .clicked()
                 {
-                    let _ = studio.render_picture();
+                    asked = Some(Action::RenderPicture);
                 }
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(studio.status()).weak());
-                });
             });
             ui.add_space(2.0);
         });
@@ -295,10 +319,10 @@ impl StudioApp {
                 (undo, redo)
             });
             if undo {
-                let _ = studio.undo();
+                asked = Some(Action::Undo);
             }
             if redo {
-                let _ = studio.redo();
+                asked = Some(Action::Redo);
             }
             // The tools' keys, as in other 3D programs.
             for (key, tool) in [
@@ -320,12 +344,66 @@ impl StudioApp {
             asked = asked.or(actions::keys(ui).filter(|action| {
                 matches!(
                     action,
-                    Action::Frame | Action::Hide | Action::ShowAll | Action::SelectAll
+                    Action::Frame
+                        | Action::Hide
+                        | Action::ShowAll
+                        | Action::SelectAll
+                        | Action::LookFrom(_)
+                        | Action::Wireframe
+                        | Action::Open
+                        | Action::NewModel
+                        | Action::Export
                 )
             }));
         }
+        // What has to wait until the file is let go of.
+        let mut open_another = false;
+        let mut new_model = false;
+        let mut to_start = false;
         if let Some(action) = asked {
+            // Only what changes nothing is done when looking only.
+            let allowed = !studio.look_only()
+                || matches!(
+                    action,
+                    Action::Frame
+                        | Action::Hide
+                        | Action::ShowAll
+                        | Action::SelectAll
+                        | Action::LookFrom(_)
+                        | Action::Grid
+                        | Action::Wireframe
+                        | Action::Shadow
+                        | Action::Open
+                        | Action::NewModel
+                        | Action::Export
+                        | Action::RenderPicture
+                        | Action::StartPage
+                        | Action::ShowKeys
+                        | Action::About
+                );
             match action {
+                _ if !allowed => {}
+                Action::Undo => {
+                    let _ = studio.undo();
+                }
+                Action::Redo => {
+                    let _ = studio.redo();
+                }
+                Action::LookFrom(from) => studio.look_from(from),
+                Action::Grid => studio.grid = !studio.grid,
+                Action::Wireframe => studio.wire = !studio.wire,
+                Action::Shadow => studio.shadow = !studio.shadow,
+                Action::NewModel => new_model = true,
+                Action::Open => open_another = true,
+                Action::Export => {
+                    let _ = studio.export();
+                }
+                Action::RenderPicture => {
+                    let _ = studio.render_picture();
+                }
+                Action::StartPage => to_start = true,
+                Action::ShowKeys => self.showing = Some(Showing::Keys),
+                Action::About => self.showing = Some(Showing::About),
                 Action::Duplicate => {
                     let _ = studio.duplicate_selected(false);
                 }
@@ -394,8 +472,68 @@ impl StudioApp {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         }
+        self.help_window(ui);
         if open_another && let Some(path) = pick_file() {
             self.open(path, false);
+        }
+        if new_model && let Some(path) = pick_new_file() {
+            self.start_new(&path);
+        }
+        if to_start {
+            self.studio = None;
+            self.view.reset();
+        }
+    }
+
+    /// The list of keys, or what the program is: Help's two windows.
+    fn help_window(&mut self, ui: &mut egui::Ui) {
+        let Some(showing) = self.showing else {
+            return;
+        };
+        let mut open = true;
+        let title = match showing {
+            Showing::Keys => "The keys",
+            Showing::About => "About Duck Mold Studio",
+        };
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ui.ctx(), |ui| match showing {
+                Showing::Keys => {
+                    egui::Grid::new("duck_mold_keys")
+                        .num_columns(2)
+                        .spacing([16.0, 4.0])
+                        .show(ui, |ui| {
+                            for (key, does) in actions::KEYS {
+                                ui.label(RichText::new(key).strong());
+                                ui.label(does);
+                                ui.end_row();
+                            }
+                        });
+                    ui.add_space(4.0);
+                    ui.label(
+                        RichText::new("Keys don't fire while you are typing in a field.").weak(),
+                    );
+                }
+                Showing::About => {
+                    ui.label(
+                        RichText::new(format!(
+                            "Duck Mold Studio {}",
+                            env!("CARGO_PKG_VERSION")
+                        ))
+                        .strong(),
+                    );
+                    ui.label("Make 3D models for Duck Forge games from parts that join at sockets.");
+                    ui.add_space(4.0);
+                    ui.label(
+                        "A model is a recipe: a text file. The Studio changes that file every time you change something, so there is nothing to save, and an AI agent can read and change it too.",
+                    );
+                }
+            });
+        if !open || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+            self.showing = None;
         }
     }
 
@@ -542,30 +680,8 @@ fn outliner(
                 let is_selected = studio.is_selected(&row.path);
                 ui.horizontal(|ui| {
                     ui.add_space(row.depth as f32 * 14.0);
-                    let words = if row.hidden {
-                        RichText::new(&row.name).weak().strikethrough()
-                    } else {
-                        RichText::new(&row.name)
-                    };
-                    let name = ui
-                        .selectable_label(is_selected, words)
-                        .on_hover_text(format!("{}: {} triangles", row.path, row.triangles));
-                    if name.clicked() {
-                        clicked = Some(row.path.clone());
-                    }
-                    if name.secondary_clicked() {
-                        menu_for = Some(row.path.clone());
-                    }
-                    name.context_menu(|ui| {
-                        if let Some(action) = actions::part_menu(ui, studio, thumbs) {
-                            asked = Some(action);
-                        }
-                    });
-                    if selected.as_deref() == Some(row.path.as_str()) && newly_selected {
-                        name.scroll_to_me(None);
-                    }
-                    ui.label(RichText::new(&row.kind).weak().small());
-                    // The eye: at the right of the line.
+                    // The eye first, at the right; the name and what the
+                    // part is take the room that is left.
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         let (mark, tip) = if row.hidden {
                             ("show", "Hidden: click to show it again")
@@ -581,6 +697,37 @@ fn outliner(
                         {
                             eye = Some((row.path.clone(), !row.hidden));
                         }
+                        ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            let words = if row.hidden {
+                                RichText::new(&row.name).weak().strikethrough()
+                            } else {
+                                RichText::new(&row.name)
+                            };
+                            let name =
+                                ui.selectable_label(is_selected, words)
+                                    .on_hover_text(format!(
+                                        "{}: {} triangles",
+                                        row.path, row.triangles
+                                    ));
+                            if name.clicked() {
+                                clicked = Some(row.path.clone());
+                            }
+                            if name.secondary_clicked() {
+                                menu_for = Some(row.path.clone());
+                            }
+                            name.context_menu(|ui| {
+                                if let Some(action) = actions::part_menu(ui, studio, thumbs) {
+                                    asked = Some(action);
+                                }
+                            });
+                            if selected.as_deref() == Some(row.path.as_str()) && newly_selected {
+                                name.scroll_to_me(None);
+                            }
+                            ui.add(
+                                egui::Label::new(RichText::new(&row.kind).weak().small())
+                                    .truncate(),
+                            );
+                        });
                     });
                 });
             }
@@ -622,6 +769,10 @@ fn problems(ui: &mut egui::Ui, studio: &mut Studio) {
                 "The file has mistakes. The picture is of the last version that worked.",
             );
         }
+        // What was last done, at the right.
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.label(RichText::new(studio.status()).weak());
+        });
     });
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])

@@ -31,9 +31,15 @@ A FIRST LOOK
     a shape: a new part is joined there.
   - Drag the selected part onto another part's marker to join it there.
     "Unjoin", on the right, makes a joined part free again.
+  - Shift+click selects several parts, to move or colour together.
+    Right-click a part for its menu. Delete removes it; Ctrl+D copies
+    it; H hides it so you can get at what is behind (Shift+H shows it
+    again).
+  - "Front", "Side", "Top" and "3/4" turn the view. "Wire" lets you see
+    through the model.
   - "Export" writes the model as a .glb file next to the recipe, for a
     Duck Forge game. "Render picture" writes a picture of it.
-  - Undo is Ctrl+Z.
+  - Undo is Ctrl+Z. Help > The keys lists every key.
 
   "New model" starts a recipe of your own with one box in it.
 

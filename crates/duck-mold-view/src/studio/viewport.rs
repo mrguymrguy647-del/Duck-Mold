@@ -83,6 +83,39 @@ pub struct Orbit {
     pub target: Vec3,
 }
 
+/// A side to look at the model from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Viewpoint {
+    /// Straight at its front.
+    Front,
+    /// Straight at its right side.
+    Side,
+    /// Straight down on it.
+    Top,
+    /// From the front right and a little above: how the Studio opens.
+    ThreeQuarter,
+}
+
+impl Viewpoint {
+    /// All four, in the order of their keys: 1, 2, 3, 4.
+    pub const ALL: [Viewpoint; 4] = [
+        Viewpoint::Front,
+        Viewpoint::Side,
+        Viewpoint::Top,
+        Viewpoint::ThreeQuarter,
+    ];
+
+    /// Its name on a button.
+    pub fn name(self) -> &'static str {
+        match self {
+            Viewpoint::Front => "Front",
+            Viewpoint::Side => "Side",
+            Viewpoint::Top => "Top",
+            Viewpoint::ThreeQuarter => "3/4",
+        }
+    }
+}
+
 impl Orbit {
     /// From the front right and a little above, with all of `bounds` in
     /// view.
@@ -105,6 +138,17 @@ impl Orbit {
         let (sin_half, _) = sin_cos_degrees(FIELD_OF_VIEW / 2.0);
         self.target = bounds.center();
         self.distance = (bounds.half().length().max(0.05) / sin_half) * 1.15;
+    }
+
+    /// Looks from one of the four named sides, at the same point and
+    /// from as far as before.
+    pub fn look_from(&mut self, from: Viewpoint) {
+        (self.round, self.above) = match from {
+            Viewpoint::Front => (0.0, 0.0),
+            Viewpoint::Side => (90.0, 0.0),
+            Viewpoint::Top => (0.0, 90.0),
+            Viewpoint::ThreeQuarter => (30.0, 20.0),
+        };
     }
 
     /// Turns the view as a drag of the mouse does: dragging right turns
@@ -255,6 +299,11 @@ pub struct Look<'a> {
     pub selected: &'a [&'a Part],
     /// The faces that aren't drawn: those of hidden parts.
     pub hidden: &'a [Range<usize>],
+    /// Whether only the outline of each face is drawn, so that the
+    /// model can be seen through.
+    pub wire: bool,
+    /// Whether the ground is darkened under the model.
+    pub shadow: bool,
     /// The sockets to show.
     pub markers: &'a [Marker],
     /// Which of `markers` the pointer is on.
@@ -325,6 +374,52 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
             canvas.draw_line(from + across, to + across, color);
         }
     };
+
+    // The shadow: the ground darkened straight under the model, darkest
+    // where something stands on it. Only seen from above the ground.
+    if look.shadow
+        && orbit.above > 1.0
+        && let Some(model) = look.model
+        && let Some(shade) = Shade::under(model, look.hidden)
+    {
+        let spot = |canvas: &Canvas, x: f64, z: f64| -> Option<Vec2> {
+            let seen = orbit.to_view(vec3(x, shade.ground, z) + offset);
+            if seen.z < NEAR {
+                return None;
+            }
+            camera.project(forge(seen), canvas).map(|(at, _)| at)
+        };
+        let [red, green, blue] = [BACKGROUND.r, BACKGROUND.g, BACKGROUND.b];
+        for row in 0..shade.deep {
+            for column in 0..shade.across {
+                let dark = shade.dark[row * shade.across + column];
+                if dark < 0.02 {
+                    continue;
+                }
+                let (x, z) = (
+                    shade.x + column as f64 * shade.cell,
+                    shade.z + row as f64 * shade.cell,
+                );
+                let corners = [
+                    spot(&canvas, x, z),
+                    spot(&canvas, x + shade.cell, z),
+                    spot(&canvas, x + shade.cell, z + shade.cell),
+                    spot(&canvas, x, z + shade.cell),
+                ];
+                let [Some(a), Some(b), Some(c), Some(d)] = corners else {
+                    continue;
+                };
+                let keep = 1.0 - SHADOW_DEPTH * dark;
+                let color = Color::rgb(
+                    (f32::from(red) * keep) as u8,
+                    (f32::from(green) * keep) as u8,
+                    (f32::from(blue) * keep) as u8,
+                );
+                canvas.fill_triangle(a, b, c, color);
+                canvas.fill_triangle(a, c, d, color);
+            }
+        }
+    }
 
     if look.grid {
         // The ground: light lines every 10 cm near the model, heavier
@@ -399,15 +494,43 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
             .iter()
             .map(|part| part.faces.clone())
             .collect();
-        let mesh = mesh_of(model, orbit, offset, &lit, look.hidden);
-        // The light comes from over the viewer's left shoulder, whichever
-        // way the model is turned.
-        canvas.set_lighting(Lighting {
-            sun_direction: duckforge::prelude::vec3(-0.35, 0.75, -1.0),
-            ambient: 0.45,
-            ..Lighting::default()
-        });
-        canvas.draw_mesh(&mesh, &Transform::default(), &camera);
+        if look.wire {
+            // Wireframe: the outline of every face, in the face's own
+            // colour made lighter, and nothing filled in.
+            for (at, face) in model.faces.iter().enumerate() {
+                if look.hidden.iter().any(|hidden| hidden.contains(&at)) {
+                    continue;
+                }
+                let rgb = face
+                    .color
+                    .and_then(|color| model.palette.get(color))
+                    .map_or(UNCOLOURED, |color| color.rgb);
+                let bright = lit.iter().any(|lit| lit.contains(&at));
+                let lighter = |channel: u8| {
+                    let once = channel + (255 - channel) / 3;
+                    if bright {
+                        once + (255 - once) / 2
+                    } else {
+                        once
+                    }
+                };
+                let color = Color::rgb(lighter(rgb[0]), lighter(rgb[1]), lighter(rgb[2]));
+                for (corner, &from) in face.corners.iter().enumerate() {
+                    let to = face.corners[(corner + 1) % face.corners.len()];
+                    line(&mut canvas, from + offset, to + offset, color);
+                }
+            }
+        } else {
+            let mesh = mesh_of(model, orbit, offset, &lit, look.hidden);
+            // The light comes from over the viewer's left shoulder,
+            // whichever way the model is turned.
+            canvas.set_lighting(Lighting {
+                sun_direction: duckforge::prelude::vec3(-0.35, 0.75, -1.0),
+                ambient: 0.45,
+                ..Lighting::default()
+            });
+            canvas.draw_mesh(&mesh, &Transform::default(), &camera);
+        }
     }
 
     for bounds in look.selected.iter().filter_map(|part| part.bounds) {
@@ -491,6 +614,120 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
         width,
         height,
         pixels: canvas.pixels().to_vec(),
+    }
+}
+
+/// How much of the ground's brightness the darkest shadow takes away.
+const SHADOW_DEPTH: f32 = 0.72;
+/// How many cells the shadow has along the model's longer side.
+const SHADOW_CELLS: usize = 96;
+
+/// The shadow under a model: a grid of square cells on the ground, each
+/// with how dark it is, from 0 (open ground) to 1 (something stands
+/// right on it).
+struct Shade {
+    /// The corner of the grid with the least x and z, in the model.
+    x: f64,
+    z: f64,
+    /// The side of a cell, in metres.
+    cell: f64,
+    across: usize,
+    deep: usize,
+    dark: Vec<f32>,
+    /// How high the ground is: the model's lowest point.
+    ground: f64,
+}
+
+impl Shade {
+    /// Works the shadow out: every face darkens the cells straight under
+    /// it, the more the nearer it is to the ground, and the edges are
+    /// then softened.
+    fn under(model: &Model, hidden: &[Range<usize>]) -> Option<Shade> {
+        let bounds = model.bounds()?;
+        let size = bounds.size();
+        let long = size.x.max(size.z);
+        if long <= 0.0 {
+            return None;
+        }
+        // Room all round for the soft edge.
+        let cell = long * 1.2 / SHADOW_CELLS as f64;
+        let margin = cell * 6.0;
+        let (x, z) = (bounds.min.x - margin, bounds.min.z - margin);
+        let across = (((size.x + margin * 2.0) / cell).ceil() as usize).clamp(1, 160);
+        let deep = (((size.z + margin * 2.0) / cell).ceil() as usize).clamp(1, 160);
+        let ground = bounds.min.y;
+        // A face this high above the ground casts the palest shadow.
+        let tall = size.y.max(long * 0.25).max(1e-6);
+        let mut dark = vec![0.0f32; across * deep];
+        for (at, face) in model.faces.iter().enumerate() {
+            if hidden.iter().any(|hidden| hidden.contains(&at)) {
+                continue;
+            }
+            let low = face
+                .corners
+                .iter()
+                .fold(f64::INFINITY, |low, corner| low.min(corner.y));
+            let weight = (1.0 - ((low - ground) / tall) * 0.7).clamp(0.3, 1.0) as f32;
+            for [a, b, c] in face.triangles() {
+                // The cells whose middles are under the triangle.
+                let column = |x_at: f64| ((x_at - x) / cell).floor().max(0.0) as usize;
+                let row = |z_at: f64| ((z_at - z) / cell).floor().max(0.0) as usize;
+                let (first_column, last_column) = (
+                    column(a.x.min(b.x).min(c.x)),
+                    column(a.x.max(b.x).max(c.x)).min(across - 1),
+                );
+                let (first_row, last_row) = (
+                    row(a.z.min(b.z).min(c.z)),
+                    row(a.z.max(b.z).max(c.z)).min(deep - 1),
+                );
+                // Which side of each edge a point is on, seen from above.
+                let side = |p: (f64, f64), from: Vec3, to: Vec3| {
+                    (to.x - from.x) * (p.1 - from.z) - (to.z - from.z) * (p.0 - from.x)
+                };
+                for row_at in first_row..=last_row {
+                    for column_at in first_column..=last_column {
+                        let middle = (
+                            x + (column_at as f64 + 0.5) * cell,
+                            z + (row_at as f64 + 0.5) * cell,
+                        );
+                        let sides = [side(middle, a, b), side(middle, b, c), side(middle, c, a)];
+                        let inside = sides.iter().all(|side| *side >= 0.0)
+                            || sides.iter().all(|side| *side <= 0.0);
+                        let cell_at = &mut dark[row_at * across + column_at];
+                        if inside && weight > *cell_at {
+                            *cell_at = weight;
+                        }
+                    }
+                }
+            }
+        }
+        // Softened: each cell becomes the average of itself and the
+        // cells round it, three times over.
+        for _ in 0..3 {
+            let before = dark.clone();
+            for row_at in 0..deep {
+                for column_at in 0..across {
+                    let mut sum = 0.0;
+                    let mut count = 0.0;
+                    for down in row_at.saturating_sub(1)..=(row_at + 1).min(deep - 1) {
+                        for along in column_at.saturating_sub(1)..=(column_at + 1).min(across - 1) {
+                            sum += before[down * across + along];
+                            count += 1.0;
+                        }
+                    }
+                    dark[row_at * across + column_at] = sum / count;
+                }
+            }
+        }
+        Some(Shade {
+            x,
+            z,
+            cell,
+            across,
+            deep,
+            dark,
+            ground,
+        })
     }
 }
 

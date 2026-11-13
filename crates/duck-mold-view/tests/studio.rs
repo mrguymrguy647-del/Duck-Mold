@@ -2859,3 +2859,127 @@ fn a_selection_is_copied_removed_coloured_and_unjoined_in_one_step() {
     studio.remove_selected(false).unwrap();
     assert!(studio.part("post").is_none() && studio.part("cap").is_none());
 }
+
+// ---- views, wireframe and the shadow ---------------------------------------------
+
+#[test]
+fn the_camera_looks_from_the_four_named_sides() {
+    use duck_mold_view::studio::viewport::Viewpoint;
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    let start = studio.orbit;
+    // It opens three-quarter.
+    assert_eq!((start.round, start.above), (30.0, 20.0));
+    for (from, round, above, said) in [
+        (Viewpoint::Front, 0.0, 0.0, "Looking at the front"),
+        (Viewpoint::Side, 90.0, 0.0, "Looking at the right side"),
+        (Viewpoint::Top, 0.0, 90.0, "Looking down from the top"),
+        (
+            Viewpoint::ThreeQuarter,
+            30.0,
+            20.0,
+            "Looking from the front right",
+        ),
+    ] {
+        studio.look_from(from);
+        assert_eq!((studio.orbit.round, studio.orbit.above), (round, above));
+        assert_eq!(studio.status(), said);
+        // The whole model is in the picture: every corner of its box.
+        let bounds = studio.model().unwrap().bounds().unwrap();
+        for corner in [bounds.min, bounds.max] {
+            let (x, y) = studio
+                .orbit
+                .on_screen(corner + studio.offset(), 480, 360)
+                .unwrap();
+            assert!(
+                (0.0..480.0).contains(&x) && (0.0..360.0).contains(&y),
+                "{from:?}: {x}, {y}"
+            );
+        }
+    }
+    // Back where it began.
+    assert_eq!(studio.orbit, start);
+
+    // From the front, the robot's left is on the right of the picture;
+    // from the top, its front is at the bottom.
+    studio.look_from(Viewpoint::Front);
+    check_picture("studio-robot-front", &studio.picture(480, 360));
+    let left = studio.part("left_arm").unwrap().bounds.unwrap().center();
+    let right = studio.part("right_arm").unwrap().bounds.unwrap().center();
+    let at = |studio: &Studio, point: Vec3| {
+        studio
+            .orbit
+            .on_screen(point + studio.offset(), 480, 360)
+            .unwrap()
+    };
+    assert!(at(&studio, left).0 > at(&studio, right).0);
+    studio.look_from(Viewpoint::Top);
+    check_picture("studio-robot-top", &studio.picture(480, 360));
+    let nose = studio.part("panel").unwrap().bounds.unwrap().center();
+    let back = studio.part("body").unwrap().bounds.unwrap().center();
+    assert!(at(&studio, nose).1 > at(&studio, back).1);
+
+    // With a part selected, the view goes to that part.
+    studio.select(Some("head"));
+    studio.look_from(Viewpoint::Side);
+    let head = studio.part("head").unwrap().bounds.unwrap().center();
+    let (x, y) = at(&studio, head);
+    assert!(
+        (x - 240.0).abs() < 1.0 && (y - 180.0).abs() < 1.0,
+        "{x}, {y}"
+    );
+}
+
+#[test]
+fn wireframe_shows_outlines_only_and_the_shadow_can_be_turned_off() {
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    let solid = studio.picture(480, 360);
+    // Wireframe: far fewer pixels are drawn, and what is behind shows.
+    studio.wire = true;
+    let wire = studio.picture(480, 360);
+    check_picture("studio-robot-wire", &wire);
+    assert!(drawn(&wire) < drawn(&solid));
+    assert_ne!(wire.pixels, solid.pixels);
+    // A click still finds the part there.
+    let head = studio.part("head").unwrap().bounds.unwrap().center();
+    let at = studio
+        .orbit
+        .on_screen(head + studio.offset(), 480, 360)
+        .unwrap();
+    assert!(studio.click((480, 360), at).is_some());
+    studio.select(None);
+    studio.wire = false;
+    assert_eq!(studio.picture(480, 360).pixels, solid.pixels);
+
+    // The shadow: the ground under the robot's foot is darker with it
+    // than without, and the ground far from the robot is the same.
+    studio.grid = false;
+    let with = studio.picture(480, 360);
+    studio.shadow = false;
+    let without = studio.picture(480, 360);
+    assert_ne!(with.pixels, without.pixels);
+    let brightness = |picture: &Picture, (x, y): (f64, f64)| {
+        let pixel = picture.pixels[y as usize * picture.width + x as usize];
+        ((pixel >> 16) & 0xFF) + ((pixel >> 8) & 0xFF) + (pixel & 0xFF)
+    };
+    // On the ground straight under the hand that hangs at its side.
+    let hand = studio.part("left_arm/hand").unwrap().bounds.unwrap();
+    let ground = studio.model().unwrap().bounds().unwrap().min.y;
+    let under = vec3(hand.center().x, ground, hand.center().z) + studio.offset();
+    let under = studio.orbit.on_screen(under, 480, 360).unwrap();
+    assert!(
+        brightness(&with, under) < brightness(&without, under),
+        "{} {}",
+        brightness(&with, under),
+        brightness(&without, under)
+    );
+    assert_eq!(
+        brightness(&with, (5.0, 350.0)),
+        brightness(&without, (5.0, 350.0))
+    );
+    // Seen from below the ground there is no shadow to see.
+    studio.orbit.above = -20.0;
+    studio.shadow = true;
+    let under = studio.picture(480, 360);
+    studio.shadow = false;
+    assert_eq!(studio.picture(480, 360).pixels, under.pixels);
+}

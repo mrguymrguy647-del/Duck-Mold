@@ -64,7 +64,22 @@ fn an_open_recipe_shows_its_parts_and_no_problems() {
     screen.get_by_label("Problems");
     screen.get_by_label("None");
     assert!(screen.query_by_label("looking only").is_none());
-    for button in ["Open", "Frame", "Grid", "Export", "Render picture"] {
+    for button in [
+        "File",
+        "Edit",
+        "View",
+        "Help",
+        "Front",
+        "Side",
+        "Top",
+        "3/4",
+        "Frame",
+        "Grid",
+        "Wire",
+        "Shadow",
+        "Export",
+        "Render picture",
+    ] {
         screen.get_by_label(button);
     }
 }
@@ -1515,5 +1530,148 @@ fn looking_only_nothing_is_copied_or_removed_but_parts_can_be_hidden() {
     screen.key_press(Key::H);
     screen.run_steps(3);
     assert!(screen.state().studio().unwrap().is_hidden("head"));
+    assert_eq!(text_of(&recipe), before);
+}
+
+// ---- views, wireframe, the shadow, and the menus ----------------------------------
+
+#[test]
+fn the_view_buttons_and_keys_turn_the_camera_and_change_the_look() {
+    use egui::Key;
+    let (recipe, mut screen) = yard("screens_views");
+    let looking = |screen: &Harness<'static, StudioApp>| {
+        let orbit = screen.state().studio().unwrap().orbit;
+        (orbit.round, orbit.above)
+    };
+    assert_eq!(looking(&screen), (30.0, 20.0));
+    // The buttons.
+    for (button, wanted) in [
+        ("Front", (0.0, 0.0)),
+        ("Side", (90.0, 0.0)),
+        ("Top", (0.0, 90.0)),
+        ("3/4", (30.0, 20.0)),
+    ] {
+        screen.get_by_label(button).click();
+        screen.run_steps(2);
+        assert_eq!(looking(&screen), wanted, "{button}");
+    }
+    screen.get_by_label_contains("Looking from the front right");
+    // The keys 1 to 4.
+    for (key, wanted) in [
+        (Key::Num1, (0.0, 0.0)),
+        (Key::Num2, (90.0, 0.0)),
+        (Key::Num3, (0.0, 90.0)),
+        (Key::Num4, (30.0, 20.0)),
+    ] {
+        screen.key_press(key);
+        screen.run_steps(2);
+        assert_eq!(looking(&screen), wanted, "{key:?}");
+    }
+
+    // Wireframe: the button, and Z.
+    assert!(!screen.state().studio().unwrap().wire);
+    screen.get_by_label("Wire").click();
+    screen.run_steps(2);
+    assert!(screen.state().studio().unwrap().wire);
+    screen.key_press(Key::Z);
+    screen.run_steps(2);
+    assert!(!screen.state().studio().unwrap().wire);
+    // The shadow is on to begin with, and the grid.
+    assert!(screen.state().studio().unwrap().shadow);
+    assert!(screen.state().studio().unwrap().grid);
+    screen.get_by_label("Shadow").click();
+    screen.run_steps(2);
+    assert!(!screen.state().studio().unwrap().shadow);
+    // None of it is the recipe's business.
+    assert_eq!(text_of(&recipe), YARD);
+    assert_eq!(screen.state().studio().unwrap().can_undo(), None);
+}
+
+#[test]
+fn the_menus_do_what_the_buttons_and_keys_do() {
+    let (recipe, mut screen) = yard("screens_menus");
+    // A line of a menu: open the menu, click the line.
+    let choose = |screen: &mut Harness<'static, StudioApp>, menu: &str, line: &str| {
+        screen.get_by_label(menu).click();
+        screen.run_steps(3);
+        screen
+            .query_all_by_label_contains(line)
+            .last()
+            .unwrap_or_else(|| panic!("the {menu} menu has no line {line}"))
+            .click();
+        screen.run_steps(3);
+    };
+
+    // Edit: select all, duplicate, undo, redo.
+    choose(&mut screen, "Edit", "Select all");
+    assert_eq!(selection(&screen), ["floor", "crate", "post", "cap"]);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("crate"));
+    screen.run_steps(2);
+    choose(&mut screen, "Edit", "Duplicate");
+    assert_eq!(selection(&screen), ["crate_2"]);
+    choose(&mut screen, "Edit", "Undo");
+    assert_eq!(text_of(&recipe), YARD);
+    choose(&mut screen, "Edit", "Redo");
+    assert!(text_of(&recipe).contains("crate_2"));
+    // (Undo let go of the copy, so it is selected again by hand.)
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("crate_2"));
+    screen.run_steps(2);
+    choose(&mut screen, "Edit", "Remove");
+    assert_eq!(text_of(&recipe), YARD);
+
+    // View: the top, wireframe, and hiding.
+    choose(&mut screen, "View", "Top");
+    assert_eq!(screen.state().studio().unwrap().orbit.above, 90.0);
+    choose(&mut screen, "View", "Wireframe: off");
+    assert!(screen.state().studio().unwrap().wire);
+    choose(&mut screen, "View", "Wireframe: on");
+    assert!(!screen.state().studio().unwrap().wire);
+    choose(&mut screen, "View", "Grid: on");
+    assert!(!screen.state().studio().unwrap().grid);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("post"));
+    screen.run_steps(2);
+    choose(&mut screen, "View", "Hide");
+    assert!(screen.state().studio().unwrap().is_hidden("post"));
+    choose(&mut screen, "View", "Show everything hidden");
+    assert!(!screen.state().studio().unwrap().is_hidden("post"));
+
+    // File: export writes the model next to the recipe.
+    choose(&mut screen, "File", "Export");
+    assert!(recipe.with_extension("glb").is_file());
+
+    // Help: the keys, in a window; Escape closes it.
+    choose(&mut screen, "Help", "The keys");
+    screen.get_by_label("Ctrl+D");
+    screen.get_by_label("Duplicate what is selected");
+    screen.get_by_label("Keys don't fire while you are typing in a field.");
+    screen.key_press(egui::Key::Escape);
+    screen.run_steps(3);
+    assert!(
+        screen
+            .query_by_label("Duplicate what is selected")
+            .is_none()
+    );
+    choose(&mut screen, "Help", "About");
+    screen.get_by_label_contains("Duck Mold Studio 0.");
+    screen.key_press(egui::Key::Escape);
+    screen.run_steps(3);
+
+    // File: back to the start page. The model stays as it is on disk.
+    let before = text_of(&recipe);
+    choose(&mut screen, "File", "Back to the start page");
+    assert!(screen.state().studio().is_none());
+    screen.get_by_label("Open a model");
     assert_eq!(text_of(&recipe), before);
 }

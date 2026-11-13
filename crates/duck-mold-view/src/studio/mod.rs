@@ -101,6 +101,11 @@ pub struct Studio {
     pub orbit: Orbit,
     /// Whether the grid on the ground is drawn.
     pub grid: bool,
+    /// Whether the model is drawn as outlines only, to see through it.
+    pub wire: bool,
+    /// Whether the ground is darkened under the model. In the Studio
+    /// only: `render`'s pictures have no shadow.
+    pub shadow: bool,
     /// The part that is selected, by path. When several are, this is
     /// the one selected last: the one the panel shows.
     pub(crate) selected: Option<String>,
@@ -148,6 +153,8 @@ impl Studio {
             problems: Vec::new(),
             orbit: Orbit::framing(None),
             grid: true,
+            wire: false,
+            shadow: true,
             selected: None,
             also: Vec::new(),
             hidden: Vec::new(),
@@ -656,6 +663,19 @@ impl Studio {
         }
     }
 
+    /// Turns the camera to look from one of the four named sides, with
+    /// what is selected (or the whole model) in view.
+    pub fn look_from(&mut self, from: viewport::Viewpoint) {
+        self.orbit.look_from(from);
+        self.frame();
+        self.say(match from {
+            viewport::Viewpoint::Front => "Looking at the front",
+            viewport::Viewpoint::Side => "Looking at the right side",
+            viewport::Viewpoint::Top => "Looking down from the top",
+            viewport::Viewpoint::ThreeQuarter => "Looking from the front right",
+        });
+    }
+
     /// Brings the whole model back into view (or the selected part, if
     /// one is), without turning the camera.
     pub fn frame(&mut self) {
@@ -724,6 +744,8 @@ impl Studio {
                 hot,
                 marks: &marks,
                 grid: self.grid,
+                wire: self.wire,
+                shadow: self.shadow,
             },
             width,
             height,
