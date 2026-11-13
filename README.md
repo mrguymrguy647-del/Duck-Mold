@@ -485,6 +485,7 @@ see the handoff note.
 | [PHASE0_REPORT.md](PHASE0_REPORT.md) | Phase 0: what works, what doesn't yet, and what comes next. |
 | [PHASE1_REPORT.md](PHASE1_REPORT.md) | Phase 1: pictures, the preview window, sockets on surfaces and in the `.glb`, `twist`, glTF import. |
 | [PHASE2_REPORT.md](PHASE2_REPORT.md) | Phase 2: the Studio, the edit commands, undo, the parts library, the Windows download. |
+| [PHASE3_REPORT.md](PHASE3_REPORT.md) | Phase 3: handles, twelve shapes with bevel and taper, several parts, views, colour, the start page and the tour, with a picture of each. |
 
 ## Project layout
 
@@ -496,7 +497,7 @@ Duck-Mold/
 ├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
 ├── release/                   what goes in the download beside the programs
 ├── Cargo.toml                 the workspace: four crates, built together
-├── examples/                  eight recipes to read and change, and parts/ for files they use
+├── examples/                  fifteen recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/
@@ -515,11 +516,11 @@ Duck-Mold/
     │   │   ├── glb.rs         writing (and reading back) .glb
     │   │   ├── inspect.rs     size, ground, floating and overlapping parts
     │   │   ├── edit/          the edits: one change to a recipe's text, and nothing else
-    │   │   └── tools.rs       what the commands do, for any front end
+    │   │   └── tools.rs       what the commands do, for any front end; the examples, inside the program
     │   └── tests/             one file of tests per step
     ├── duck-mold-view/        pictures (`render`), and all the Studio does, with no window
     ├── duck-mold-studio/      the Studio's window (egui): the `DuckMoldStudio` program
-    │   └── assets/            its icon: a picture of examples/duck.toml
+    │   └── assets/            its icon (a picture of examples/duck.toml) and the examples' pictures
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 
