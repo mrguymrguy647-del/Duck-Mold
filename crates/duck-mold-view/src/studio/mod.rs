@@ -11,14 +11,18 @@
 //! after which it reads and builds the file again. When another program
 //! saves the file, it does the same.
 
+mod edges;
 mod group;
 pub mod handles;
 pub mod history;
 pub mod library;
 mod paint;
+mod shape;
 mod sockets;
 pub mod viewport;
 
+pub use edges::CutAim;
+pub use shape::{FaceTool, Mode};
 pub use sockets::Clicked;
 
 use std::path::{Path, PathBuf};
@@ -138,6 +142,12 @@ pub struct Studio {
     /// What the recipe would build with that edit: shown while the drag
     /// lasts. Nothing is written until the handle is let go.
     preview: Option<Model>,
+    /// Parts, or the faces of the selected box (Tab).
+    mode: Mode,
+    /// The tool in hand in Face mode.
+    pub face_tool: FaceTool,
+    /// The faces selected in Face mode, by their own names.
+    faces: Vec<String>,
 }
 
 impl Studio {
@@ -174,6 +184,9 @@ impl Studio {
             tool: handles::Tool::Move,
             grab: None,
             preview: None,
+            mode: Mode::Part,
+            face_tool: FaceTool::Pull,
+            faces: Vec::new(),
         };
         studio.reload();
         studio.read_library();
@@ -237,6 +250,12 @@ impl Studio {
 
     pub(super) fn say(&mut self, status: impl Into<String>) {
         self.status = self.shorten(&status.into());
+    }
+
+    /// Says why something the window was asked for wasn't done, in the
+    /// status line.
+    pub fn say_why(&mut self, why: &str) {
+        self.say(why.to_owned());
     }
 
     /// The same words with files named from the recipe's folder:
@@ -333,6 +352,7 @@ impl Studio {
             .into_iter()
             .filter(|path| self.part(path).is_some())
             .collect();
+        self.keep_face_mode();
     }
 
     /// True if a watched file has been saved, made or removed since it
@@ -426,7 +446,8 @@ impl Studio {
     /// what is selected; false if there is no such part (and the
     /// selection is as it was).
     pub fn select(&mut self, path: Option<&str>) -> bool {
-        match path {
+        let before = self.selected.clone();
+        let done = match path {
             None => {
                 self.selected = None;
                 self.also.clear();
@@ -438,7 +459,17 @@ impl Studio {
                 true
             }
             Some(_) => false,
+        };
+        // Another part in Face mode: its faces, if it can be shaped.
+        if self.mode != Mode::Part && self.selected != before {
+            self.faces.clear();
+            if self.selected.is_none() {
+                self.mode = Mode::Part;
+            } else {
+                self.keep_face_mode();
+            }
         }
+        done
     }
 
     /// A click in the viewport, at (`x`, `y`) pixels from the top left of
@@ -769,11 +800,13 @@ impl Studio {
 
     /// Draws the viewport, `width` x `height` pixels.
     pub fn picture(&self, width: usize, height: usize) -> Picture {
-        let mut markers = self.markers();
+        let shaping = self.mode != Mode::Part;
+        // In Face mode there are no sockets to show: the faces are.
+        let mut markers = if shaping { Vec::new() } else { self.markers() };
         // What the pointer is on is drawn bigger: a marker, or the point
         // of a surface where a socket would be made. (Only when the
         // picture is the size the pointer was measured in.)
-        let aim = if self.view == (width, height) {
+        let aim = if self.view == (width, height) && !shaping {
             self.aim(&markers)
         } else {
             None
@@ -795,16 +828,24 @@ impl Studio {
         };
         let model = self.shown_model();
         // The selected parts as they are in what is shown.
+        // (In Face mode the box isn't lit whole: its faces are.)
         let selected: Vec<&Part> = self
             .selection()
             .into_iter()
-            .filter(|path| !self.is_hidden(path))
+            .filter(|path| !shaping && !self.is_hidden(path))
             .filter_map(|path| part_in(&model?.parts, path))
             .collect();
-        let marks = self.marks(width, height);
+        let mut marks = if self.view == (width, height) {
+            self.face_marks()
+        } else {
+            Vec::new()
+        };
+        marks.extend(self.marks(width, height));
         let hidden = self.unseen_in(model);
         let lit = if self.view == (width, height) {
-            self.paint_aim()
+            let mut lit = self.paint_aim();
+            lit.extend(self.face_lit());
+            lit
         } else {
             Vec::new()
         };
@@ -816,6 +857,7 @@ impl Studio {
                 selected: &selected,
                 lit: &lit,
                 hidden: &hidden,
+                focus: self.face_focus(),
                 markers: &markers,
                 hot,
                 marks: &marks,

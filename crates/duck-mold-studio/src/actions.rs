@@ -6,8 +6,8 @@
 //! agent can run too: this only chooses which.
 
 use duck_mold_core::edit::Made;
-use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::viewport::Viewpoint;
+use duck_mold_view::studio::{FaceTool, Mode, Studio};
 use eframe::egui::{self, RichText};
 
 use crate::library::Thumbs;
@@ -77,13 +77,42 @@ pub enum Action {
     ShowKeys,
     /// Show what this program is.
     About,
+    /// Shape the selected box: Face mode, or back to Part mode (Tab).
+    Shape,
+    /// Take this tool in hand in Face mode.
+    FaceTool(FaceTool),
+    /// The selected box's edges: Edge mode, or back to Part mode (E).
+    EdgeMode,
+    /// The selected box's corners: Corner mode, or back to Part mode
+    /// (C).
+    CornerMode,
+    /// Ask for a name, and make a definition from the selected part.
+    MakeDefinition,
+    /// Write the selected part alone to the library's folder.
+    SaveToLibrary,
 }
 
 /// Every key and what it does, for Help's list and the README's.
-pub const KEYS: [(&str, &str); 21] = [
+pub const KEYS: [(&str, &str); 25] = [
     (
         "G, R, S, T, P",
         "The Move, Rotate, Scale, Size and Paint tools",
+    ),
+    (
+        "Tab",
+        "Shape the selected box: click its faces. Tab again: back to parts",
+    ),
+    (
+        "E",
+        "The selected box's edges: click one to move it. E again: back to parts",
+    ),
+    (
+        "C",
+        "The selected box's corners: click one to move it. C again: back to parts",
+    ),
+    (
+        "T, G, R, S, I, K (shaping)",
+        "The Pull, Move, Turn, Scale, Inset and Cut tools",
     ),
     ("Ctrl held while dragging", "No snapping"),
     ("Delete or Backspace", "Remove what is selected"),
@@ -105,7 +134,10 @@ pub const KEYS: [(&str, &str); 21] = [
     ("Shift+A", "Add a part on the ground"),
     ("Shift+click", "Add a part to the selection, or take it out"),
     ("Ctrl+A", "Select every part"),
-    ("Escape", "Let go: of a drag, a list, then the selection"),
+    (
+        "Escape",
+        "Let go: of a drag, a list, the faces, Face mode, then the selection",
+    ),
     ("Ctrl+N", "New model"),
     ("Ctrl+O", "Open"),
     ("Ctrl+E", "Export the .glb"),
@@ -251,6 +283,70 @@ pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) ->
         (None, count) => format!("{count} parts"),
     };
     ui.label(RichText::new(title).weak().small());
+    // Shaping: the tools, and the way back.
+    if studio.mode() != Mode::Part {
+        let edges = studio.mode() == Mode::Edge;
+        let corners = studio.mode() == Mode::Corner;
+        for (tool, words, key) in [
+            (FaceTool::Pull, "Pull", "T"),
+            (FaceTool::Move, "Move", "G"),
+            (FaceTool::Turn, "Turn", "R"),
+            (FaceTool::Scale, "Scale", "S"),
+            (FaceTool::Inset, "Inset", "I"),
+            (FaceTool::Cut, "Cut", "K"),
+        ] {
+            if (edges && !matches!(tool, FaceTool::Move | FaceTool::Cut))
+                || (corners && tool != FaceTool::Move)
+            {
+                continue;
+            }
+            if line(ui, true, words, key) {
+                chosen = Some(Action::FaceTool(tool));
+            }
+        }
+        ui.separator();
+        if corners {
+            if line(ui, true, "Faces", "Tab") {
+                chosen = Some(Action::Shape);
+            }
+            if line(ui, true, "Back to Part", "C") {
+                chosen = Some(Action::CornerMode);
+            }
+        } else if edges {
+            if line(ui, true, "Faces", "Tab") {
+                chosen = Some(Action::Shape);
+            }
+            if line(ui, true, "Back to Part", "E") {
+                chosen = Some(Action::EdgeMode);
+            }
+        } else {
+            if line(ui, true, "Edges", "E") {
+                chosen = Some(Action::EdgeMode);
+            }
+            if line(ui, true, "Back to Part", "Tab") {
+                chosen = Some(Action::Shape);
+            }
+        }
+        if chosen.is_some() {
+            ui.close();
+        }
+        return chosen;
+    }
+    if line(ui, edits && one.is_some(), "Shape", "Tab") {
+        chosen = Some(Action::Shape);
+    }
+    if line(ui, edits && one.is_some(), "Edges", "E") {
+        chosen = Some(Action::EdgeMode);
+    }
+    if line(ui, edits && one.is_some(), "Corners", "C") {
+        chosen = Some(Action::CornerMode);
+    }
+    if line(ui, edits && one.is_some(), "Make a definition...", "") {
+        chosen = Some(Action::MakeDefinition);
+    }
+    if line(ui, edits && one.is_some(), "Save to the library", "") {
+        chosen = Some(Action::SaveToLibrary);
+    }
     if line(ui, edits, "Duplicate", "Ctrl+D") {
         chosen = Some(Action::Duplicate);
     }

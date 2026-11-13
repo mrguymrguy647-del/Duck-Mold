@@ -520,6 +520,77 @@ fn duplicate_copies_the_block_with_its_comments() {
 }
 
 #[test]
+fn a_copy_of_a_joined_part_does_not_sit_on_the_part_it_copies() {
+    let example = |name: &str| {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../examples")
+            .join(format!("{name}.toml"));
+        std::fs::read_to_string(path).unwrap()
+    };
+    let copy = |part: &str| Edit::Duplicate {
+        part: part.into(),
+        name: None,
+        to: None,
+        mirror: false,
+    };
+    let table = example("table");
+    // 1. The next socket nothing is joined to, facing the same way.
+    let without = done(
+        &table,
+        Syntax::Toml,
+        &Edit::Remove {
+            part: "leg_back_right".into(),
+            with_attached: false,
+        },
+    )
+    .text;
+    let applied = done(&without, Syntax::Toml, &copy("leg_front_left"));
+    assert_eq!(
+        applied.summary,
+        "copied \"leg_front_left\" as \"leg_front_left_2\", on top.back_right, the next free socket"
+    );
+    assert!(applied.text.contains("to = \"top.back_right\""));
+    // 2. With none free, a new socket beside it, on the same side, 10 cm
+    // past it.
+    let applied = done(&table, Syntax::Toml, &copy("leg_front_left"));
+    assert_eq!(
+        applied.summary,
+        "copied \"leg_front_left\" as \"leg_front_left_2\", on top.spot, a new socket beside top.front_left"
+    );
+    let model = applied.model.unwrap();
+    let (first, second) = (
+        part(&model, "leg_front_left").bounds.unwrap(),
+        part(&model, "leg_front_left_2").bounds.unwrap(),
+    );
+    assert!(
+        (second.min.x - first.max.x - 0.1).abs() < 1e-6,
+        "{first:?} {second:?}"
+    );
+    assert!((second.min.y - first.min.y).abs() < 1e-9);
+    assert!((second.min.z - first.min.z).abs() < 1e-9);
+    let looked = duck_mold_core::inspect::inspect(&model, "table", Vec::new());
+    assert!(looked.overlapping.is_empty(), "{:?}", looked.overlapping);
+    // 3. With no room beside it either, free, in front of the model, on
+    // the ground.
+    let robot = example("robot");
+    let applied = done(&robot, Syntax::Toml, &copy("left_arm"));
+    assert_eq!(
+        applied.summary,
+        "copied \"left_arm\" as \"left_arm_2\", standing free in front of the model: no socket beside it was free"
+    );
+    let model = applied.model.unwrap();
+    let new = part(&model, "left_arm_2");
+    assert_eq!(new.attached_to, None);
+    let (arm, all) = (new.bounds.unwrap(), model.bounds().unwrap());
+    assert!((arm.min.y - all.min.y).abs() < 1e-9, "{arm:?}");
+    let body = part(&model, "body").bounds.unwrap();
+    assert!(arm.min.z > body.max.z, "{arm:?} {body:?}");
+    // It still looks the same way as the arm it copies.
+    let old = part(&model, "left_arm").bounds.unwrap();
+    assert!((arm.size() - old.size()).length() < 1e-9);
+}
+
+#[test]
 fn a_mirrored_copy_swaps_left_and_right_and_turns_its_twist() {
     // (The pole stands straight here, so that its left and right are the
     // model's.)
@@ -861,6 +932,7 @@ fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
             socket: "base.spot".into(),
             on: None,
             shift: Some([-0.5, 0.0, 0.25]),
+            facing: None,
         },
     );
     assert_eq!(
@@ -872,6 +944,33 @@ fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
     );
     assert!((at(&slid) + 0.15).abs() < 1e-5);
 
+    // Turned: the pole on it leans to face the front, and "out" puts the
+    // socket back to facing straight out of its side.
+    let facing = |way: &str| Edit::SetSocket {
+        socket: "base.spot".into(),
+        on: None,
+        shift: None,
+        facing: Some(way.into()),
+    };
+    let turned = done(&slid.text, Syntax::Toml, &facing("front"));
+    assert_eq!(
+        changed(&slid.text, &turned.text).1,
+        ["spot = { on = \"top\", shift = [-0.5, 0, 0.25], facing = \"front\" }"]
+    );
+    assert_eq!(turned.summary, "turned the socket base.spot to face front");
+    let pole = part(turned.model.as_ref().unwrap(), "pole").bounds.unwrap();
+    assert!(pole.size().z > pole.size().y, "{pole:?}");
+    let back = done(&turned.text, Syntax::Toml, &facing("out"));
+    assert_eq!(back.text, slid.text);
+    assert_eq!(
+        back.summary,
+        "turned the socket base.spot to face straight out"
+    );
+    let failure = refused(&slid.text, &facing("sideways"));
+    let error = &failure.report().errors[0];
+    assert_eq!(error.code, Code::TypeMismatch);
+    assert!(error.message.contains("\"sideways\""), "{}", error.message);
+
     // A built-in socket can't be moved, and the message says what to do.
     let failure = refused(
         LAMP,
@@ -879,6 +978,7 @@ fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
             socket: "base.top".into(),
             on: None,
             shift: Some([0.0; 3]),
+            facing: None,
         },
     );
     assert!(failure.report().errors[0].message.contains("add-socket"));
@@ -1517,10 +1617,13 @@ fn a_part_added_without_a_socket_stands_free_on_the_ground() {
     let before = done(LAMP, Syntax::Toml, &add_colour_x()).model.unwrap();
     // The lamp's base is 0.05 thick round the recipe's zero, so the
     // ground is at -0.025, and the middle of a box 0.4 tall is 0.2 above.
+    // With no place given, it walks from the middle of the lamp towards
+    // its front until it stands clear, 10 cm from the base: the base is
+    // 0.3 round and the box 0.1 from its middle to its sides.
     let applied = done(LAMP, Syntax::Toml, &add_free("crate", Free::default()));
     assert!(
         applied.text.ends_with(
-            "to = \"pole.right\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.2, 0.4, 0.2]\ncolor = \"steel\"\nmove = [0, 0.175, 0]\n"
+            "to = \"pole.right\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.2, 0.4, 0.2]\ncolor = \"steel\"\nmove = [0, 0.175, 0.5]\n"
         ),
         "{}",
         applied.text
@@ -1533,13 +1636,23 @@ fn a_part_added_without_a_socket_stands_free_on_the_ground() {
     // It stands on the same ground as the lamp, and the lamp hasn't moved.
     let (low, ground) = (new.bounds.unwrap().min.y, model.bounds().unwrap().min.y);
     assert!((low - ground).abs() < 1e-9, "{low} {ground}");
+    // (In the recipe's own measurements: the picture is centred again
+    // round the whole model.)
+    let own = |model: &Model, name: &str| {
+        part(model, name)
+            .bounds
+            .map(|bounds| (bounds.min - model.zero, bounds.max - model.zero))
+    };
     for name in ["base", "pole", "left_bulb", "right_bulb"] {
-        assert_eq!(
-            part(&model, name).bounds,
-            part(&before, name).bounds,
-            "{name}"
+        let (now, was) = (own(&model, name).unwrap(), own(&before, name).unwrap());
+        assert!(
+            (now.0 - was.0).length() < 1e-9 && (now.1 - was.1).length() < 1e-9,
+            "{name}: {now:?} {was:?}"
         );
     }
+    // And it stands clear of the lamp.
+    let (crate_box, base) = (new.bounds.unwrap(), part(&model, "base").bounds.unwrap());
+    assert!(crate_box.min.z >= base.max.z + 0.1 - 1e-9, "{crate_box:?}");
 
     // Somewhere else on the ground: its middle is over the place.
     let applied = done(
@@ -1575,7 +1688,7 @@ fn a_part_added_without_a_socket_stands_free_on_the_ground() {
     assert!(
         applied
             .text
-            .ends_with("rotate = [0, 0, 90]\nmove = [0, 0.175, 0]\nscale = 2\n"),
+            .ends_with("rotate = [0, 0, 90]\nmove = [0, 0.175, 0.6]\nscale = 2\n"),
         "{}",
         applied.text
     );
@@ -1608,7 +1721,7 @@ fn a_part_added_without_a_socket_stands_free_on_the_ground() {
         &add_free("crate", Free::default()),
     );
     assert!(
-        applied.text.contains("\"move\": [0, 0.175, 0]"),
+        applied.text.contains("\"move\": [0, 0.175, 0.5]"),
         "{}",
         applied.text
     );
@@ -2276,6 +2389,7 @@ fn json_recipes_are_edited_the_same_way() {
             socket: "stem.badge".into(),
             on: Some("back".into()),
             shift: Some([0.0, -0.5, 0.0]),
+            facing: None,
         },
         Edit::Remove {
             part: "right_bulb".into(),
@@ -2361,8 +2475,24 @@ fn windows_line_endings_and_the_invisible_mark_survive() {
 fn examples() -> Vec<(String, String)> {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     [
-        "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck", "dog", "doughnut",
-        "mug", "temple", "barn", "slide", "gate",
+        "crate",
+        "table",
+        "tree",
+        "house",
+        "robot",
+        "snowman",
+        "desk",
+        "duck",
+        "dog",
+        "doughnut",
+        "mug",
+        "temple",
+        "barn",
+        "slide",
+        "gate",
+        "chair",
+        "window_wall",
+        "rock",
     ]
     .into_iter()
     .map(|name| {
@@ -2629,6 +2759,7 @@ fn every_kind_of_edit_has_a_name() {
             socket: String::new(),
             on: None,
             shift: None,
+            facing: None,
         },
         Edit::RenameSocket {
             socket: String::new(),
@@ -2640,6 +2771,64 @@ fn every_kind_of_edit_has_a_name() {
         Edit::TidySockets,
         Edit::Unjoin {
             part: String::new(),
+        },
+        Edit::Pull {
+            part: String::new(),
+            faces: Vec::new(),
+            by: 0.0,
+            name: None,
+        },
+        Edit::Inset {
+            part: String::new(),
+            faces: Vec::new(),
+            by: 0.0,
+            name: None,
+        },
+        Edit::SetChange {
+            part: String::new(),
+            number: 1,
+            by: None,
+            by_xyz: None,
+            at: None,
+        },
+        Edit::RemoveChange {
+            part: String::new(),
+            number: None,
+        },
+        Edit::MoveFace {
+            part: String::new(),
+            faces: Vec::new(),
+            by: [0.0; 3],
+        },
+        Edit::TurnFace {
+            part: String::new(),
+            faces: Vec::new(),
+            by: [0.0; 3],
+        },
+        Edit::ScaleFace {
+            part: String::new(),
+            faces: Vec::new(),
+            by: [1.0; 3],
+        },
+        Edit::MoveEdge {
+            part: String::new(),
+            edges: Vec::new(),
+            by: [0.0; 3],
+        },
+        Edit::Cut {
+            part: String::new(),
+            toward: String::new(),
+            at: 0.0,
+            name: None,
+        },
+        Edit::MoveCorner {
+            part: String::new(),
+            corners: Vec::new(),
+            by: [0.0; 3],
+        },
+        Edit::Define {
+            part: String::new(),
+            name: String::new(),
         },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();

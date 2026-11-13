@@ -8,9 +8,11 @@
 //! from it at the very end.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use crate::math::{Bounds, Transform, Vec3};
 use crate::recipe::{Loc, PaletteColor};
+use crate::shaping::Shaped;
 
 /// A finished model.
 #[derive(Debug, Clone, PartialEq)]
@@ -113,6 +115,9 @@ pub struct Part {
     /// For each of its own faces, in order, which of `face_names` it
     /// goes by. Empty where `face_names` is.
     pub face_groups: Vec<u16>,
+    /// For a shaped box: its faces, edges and corners, by name, in the
+    /// part's own space (`place` puts them in the model).
+    pub shaped: Option<Arc<Shaped>>,
 }
 
 impl Part {
@@ -149,15 +154,24 @@ pub struct PartKind {
     pub uses: Option<String>,
     /// The file it came from, if it was made with `file`.
     pub file: Option<String>,
+    /// How many changes were made to its shape (a shaped box's
+    /// `changes`).
+    pub changes: usize,
 }
 
 impl PartKind {
-    /// For people: `box`, `arm (box)`, `wheel.toml (assembly)`.
+    /// For people: `box`, `arm (box)`, `wheel.toml (assembly)`,
+    /// `box, 9 changes`.
     pub fn label(&self) -> String {
+        let shape = match self.changes {
+            0 => self.shape.clone(),
+            1 => format!("{}, 1 change", self.shape),
+            count => format!("{}, {count} changes", self.shape),
+        };
         match (&self.uses, &self.file) {
-            (Some(name), _) => format!("{name} ({})", self.shape),
-            (None, Some(file)) => format!("{file} ({})", self.shape),
-            (None, None) => self.shape.clone(),
+            (Some(name), _) => format!("{name} ({shape})"),
+            (None, Some(file)) => format!("{file} ({shape})"),
+            (None, None) => shape,
         }
     }
 }

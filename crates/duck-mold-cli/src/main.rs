@@ -58,6 +58,11 @@ enum Command {
         /// can ask the .glb for, like head.top.
         #[arg(long)]
         sockets: bool,
+        /// Also list the faces of every shaped part (one with
+        /// "changes"): each name, the way it faces, its size and the
+        /// faces next to it. These are the names changes and colours use.
+        #[arg(long)]
+        faces: bool,
     },
     /// Build a recipe and write the model as a .glb file.
     ///
@@ -132,6 +137,22 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Write one part of a recipe alone, as a recipe of its own: for the
+    /// parts library. What it is made of (its definition's, if it uses
+    /// one) and the colours it uses go in; where it stands doesn't. The
+    /// recipe doesn't change. Never writes over a file.
+    SavePart {
+        /// The recipe (.toml or .json).
+        recipe: PathBuf,
+        /// The part, as inspect names it: chair, or left_arm/hand.
+        part: String,
+        /// The new recipe to write: parts/chair.toml. Its name must end
+        /// in .toml.
+        file: PathBuf,
+        /// Print the report as JSON, for agents.
+        #[arg(long)]
+        json: bool,
+    },
     /// Make one change to a recipe without typing it: add, remove, rename,
     /// join, unjoin, set, duplicate, add-color, set-color, remove-color,
     /// add-socket, set-socket, rename-socket, remove-socket, tidy-sockets.
@@ -169,11 +190,8 @@ fn main() -> ExitCode {
             file,
             json,
             sockets,
-        } => match if sockets {
-            tools::inspect_file_with_sockets(&file)
-        } else {
-            tools::inspect_file(&file)
-        } {
+            faces,
+        } => match tools::inspect_file_listing(&file, sockets, faces) {
             Ok(inspection) => {
                 if json {
                     say_json(&inspection);
@@ -244,6 +262,23 @@ fn main() -> ExitCode {
             Some(example) => tools::new_from_example(&recipe, example),
             None => tools::new_file(&recipe),
         } {
+            Ok(inspection) => {
+                if json {
+                    say_json(&inspection);
+                } else {
+                    say(&format!("wrote {}", inspection.source));
+                    say(inspection.to_text().trim_end());
+                }
+                ExitCode::SUCCESS
+            }
+            Err(failure) => fail(&failure, json),
+        },
+        Command::SavePart {
+            recipe,
+            part,
+            file,
+            json,
+        } => match tools::save_part(&recipe, &part, &file) {
             Ok(inspection) => {
                 if json {
                     say_json(&inspection);

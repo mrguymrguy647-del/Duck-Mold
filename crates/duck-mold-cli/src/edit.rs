@@ -5,8 +5,10 @@
 use clap::{Args, Subcommand};
 use duck_mold_core::edit::{Changes, Edit, Free, Made, Sizes};
 
-/// One change to a recipe.
+/// One change to a recipe. (Each variant's name is the command's, so
+/// `set-change` is `SetChange`.)
 #[derive(Subcommand)]
+#[allow(clippy::enum_variant_names)]
 pub enum Change {
     /// Add a part: joined to a socket (--to), or standing free.
     ///
@@ -203,8 +205,8 @@ pub enum Change {
         #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
         shift: Option<String>,
     },
-    /// Move a socket that add-socket (or the recipe) put on a side of a
-    /// part. Whatever is joined to it moves with it.
+    /// Move or turn a socket that add-socket (or the recipe) put on a
+    /// side of a part. Whatever is joined to it moves with it.
     SetSocket {
         /// The socket, like body.badge.
         socket: String,
@@ -214,7 +216,178 @@ pub enum Change {
         /// A new slide across the side: x,y,z.
         #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
         shift: Option<String>,
+        /// Which way it faces: up, down, left, right, front, back, or out
+        /// (straight out of its side, as it faces when nothing says).
+        #[arg(long, value_name = "WAY")]
+        facing: Option<String>,
     },
+    /// Pull faces of a box out the way they face, with new walls round
+    /// them (a negative --by pushes them in, making a hollow).
+    ///
+    /// Adds a pull to the part's "changes". Faces that touch are pulled
+    /// as one piece. `duck-mold inspect --faces` lists the face names.
+    Pull {
+        /// The part.
+        part: String,
+        /// The faces, by name: top, or several with commas, like
+        /// top_left,top,top_right.
+        faces: String,
+        /// How far, in metres. Below 0 pushes the faces in.
+        #[arg(long, allow_hyphen_values = true)]
+        by: f64,
+        /// What the new walls are called: <name>_front, <name>_left...
+        /// Without it: <face>_side_front...
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Make a smaller face inside each face of a box, --by metres in from
+    /// its edges, with a ring of faces round it.
+    ///
+    /// Adds an inset to the part's "changes". The face's old name then
+    /// stands for the ring.
+    Inset {
+        /// The part.
+        part: String,
+        /// The faces, by name: front, or several with commas.
+        faces: String,
+        /// How far in from the edges, in metres.
+        #[arg(long)]
+        by: f64,
+        /// What the face in the middle is called. Without it:
+        /// <face>_inset.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Change the amount of one of a box's changes, counted from 1 as
+    /// they are written.
+    SetChange {
+        /// The part.
+        part: String,
+        /// Which change: 1 is the first.
+        number: usize,
+        /// Its new amount: one number (a pull, an inset, a scale alike
+        /// each way), or x,y,z (a move, a turn, a scale).
+        #[arg(long, allow_hyphen_values = true, value_name = "N or X,Y,Z")]
+        by: Option<String>,
+        /// A cut's new place: from 0 (the middle) to just under 1 (the
+        /// side).
+        #[arg(long)]
+        at: Option<f64>,
+    },
+    /// Move edges of a box (where two faces meet: top+front) by x,y,z
+    /// metres, in its own directions.
+    ///
+    /// Right after a move of the same edges, it adds to that one.
+    MoveEdge {
+        /// The part.
+        part: String,
+        /// The edges: top+front, or several with commas.
+        edges: String,
+        /// How far along x, y and z, in metres.
+        #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
+        by: String,
+    },
+    /// Make a definition from a part: what it is made of (its shape and
+    /// sizes, changes, colours and own sockets) moves to [define.<name>],
+    /// and the part uses it where it stands. Add more of it with
+    /// `add <name> --use <name>`.
+    Define {
+        /// The part: one of the model's own list.
+        part: String,
+        /// The definition's name.
+        name: String,
+    },
+    /// Move corners of a box (where three faces or more meet:
+    /// top+front+left) by x,y,z metres, in its own directions.
+    ///
+    /// Right after a move of the same corners, it adds to that one.
+    MoveCorner {
+        /// The part.
+        part: String,
+        /// The corners: top+front+left, or several with commas.
+        corners: String,
+        /// How far along x, y and z, in metres.
+        #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
+        by: String,
+    },
+    /// Cut all the way round a box, with a flat cut facing a side: every
+    /// face it crosses becomes two, to shape further.
+    Cut {
+        /// The part.
+        part: String,
+        /// The side the cut faces: top, bottom, left, right, front or
+        /// back.
+        #[arg(long)]
+        toward: String,
+        /// How far from the middle (0) to that side (just under 1).
+        #[arg(long)]
+        at: f64,
+        /// What the slices towards the side are called: <face>_<name>.
+        /// Without it: <face>_<side>, like top_right.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Move faces of a box by x,y,z metres, in its own directions. The
+    /// faces round them stretch to follow.
+    ///
+    /// Right after a move of the same faces, it adds to that one.
+    MoveFace {
+        /// The part.
+        part: String,
+        /// The faces, by name: top, or several with commas.
+        faces: String,
+        /// How far along x, y and z, in metres.
+        #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
+        by: String,
+    },
+    /// Turn faces of a box about their middle: degrees around x, y and z.
+    ///
+    /// Right after a turn of the same faces, it adds to that one.
+    TurnFace {
+        /// The part.
+        part: String,
+        /// The faces, by name.
+        faces: String,
+        /// Degrees around x, then y, then z.
+        #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
+        by: String,
+    },
+    /// Make faces of a box bigger or smaller about their middle.
+    ///
+    /// Right after a scale of the same faces, it multiplies that one.
+    ScaleFace {
+        /// The part.
+        part: String,
+        /// The faces, by name.
+        faces: String,
+        /// How much: one number for all three ways, or x,y,z. 1 is as
+        /// they are.
+        #[arg(long, value_name = "N or X,Y,Z")]
+        by: String,
+    },
+    /// Take one of a box's changes away (or, with --all, every one).
+    ///
+    /// Refused if a later change, or a colour, names a face only that
+    /// change made: the mistakes it would cause are listed.
+    RemoveChange {
+        /// The part.
+        part: String,
+        /// Which change: 1 is the first.
+        #[arg(required_unless_present = "all")]
+        number: Option<usize>,
+        /// Take away every change: the part is a plain box again.
+        #[arg(long, conflicts_with = "number")]
+        all: bool,
+    },
+}
+
+/// `top_left,top` as a list of names.
+fn face_list(written: &str) -> Vec<String> {
+    written
+        .split(',')
+        .map(|face| face.trim().to_owned())
+        .filter(|face| !face.is_empty())
+        .collect()
 }
 
 /// The sizes of a shape.
@@ -477,13 +650,115 @@ impl Change {
                     .transpose()?
                     .unwrap_or([0.0; 3]),
             },
-            Change::SetSocket { socket, on, shift } => Edit::SetSocket {
+            Change::Pull {
+                part,
+                faces,
+                by,
+                name,
+            } => Edit::Pull {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: *by,
+                name: name.clone(),
+            },
+            Change::Inset {
+                part,
+                faces,
+                by,
+                name,
+            } => Edit::Inset {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: *by,
+                name: name.clone(),
+            },
+            Change::SetChange {
+                part,
+                number,
+                by,
+                at,
+            } => {
+                let (one, xyz) = match by.as_deref() {
+                    None => (None, None),
+                    Some(by) if by.contains(',') => (None, Some(three("--by", by)?)),
+                    Some(by) => (
+                        Some(by.trim().parse::<f64>().map_err(|_| {
+                            format!("--by needs a number, like 0.5, or three, like 0,0.2,0, not \"{by}\"")
+                        })?),
+                        None,
+                    ),
+                };
+                Edit::SetChange {
+                    part: part.clone(),
+                    number: *number,
+                    by: one,
+                    by_xyz: xyz,
+                    at: *at,
+                }
+            }
+            Change::MoveEdge { part, edges, by } => Edit::MoveEdge {
+                part: part.clone(),
+                edges: face_list(edges),
+                by: three("--by", by)?,
+            },
+            Change::Define { part, name } => Edit::Define {
+                part: part.clone(),
+                name: name.clone(),
+            },
+            Change::MoveCorner { part, corners, by } => Edit::MoveCorner {
+                part: part.clone(),
+                corners: face_list(corners),
+                by: three("--by", by)?,
+            },
+            Change::Cut {
+                part,
+                toward,
+                at,
+                name,
+            } => Edit::Cut {
+                part: part.clone(),
+                toward: toward.clone(),
+                at: *at,
+                name: name.clone(),
+            },
+            Change::MoveFace { part, faces, by } => Edit::MoveFace {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: three("--by", by)?,
+            },
+            Change::TurnFace { part, faces, by } => Edit::TurnFace {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: three("--by", by)?,
+            },
+            Change::ScaleFace { part, faces, by } => Edit::ScaleFace {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: if by.contains(',') {
+                    three("--by", by)?
+                } else {
+                    [by.trim().parse::<f64>().map_err(|_| {
+                        format!("--by needs a number, like 0.5, or three, like 1,0.5,1, not \"{by}\"")
+                    })?; 3]
+                },
+            },
+            Change::RemoveChange { part, number, .. } => Edit::RemoveChange {
+                part: part.clone(),
+                number: *number,
+            },
+            Change::SetSocket {
+                socket,
+                on,
+                shift,
+                facing,
+            } => Edit::SetSocket {
                 socket: socket.clone(),
                 on: on.clone(),
                 shift: shift
                     .as_deref()
                     .map(|shift| three("--shift", shift))
                     .transpose()?,
+                facing: facing.clone(),
             },
         })
     }

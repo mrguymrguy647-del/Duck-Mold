@@ -1,0 +1,76 @@
+{
+  "ok": true,
+  "summary": "chair: 0.50 x 0.98 x 0.50 m, 108 triangles, 1 part, 2 colours, rests on the ground, nothing floating, nothing overlapping",
+  "source": "examples/chair.toml",
+  "name": "chair",
+  "size": [
+    0.5,
+    0.98,
+    0.5
+  ],
+  "bounds": {
+    "min": [
+      -0.25,
+      0.0,
+      -0.25
+    ],
+    "max": [
+      0.25,
+      0.98,
+      0.25
+    ]
+  },
+  "triangles": 108,
+  "vertices": 216,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "wood",
+      "hex": "#9C6B3E",
+      "triangles": 106
+    },
+    {
+      "name": "cushion",
+      "hex": "#C8553D",
+      "triangles": 2
+    }
+  ],
+  "parts": [
+    {
+      "name": "chair",
+      "kind": "box",
+      "changes": 9,
+      "triangles": 108,
+      "size": [
+        0.5,
+        0.98,
+        0.5
+      ],
+      "bounds": {
+        "min": [
+          -0.25,
+          0.0,
+          -0.25
+        ],
+        "max": [
+          0.25,
+          0.98,
+          0.25
+        ]
+      },
+      "colors": [
+        "wood",
+        "cushion"
+      ],
+      "attached_to": null,
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [],
+  "warnings": [],
+  "errors": []
+}

@@ -20,6 +20,7 @@ use crate::issue::{Code, Issue, in_file_order};
 use crate::math::{Bounds, Vec3, tidy, vec3};
 use crate::model::{Model, Part};
 use crate::recipe::hex;
+use crate::shaping::{Shaped, facing_word};
 
 /// How close two surfaces must be to count as touching, and how deep one
 /// part must be inside another to count as overlapping: a millimetre.
@@ -74,6 +75,10 @@ pub struct Inspection {
     /// ([`socket_report`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub sockets: Vec<SocketReport>,
+    /// Every shaped part's faces, by name: only with `--faces`
+    /// ([`face_report`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub shaped: Vec<ShapedReport>,
     /// Things that look like mistakes.
     pub warnings: Vec<Issue>,
     /// Always empty: a model that has errors is never inspected.
@@ -139,6 +144,125 @@ pub fn socket_report(model: &Model) -> Vec<SocketReport> {
         .collect()
 }
 
+/// The faces of one shaped part, for `inspect --faces`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ShapedReport {
+    /// The part: `chair`, `kitchen/chair`.
+    pub part: String,
+    /// The file its changes are written in.
+    pub file: String,
+    /// How many changes were made to it.
+    pub changes: usize,
+    /// How many faces it has.
+    pub face_count: usize,
+    /// Each of its faces' own names, once.
+    pub faces: Vec<FaceReport>,
+    /// The names that stand for several faces: `sides`, a pull's name,
+    /// the old name of an inset face.
+    pub names: Vec<NameReport>,
+}
+
+/// One face name of a shaped part.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FaceReport {
+    /// The name.
+    pub name: String,
+    /// How many faces have it as their own name: usually 1.
+    pub count: usize,
+    /// The way it faces: `up`, `down`, `left`, `right`, `front`, `back`
+    /// (the nearest of them).
+    pub facing: String,
+    /// For a single face: how wide and tall it is, in metres.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<[f64; 2]>,
+    /// The faces next to it: the ones it shares an edge with.
+    pub next_to: Vec<String>,
+}
+
+/// A name that stands for several faces.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct NameReport {
+    /// The name.
+    pub name: String,
+    /// The faces' own names.
+    pub faces: Vec<String>,
+}
+
+/// The faces of every shaped part of a model, by name.
+pub fn face_report(model: &Model) -> Vec<ShapedReport> {
+    fn gather(parts: &[Part], into: &mut Vec<ShapedReport>) {
+        for part in parts {
+            if let Some(shaped) = &part.shaped {
+                into.push(shaped_report(part, shaped));
+            }
+            gather(&part.parts, into);
+        }
+    }
+    let mut reports = Vec::new();
+    gather(&model.parts, &mut reports);
+    reports
+}
+
+fn shaped_report(part: &Part, shaped: &Shaped) -> ShapedReport {
+    let own = shaped.own_names();
+    let faces = own
+        .iter()
+        .map(|name| {
+            let these: Vec<usize> = (0..shaped.faces.len())
+                .filter(|&face| shaped.faces[face].name == *name)
+                .collect();
+            let facing = these.iter().fold(Vec3::ZERO, |sum, &face| {
+                sum + shaped.normal(face).unwrap_or(Vec3::ZERO) * shaped.area(face)
+            });
+            let mut next_to: Vec<String> = Vec::new();
+            for &face in &these {
+                for other in shaped.neighbours(face) {
+                    let other = &shaped.faces[other].name;
+                    if other != name && !next_to.contains(other) {
+                        next_to.push(other.clone());
+                    }
+                }
+            }
+            FaceReport {
+                name: name.clone(),
+                count: these.len(),
+                facing: facing_word(facing).to_owned(),
+                size: match these.as_slice() {
+                    [face] => Some(
+                        shaped
+                            .extent(*face)
+                            .map(|n| (n * 10_000.0).round() / 10_000.0 + 0.0),
+                    ),
+                    _ => None,
+                },
+                next_to,
+            }
+        })
+        .collect();
+    let names = shaped
+        .names()
+        .into_iter()
+        .filter(|name| !own.contains(name))
+        .map(|name| {
+            let mut faces: Vec<String> = Vec::new();
+            for face in &shaped.faces {
+                if face.answers_to(&name) && !faces.contains(&face.name) {
+                    faces.push(face.name.clone());
+                }
+            }
+            NameReport { name, faces }
+        })
+        .collect();
+    ShapedReport {
+        part: part.path.clone(),
+        file: part.loc.file.clone(),
+        changes: part.kind.changes,
+        face_count: shaped.faces.len(),
+        faces,
+        names,
+    }
+}
+
 /// One material of a mesh file and how many triangles have it.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct MaterialUse {
@@ -162,6 +286,9 @@ pub struct PartReport {
     /// The file it comes from, if any.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub file: Option<String>,
+    /// How many changes were made to its shape: pulls, insets...
+    #[serde(skip_serializing_if = "is_zero")]
+    pub changes: usize,
     /// How many triangles, the parts inside it included.
     pub triangles: usize,
     /// Width, height and depth of the box around it.
@@ -255,7 +382,8 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
     // ---- floating and overlapping parts
     let leaves = model.leaves();
     let solids: Vec<Solid> = leaves.iter().map(|leaf| Solid::of(model, leaf)).collect();
-    let (floating, overlapping, by_box) = compare(&solids);
+    let ground_y = model.bounds().map(|all| all.min.y);
+    let (floating, overlapping, by_box) = compare(&solids, ground_y);
     for float in &floating {
         let part = leaves.iter().find(|leaf| leaf.path == float.part);
         warnings.push(warning_at(
@@ -333,6 +461,7 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
         floating,
         overlapping,
         sockets: Vec::new(),
+        shaped: Vec::new(),
         warnings,
         errors: Vec::new(),
     }
@@ -366,6 +495,7 @@ fn part_report(model: &Model, part: &Part) -> PartReport {
         kind: part.kind.shape.clone(),
         uses: part.kind.uses.clone(),
         file: part.kind.file.clone(),
+        changes: part.kind.changes,
         triangles: faces.iter().map(|face| face.triangle_count()).sum(),
         size: bounds.size().tidied().to_array(),
         bounds: corners(&bounds),
@@ -494,10 +624,15 @@ impl Inspection {
         ) {
             for part in parts {
                 let own_name = part.name.rsplit('/').next().unwrap_or(&part.name);
+                let kind = match part.changes {
+                    0 => part.kind.clone(),
+                    1 => format!("{}, 1 change", part.kind),
+                    changes => format!("{}, {changes} changes", part.kind),
+                };
                 let label = match (&part.uses, &part.file) {
-                    (Some(uses), _) => format!("{uses} ({})", part.kind),
-                    (None, Some(file)) => format!("{file} ({})", part.kind),
-                    (None, None) => part.kind.clone(),
+                    (Some(uses), _) => format!("{uses} ({kind})"),
+                    (None, Some(file)) => format!("{file} ({kind})"),
+                    (None, None) => kind,
                 };
                 let mut notes = Vec::new();
                 if let Some(socket) = &part.attached_to {
@@ -609,6 +744,47 @@ impl Inspection {
                 })
                 .collect();
             list("sockets", rows);
+        }
+        for shaped in &self.shaped {
+            out.push_str(&format!(
+                "  {:<12} {}  ({}): box, {}, {}\n",
+                "faces",
+                shaped.part,
+                shaped.file,
+                count(shaped.changes, "change"),
+                count(shaped.face_count, "face")
+            ));
+            let width = shaped
+                .faces
+                .iter()
+                .map(|face| face.name.chars().count())
+                .chain(shaped.names.iter().map(|name| name.name.chars().count()))
+                .max()
+                .unwrap_or(0);
+            let sizes: Vec<String> = shaped
+                .faces
+                .iter()
+                .map(|face| match face.size {
+                    Some([wide, tall]) => format!("{wide:.2} x {tall:.2} m"),
+                    None => count(face.count, "face"),
+                })
+                .collect();
+            let size_width = sizes.iter().map(String::len).max().unwrap_or(0);
+            for (face, size) in shaped.faces.iter().zip(&sizes) {
+                out.push_str(&format!(
+                    "    {:<width$}   faces {:<5}   {size:<size_width$}   next to: {}\n",
+                    face.name,
+                    face.facing,
+                    face.next_to.join(", ")
+                ));
+            }
+            for name in &shaped.names {
+                out.push_str(&format!(
+                    "    {:<width$}   stands for: {}\n",
+                    name.name,
+                    name.faces.join(", ")
+                ));
+            }
         }
         format!("{}  ({})\n{out}", self.name, self.source)
     }
@@ -752,10 +928,15 @@ impl Solid {
     }
 }
 
+/// How near the ground a part's lowest point must be for it to stand
+/// there: a millimetre, as for the model.
+const GROUND_NEAR: f64 = 0.001;
+
 /// Compares every pair of parts. Returns the floating parts, the
 /// overlapping pairs, and whether any pair was too big to compare
-/// exactly.
-fn compare(solids: &[Solid]) -> (Vec<Floating>, Vec<Overlap>, bool) {
+/// exactly. `ground` is the height of the model's lowest point: parts
+/// standing there stand on the ground, and don't float.
+fn compare(solids: &[Solid], ground: Option<f64>) -> (Vec<Floating>, Vec<Overlap>, bool) {
     let count = solids.len();
     let mut by_box = false;
     let mut overlapping = Vec::new();
@@ -813,13 +994,24 @@ fn compare(solids: &[Solid]) -> (Vec<Floating>, Vec<Overlap>, bool) {
         }
     }
 
-    // Everything joined to the first part is the body. The rest floats.
+    // What stands on the ground, and everything joined to it, stands.
+    // So does everything joined to the first part (the body), if nothing
+    // stands on the ground. The rest floats.
     let mut floating = Vec::new();
     if count > 0 {
-        let body = root(&mut group, 0);
+        let on_ground = |solid: &Solid| {
+            ground.is_some_and(|ground| (solid.bounds.min.y - ground).abs() <= GROUND_NEAR)
+        };
+        let mut standing: Vec<usize> = (0..count)
+            .filter(|&at| on_ground(&solids[at]))
+            .map(|at| root(&mut group, at))
+            .collect();
+        if standing.is_empty() {
+            standing.push(root(&mut group, 0));
+        }
         for at in 0..count {
             let own = root(&mut group, at);
-            if own == body {
+            if standing.contains(&own) {
                 continue;
             }
             // The nearest part that isn't joined to this one. Parts are

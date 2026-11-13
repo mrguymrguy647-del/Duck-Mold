@@ -8,9 +8,9 @@
 use std::path::{Path, PathBuf};
 
 use duck_mold_core::tools;
-use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::handles::Tool;
 use duck_mold_view::studio::viewport::Viewpoint;
+use duck_mold_view::studio::{FaceTool, Mode, Studio};
 use eframe::egui::{self, Rect, RichText, Sense};
 
 use crate::actions::{self, Action};
@@ -46,6 +46,12 @@ pub struct StudioApp {
     /// Where a copy of an example goes: the person's own
     /// `Documents\Duck Mold` folder.
     models_folder: PathBuf,
+    /// Set when Tab was pressed while nothing was being typed: taken
+    /// before egui could move the focus with it.
+    tab: bool,
+    /// The part a definition is being made from, and the name being
+    /// typed for it, while the window that asks is open.
+    defining: Option<(String, String)>,
 }
 
 /// The folder a person's own models go in: `Duck Mold` in their
@@ -92,6 +98,8 @@ impl StudioApp {
             showing: None,
             gallery: gallery::Gallery::default(),
             models_folder: own_models_folder(),
+            tab: false,
+            defining: None,
             tour: None,
             add_button: None,
         }
@@ -101,8 +109,9 @@ impl StudioApp {
     /// the start page.
     pub fn remembering(mut self, recent: Recent) -> StudioApp {
         self.recent = recent;
-        if let Some(studio) = &self.studio {
+        if let Some(studio) = &mut self.studio {
             self.recent.opened(studio.path());
+            studio.hide_again(self.recent.hidden_in(studio.path()));
         }
         self
     }
@@ -119,7 +128,9 @@ impl StudioApp {
     pub fn open(&mut self, path: PathBuf, look_only: bool) {
         if path.is_file() {
             self.recent.opened(&path);
-            self.studio = Some(Studio::open(path, look_only));
+            let mut studio = Studio::open(path, look_only);
+            studio.hide_again(self.recent.hidden_in(studio.path()));
+            self.studio = Some(studio);
             self.notice = None;
             // The first model a person opens to work on gets the tips.
             self.tour = (!look_only && !self.recent.tips_seen()).then_some(0);
@@ -224,9 +235,21 @@ impl StudioApp {
             return;
         };
 
+        // Tab shapes the selected box. Taken before anything is drawn, so
+        // that egui doesn't also move the focus from widget to widget with
+        // it (unless something is being typed: then it is the typing's).
+        if !ui.ctx().egui_wants_keyboard_input()
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+        {
+            ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+            self.tab = true;
+        }
+
         // Twice a second, see if the file was saved by something else.
         let seconds = f64::from(ui.input(|input| input.stable_dt)).min(1.0);
         studio.tick(seconds);
+        // Which parts are hidden is remembered for next time.
+        self.recent.keep_hidden(studio.path(), studio.hidden());
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(250));
 
@@ -422,17 +445,59 @@ impl StudioApp {
             if redo {
                 asked = Some(Action::Redo);
             }
-            // The tools' keys, as in other 3D programs.
-            for (key, tool) in [
-                (egui::Key::G, Tool::Move),
-                (egui::Key::R, Tool::Rotate),
-                (egui::Key::S, Tool::Scale),
-                (egui::Key::T, Tool::Size),
-                (egui::Key::P, Tool::Paint),
-            ] {
-                if ui.input(|input| input.modifiers.is_none() && input.key_pressed(key)) {
-                    studio.tool = tool;
+            // The tools' keys, as in other 3D programs. Shaping has
+            // tools of its own.
+            let key = |key: egui::Key| {
+                ui.input(|input| input.modifiers.is_none() && input.key_pressed(key))
+            };
+            if studio.mode() == Mode::Face {
+                for (pressed, tool) in [
+                    (egui::Key::T, FaceTool::Pull),
+                    (egui::Key::G, FaceTool::Move),
+                    (egui::Key::R, FaceTool::Turn),
+                    (egui::Key::S, FaceTool::Scale),
+                    (egui::Key::I, FaceTool::Inset),
+                    (egui::Key::K, FaceTool::Cut),
+                ] {
+                    if key(pressed) {
+                        studio.face_tool = tool;
+                    }
                 }
+            } else if studio.mode() == Mode::Corner {
+                if key(egui::Key::G) {
+                    studio.face_tool = FaceTool::Move;
+                }
+            } else if studio.mode() == Mode::Edge {
+                for (pressed, tool) in [
+                    (egui::Key::G, FaceTool::Move),
+                    (egui::Key::K, FaceTool::Cut),
+                ] {
+                    if key(pressed) {
+                        studio.face_tool = tool;
+                    }
+                }
+            } else {
+                for (pressed, tool) in [
+                    (egui::Key::G, Tool::Move),
+                    (egui::Key::R, Tool::Rotate),
+                    (egui::Key::S, Tool::Scale),
+                    (egui::Key::T, Tool::Size),
+                    (egui::Key::P, Tool::Paint),
+                ] {
+                    if key(pressed) {
+                        studio.tool = tool;
+                    }
+                }
+            }
+            // Tab: shape the selected box, or back to parts.
+            if std::mem::take(&mut self.tab) {
+                asked = Some(Action::Shape);
+            }
+            if key(egui::Key::E) {
+                asked = Some(Action::EdgeMode);
+            }
+            if key(egui::Key::C) {
+                asked = Some(Action::CornerMode);
             }
             if let Some(action) = actions::keys(ui) {
                 asked = Some(action);
@@ -522,9 +587,42 @@ impl StudioApp {
                         self.draft.rename();
                     }
                 }
+                Action::Remove if studio.mode() != Mode::Part => {
+                    studio.say_why(
+                        "Faces can't be removed: a shape must stay closed. To take a change back, Undo, or remove it from the Changes list",
+                    );
+                }
                 Action::Remove => {
                     if !studio.selection().is_empty() {
                         self.draft.remove(studio);
+                    }
+                }
+                Action::Shape => {
+                    // What it did, or why not, is in the status line.
+                    let _ = studio.toggle_face_mode();
+                }
+                Action::FaceTool(tool) => studio.face_tool = tool,
+                Action::EdgeMode => {
+                    // What it did, or why not, is in the status line.
+                    let _ = studio.toggle_edge_mode();
+                }
+                Action::CornerMode => {
+                    let _ = studio.toggle_corner_mode();
+                }
+                Action::MakeDefinition => {
+                    if let Some(part) = studio.selected().map(str::to_owned) {
+                        let own = part.rsplit('/').next().unwrap_or(&part).to_owned();
+                        let name = duck_mold_core::edit::unused_name(
+                            own.trim_start_matches('#'),
+                            &studio.definitions(),
+                        );
+                        self.defining = Some((part, name));
+                    }
+                }
+                Action::SaveToLibrary => {
+                    if let Some(part) = studio.selected().map(str::to_owned) {
+                        // What it did, or why not, is in the status line.
+                        let _ = studio.save_to_library(&part);
                     }
                 }
                 Action::Unjoin => {
@@ -574,10 +672,10 @@ impl StudioApp {
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             if self.view.is_adding() {
                 self.view.stop_adding();
-            } else if studio.dragging().is_some() {
-                // The viewport lets go of the part it was dragging.
-            } else if studio.selected().is_some() {
-                studio.select(None);
+            } else if studio.dragging().is_some() || studio.grabbed().is_some() {
+                // The viewport lets go of what it was dragging.
+            } else if studio.escape() {
+                // A step back: the faces, Face mode, then the selection.
             } else if studio.look_only() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -597,6 +695,7 @@ impl StudioApp {
             }
         }
         self.help_window(ui);
+        self.definition_window(ui);
         if open_another && let Some(path) = pick_file() {
             self.open(path, false);
         }
@@ -616,6 +715,58 @@ impl StudioApp {
     }
 
     /// The list of keys, or what the program is: Help's two windows.
+    /// The window that asks for a definition's name.
+    fn definition_window(&mut self, ui: &mut egui::Ui) {
+        let Some((part, name)) = &mut self.defining else {
+            return;
+        };
+        let mut open = true;
+        let mut make = false;
+        let mut cancel = false;
+        egui::Window::new("Make a definition")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                ui.label(format!(
+                    "What \"{part}\" is made of becomes a definition the recipe can use again: Add > Defined in this recipe."
+                ));
+                ui.horizontal(|ui| {
+                    let label = ui.label("Called");
+                    let field = ui
+                        .add(egui::TextEdit::singleline(name).desired_width(140.0))
+                        .labelled_by(label.id);
+                    if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                        make = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!name.is_empty(), theme::primary_button("Make"))
+                        .clicked()
+                    {
+                        make = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if cancel {
+            open = false;
+        }
+        if make && let Some(studio) = &mut self.studio {
+            let (part, name) = (part.clone(), name.clone());
+            // What it did, or why not, is in the status line.
+            let _ = studio.apply(&duck_mold_core::edit::Edit::Define { part, name });
+            open = false;
+        }
+        if !open {
+            self.defining = None;
+        }
+    }
+
     fn help_window(&mut self, ui: &mut egui::Ui) {
         let Some(showing) = self.showing else {
             return;
@@ -921,6 +1072,10 @@ impl eframe::App for StudioApp {
             self.open(path, false);
         }
         StudioApp::ui(self, ui);
+        // (Kept again after the frame, in case the window closes next.)
+        if let Some(studio) = &self.studio {
+            self.recent.keep_hidden(studio.path(), studio.hidden());
+        }
         let title = self.title();
         if title != self.titled {
             ui.ctx()

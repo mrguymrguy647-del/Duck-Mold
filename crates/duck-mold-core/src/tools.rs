@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
 use crate::gltf::{is_duck_mold_glb, read_gltf};
-use crate::inspect::{Inspection, MaterialUse, inspect, socket_report};
+use crate::inspect::{Inspection, MaterialUse, face_report, inspect, socket_report};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
@@ -212,6 +212,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
             shape: "mesh".to_owned(),
             uses: None,
             file: None,
+            changes: 0,
         },
         attached_to: None,
         mirrored: false,
@@ -227,6 +228,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
             .iter()
             .map(|&material| material as u16)
             .collect(),
+        shaped: None,
     };
     Model {
         name,
@@ -266,10 +268,26 @@ pub fn inspect_file(path: &Path) -> Result<Inspection, Failure> {
 /// `duck-mold inspect --sockets`: [`inspect_file`], with every named
 /// socket listed too.
 pub fn inspect_file_with_sockets(path: &Path) -> Result<Inspection, Failure> {
+    inspect_file_listing(path, true, false)
+}
+
+/// `duck-mold inspect --sockets --faces`: [`inspect_file`], with every
+/// named socket listed if `sockets`, and every face of every shaped part
+/// if `faces`.
+pub fn inspect_file_listing(
+    path: &Path,
+    sockets: bool,
+    faces: bool,
+) -> Result<Inspection, Failure> {
     let built = build(path)?;
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
     inspection.materials = built.materials;
-    inspection.sockets = socket_report(&built.model);
+    if sockets {
+        inspection.sockets = socket_report(&built.model);
+    }
+    if faces {
+        inspection.shaped = face_report(&built.model);
+    }
     Ok(inspection)
 }
 
@@ -367,7 +385,7 @@ pub struct Example {
 }
 
 /// The examples, in the order the start page shows them.
-pub const EXAMPLES: [Example; 12] = [
+pub const EXAMPLES: [Example; 15] = [
     Example {
         name: "robot",
         about: "Parts made of parts, and a mirrored arm",
@@ -376,7 +394,7 @@ pub const EXAMPLES: [Example; 12] = [
     },
     Example {
         name: "house",
-        about: "A roof of two ramps, with a door, windows and a chimney on sockets",
+        about: "A roof of two ramps, with a door, framed windows and a chimney on sockets",
         recipe: include_str!("../../../examples/house.toml"),
         files: &[],
     },
@@ -449,6 +467,24 @@ pub const EXAMPLES: [Example; 12] = [
         recipe: include_str!("../../../examples/gate.toml"),
         files: &[],
     },
+    Example {
+        name: "chair",
+        about: "One box, shaped: legs and a back pulled out of its seat",
+        recipe: include_str!("../../../examples/chair.toml"),
+        files: &[],
+    },
+    Example {
+        name: "window_wall",
+        about: "A wall with a framed window, made by inset",
+        recipe: include_str!("../../../examples/window_wall.toml"),
+        files: &[],
+    },
+    Example {
+        name: "rock",
+        about: "A box cut through its middle, its corners moved in and out",
+        recipe: include_str!("../../../examples/rock.toml"),
+        files: &[],
+    },
 ];
 
 /// `duck-mold new --example`: writes a copy of an example to `path`,
@@ -502,6 +538,61 @@ pub fn new_file(path: &Path) -> Result<Inspection, Failure> {
     let text = STARTER.replacen("\"model\"", &format!("\"{name}\""), 1);
     new_recipe(path, &text)?;
     inspect_file(path)
+}
+
+/// `duck-mold save-part`: writes a part of a recipe alone, as a recipe
+/// of its own (for the library), to `output`, which must end in `.toml`
+/// and must not be there yet. The recipe doesn't change.
+pub fn save_part(recipe: &Path, part: &str, output: &Path) -> Result<Inspection, Failure> {
+    let text = std::fs::read_to_string(recipe).map_err(|error| {
+        let reason = match error.kind() {
+            std::io::ErrorKind::NotFound => "there is no such file",
+            _ => "it didn't work",
+        };
+        Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!("can't read \"{}\": {reason}", display_path(recipe)),
+        )))
+    })?;
+    let Some(syntax) = crate::source::Syntax::from_path(recipe) else {
+        return Err(Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!(
+                "\"{}\" isn't a recipe: its name must end in .toml or .json",
+                display_path(recipe)
+            ),
+        ))));
+    };
+    if output.exists() {
+        return Err(Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!(
+                "\"{}\" is already there: save-part never writes over a file",
+                display_path(output)
+            ),
+        ))));
+    }
+    let saved = crate::edit::part_recipe(&text, syntax, recipe, part)?;
+    if let Some(folder) = output
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(folder).map_err(|error| {
+            Failure::Usage(Box::new(Issue::error(
+                Code::Io,
+                "",
+                format!(
+                    "can't make the folder \"{}\": {error}",
+                    display_path(folder)
+                ),
+            )))
+        })?;
+    }
+    new_recipe(output, &saved)?;
+    inspect_file(output)
 }
 
 /// Writes a new recipe's text to `path`, which must end in `.toml` and

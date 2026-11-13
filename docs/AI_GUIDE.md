@@ -92,8 +92,10 @@ target/release/duck-mold new my_robot.toml --example robot
 
 The examples are `robot`, `house`, `snowman`, `desk`, `duck`, `dog`
 (capsules), `doughnut` (a torus), `mug` (a tube), `temple` (a pyramid
-and stairs), `barn` (a prism), `slide` (stairs) and `gate` (an arch,
-taper and bevel). `new` never writes over a file. Without `--example`
+and stairs), `barn` (a prism), `slide` (stairs), `gate` (an arch,
+taper and bevel), and three made by shaping one box: `chair` (cuts and
+pulls), `window_wall` (insets) and `rock` (corners moved). `new` never
+writes over a file. Without `--example`
 it starts a recipe with one box in it.
 
 ## 3. A first recipe
@@ -195,6 +197,7 @@ Its other fields:
 | `name` | Letters, digits, `_`, `-`. Needed if another part attaches to it. |
 | `color` | A palette name: the colour of the whole part. |
 | `colors` | Colours for single faces: `{ top = "grass", sides = "dirt" }`. |
+| `changes` | A box only: changes made to its shape once it is built, in order. See "Shaping a box" below. |
 | `attach`, `to` | Join my socket `attach` to `to = "part.socket"`, a socket of another part in the same list. Always both. |
 | `twist` | Attached part only: one number, degrees to twist it around the join. |
 | `rotate` | Free part only: `[x, y, z]` degrees, around x, then y, then z. |
@@ -235,6 +238,57 @@ Two options:
   narrows x and z differently.
 
 Use them sparingly: a bevel on every box multiplies the triangles.
+
+**Shaping a box: `changes`.** A box (with or without `taper`, without
+`bevel`) can have a list of changes, made to it one after the other:
+
+```toml
+[[parts]]
+name = "wall"
+shape = "box"
+size = [3, 2.4, 0.2]
+color = "plaster"
+changes = [
+  { inset = "front", by = 0.6, name = "window" },   # a face 0.6 m in from every edge of the front
+  { inset = "window", by = 0.06, name = "glass" },  # the window's frame: 6 cm
+  { pull = "glass", by = -0.08 },                   # the glass pushed 8 cm in
+]
+colors = { window = "wood", glass = "sky" }
+```
+
+| Change | What it does | New faces |
+|---|---|---|
+| `{ pull = "top", by = 0.5 }` | Pulls the face out the way it faces, by `by` metres, with new walls round it. A negative `by` pushes it in (a hollow). Several faces, `pull = ["a", "b"]`, that touch are pulled as one piece. | The face keeps its name. Walls `<face>_side_<side>` (`top_side_front`...); with `name = "leg"`: `leg_front`..., and `leg` for all of them. |
+| `{ inset = "front", by = 0.1 }` | A smaller face inside the face, `by` metres in from every edge (less than half its width). The shape doesn't change: there are more faces to work with. | The middle: `<face>_inset`, or `name`. The ring round it: `<middle>_rim_<side>`; the face's old name now stands for the ring. |
+| `{ move = "top", by = [0, 0, 0.2] }` | Moves the face by x, y, z metres; the faces round it stretch to follow. | None. |
+| `{ turn = "top", by = [0, 15, 0] }` | Turns the face about its middle: degrees around x, then y, then z. Faces round it bend (each is drawn as two triangles). | None. |
+| `{ scale = "top", by = 0.5 }` | Makes the face bigger or smaller about its middle: one number, or `[x, y, z]`. `scale = "top", by = 0.5` on a box makes a frustum. | None. |
+| `{ move = "top+front", by = [0, 0.1, 0] }` | Moves an edge: where the faces `top` and `front` meet (in either order). | None. |
+| `{ move = "top+front+left", by = [0, 0.1, 0] }` | Moves a corner: where those three faces meet. A face that bends is drawn as two triangles. | None. |
+| `{ cut = "right", at = 0.8 }` | Cuts all the way round, with a flat cut facing right, 0.8 of the way from the middle to the right side of the box (0 to just under 1). Every face it crosses becomes two; nothing moves. | The piece towards the middle keeps the name; the slice towards the side is `<face>_<side>` (`top_right`), or `<face>_<name>`. |
+
+- **Names are words, never numbers**, and never change when the size or
+  an amount does. `duck-mold inspect <recipe> --faces` lists every face
+  of every shaped part: its name, which way it faces, its size and the
+  faces next to it, and the names that stand for several faces.
+- A name can stand for several faces, and works wherever a face name
+  does: in `colors`, and in later changes. A name for fewer faces beats
+  one for more in `colors` (`front` beats `sides`).
+- A name a change would make that an earlier change made already gets a
+  number: `top_side_front_2`. A `name` you give is used as it is.
+- **Amounts are metres**, in the part's own directions, before its
+  `scale`, `mirror`, `rotate` and `move`.
+- **A change that would break the shape is an error naming it**: a face
+  that isn't there (`unknown_face`), an inset too wide (`out_of_range`,
+  with the widest that fits), or a shape squeezed flat, turned inside out
+  or passing through itself (`bad_shape`). Nothing is built.
+- **New faces work like old ones**: `colors = { glass = "sky" }`, and
+  sockets on them: `lamp = { on = "glass" }` sits at the middle of the
+  glass, facing out of it, and moves with it (`shift` slides it across
+  the face, -1 to 1 each way). `add-socket <part> <name> --on glass`
+  writes one.
+- Only a box can be shaped in this version; a part that `use`s a
+  definition is shaped in the definition.
 
 Use few segments: 8 is usually enough for a game model. A 4-sided cone
 is a square pyramid; a 4-sided cylinder is a box. A round shape's radius
@@ -372,9 +426,12 @@ What to check, in this order:
 1. **`ok` and `errors`.** Fix all errors first.
 2. **`size`.** Is the model the size you meant? A chair is about 1 tall;
    a 10-metre chair means a wrong `size`, `scale` or socket.
-3. **`floating`.** Each entry is a part that touches nothing:
-   `{ "part": "knob", "nearest": "peg", "gap": 0.1 }`. Almost always a
-   mistake: attach it to a socket, or move it by `gap`.
+3. **`floating`.** Each entry is a part up in the air that touches
+   nothing: `{ "part": "knob", "nearest": "peg", "gap": 0.1 }`. Almost
+   always a mistake: attach it to a socket, or move it by `gap`. A part
+   standing on the ground (its lowest point within a millimetre of the
+   model's), and everything touching it, never floats: two things side
+   by side on a floor are fine.
 4. **`overlapping`.** Each entry is one part poking into another:
    `{ "a": "peg", "b": "base", "depth": 0.3, "hidden": false }` means
    `peg` is 0.3 deep inside `base`. Overlap is often meant (a nose
@@ -440,6 +497,7 @@ As JSON (`"ok": false`, with `errors` and `warnings`), each is:
 | `unsupported` | Not available: see-through colours, compressed glTF. |
 | `file_not_found` | A file the recipe names can't be read. Paths start from the recipe's folder. |
 | `bad_mesh` | A mistake inside a mesh file (an `.obj`'s with its line). |
+| `bad_shape` | A change in a part's `changes` would squeeze a face flat, turn the shape inside out, or make it pass through itself. Use a smaller `by`, or change other faces. |
 | `io` | The file on the command line can't be read or written. |
 
 Warnings (the model is still built; exit code 0):
@@ -532,23 +590,35 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | Command | What it does |
 |---|---|
 | `duck-mold edit <recipe> add <name> --to <part.socket>` | Adds a part joined to a socket. Made of `--shape box` (or any other shape's name), `--use <defined part>` or `--file <recipe or mesh>`. Also takes `--attach <own socket>`, the shape's sizes (`--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`), its options (`--bevel`, `--bevel-steps`, `--taper n` or `--taper x,z`), `--color`, `--twist`. |
-| `duck-mold edit <recipe> add <name>` (no `--to`) | Adds a part joined to nothing, in the model's own list. It is stood on the ground: at the recipe's zero, or at `--stand x,z`. Or give its middle exactly with `--move x,y,z`. Also takes `--rotate x,y,z` and `--scale n` (or `x,y,z`), and what it is made of, its sizes and `--color` as above. Move it later with `set <name> --move`. |
+| `duck-mold edit <recipe> add <name>` (no `--to`) | Adds a part joined to nothing, in the model's own list. It is stood on the ground, clear of the other parts: from the middle of the model towards its front (+z), 10 cm at a time, until 10 cm separates it from everything else; or exactly at `--stand x,z`. Or give its middle exactly with `--move x,y,z`. Also takes `--rotate x,y,z` and `--scale n` (or `x,y,z`), and what it is made of, its sizes and `--color` as above. Move it later with `set <name> --move`. |
 | `duck-mold edit <recipe> remove <part>` | Removes a part. Refused, with their names, if other parts hang from it; `--with-attached` removes those too. |
 | `duck-mold edit <recipe> rename <part> <new-name>` | Renames a part, and every `to`, `from` and `origin` that names it. |
 | `duck-mold edit <recipe> join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes its own socket. A part placed with `move` loses it. |
 | `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`, `--bevel` (`0` makes the edges sharp again), `--bevel-steps`, `--taper n` or `--taper x,z` (`1` makes the sides straight again), `--color`, `--face-color top=plank` (repeatable; `top=none` takes the face's own colour away again), `--twist`. Several at once are one edit. A new shape drops the sizes, options and face colours it doesn't have. |
 | `duck-mold edit <recipe> set <part> --move x,y,z` | Puts a **free** part (one that isn't joined) there: its middle, in metres, measured from the recipe's own zero. Also `--rotate x,y,z` (degrees around x, then y, then z) and `--scale n` or `--scale x,y,z`. A joined part refuses `--move` and `--rotate`, and says what to do instead; `--scale` works on any part. |
 | `duck-mold edit <recipe> unjoin <part>` | Makes a joined part free, exactly where it stands: its `attach`, `to` and `twist` become a `move` and a `rotate`. The model doesn't change; the part can then be moved anywhere. |
-| `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. |
+| `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. A copy of a joined part, with no `--to`, never sits on the part it copies: it goes to the next socket of the same part that nothing is joined to and that faces the same way (in the order they are written: the next table leg's socket); else to a new socket (`spot`) made beside the original's, 10 cm past it on the same side, if there is room; else (in the model's own list) it stands free on clear ground in front of the model. The summary says which. |
 | `duck-mold edit <recipe> duplicate <part> --mirror` | A mirror image: a right arm from a left arm. The copy gets `mirror = "x"`, its twist is reversed, and `left` and `right` are swapped in its name and in the socket it joins (`body.left_arm` becomes `body.right_arm`), unless `--name` and `--to` say otherwise. |
 | `duck-mold edit <recipe> add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
 | `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
 | `duck-mold edit <recipe> remove-color <name>` | Takes a colour out of the palette. Refused if anything is painted with it, naming what; `--replace-with <other colour>` paints those with the other colour first. |
-| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
+| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
 | `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared that way: `--shift x,y,z`, `--on <side>`. Whatever is joined to it moves with it. |
+| `duck-mold edit <recipe> set-socket <part.socket> --facing <way>` | Turns a socket declared that way: `up`, `down`, `left`, `right`, `front`, `back` writes `facing`; `out` takes it away, so the socket faces straight out of its side again. Whatever is joined to it turns to match. |
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
+| `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
+| `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
+| `duck-mold edit <recipe> set-change <part> <number> --by <amount>` | Changes the amount of one change, counted from 1 as they are written: one number, or `x,y,z` for a move, a turn or a scale. Later changes, and every name, stay. |
+| `duck-mold edit <recipe> move-face <part> <faces> --by x,y,z` | Adds a move of faces to a box's `changes`. Right after a move of the same faces, it adds to that one instead of making a second line. |
+| `duck-mold edit <recipe> turn-face <part> <faces> --by x,y,z` | Adds a turn of faces (degrees around x, y, z, about their middle). Adds to a turn of the same faces right before it. |
+| `duck-mold edit <recipe> scale-face <part> <faces> --by n` | Adds a scale of faces (one number, or `x,y,z`). Multiplies a scale of the same faces right before it. |
+| `duck-mold edit <recipe> move-edge <part> <a+b> --by x,y,z` | Adds a move of an edge (where faces `a` and `b` meet; several with commas). Adds to a move of the same edges right before it. |
+| `duck-mold edit <recipe> define <part> <name>` | Makes a definition from a part of the model's own list: its shape and sizes (or file), changes, colours and own sockets move to `[define.<name>]`, and the part becomes `use = "<name>"` where it stands. Add more with `add <new> --use <name>`; shaping one shapes them all. |
+| `duck-mold edit <recipe> move-corner <part> <a+b+c> --by x,y,z` | Adds a move of a corner (where faces `a`, `b` and `c` meet; several with commas). Adds to a move of the same corners right before it. A rock: cut a box through the middle three ways (`cut` right, top and front, `--at 0`), then move its corners in and out. |
+| `duck-mold edit <recipe> cut <part> --toward <side> --at <share>` | Adds a cut all the way round, facing a side, `--at` of the way from the middle (0) to that side (just under 1). `--name` names the slices. `set-change --at` moves it. |
+| `duck-mold edit <recipe> remove-change <part> <number>` | Takes one change away (`--all`: every one, and the part is a plain box again). Refused if a later change or a colour names a face only that change made: the mistakes it would cause are listed. |
 
 - **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,
   or `#2` for a part with no name. `--to` takes the same
@@ -567,6 +637,11 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   `use = "arm"`) is changed in the definition, so every part using it
   changes. The report says so: `"definition": "arm", "also_changes":
   ["right_arm/hand"]`.
+- **`duck-mold save-part <recipe> <part> <file>`** (not an `edit`: the
+  recipe doesn't change) writes the part alone as a recipe of its own,
+  with the palette colours it uses and none of where it stands: put it
+  in the `parts` folder next to a recipe and it is in the Studio's
+  library. It never writes over a file.
 - **A part made from a defined part** (`left_eye`, which is `use =
   "eye"`): `set --shape`, `--size`, `--radius`, `--height`,
   `--segments`, `--color` and `--face-color` change the definition,
@@ -583,6 +658,14 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   scale, colour, copy or remove them together. In the file that is
   the same edit, once for each part: run the command once for each.
   Hiding a part in the Studio changes nothing in the file.
+- In the Studio, Face mode (Tab) shapes a box by hand: a drag of its
+  Pull arrow is a `pull`, of its Inset knob an `inset`, and the panel's
+  Changes list is `set-change` and `remove-change`. Read the result
+  with `inspect --faces`.
+- **`pull`, `inset`, `set-change` and `remove-change` on a part made
+  from a defined part** change the definition, like `set --shape`.
+- **`set --shape` to anything but a box drops a box's changes** (only a
+  box can be shaped), and says so: `dropped 3 changes`.
 - Not edits: `mirror` (except through `duplicate --mirror`), sockets
   written with `at` or `from`, and `define`. Type those in the recipe.
 

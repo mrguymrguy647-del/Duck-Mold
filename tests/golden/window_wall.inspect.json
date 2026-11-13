@@ -1,0 +1,82 @@
+{
+  "ok": true,
+  "summary": "window_wall: 3.00 x 2.40 x 0.20 m, 36 triangles, 1 part, 3 colours, rests on the ground, nothing floating, nothing overlapping",
+  "source": "examples/window_wall.toml",
+  "name": "window_wall",
+  "size": [
+    3.0,
+    2.4,
+    0.2
+  ],
+  "bounds": {
+    "min": [
+      -1.5,
+      0.0,
+      -0.1
+    ],
+    "max": [
+      1.5,
+      2.4,
+      0.1
+    ]
+  },
+  "triangles": 36,
+  "vertices": 72,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "plaster",
+      "hex": "#E8E0D0",
+      "triangles": 18
+    },
+    {
+      "name": "wood",
+      "hex": "#8B5A2B",
+      "triangles": 16
+    },
+    {
+      "name": "sky",
+      "hex": "#9FD3F0",
+      "triangles": 2
+    }
+  ],
+  "parts": [
+    {
+      "name": "wall",
+      "kind": "box",
+      "changes": 3,
+      "triangles": 36,
+      "size": [
+        3.0,
+        2.4,
+        0.2
+      ],
+      "bounds": {
+        "min": [
+          -1.5,
+          0.0,
+          -0.1
+        ],
+        "max": [
+          1.5,
+          2.4,
+          0.1
+        ]
+      },
+      "colors": [
+        "plaster",
+        "wood",
+        "sky"
+      ],
+      "attached_to": null,
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [],
+  "warnings": [],
+  "errors": []
+}

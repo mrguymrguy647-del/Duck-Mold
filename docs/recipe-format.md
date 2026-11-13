@@ -174,6 +174,80 @@ side it leans with the side, and at the very edge of a bevelled face it
 is on the cut and leans with that. Give such a socket a `facing` of its
 own (`facing = "front"`) where it should look straight out.
 
+**Shaping a box: `changes`.** A `box` (with or without `taper`, without
+`bevel`) can have a list of changes, made to it after it is built, one
+after the other, in the order they are written:
+
+```toml
+[[parts]]
+name = "wall"
+shape = "box"
+size = [3, 2.4, 0.2]
+color = "plaster"
+changes = [
+  { inset = "front", by = 0.6, name = "window" },
+  { inset = "window", by = 0.06, name = "glass" },
+  { pull = "glass", by = -0.08 },
+]
+colors = { window = "wood", glass = "sky" }
+```
+
+Each change is a table with one of these, and the fields it takes:
+
+| Change | Fields | What it does |
+|---|---|---|
+| `pull` | `pull` (a face name, or a list of them), `by` (metres, not 0: -1000 to 1000), `name` (optional) | Pulls the faces out the way they face by `by`, and fills the gap with new walls. A negative `by` pushes them in, making a hollow. Faces in the list that share an edge are pulled as one piece, with walls only round its outside, the way the faces face together. |
+| `inset` | `inset` (a face name, or a list), `by` (metres, above 0), `name` (optional) | Makes a smaller face inside each face, `by` in from every edge, with a ring of four-sided faces round it. `by` must be less than half the face's width. Nothing moves: there are just more faces. |
+| `move` | `move` (a face name, or a list), `by` (`[x, y, z]` metres, not all 0) | Moves the faces; the faces round them stretch to follow. No new faces. |
+| `turn` | `turn` (a face name, or a list), `by` (`[x, y, z]` degrees, not all 0) | Turns the faces about their middle (the middle of them all, for several): around x, then y, then z. Faces round them may bend: a bent four-sided face is drawn as two triangles, folded the way that bulges out, and keeps its name. |
+| `scale` | `scale` (a face name, or a list), `by` (one number above 0, or `[x, y, z]`; not 1) | Makes the faces bigger or smaller about their middle. |
+| `move` of an edge | `move` (an edge: `"top+front"`, the faces that meet there, in any order; or a list), `by` (`[x, y, z]`) | Moves the edge; the faces on both sides follow. |
+| `move` of a corner | `move` (a corner: `"top+front+left"`, three or more faces that meet there; or a list), `by` (`[x, y, z]`) | Moves the corner; the faces round it follow. A four-sided face that bends is drawn as two triangles, folded the way that bulges out, and keeps its name. |
+| `cut` | `cut` (a side: `top`, `bottom`, `left`, `right`, `front` or `back`), `at` (0 to just under 1), `name` (optional) | Cuts all the way round with a flat cut facing that side, `at` of the way from the box's middle to that side (a share of the size, so it stays near the side when the box is resized). Every face it crosses becomes two; nothing moves. |
+
+Amounts are metres, in the part's own directions, before its `scale`,
+`mirror`, `rotate` and `move`. Resizing the box keeps them: a frame
+6 cm wide stays 6 cm wide.
+
+**Names.** Every face has a name made of words, never a number, and no
+size or amount changes it:
+
+| Change | The face it is made to | The new faces |
+|---|---|---|
+| `pull` | Keeps its name: it is the end of what was pulled. | One wall along each edge, `<face>_side_<side>`, where the side is the edge's side of the face (`top_side_front`). With `name = "leg"`: `leg_front`, `leg_left`... `<face>_side`, or the `name`, stands for all the walls. |
+| `inset` | Its name now stands for the ring left round the new face. | The face in the middle: `<face>_inset`, or the `name`. The ring's pieces: `<middle>_rim_<side>` (`window_rim_top`). |
+| `move`, `turn`, `scale` | Keeps its name. | None. |
+| `cut` | Keeps its name on the piece towards the middle. | The slice towards the side: `<face>_<side>` (`top_right`), or `<face>_<name>`. |
+
+**Edges** are named by the two faces that meet there, joined with `+`
+(`top+front`), and corners by three or more (`top+front+left`); the
+order doesn't matter. A name for several faces works there too:
+`backrest_front+top` is every edge where one of the `backrest_front`
+walls meets the top. `duck-mold inspect --faces` lists each face's
+neighbours, which are the edges it has.
+
+The side words (`top`, `left`, `front`...) are passed down from the
+box's faces to the faces the changes make, not measured, so a turned
+face keeps them. A name can stand for several faces: walls along the
+same side share one, and `sides`, a pull's name and an inset face's old
+name stand for groups. Such names work wherever a face name does, in
+`colors` and in later changes. In `colors`, a name for fewer faces wins
+over one for more (`front` over `sides`), whichever is written first.
+A name a change would make that an earlier change made already gets a
+number: `top_side_front_2`, `top_inset_2`. A `name` you give is used as
+it is.
+
+`duck-mold inspect <recipe> --faces` lists every face of every shaped
+part: its name, the way it faces, its size, and the faces next to it.
+
+**Mistakes.** A change that names a face that isn't there
+(`unknown_face`, with the closest name), an inset wider than the face
+allows (`out_of_range`, saying how wide it may be), or a change that
+would squeeze a face flat, turn the shape inside out or make it pass
+through itself (`bad_shape`) is an error on that change's line. Nothing
+is built. `changes` on any other shape, on a bevelled box, or on a part
+that `use`s a definition (shape the definition instead) is an error too.
+
 A round shape's first flat side faces right (+x). When `segments` is a
 multiple of 4, flat sides face left, right, front and back, and a
 `radius` of 0.5 is exactly 1 wide.
@@ -196,6 +270,7 @@ multiple of 4, flat sides face left, right, front and back, and a
 | `arch` | `front`, `back`, `left`, `right`, `top`, `bottom` (under its two feet), `inside` (the doorway) | 4 × segments + 24 |
 | a bevelled `box` | the box's, and `bevel` | 12 + 24 × steps + 8 × steps × steps: 44 for one step |
 | a bevelled `cylinder` | the cylinder's, and `bevel` | 4 × segments × steps more than the cylinder |
+| a `box` with `changes` | the box's, and those the changes make (above) | 2 for each four-sided face: a pull adds a wall for each edge round the outside, an inset a ring of as many faces as the face has edges |
 | an `.obj` file | its material names (`default` for faces before any material) | as in the file |
 | a `.gltf` or `.glb` file | its material names (`material_N` for one with no name, `default` for faces with no material); for a `.glb` Duck Mold wrote, its palette names | as in the file |
 
@@ -263,7 +338,9 @@ around it: they say how big it is and where the ground is.
 |---|---|---|
 | On a side | `on` | `top`, `bottom`, `left`, `right`, `front`, `back` or `center`. |
 | | `shift` (default `[0, 0, 0]`) | Slides the socket across the side of the box: each number from -1 (the left, bottom or back edge) to 1 (the right, top or front edge). The number for the direction the side faces must be 0. With `center`, all three are free. Then, on a shape, the socket moves straight in onto the surface, as above; a shift that puts it beside the shape, where there is nothing to sit on, is an error. |
-| | `facing` (default: out of the surface) | A direction. Given, it wins over the surface's. |
+| | `facing` (default: out of the surface) | A direction. Given, it wins over the surface's. (`duck-mold edit <recipe> set-socket <part.socket> --facing <way>` writes it, or with `out` takes it away; so does the list beside each socket in the Studio's panel.) |
+| On a face of a shaped box | `on` | Any face name of a box with `changes` (`glass`, `backrest_front`), or a name for several faces: the socket is at the middle of the faces with that name, facing out of them. It moves with them when a change moves them. |
+| | `shift` (default `[0, 0, 0]`) | Slides it across the face: each number from -1 to 1, a share of how wide, tall and deep the faces are from their middle. It stays on the face's plane, so the number along the way the face faces does nothing. |
 | At a point | `at` | `[x, y, z]` in the part's own space. For a shape, zero is its middle. For an assembly, zero is where a part of its list goes when it is neither attached nor moved. For a recipe used as a part, zero is its `origin`. |
 | | `facing` (default `"up"`) | A direction. |
 | Passed on | `from` | `"part.socket"`: a socket of a part inside this assembly, offered to the outside under a new name. |

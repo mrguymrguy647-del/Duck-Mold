@@ -6,10 +6,12 @@
 //! [`Edit`], the same one `duck-mold edit` makes, and the Studio applies
 //! it to the recipe file. The fields are then read from the file again.
 
-use duck_mold_core::edit::{Changes, Edit, Facts, Made, Sizes};
+use duck_mold_core::edit::{Changes, Edit, FACINGS, Facts, Made, Sizes};
+use duck_mold_core::math::Vec3;
 use duck_mold_core::model::Part;
 use duck_mold_core::recipe::Shape;
-use duck_mold_view::studio::Studio;
+use duck_mold_core::shaping::facing_word;
+use duck_mold_view::studio::{Mode, Studio};
 use eframe::egui::{self, Color32, DragValue, RichText, TextEdit};
 
 use crate::theme;
@@ -54,6 +56,11 @@ pub struct Draft {
     focus_name: bool,
     /// The names of the part's sockets, as they are being typed.
     socket_names: Vec<String>,
+    /// The amount of each of the part's changes, as it is being typed.
+    change_by: Vec<f64>,
+    /// The three amounts of each change that has three (a move, a
+    /// turn), as they are being typed.
+    change_xyz: Vec<[f64; 3]>,
 }
 
 impl Draft {
@@ -76,6 +83,261 @@ impl Draft {
         self.recolor = None;
         self.confirm_remove = None;
         self.socket_names = facts.sockets.iter().map(|(name, _)| name.clone()).collect();
+        self.change_by = facts
+            .changes
+            .iter()
+            .map(|change| change.by.or(change.at).unwrap_or(0.0))
+            .collect();
+        self.change_xyz = facts
+            .changes
+            .iter()
+            .map(|change| change.by_xyz.unwrap_or([0.0; 3]))
+            .collect();
+    }
+}
+
+/// In Face mode: the faces selected, each with the way it faces and how
+/// big it is.
+fn faces_section(ui: &mut egui::Ui, studio: &Studio) {
+    let Some((part, shaped)) = studio.shaped_selected() else {
+        return;
+    };
+    if studio.mode() == Mode::Corner {
+        ui.label(RichText::new("Shaping: Corner mode").strong())
+            .on_hover_text("C, or Part above the tools, goes back to parts");
+        let corners = studio.selected_faces();
+        if corners.is_empty() {
+            ui.label(RichText::new("Click a corner of the box to select it.").weak());
+        }
+        for name in corners {
+            let points = shaped.corners_named_or_none(name);
+            // The name on a line of its own, cut short if it is long (it
+            // is whole in its tip), so the panel keeps its width.
+            ui.add(egui::Label::new(RichText::new(name).monospace()).truncate())
+                .on_hover_text(name);
+            ui.horizontal(|ui| {
+                if let [one] = points.as_slice() {
+                    let at = shaped.corners[*one];
+                    ui.label(format!("at {:.2}, {:.2}, {:.2}", at.x, at.y, at.z))
+                        .on_hover_text(
+                            "Where it is in the box's own measurements, from its middle",
+                        );
+                } else {
+                    ui.label(
+                        RichText::new(format!("{} corners", points.len()))
+                            .weak()
+                            .small(),
+                    );
+                }
+            });
+        }
+        ui.add_space(6.0);
+        return;
+    }
+    if studio.mode() == Mode::Edge {
+        ui.label(RichText::new("Shaping: Edge mode").strong())
+            .on_hover_text("E, or Part above the tools, goes back to parts");
+        let edges = studio.selected_faces();
+        if edges.is_empty() {
+            ui.label(RichText::new("Click an edge of the box to select it.").weak());
+        }
+        for name in edges {
+            // How long it is, all its pieces together.
+            let corners: Vec<usize> = shaped.corners_named_or_none(name);
+            let long: f64 = shaped
+                .edges()
+                .iter()
+                .filter(|edge| shaped.edge_name(edge) == *name)
+                .map(|edge| {
+                    let [a, b] = edge
+                        .corners
+                        .map(|corner| part.place.apply(shaped.corners[corner]));
+                    (b - a).length()
+                })
+                .sum();
+            ui.add(egui::Label::new(RichText::new(name).monospace()).truncate())
+                .on_hover_text(name);
+            ui.horizontal(|ui| {
+                ui.label(format!("{long:.2} m long"));
+                if corners.len() > 2 {
+                    ui.label(RichText::new("several edges").weak().small());
+                }
+            });
+        }
+        ui.add_space(6.0);
+        return;
+    }
+    ui.label(RichText::new("Shaping: Face mode").strong())
+        .on_hover_text("Tab, or Part above the tools, goes back to parts");
+    let faces = studio.selected_faces();
+    if faces.is_empty() {
+        ui.label(RichText::new("Click a face of the box to select it.").weak());
+        ui.add_space(6.0);
+        return;
+    }
+    egui::Grid::new("duck_mold_faces_grid")
+        .num_columns(3)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            for name in faces {
+                let these = shaped.faces_named(name);
+                let facing = these.iter().fold(Vec3::ZERO, |sum, &face| {
+                    sum + shaped.normal(face).unwrap_or(Vec3::ZERO) * shaped.area(face)
+                });
+                ui.label(RichText::new(name).monospace());
+                ui.label(format!("faces {}", facing_word(facing)));
+                match these.as_slice() {
+                    [one] => {
+                        let [wide, tall] = shaped.extent(*one);
+                        ui.label(format!("{wide:.2} x {tall:.2} m"));
+                    }
+                    many => {
+                        ui.label(format!("{} faces", many.len()));
+                    }
+                }
+                ui.end_row();
+            }
+        });
+    ui.add_space(6.0);
+}
+
+/// The changes made to a box's shape, in order: each amount can be
+/// changed, and each change taken away.
+fn changes_section(
+    ui: &mut egui::Ui,
+    facts: &Facts,
+    draft: &mut Draft,
+    path: &str,
+    edits: &mut Vec<Edit>,
+) {
+    if facts.changes.is_empty()
+        || draft.change_by.len() != facts.changes.len()
+        || draft.change_xyz.len() != facts.changes.len()
+    {
+        return;
+    }
+    ui.add_space(8.0);
+    ui.label(RichText::new("Changes").strong()).on_hover_text(
+        "What has been done to the box's shape, in order. Change an amount, or take a change away (Undo brings it back)",
+    );
+    for (at, change) in facts.changes.iter().enumerate() {
+        let number = at + 1;
+        let mut words = format!("{number}. {} {}", change.word, change.faces.join(", "));
+        if let Some(name) = &change.name {
+            words.push_str(&format!(" ({name})"));
+        }
+        // A long name (a corner's, say) is cut short, whole in its tip,
+        // so the panel keeps its width. A change with three amounts has
+        // them on a line of their own.
+        let three = change.by_xyz.is_some();
+        if three {
+            ui.add(egui::Label::new(&words).truncate())
+                .on_hover_text(&words);
+        }
+        ui.horizontal(|ui| {
+            if three {
+                ui.add_space(14.0);
+            } else {
+                let width = (ui.available_width() - 100.0).max(80.0);
+                ui.scope(|ui| {
+                    ui.set_max_width(width);
+                    ui.add(egui::Label::new(&words).truncate())
+                        .on_hover_text(&words);
+                });
+            }
+            let settled = |field: &egui::Response| field.drag_stopped() || field.lost_focus();
+            if change.by_xyz.is_some() {
+                // A move, a turn or a scale: x, y and z.
+                let (speed, suffix, hover) = match change.word.as_str() {
+                    "turn" => (1.0, "°", "Degrees around x, y and z"),
+                    "scale" => (0.01, "", "How much bigger, along x, y and z"),
+                    _ => (0.01, "", "How far along x, y and z, in metres"),
+                };
+                let mut done = false;
+                for axis in 0..3 {
+                    let field = ui
+                        .add(
+                            DragValue::new(&mut draft.change_xyz[at][axis])
+                                .speed(speed)
+                                .max_decimals(3)
+                                .suffix(suffix),
+                        )
+                        .on_hover_text(hover);
+                    done |= settled(&field);
+                }
+                if done && Some(draft.change_xyz[at]) != change.by_xyz {
+                    edits.push(Edit::SetChange {
+                        part: path.to_owned(),
+                        number,
+                        by: None,
+                        by_xyz: Some(draft.change_xyz[at]),
+                        at: None,
+                    });
+                }
+            } else if change.at.is_some() {
+                // A cut: where it is, from the middle to the side.
+                let field = ui
+                    .add(
+                        DragValue::new(&mut draft.change_by[at])
+                            .speed(0.01)
+                            .range(0.0..=0.999)
+                            .max_decimals(3),
+                    )
+                    .on_hover_text(
+                        "Where the cut is: from 0 (the middle) to just under 1 (the side)",
+                    );
+                if settled(&field) && Some(draft.change_by[at]) != change.at {
+                    edits.push(Edit::SetChange {
+                        part: path.to_owned(),
+                        number,
+                        by: None,
+                        by_xyz: None,
+                        at: Some(draft.change_by[at]),
+                    });
+                }
+            } else if change.by.is_some() {
+                let (range, suffix) = match change.word.as_str() {
+                    "pull" => (-1000.0..=1000.0, " m"),
+                    "scale" => (0.001..=1000.0, ""),
+                    _ => (0.001..=1000.0, " m"),
+                };
+                let field = ui
+                    .add(
+                        DragValue::new(&mut draft.change_by[at])
+                            .speed(0.01)
+                            .range(range)
+                            .max_decimals(3)
+                            .suffix(suffix),
+                    )
+                    .on_hover_text(if change.word == "scale" {
+                        "How much bigger, all ways"
+                    } else {
+                        "How far, in metres"
+                    });
+                if settled(&field)
+                    && Some(draft.change_by[at]) != change.by
+                    && draft.change_by[at] != 0.0
+                {
+                    edits.push(Edit::SetChange {
+                        part: path.to_owned(),
+                        number,
+                        by: Some(draft.change_by[at]),
+                        by_xyz: None,
+                        at: None,
+                    });
+                }
+            }
+            if ui
+                .small_button("x")
+                .on_hover_text("Take this change away")
+                .clicked()
+            {
+                edits.push(Edit::RemoveChange {
+                    part: path.to_owned(),
+                    number: Some(number),
+                });
+            }
+        });
     }
 }
 
@@ -346,6 +608,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     }
 
     definition_notice(ui, &facts);
+    if studio.mode() != Mode::Part {
+        faces_section(ui, studio);
+    }
 
     let set = |changes: Changes| Edit::Set {
         part: path.clone(),
@@ -553,7 +818,16 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                                 draft.bevel > 0.0,
                                 DragValue::new(&mut draft.bevel_steps)
                                     .range(1..=4)
-                                    .suffix(" cuts"),
+                                    .custom_formatter(|steps, _| {
+                                        if steps == 1.0 {
+                                            "1 cut".to_owned()
+                                        } else {
+                                            format!("{steps} cuts")
+                                        }
+                                    })
+                                    .custom_parser(|typed| {
+                                        typed.split_whitespace().next()?.parse().ok()
+                                    }),
                             )
                             .on_hover_text("How many flat cuts go round each edge");
                         if settled(&cuts) && Some(draft.bevel_steps) != facts.sizes.bevel_steps {
@@ -853,6 +1127,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 }
             });
 
+        // ---- the changes to its shape
+        changes_section(ui, &facts, draft, &path, &mut edits);
+
         // ---- the sockets it declares
         if !facts.sockets.is_empty() && draft.socket_names.len() == facts.sockets.len() {
             ui.add_space(8.0);
@@ -863,7 +1140,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 ui.horizontal(|ui| {
                     let field = ui
                         .add(
-                            TextEdit::singleline(&mut draft.socket_names[at]).desired_width(100.0),
+                            TextEdit::singleline(&mut draft.socket_names[at]).desired_width(76.0),
                         )
                         .on_hover_text("Type a new name: everything joined to it follows");
                     if field.lost_focus()
@@ -875,6 +1152,30 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                             new_name: draft.socket_names[at].clone(),
                         });
                     }
+                    // Which way it faces: a choice for one on a side.
+                    if let Some(Some(facing)) = facts.socket_facings.get(at) {
+                        let mut chosen = facing.clone();
+                        egui::ComboBox::from_id_salt(("socket facing", at))
+                            .selected_text(chosen.clone())
+                            .width(52.0)
+                            .show_ui(ui, |ui| {
+                                for way in FACINGS {
+                                    ui.selectable_value(&mut chosen, way.to_owned(), way);
+                                }
+                            })
+                            .response
+                            .on_hover_text(
+                                "Which way it faces: what joins it turns to match. \"out\" is straight out of its side",
+                            );
+                        if chosen != *facing {
+                            edits.push(Edit::SetSocket {
+                                socket: format!("{path}.{name}"),
+                                on: None,
+                                shift: None,
+                                facing: Some(chosen),
+                            });
+                        }
+                    }
                     ui.label(
                         RichText::new(match uses {
                             0 => "not used".to_owned(),
@@ -885,11 +1186,8 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                         .small(),
                     );
                     let remove = ui
-                        .add_enabled(
-                            *uses == 0,
-                            egui::Button::new(RichText::new("remove socket").small()),
-                        )
-                        .on_hover_text("Take this socket away")
+                        .add_enabled(*uses == 0, egui::Button::new(RichText::new("x").small()))
+                        .on_hover_text("Remove this socket")
                         .on_disabled_hover_text(
                             "Something is joined to it: move that away first, or remove it",
                         );

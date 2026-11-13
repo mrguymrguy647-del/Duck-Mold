@@ -119,7 +119,7 @@ target/release/duck-mold studio examples/robot.toml
 
 Started with no file (or by double-clicking it), the Studio shows its
 **start page**: New model and Open a model; the models you opened
-lately, each with its picture; and the **examples**, twelve of them,
+lately, each with its picture; and the **examples**, fifteen of them,
 each with its picture. Click an example to open a copy of your own: the
 copy goes in the folder `Duck Mold` in your Documents (as `robot.toml`,
 or `robot_2.toml` if that is taken), so you can change it as you like
@@ -127,7 +127,7 @@ and the example stays as it is. The examples are inside the program, so
 they are there wherever it was started from. File > Open an example and
 File > Opened lately offer the same lists once a model is open.
 
-![The start page: models opened lately and the twelve examples, each with its picture](docs/studio-start.png)
+![The start page: models opened lately and the fifteen examples, each with its picture](docs/studio-start.png)
 
 The first model you open to work on gets **five small tips**, one at a
 time, each pointing at what it is about: the picture, a part, the
@@ -181,13 +181,78 @@ part:
 
 ![A crate with the Move tool's arrows on it](docs/studio-handles.png)
 
+**Shaping a box.** Select a box and press **Tab** (or click **Face**,
+above the tools): the Studio is in Face mode. The other parts fade, the
+box's faces are outlined, and a click picks a face, by the name the
+recipe calls it (`top`, `front`...). Shift+click adds a face.
+
+| Tool | Key | Handle | Dragging it |
+|---|---|---|---|
+| Pull | T | An arrow out of the faces selected | Pulls them out the way they face, with new walls round them, or pushes them in to make a hollow. Steps of 10 cm (1 cm close up); Ctrl: free. |
+| Move | G | Three arrows, along the part's own directions | Slides the faces; the faces round them stretch to follow. |
+| Turn | R | Three rings | Turns the faces about their middle, 15 degrees at a time. The faces round them bend. |
+| Scale | S | Three boxes, and one in the middle | Makes the faces bigger or smaller one way, or all ways: a box with its top scaled down is a frustum. |
+| Inset | I | A knob on the middle of an edge | Dragged in, makes a smaller face inside each face: a frame round it, in steps of 1 cm. The new face in the middle is selected, ready to pull. |
+
+- **Edges.** Press **E** (or click **Edge**): a click picks an edge, by
+  the faces that meet there (`top+front`), and Move's arrows move it;
+  the faces on both sides follow.
+- **Corners.** Press **C** (or click **Corner**): the box's corners
+  show as dots; a click picks one, by the faces that meet there
+  (`top+front+left`), and Move's arrows move it. A face that bends is
+  drawn as two triangles, folded the way that bulges out. Cut a box
+  through its middle three ways first, and it has 26 corners to make a
+  rock of.
+- **Cut** (K, in Face and Edge mode) shows a ring all the way round the
+  box where you point, across the edge under the pointer. Click, and
+  every face the ring crosses becomes two: more faces to pull and
+  move. The place is a share of the way from the middle to the side,
+  in tenths (hold Ctrl for any place), so it stays near that side when
+  the box is resized. The slices are named by the side:
+  `top_right`.
+- What you do is a list of **changes** under the box in the recipe
+  (`changes = [ { inset = "front", by = 0.6 }, ... ]`), and the panel
+  lists them: change a number to change that step, or click **x** to
+  take it away. The box keeps its size, so make it wider and the
+  window stays 60 cm in from the sides.
+- A drag that would turn the shape inside out, or push a face through
+  another, shows its label in red, saying why, and nothing is written
+  when you let go.
+- **New faces work like old ones.** The Paint tool paints them by
+  their names (`colors = { glass = "sky" }`), and in Part mode a click
+  on one makes a socket on it (`on = "glass"`), so a part can be added
+  there; the socket moves with the face.
+- **Using it again.** Right-click the part: **Make a definition...**
+  moves what it is made of (shape, size, changes, colours, sockets) to
+  `[define.<name>]` and the part uses it, so Add > Defined in this
+  recipe makes more, and shaping one shapes them all. **Save to the
+  library** writes it alone to `parts/<name>.toml`, with the colours it
+  uses, and it shows in the library at once.
+- Faces can't be deleted (a shape must stay closed): Undo, or the
+  Changes list, takes a change back.
+- Escape lets go of the faces, then leaves Face mode. Tab goes back to
+  parts too.
+- Only a box can be shaped in this version (with or without a taper,
+  without a bevel). Changing its shape to another drops its changes,
+  and says so; Undo brings them back.
+
+Dragging the same face again with Move, Turn or Scale adds to the line
+already there instead of writing another. In the file these are
+`pull`, `inset`, `move-face`, `turn-face`, `scale-face`, `move-edge`,
+`move-corner`, `cut`, `set-change` and `remove-change` edits; `duck-mold inspect <recipe> --faces` lists
+every face's name.
+
+![A wall in Face mode: the glass of its framed window selected, with the Changes list on the right](docs/studio-shaping.png)
+
 **Adding parts.** There are two ways.
 
-- **Add**, in the top bar, lists the shapes, the parts the recipe
-  defines and the library. Pick one and it stands on the ground in the
-  middle of what you are looking at, or just in front of whatever
-  already stands there, joined to nothing. It is selected, with the
-  Move arrows on it, so you can drag it straight away.
+- **Add**, in the top bar, lists the shapes (each with a small
+  picture), the parts the recipe defines and the library. Pick one and
+  it stands on the ground in the middle of what you are looking at, or
+  just in front of whatever already stands there, joined to nothing.
+  It is selected, with the Move arrows on it, so you can drag it
+  straight away. (`duck-mold edit <recipe> add <name>` with no place
+  does the same, walking towards the model's front.)
 - The selected part's sockets show as small round dots. Click a dot
   and pick what to add there: one of the twelve shapes, or a
   part the recipe defines. The new part is about half the size of the
@@ -202,6 +267,18 @@ part:
 Each of these is a `set`, `add`, `join`, `unjoin`, `add-socket` or
 `set-socket` edit in the recipe file, the same ones `duck-mold edit`
 makes.
+
+**Sockets.** The panel lists the sockets the selected part declares.
+Type over a name to rename it (whatever is joined to it follows); pick
+which way it faces (`out` of its side, or `up`, `down`, `left`,
+`right`, `front`, `back`: what is joined to it turns to match); "x"
+removes one nothing uses.
+
+**Copies.** Duplicate (Ctrl+D) puts a copy of a free part beside it. A
+copy of a joined part goes to the next free socket of the same part
+facing the same way (the next table leg's socket), or else to a new
+socket beside the original, or, with no room there either, stands on
+the ground in front of the model. The status line says which.
 
 **Several parts at once.** Shift+click a part, in the picture or in
 the list, to add it to the selection (or take it out); Ctrl+A selects
@@ -223,7 +300,9 @@ Hide.
 it. Nothing else changes: the recipe doesn't know, and a hidden part
 is exported like any other. The top bar says how many are hidden;
 click that, or the "show" at the end of the part's line in the list,
-to bring them back.
+to bring them back. The Studio remembers which parts were hidden in
+each of the models opened lately (in its settings, beside that list),
+and hides them again when the file is next opened.
 
 **Colour.** Under the properties is the **palette**: the recipe's
 colours, each a square with its name.
@@ -279,6 +358,10 @@ keys, About). Every line shows its key.
 | Key | Does |
 |---|---|
 | G, R, S, T, P | The Move, Rotate, Scale, Size and Paint tools |
+| Tab | Shape the selected box: Face mode. Tab again: back to parts |
+| E | The selected box's edges: click one to move it. E again: back to parts |
+| C | The selected box's corners: click one to move it. C again: back to parts |
+| T, G, R, S, I, K (shaping) | The Pull, Move, Turn, Scale, Inset and Cut tools (Edge mode: G and K) |
 | Ctrl held while dragging | No snapping |
 | Delete or Backspace | Remove what is selected |
 | Ctrl+D | Duplicate it. A copy of a free part stands beside it; a copy of a joined part is on the same socket |
@@ -291,7 +374,7 @@ keys, About). Every line shows its key.
 | Shift+A | Add a part on the ground |
 | Shift+click | Add a part to the selection, or take it out |
 | Ctrl+A | Select every part |
-| Escape | Let go: of a drag, then of a list, then of the selection |
+| Escape | Let go: of a drag, then of a list, the faces, Face mode, then of the selection |
 | Ctrl+N, Ctrl+O, Ctrl+E | New model, Open, Export |
 
 Keys don't fire while you are typing in a field.
@@ -334,11 +417,12 @@ only: nothing can be changed there.
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is. |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
-| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
-| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`): a copy of that example, with the files it uses. Never writes over a file. |
+| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
+| `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
+| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`): a copy of that example, with the files it uses. Never writes over a file. |
 | `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
 | `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |
 | `duck-mold guide` | Prints the guide for AI agents. |
@@ -383,7 +467,8 @@ ok: no problems found
 - **ground**: whether it stands on the ground.
 - **colours**: how much of it each palette colour paints.
 - **parts**: every part, what it is and what it is joined to.
-- **floating**: parts that touch nothing. Almost always a mistake.
+- **floating**: parts up in the air that touch nothing. Almost always a
+  mistake. (A part standing on the ground never floats.)
 - **overlapping**: parts that poke into other parts, and how deep.
   Sometimes meant (a nose pushed into a head), sometimes not.
 
@@ -434,7 +519,7 @@ A recipe can be written as TOML (the examples) or as JSON
 | [crate.toml](examples/crate.toml) | The smallest useful recipe: one box, two colours. |
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
-| [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, windows and a chimney placed by sockets, and a skylight on the roof's `slope`. |
+| [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, framed windows (one box inset to a frame and a pane, defined once) and a chimney placed by sockets, and a skylight on the roof's `slope`. |
 | [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
@@ -446,6 +531,9 @@ A recipe can be written as TOML (the examples) or as JSON
 | [barn.toml](examples/barn.toml) | `prism`: a ridged roof in one part, its ends coloured by name, and a silo with a round cap. |
 | [slide.toml](examples/slide.toml) | `stairs`: steps up to a platform that is placed with `move`, and a ramp down the other side. |
 | [gate.toml](examples/gate.toml) | `arch`: a doorway between two towers that are tapered and bevelled, defined once and used twice. |
+| [chair.toml](examples/chair.toml) | Shaping: a chair from one box. Four cuts slice the seat's edges; four legs are pulled down from the corners and the back pulled up from the back strip. |
+| [window_wall.toml](examples/window_wall.toml) | Shaping: a wall with a framed window, made by two insets and a pull, painted by face name, with a socket on a face an inset made. |
+| [rock.toml](examples/rock.toml) | Shaping: a box cut three ways through its middle, so it has 26 corners, with its corners moved in and out by name. |
 
 Each is commented line by line.
 
@@ -486,6 +574,7 @@ see the handoff note.
 | [PHASE1_REPORT.md](PHASE1_REPORT.md) | Phase 1: pictures, the preview window, sockets on surfaces and in the `.glb`, `twist`, glTF import. |
 | [PHASE2_REPORT.md](PHASE2_REPORT.md) | Phase 2: the Studio, the edit commands, undo, the parts library, the Windows download. |
 | [PHASE3_REPORT.md](PHASE3_REPORT.md) | Phase 3: handles, twelve shapes with bevel and taper, several parts, views, colour, the start page and the tour, with a picture of each. |
+| [PHASE4_REPORT.md](PHASE4_REPORT.md) | Phase 4: shaping a box by hand (faces, edges, corners, cuts), shaped parts used again, and the chair, wall and rock examples, with a picture of each screen. |
 
 ## Project layout
 
@@ -497,7 +586,7 @@ Duck-Mold/
 ├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
 ├── release/                   what goes in the download beside the programs
 ├── Cargo.toml                 the workspace: four crates, built together
-├── examples/                  fifteen recipes to read and change, and parts/ for files they use
+├── examples/                  eighteen recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/
@@ -509,6 +598,7 @@ Duck-Mold/
     │   │   ├── load.rs        the files a recipe names: palettes, recipes, meshes
     │   │   ├── math.rs        points, turns, and an exact sine and cosine
     │   │   ├── shapes.rs      the twelve shapes, bevel and taper
+    │   │   ├── shaping.rs     a box's changes: pulls and insets, named faces, the four checks
     │   │   ├── mesh.rs        reading .obj files
     │   │   ├── gltf.rs        reading .gltf and .glb files
     │   │   ├── assemble.rs    parts, sockets, joins, nesting, colour

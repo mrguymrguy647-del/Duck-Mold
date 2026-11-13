@@ -105,6 +105,34 @@ impl Studio {
             .unwrap_or_else(|| self.path.parent().unwrap_or(Path::new("")).join("parts"))
     }
 
+    /// Writes a part alone to the library's folder, as `duck-mold
+    /// save-part` does: `<its name>.toml` (with a number added if that is
+    /// taken). Says where it went, and reads the library again.
+    pub fn save_to_library(&mut self, part: &str) -> Result<String, String> {
+        let folder = self.library_folder();
+        let own = part.rsplit('/').next().unwrap_or(part);
+        let base = if own.starts_with('#') { "part" } else { own };
+        let mut file = folder.join(format!("{base}.toml"));
+        let mut count = 2;
+        while file.exists() {
+            file = folder.join(format!("{base}_{count}.toml"));
+            count += 1;
+        }
+        let done = tools::save_part(&self.path, part, &file)
+            .map(|_| {
+                let beside = self.path.parent().unwrap_or(Path::new(""));
+                let written =
+                    written_from(beside, &file).unwrap_or_else(|| file.display().to_string());
+                format!("Saved \"{part}\" to the library: {written}")
+            })
+            .map_err(|failure| format!("Not saved: {}", self.shorten(&first_error(&failure))));
+        self.read_library();
+        self.say(match &done {
+            Ok(said) | Err(said) => said.clone(),
+        });
+        done
+    }
+
     /// Uses another folder as the library (`None`: `parts` next to the
     /// recipe again), and reads it.
     pub fn set_library_folder(&mut self, folder: Option<PathBuf>) {

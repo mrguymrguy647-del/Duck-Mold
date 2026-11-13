@@ -2506,3 +2506,619 @@ recommended.
    unless you tell me to stop.
 
 The version becomes 0.3.0.
+
+## 20. Phase 4: shaping by hand
+
+**Status: approved**, with all twelve decisions at the end as
+recommended.
+
+The first complaint about the Studio was "I can't form it in any way".
+Phase 3 answered half of it: a part can now be moved, turned, resized,
+bevelled and tapered. But a box is still a box. Phase 4 is about
+changing the shape itself: pulling a face out to make a leg, insetting
+a face to make a window, moving a corner to make a rock.
+
+The four rules stay:
+
+1. The recipe is the model. The Studio keeps no model of its own.
+2. Every Studio action that changes the model is an edit command an
+   agent can run too.
+3. An edit changes only what it has to in the file.
+4. The viewport is Duck Forge's CPU renderer.
+
+### The idea: a part keeps its shape, and a list of changes follows it
+
+A shaped part is still written as a box with a size. Under it comes a
+list called `changes`. The box is built first; then the changes are
+made to it, one after the other, in the order they are written.
+
+```toml
+[[parts]]
+name = "wall"
+shape = "box"
+size = [3, 2.4, 0.2]
+color = "plaster"
+changes = [
+  { inset = "front", by = 0.6, name = "window" },
+  { inset = "window", by = 0.06, name = "glass" },
+  { pull = "glass", by = -0.08 },
+]
+colors = { window = "wood", glass = "sky" }
+```
+
+Read aloud: "a wall, 3 m by 2.4 m by 20 cm. Inset its front by 60 cm and
+call the new face in the middle `window`. Inset the window by 6 cm and
+call the face in the middle of that `glass`; what is left of `window`
+is now a frame 6 cm wide. Push the glass 8 cm back into the wall."
+
+Why this way, and not by writing every corner's position out:
+
+- **The part stays a box you can resize.** Make the wall 4 m wide and
+  the window is still 60 cm in from each side, with a 6 cm frame.
+- **An agent, and a person, can read what was done**, and change one
+  number of it.
+- **An edit is still a small change to the file**: one line added to
+  the list, or one number changed.
+
+The same in JSON:
+
+```json
+{
+  "name": "wall",
+  "shape": "box",
+  "size": [3, 2.4, 0.2],
+  "changes": [
+    { "inset": "front", "by": 0.6, "name": "window" },
+    { "pull": "glass", "by": -0.08 }
+  ]
+}
+```
+
+### The changes
+
+| Change | Written | What it does | Step |
+|---|---|---|---|
+| **Pull** | `{ pull = "top", by = 0.5 }` | Pulls a face out along its own direction, by 0.5 m, and fills in the gap with new side walls (Blender calls this "extrude"). A negative `by` pushes it in, making a hollow. | 1 |
+| **Inset** | `{ inset = "front", by = 0.1 }` | Makes a smaller face inside the face, 0.1 m in from every edge, with a ring of faces around it. The shape doesn't change yet: there are only more faces to work with. | 1 |
+| **Move** (slide) | `{ move = "top", by = [0, 0, 0.2] }` | Moves a face by x, y, z metres, and the faces round it stretch to follow. No new faces. | 3 |
+| **Turn** | `{ turn = "top", by = [0, 15, 0] }` | Turns a face about its own middle: degrees around x, then y, then z. | 3 |
+| **Scale** | `{ scale = "top", by = 0.5 }` | Makes a face bigger or smaller about its own middle: one number, or `[x, y, z]`. | 3 |
+| **Move an edge** | `{ move = "top+front", by = [0, 0.1, 0] }` | Moves the edge where `top` meets `front`. | 4 |
+| **Cut** | `{ cut = "right", at = 0.8 }` | Cuts all the way round the part, with a flat cut facing right, 0.8 of the way from the middle to the right side. Every face it crosses becomes two. Nothing moves: there are more faces, edges and corners to shape. | 4 |
+| **Move a corner** | `{ move = "top+front+left", by = [0, 0.1, 0] }` | Moves the corner where `top`, `front` and `left` meet. | 5 |
+
+- **Several at once.** Wherever one name goes, a list can go:
+  `{ pull = ["top_left_back", "top_back", "top_right_back"], by = 0.5 }`
+  pulls the three faces as one piece, with walls only round the
+  outside of the three (not between them). The same for `move`,
+  `turn`, `scale` and `inset`.
+- **Amounts are metres; a cut's place is a share.** `by` is always in
+  metres (and degrees for a turn), so a 6 cm frame stays 6 cm when the
+  wall is resized. A cut's `at` is a share of the way from the middle
+  (0) to the side (just under 1), like a socket's `shift`, so a cut at
+  0.8 stays near the side when the part is resized.
+- **Directions are the part's own.** `by = [0, 0, 0.2]` moves towards
+  the part's front, whichever way the part is turned in the model.
+  Changes are made in the shape's own measurements, before the part's
+  `scale`, `mirror`, `rotate` and `move`, as its size is.
+- **`name`** can be given to a pull, an inset or a cut, to choose the
+  names of the faces it makes (below).
+
+### How faces, edges and corners are named
+
+**Never by a number of a triangle, and never by a measurement.** Every
+name is made of words, and comes from the list of changes only.
+
+**The box's own faces** keep the names they have always had: `top`,
+`bottom`, `left`, `right`, `front`, `back`.
+
+**An edge is named by the two faces that meet there**, joined with `+`:
+`top+front` is the edge along the top of the front. **A corner is named
+by three faces** (or more): `top+front+left`. The order doesn't matter:
+`front+left+top` is the same corner. Moving or resizing never changes
+which faces meet where, so these names stay put.
+
+**Each change names the faces it makes**, by these rules:
+
+| Change | The face it was done to | The new faces |
+|---|---|---|
+| **Pull** | Keeps its name: it is the end of what was pulled (the top of a chimney, the foot of a leg). | One wall along each edge, named `<face>_side_<word>`, where the word says which side of the face the wall is on: `top_side_front`, `top_side_left`... With `name = "leg"`: `leg_front`, `leg_left`... |
+| **Inset** | Its name now stands for the ring that is left around the new face (the front of a wall, around its window). | The face in the middle: `<face>_inset`, or the `name` given (`window`). The ring's pieces each have a name too, `<middle>_rim_<word>`: `window_rim_top`, `window_rim_left`... |
+| **Cut** | Keeps its name on the piece towards the middle of the part. | The slice towards the side gets the side's word: cutting `top` towards the right makes `top_right`. With `name = "rim"`: `top_rim`. |
+| **Move, turn, scale** | Keeps its name. | None. |
+
+**Where the words come from.** Every edge of every face knows which
+side of its face it is on. A box's top has a front, a back, a left and
+a right edge; its front has a top, a bottom, a left and a right edge.
+A cut gives the new edges the word of the side they face; a pull's
+walls and an inset's ring pieces pass the words on. So a word is never
+worked out from which way something points (which a turn could
+change); it is passed down from the box, change by change.
+
+**A name can stand for several faces.** This is how `sides` already
+stands for a box's four sides. The walls a pull makes along the same
+side share a name (pull three faces in a row, and the three walls
+along their front are all `backrest_front`), and the walls together
+are named by the beginning: `backrest` is all the walls of the pull
+named `backrest`. A name for several faces works everywhere a face
+name does: to paint them, to pull them, in an edge name
+(`backrest_front+top` is the three edges along the top of the back's
+front).
+
+**If a name is taken**, by a face an earlier change made, a number is
+added: `top_right_2`. Given `name`s avoid that.
+
+**A chair from one box**, to show the names in use:
+
+```toml
+[[parts]]
+name = "chair"
+shape = "box"
+size = [0.5, 0.06, 0.5]             # the seat
+color = "wood"
+changes = [
+  # A slice off each side of the seat. Where two slices cross, at
+  # the corners, is where the legs go.
+  { cut = "left", at = 0.8 },       # makes top_left, bottom_left, front_left, back_left
+  { cut = "right", at = 0.8 },
+  { cut = "front", at = 0.8 },      # makes top_front, top_left_front, top_right_front...
+  { cut = "back", at = 0.8 },
+  # Four legs, pulled down from the corners of the underside.
+  { pull = "bottom_left_front", by = 0.42, name = "leg_lf" },
+  { pull = "bottom_right_front", by = 0.42, name = "leg_rf" },
+  { pull = "bottom_left_back", by = 0.42, name = "leg_lb" },
+  { pull = "bottom_right_back", by = 0.42, name = "leg_rb" },
+  # The back: the seat's back strip, pulled up as one piece.
+  { pull = ["top_left_back", "top_back", "top_right_back"], by = 0.5, name = "backrest" },
+]
+colors = { top = "cushion" }
+```
+
+**To see a part's names**, `duck-mold inspect chair.toml --faces` lists
+every face of every shaped part, with the way it faces, its size and
+the faces next to it. The Studio shows the name of whatever is under
+the pointer.
+
+### When something changes underneath
+
+| What changes | What happens to the changes |
+|---|---|
+| **The size** | They stay. Pulls, insets and moves keep their metres; cuts keep their share, so they move with the sides. Names don't change. |
+| **The amount of an earlier change** (its `by` or `at`) | Later changes stay, and so do all names. |
+| **`taper`** | Allowed: the changes are made to the tapered box. |
+| **`bevel`** | A box with changes can't have a bevel, and a bevelled box can't have changes: the recipe says so, naming both. (A bevel adds dozens of small faces; giving each a name that lasts is for later.) |
+| **The shape** (`set --shape sphere`) | Only a box can have changes, so they are dropped. The edit says so ("dropped 9 changes: only a box can be shaped"), and Undo brings them back. |
+| **`segments`** | A box has none. (This is one reason why only boxes, below.) |
+| **Adding, removing or reordering a change before others** | Names made by later changes can change, or vanish. Then a later change that names something no longer there is a mistake, which names it (below). |
+
+**When a change no longer makes sense**, the recipe has a mistake, said
+like every other mistake: the file, the line, which change, what is
+wrong, and the likely fix. The model isn't built (the Studio keeps
+showing the last one that worked), and an edit that would cause it is
+refused and writes nothing.
+
+```text
+error: wall.toml:9: parts[0].changes[2]: there is no face "glas" on "wall". Did you mean "glass"?
+error: wall.toml:8: parts[0].changes[1]: an inset of 0.8 m is too wide for "window": it is 1.2 m across, so the inset must be less than 0.6 m
+error: chair.toml:14: parts[0].changes[6]: the cut towards "back" at 1.2 is outside the part: "at" goes from 0 (the middle) to just under 1 (the side)
+error: wall.toml:10: parts[0].changes[2]: pulling "glass" in by 0.3 takes it through the other side of the part
+error: rock.toml:12: parts[0].changes[5]: moving the corner "top+front+left" by [0, -0.9, 0] turns the shape inside out
+```
+
+**Which faces a cut goes through depends on where they are**: shrink a
+part so that a cut misses a pulled leg, and the pieces it made of that
+leg are gone. A later change that names one of them is then a mistake,
+named as above.
+
+### Which shapes can be shaped: boxes, in this phase
+
+Only `box`, with or without `taper`, and without `bevel`. Why:
+
+1. **Every face, edge and corner of a box has a name made of words**
+   (`top`, `top+front`, `top+front+left`) that no size can change. A
+   round shape's side is sixteen numbered pieces, and changing its
+   `segments` to twelve would renumber them, so "the fourth piece of
+   the side" would quietly become a different face.
+2. **Every face of a box is a flat, four-sided face**, and a cut along
+   the box's own directions keeps it so. That makes each change easy to
+   check and easy to name.
+3. **Everything the brief's examples need is a box**: a chair, a wall
+   with a window, a rock, framed windows.
+
+Asking to shape another shape says so: "only a box can be shaped in
+this version: "post" is a cylinder". The flat shapes (wedge, pyramid,
+prism) would be next; round shapes need another way of naming first.
+
+### How a shape that is turned inside out, or through itself, is caught
+
+After every change, four checks:
+
+1. **Every face still has room**: none is squeezed to a line or a
+   point.
+2. **The shape still holds room inside it.** A shape turned inside out
+   holds "less than nothing", and is caught here.
+3. **No face passes through another face.** (Faces that touch along an
+   edge or at a corner are neighbours, and fine.) A pull pushed through
+   the far side of the part, or a corner dragged through a face, is
+   caught here.
+4. **The shape is still closed**: every edge is shared by exactly two
+   faces. This can't fail by the rules above, but it is checked, so a
+   mistake in Duck Mold itself can't make a broken model.
+
+If one fails, that change is the mistake, as above. In the Studio the
+drag shows the message while you hold it, and nothing is written when
+you let go.
+
+**A face that bends is fine.** Moving one corner of a flat face leaves
+it bent. It is drawn as two triangles, folded the way that bulges out,
+and keeps its name (as a tapered face already does).
+
+### Inspect
+
+`inspect` says how many changes a part has:
+
+```text
+  parts        1
+    chair       box, 9 changes     118 triangles
+```
+
+`--json` adds `"changes": 9` to the part. `inspect --faces` lists the
+faces of every shaped part:
+
+```text
+chair  (chair.toml): box, 9 changes, 30 faces
+  top                 faces up      0.40 x 0.40 m   next to: top_left, top_right, top_front, top_back
+  top_left            faces up      0.05 x 0.40 m   next to: top, left, top_left_front, top_left_back
+  ...
+  backrest_front      faces front   3 faces         next to: top, top_left_back, top_back, top_right_back ...
+```
+
+### New edit commands
+
+```bash
+duck-mold edit wall.toml inset wall front --by 0.6 --name window
+duck-mold edit wall.toml pull wall glass --by -0.08
+duck-mold edit chair.toml cut chair --toward left --at 0.8
+duck-mold edit chair.toml pull chair top_left_back,top_back,top_right_back --by 0.5 --name backrest
+duck-mold edit rock.toml move-corner rock top+front+left --by 0,0.1,-0.05
+duck-mold edit chair.toml set-change chair 5 --by 0.45
+duck-mold edit chair.toml remove-change chair 9
+duck-mold save-part chair.toml chair parts/chair.toml
+```
+
+| Command | What it does | Step |
+|---|---|---|
+| `pull <part> <faces> --by <metres> [--name n]` | Adds a pull. Several faces are written with commas. | 1 |
+| `inset <part> <faces> --by <metres> [--name n]` | Adds an inset. | 1 |
+| `set-change <part> <number> --by ... [--at ...]` | Changes the amount of one change, counted from 1. | 2 |
+| `remove-change <part> <number>` | Takes one change away (`--all`: every one). Refused if a later change, a colour or a socket names a face only it made, saying which. | 2 |
+| `move-face <part> <faces> --by x,y,z` | Adds a move of a face. | 3 |
+| `turn-face <part> <faces> --by x,y,z` | Adds a turn of a face. | 3 |
+| `scale-face <part> <faces> --by n` or `x,y,z` | Adds a scale of a face. | 3 |
+| `move-edge <part> <a+b> --by x,y,z` | Adds a move of an edge. | 4 |
+| `cut <part> --toward <side> --at <share> [--name n]` | Adds a cut. | 4 |
+| `move-corner <part> <a+b+c> --by x,y,z` | Adds a move of a corner. | 5 |
+| `add-socket <part> <name> --on <any face name>` | A socket on a new face (`on` takes any face name of a shaped part). | 6 |
+| `define <part> <name>` | Makes a definition from a part (its shape, size, changes, colours and sockets go to `[define.<name>]`) and the part uses it. | 7 |
+| `set-socket <part.socket> --facing up` | Says which way a socket faces (`--facing out` takes it away again: out of the surface). Also on `add-socket`. | 8 |
+| `duck-mold save-part <recipe> <part> <file>` | Writes the part alone, with its colours, as a recipe of its own: for the library. The recipe itself doesn't change, so this isn't an `edit`. | 7 |
+| `duck-mold inspect <recipe> --faces` | Lists the faces of every shaped part. | 1 |
+
+- **A move right after a move of the same thing adds to it**, instead
+  of making a second line (and the same for turn and scale). Drag a
+  corner three times and the recipe has one move of that corner.
+  Pulls and insets are never added together: two pulls make two rings
+  of walls, which is a different shape.
+- **A part made from a definition** is shaped in the definition, as
+  its size already is: every part made from it changes, and the edit
+  names them.
+- All follow Phase 2's rules: the same report as `inspect`, `--json`,
+  `--dry-run`, refused if the recipe would have more mistakes
+  afterwards, and a line each in the agent guide (a test fails if one
+  is missing).
+
+### The Studio: Face, Edge and Corner modes
+
+Above the tool strip is a new row: **Part**, **Face**, **Edge**,
+**Corner**. Part is what there is today. The other three shape the
+selected part.
+
+```text
++----------------------------------------------------------------------------------+
+| chair.toml | File Edit View Help | Undo Redo | Add | Front Side Top 3/4 | Frame   |
++----------+-------------------------------------------------------+---------------+
+| PARTS    | [Part] [FACE] [Edge] [Corner]          (Tab, E, C)     | FACE          |
+|  chair   |                                                       |  top_back     |
+|  table   | [T] Pull        ^                                     |  of "chair"   |
+|          | [G] Move        |  the pull arrow                     |  faces up     |
+|          | [R] Turn  +-----+-----+                               |  0.40 x 0.05  |
+|          | [S] Scale |  top_back |  <- the selected face: yellow |               |
+|          | [I] Inset +-----------+                               | CHANGES       |
+|          | [K] Cut    the part's other faces outlined;           |  1 cut left   |
+|          |            other parts faded                          |  2 cut right  |
+|          |                                                       |  ...          |
+|          |  Pull: drag the arrow.          Snap 0.1 m (Ctrl: off) |  9 pull 0.5 x |
++----------+-------------------------------------------------------+---------------+
+| PROBLEMS  None                                      Pulled "top_back" up 0.5 m    |
++----------------------------------------------------------------------------------+
+```
+
+**Going in.** Select a box and press **Tab** (or click Face). The part
+you are shaping is drawn with the outline of every face, so you can see
+them; the other parts are drawn faded. The pointer lights up the face
+under it, and the status line names it. A click selects a face;
+Shift+click adds another. Tab again, or Escape with nothing selected,
+goes back to Part.
+
+**Face mode tools**, down the left as now:
+
+| Tool | Key | Handle on the selected face | Writes | Snaps to |
+|---|---|---|---|---|
+| **Pull** | T | One arrow, along the face's own direction | `{ pull = ..., by = ... }` | 0.1 m, or 0.01 m zoomed in |
+| **Move** | G | Three arrows: x, y, z | `{ move = ..., by = [...] }` | the same |
+| **Turn** | R | Three rings | `{ turn = ..., by = [...] }` | 15 degrees |
+| **Scale** | S | Three boxes and one in the middle | `{ scale = ..., by = ... }` | 0.1 |
+| **Inset** | I | A knob on the middle of the face's nearest edge: drag it in | `{ inset = ..., by = ... }` | 0.01 m |
+| **Cut** | K | A ring round the part follows the pointer, across the edge it is over; click to cut there | `{ cut = ..., at = ... }` | tenths of the way |
+
+Face mode opens with Pull in hand: "an arrow pulls it along its own
+direction". All of it works as Phase 3's handles do: while you drag,
+the picture shows what the recipe would build and a label shows the
+number; the file is written once when you let go, as one undo step;
+Ctrl turns snapping off; Escape lets go without writing.
+
+**Edge mode** (**E**): the part's edges are drawn as lines; the one
+under the pointer is thick and yellow. Click to select one, Shift+click
+for more. Move (G) gives three arrows at its middle. Cut (K) works
+here too.
+
+**Corner mode** (**C**): the part's corners are drawn as small dots.
+Click to select, Shift+click for more, and Move (G) gives three arrows.
+
+```text
+  Edge mode                       Corner mode
+     +---------+                     o---------o
+    /         /|                    /         /|
+   +=========+ |   <- the edge     o---------o |
+   |         | +      under the    |         | o   <- corners are dots;
+   |         |/       pointer      |         |/       the selected one
+   +---------+                     o---------o        is yellow
+```
+
+**The panel in a shaping mode** shows what is selected (its name, the
+way it faces, its size, and the part it is on) and, under it, the
+part's **Changes**: one line each, in order, with its number field and
+an x to take it away. Typing a number is `set-change`; the x is
+`remove-change`. Changes made by a definition say so, as now.
+
+**Things the modes refuse, and say why**: shaping a part that isn't a
+box; Delete in a shaping mode ("faces can't be removed: a shape must
+stay closed. To take a change back, Undo, or remove it from the
+Changes list"); a drag that breaks a check (the label turns red and
+says what is wrong; letting go writes nothing).
+
+**Right-click** on a face, edge or corner, in a shaping mode, gives the
+same tools as a menu, plus "Back to Part". In Part mode the part's menu
+gains **Shape (Tab)**, **Make a definition...** and **Save to the
+library**.
+
+### The keys
+
+New, for shaping:
+
+| Key | Does |
+|---|---|
+| Tab | Face mode; again, back to Part |
+| E | Edge mode |
+| C | Corner mode |
+| T | Pull (faces). In Part mode, T is still Size. |
+| G, R, S | Move, Turn, Scale what is selected: a part, or faces, edges, corners |
+| I | Inset (faces) |
+| K | Cut |
+| Shift+click | Add a face, edge or corner to the selection, or take it out |
+| Ctrl held while dragging | No snapping |
+| Escape | Lets go of a drag; then of the selection; then back to Part |
+
+Kept from Phase 3, in every mode: Ctrl+Z, Ctrl+Y, F (frame what is
+selected: a face, too), 1 to 4 (views), Z (wireframe), H and Shift+H,
+Ctrl+N, Ctrl+O, Ctrl+E. Keys don't fire while you type in a field.
+Help > The keys lists them all.
+
+### New faces work like old ones (step 6)
+
+- **Paint**: the Paint tool colours the face under the pointer by its
+  name, including faces changes made (`colors = { glass = "sky" }`).
+  Shift+click still paints the whole part.
+- **Sockets**: `on` takes any face name of a shaped part:
+  `seat = { on = "top" }`, `lamp = { on = "backrest_front", shift = [0, 0.4, 0] }`.
+  The socket is at the face's middle (the middle of all of them, for a
+  name that stands for several), facing out of it. `shift` works as on
+  a side: shares of the face's own width, height and depth from its
+  middle, with the number along the way it faces left at 0. The
+  socket moves with the face when the face moves. A click on a new
+  face in Part mode makes a socket there, as on any face today.
+- The part's built-in sockets (`top`, `bottom`...) stay as they are: on
+  the box around the part, landing on its surface.
+
+### Using a shaped part again (step 7)
+
+- **Make a definition**: right-click a part, "Make a definition...",
+  give it a name. The part's shape, size, changes, colours and own
+  sockets move to `[define.chair]`, and the part becomes
+  `use = "chair"` where it stood. It is then in the Add menu, under
+  "Defined in this recipe". The edit: `define <part> <name>`.
+- **Save to the library**: right-click, "Save to the library". It
+  writes `parts/chair.toml` next to the recipe: the part alone, with
+  the colours it uses. It shows in the library at once, with its
+  picture. The command: `duck-mold save-part`.
+
+### Leftovers from Phase 3, and three fixes (step 8)
+
+- **Pictures in the Add menu**: a small picture beside each shape,
+  stored and tested like the examples' pictures.
+- **A facing choice for sockets**: in the panel's Sockets list, each
+  socket gets a list: out of the surface (as now), up, down, left,
+  right, front, back. The edit: `set-socket --facing`.
+- **Hidden parts are remembered**: the Studio keeps the hidden parts of
+  each file in its settings (beside the list of models opened lately)
+  and hides them again when the file is opened. The recipe still knows
+  nothing of it (decision 1 of Phase 3 stands).
+- **Copy a joined part to the next free socket**: see the fix below.
+
+The three fixes:
+
+1. **`duck-mold edit add` with no position put the part in the middle
+   of the model, inside the other parts.** The Studio's Add menu walks
+   from the middle towards the camera until the new part is clear of
+   the others. That walk moves into the edit itself, so every `add`
+   does it: towards the camera in the Studio, towards the model's front
+   from the command line. `--stand x,z` and `--move` still put it
+   exactly where they say.
+2. **A copy of a joined part sat exactly on the original.** Now a copy
+   goes to the next socket of the same part that is declared and has
+   nothing on it (the next table leg's socket, say), in the order they
+   are written. If there is none, a socket is made beside the
+   original's, on the same face, one step past its width. If the face
+   has no room for it, the copy stands free beside the model, as a copy
+   of a free part does. The status line says which.
+3. **A new free part was "floating" at once**, which reads like an
+   error. A part that stands on the ground is no longer counted as
+   floating: two things standing side by side on a floor are fine.
+   Only a part up in the air that touches nothing floats. (No example's
+   report changes: none has a floating part.)
+
+*As built (step 8):* as above, with these differences. A copy goes
+only to a free socket that faces the same way as the one it copies
+(so a copied leg doesn't land on a socket meant for a lamp on the
+top). With no room beside, the copy stands free in front of the model
+(towards +z, the way `add` walks), not beside it. `add-socket` has no
+`--facing`: add the socket, then `set-socket --facing`; the word `out`
+takes `facing` away again. The socket row in the panel got narrower to
+make room for the list ("x" removes a socket), so the panel keeps its
+width. The hidden parts are kept in `hidden.txt` beside `recent.txt`.
+
+### Examples (step 9)
+
+Four, each with its stored model, report and picture:
+
+- **`chair.toml`**: the chair above, made from one box by pulling
+  faces.
+- **`window_wall.toml`**: the wall above, with a framed window made by
+  inset.
+- **`rock.toml`**: a box cut through the middle three ways (so it has
+  26 corners), with its corners moved in and out.
+- **`house.toml`** gets framed windows: each window's front is inset
+  to a frame and a pane, and the pane pushed back. Its stored files
+  change on purpose; no other example's change by one byte.
+
+*As built (step 9):* the four are as above. The chair is 108
+triangles, not the 118 the design guessed: the cut faces under the legs
+are pulled whole, and nothing is left over. The wall's frame is
+painted by face name, and it has a socket on a face an inset made (the
+strip above the window). The rock's corners are named as the cuts
+name them (`top_right_front+front_right_top+right_top_front`); it moves
+the eight outer corners in, the middles of five sides out and two top
+edges in, and leaves the bottom flat. The house's two windows are one
+`[define.window]`, used twice. The chair, the wall and the rock are on
+the start page too, so it has fifteen examples.
+
+### Nothing changes in the `.glb` or in Duck Forge
+
+A shaped part is only more triangles, which the reader there already
+reads. The recipe's `version` stays 0: `changes` is an addition, and
+every recipe there is still builds exactly as before.
+
+### Steps
+
+In the order of the brief, one commit each:
+
+1. Changes in the recipe and the library: pull and inset; the four
+   checks; `inspect` reports them, `--faces`; `pull`, `inset`.
+2. Face mode: Tab, selecting faces, the Pull arrow, the Inset knob, the
+   Changes list; `set-change`, `remove-change`. Then a zip to try
+   (decision 12).
+3. Move, turn and scale a face.
+4. Edges: Edge mode, moving an edge; cuts.
+5. Corners: Corner mode, moving a corner.
+6. New faces painted, and carrying sockets.
+7. Make a definition; save to the library.
+8. The Phase 3 leftovers and the three fixes.
+9. The examples. Then PHASE4_REPORT.md.
+
+### Testing
+
+- **Every shape stays whole.** For each kind of change, and for
+  thousands of random lists of changes (random faces, amounts, cuts,
+  corner moves, in random orders), the result is either a closed shape
+  that faces out everywhere, holds room and doesn't pass through
+  itself, or a mistake that names the change that broke it. Never a
+  broken model.
+- **Names last.** The same changes on boxes of many sizes give the
+  same names; changing an amount never changes a name.
+- **Each change's names** are as written above, checked face by face
+  on small cases.
+- **Each new edit command**: in TOML and JSON, with only the expected
+  lines changed, and a line in the agent guide.
+- **Handles with no screen**: face, edge and corner drags pressed,
+  moved and let go, then the recipe read; with snapping and without;
+  one undo step each; Escape writes nothing; a drag that breaks a check
+  writes nothing.
+- **Stored pictures** of the viewport in each mode and with each tool,
+  and of every new screen (each mode, the Changes list, the cut ring,
+  a refused drag, the Add menu with pictures, the socket facing list).
+- **Golden files** for the four examples; every other example byte for
+  byte as it was.
+- **The real screens clicked**, on Windows and Linux: every new key
+  and menu line.
+
+### What Phase 4 won't do
+
+Sculpting, booleans (cutting one part out of another; a window that
+goes right through is a later thing), bones, animation, UVs, textures
+and docking in Duck Forge's Studio, as the brief says. Also: shaping
+shapes other than boxes, a bevel on a shaped box, removing faces, and
+reordering changes in the Studio (by hand in the recipe, it works).
+
+### The decisions
+
+Places where a choice was made. Each says what I recommend, and the
+other way.
+
+1. **Only boxes can be shaped, in this phase** (with `taper`, without
+   `bevel`). *The other way:* the flat shapes too (wedge, pyramid,
+   prism), which name well but need more checking; round shapes can't
+   be named well yet.
+2. **Names as above**: a pull's walls `<face>_side_<word>`, an inset's
+   middle `<face>_inset`, a cut's slice `<face>_<side>`; edges and
+   corners by the faces that meet there, joined with `+`; a `name` on a
+   change chooses the new names. *The other way:* every new face gets a
+   number (`face_7`), which is shorter but means nothing to a reader.
+3. **Pull makes new walls** (Blender's extrude). Moving a face without
+   new walls is Move. *The other way:* pull only moves the face, and
+   extrude is a separate change.
+4. **Amounts are metres; a cut's place is a share** from the middle to
+   the side. *The other way:* cuts in metres too, which would keep a cut
+   at the same distance from the middle when the part is resized, and
+   could leave it outside a part made smaller.
+5. **Changing a shaped box to another shape drops its changes**, saying
+   so, and Undo brings them back. *The other way:* refuse, until the
+   changes are removed first.
+6. **The keys: Tab for faces, E for edges, C for corners**; T pulls, I
+   insets, K cuts. *The other way:* Blender's 1, 2 and 3 for corners,
+   edges and faces, which would take the keys the four views have now.
+7. **A move right after a move of the same thing adds to it**, so
+   dragging a corner several times leaves one line. *The other way:* a
+   line for every drag, as Blender's history has.
+8. **Hidden parts are remembered in the Studio's settings**, for each
+   file, not in the recipe.
+9. **The house example itself gets framed windows**, so its stored
+   files change on purpose. *The other way:* a new example beside it,
+   and the house left as it is.
+10. **A copy of a joined part** goes to the next free declared socket;
+    else to a new socket beside the original; else it stands free
+    beside the model.
+11. **A part that stands on the ground isn't floating.**
+12. **A zip to try after step 2**, so you can feel Face mode early, as
+    after Phase 3's step 3. I keep building unless you say stop.
+
+The version becomes 0.4.0.

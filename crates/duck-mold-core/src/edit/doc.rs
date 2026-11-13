@@ -68,6 +68,11 @@ pub enum Val {
     List(Vec<Val>),
     /// Names with values, written on one line: `{ on = "top" }`.
     Table(Vec<(String, Val)>),
+    /// A list written one item to a line, where the file allows it:
+    /// `changes = [` and an item on each line under it.
+    Lines(Vec<Val>),
+    /// A value copied from the file just as it is written there.
+    Raw(String),
 }
 
 impl Val {
@@ -93,8 +98,36 @@ impl Val {
                     .collect();
                 format!("{{ {} }}", fields.join(", "))
             }
+            Val::Raw(text) => text.clone(),
+            Val::Lines(items) if items.is_empty() => "[]".to_owned(),
+            // With `\n` for line endings and no indent: see `spread`.
+            Val::Lines(items) => {
+                let items: Vec<String> = items
+                    .iter()
+                    .map(|item| format!("  {}", item.write(syntax)))
+                    .collect();
+                match syntax {
+                    Syntax::Toml => format!("[\n{},\n]", items.join(",\n")),
+                    Syntax::Json => format!("[\n{}\n]", items.join(",\n")),
+                }
+            }
         }
     }
+
+    /// The value written on one line, even a [`Val::Lines`].
+    fn flat(&self) -> Val {
+        match self {
+            Val::Lines(items) => Val::List(items.clone()),
+            other => other.clone(),
+        }
+    }
+}
+
+/// Text written with `\n` and no indent, made to fit where it goes: the
+/// file's own line ending, and every line after the first indented as
+/// the first.
+fn spread(text: &str, indent: &str, newline: &str) -> String {
+    text.replace('\n', &format!("{newline}{indent}"))
 }
 
 /// `name = value` in TOML, `"name": value` in JSON.
@@ -229,6 +262,53 @@ impl Doc {
             Value::Array(items) => Some(items),
             _ => None,
         }
+    }
+
+    /// A value as it is written in the file, to copy elsewhere. A table
+    /// under a header of its own (`[parts.sockets]`) comes back on one
+    /// line: `{ a = ..., b = ... }`.
+    pub fn raw(&self, path: &[Step]) -> Option<Val> {
+        let node = self.node(path)?;
+        if self.form(path) == Form::Header {
+            let fields: Vec<(String, Val)> = match &node.value {
+                Value::Table(entries) => entries
+                    .iter()
+                    .filter_map(|entry| {
+                        Some((entry.key.clone(), self.raw(&with(path, key(&entry.key)))?))
+                    })
+                    .collect(),
+                _ => return None,
+            };
+            return Some(Val::Table(fields));
+        }
+        Some(Val::Raw(self.text[node.span.clone()].to_owned()))
+    }
+
+    /// Adds a block `[name]` (a TOML header, `define.chair`) with these
+    /// fields, just above the block at `before` and the comments over
+    /// it.
+    pub fn add_block_before(
+        &mut self,
+        before: &[Step],
+        name: &str,
+        fields: &[(String, Val)],
+    ) -> Done {
+        if self.syntax != Syntax::Toml || self.form(before) != Form::Header {
+            return cant(format!(
+                "{} isn't written under a header of its own",
+                show(before)
+            ));
+        }
+        let newline = self.newline();
+        let start = self.node(before).expect("checked above").span.start;
+        let at = self.lead(start);
+        let mut block = format!("[{name}]{newline}");
+        for (field, value) in fields {
+            block.push_str(&field_text(field, value, Syntax::Toml));
+            block.push_str(newline);
+        }
+        block.push_str(newline);
+        self.splice(at..at, &block)
     }
 
     /// The line ending the file uses.
@@ -472,7 +552,10 @@ impl Doc {
                         _ => from,
                     },
                 };
-                let line = format!("{}{newline}", field_text(name, value, self.syntax));
+                let line = format!(
+                    "{}{newline}",
+                    spread(&field_text(name, value, self.syntax), "", newline)
+                );
                 // The line above may be the file's last, with no line
                 // ending of its own.
                 let line = if at > 0 && !self.text[..at].ends_with('\n') {
@@ -484,11 +567,17 @@ impl Doc {
             }
             Form::Inline => {
                 let span = self.node(table).expect("checked above").span.clone();
-                let field = field_text(name, value, self.syntax);
+                let many_lines = self.text[span.clone()].contains('\n');
                 if entries.is_empty() {
+                    let field = field_text(name, &value.flat(), self.syntax);
                     return self.splice(span, &format!("{{ {field} }}"));
                 }
-                let many_lines = self.text[span.clone()].contains('\n');
+                let field = if many_lines {
+                    let indent = self.indent_at(entries[0].key_span.start).to_owned();
+                    spread(&field_text(name, value, self.syntax), &indent, newline)
+                } else {
+                    field_text(name, &value.flat(), self.syntax)
+                };
                 let anchor = entries
                     .iter()
                     .filter(|entry| rank(&entry.key).unwrap_or(usize::MAX) <= new_rank)
@@ -534,6 +623,33 @@ impl Doc {
                     "{} is written with dotted names, which can't be changed here",
                     show(table)
                 ));
+            }
+            Form::Root | Form::Header if self.form(&with(table, key(name))) == Form::Header => {
+                // A table under a header of its own (`[parts.sockets]`):
+                // the whole block goes, with its comments and the blank
+                // line above it.
+                let path = with(table, key(name));
+                let headers = self.headers();
+                let header = self.node(&path).expect("it is there").span.start;
+                let mut start = self.lead(header);
+                let above = &self.text[..start];
+                if above.ends_with("\r\n\r\n") {
+                    start -= 2;
+                } else if above.ends_with("\n\n") {
+                    start -= 1;
+                }
+                // Up to its last line: the blank line after it stays.
+                let mut end = self.block_end(&path, &headers);
+                while end > start {
+                    if self.text[..end].ends_with("\r\n\r\n") {
+                        end -= 2;
+                    } else if self.text[..end].ends_with("\n\n") {
+                        end -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                start..end
             }
             Form::Root | Form::Header => {
                 let mut start = self.line_start(entry.key_span.start);
@@ -715,6 +831,61 @@ impl Doc {
                 };
                 self.splice(span.end..span.end, &text)?;
             }
+        }
+        Ok(count)
+    }
+
+    /// Adds a value to the end of a list that is written between
+    /// brackets, the way its items are written: on a line of its own
+    /// under the last, or on the same line. Gives its place.
+    pub fn push_item(&mut self, list: &[Step], value: &Val) -> Result<usize, Cant> {
+        let Some(node) = self.node(list) else {
+            return cant(format!("there is no list {} in the recipe", show(list)));
+        };
+        let Value::Array(items) = &node.value else {
+            return cant(format!("{} in the recipe is not a list", show(list)));
+        };
+        let newline = self.newline();
+        let span = node.span.clone();
+        let count = items.len();
+        let item = value.flat().write(self.syntax);
+        let Some(last) = items.last() else {
+            let indent = self.indent_at(span.start).to_owned();
+            let lines = Val::Lines(vec![value.flat()]).write(self.syntax);
+            self.splice(span, &spread(&lines, &indent, newline))?;
+            return Ok(0);
+        };
+        let last = last.span.clone();
+        if !self.text[span.clone()].contains('\n') {
+            self.splice(last.end..last.end, &format!(", {item}"))?;
+            return Ok(count);
+        }
+        let indent = self.indent_at(last.start).to_owned();
+        let after = &self.text[last.end..span.end];
+        let rest = after.trim_start();
+        // Whether the last item has a comma after it: then the new one
+        // gets one too.
+        let trailing = rest.starts_with(',');
+        let comma_end = if trailing {
+            last.end + (after.len() - rest.len()) + 1
+        } else {
+            last.end
+        };
+        let next_line = self.line_end(comma_end);
+        if next_line < span.end {
+            // A line of its own, under the last item's (and under any
+            // comment at the end of it). One splice: JSON can't be read
+            // with the comma in and the item not yet.
+            let between = self.text[last.end..next_line].to_owned();
+            let (comma, end) = if trailing { ("", ",") } else { (",", "") };
+            self.splice(
+                last.end..next_line,
+                &format!("{comma}{between}{indent}{item}{end}{newline}"),
+            )?;
+        } else if trailing {
+            self.splice(comma_end..comma_end, &format!("{newline}{indent}{item},"))?;
+        } else {
+            self.splice(last.end..last.end, &format!(",{newline}{indent}{item}"))?;
         }
         Ok(count)
     }

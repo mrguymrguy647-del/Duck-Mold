@@ -56,6 +56,28 @@ fn robot() -> Harness<'static, StudioApp> {
     screen
 }
 
+/// A wall with a framed window, shaped from one box.
+const WALL: &str = r##"version = 0
+name = "wall"
+
+[palette]
+plaster = "#E8E0D0"
+wood = "#8B5A2B"
+sky = "#9FD3F0"
+
+[[parts]]
+name = "wall"
+shape = "box"
+size = [3, 2.4, 0.2]
+color = "plaster"
+changes = [
+  { inset = "front", by = 0.6, name = "window" },
+  { inset = "window", by = 0.06, name = "glass" },
+  { pull = "glass", by = -0.08 },
+]
+colors = { window = "wood", glass = "sky", glass_side = "wood" }
+"##;
+
 #[test]
 fn the_screens_look_as_they_did() {
     let mut wrong: Vec<String> = Vec::new();
@@ -374,6 +396,167 @@ fn the_screens_look_as_they_did() {
         assert!(screen.state_mut().studio_mut().unwrap().check_files());
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "mistake"));
+    }
+
+    // Shaping: a wall with a framed window, in Face mode with the glass
+    // selected and the Changes list in the panel; then a pull of the
+    // glass held too far in, its label red with why.
+    {
+        let recipe = folder("pictures_shaping").join("wall.toml");
+        std::fs::write(&recipe, WALL).unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("wall"));
+            studio.face_mode().unwrap();
+            studio.look_from(duck_mold_view::studio::viewport::Viewpoint::ThreeQuarter);
+        }
+        screen.run_steps(2);
+        let glass = face_on_screen(&screen, "glass");
+        click_at(&mut screen, glass);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "shape-face"));
+
+        use duck_mold_view::studio::handles::Grip;
+        let from = screen
+            .state()
+            .studio()
+            .unwrap()
+            .grip_at(Grip::Pull)
+            .unwrap();
+        let start = point_on_screen(&screen, from);
+        let end = point_on_screen(&screen, from + duck_mold_core::math::vec3(0.0, 0.0, -0.3));
+        screen.hover_at(start);
+        screen.step();
+        screen.drag_at(start);
+        screen.step();
+        for part in 1..=4 {
+            screen.hover_at(start + (end - start) * (part as f32 / 4.0));
+            screen.step();
+        }
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "shape-refused"));
+        screen.event(egui::Event::PointerButton {
+            pos: end,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        screen.run_steps(2);
+        assert_eq!(std::fs::read_to_string(&recipe).unwrap(), WALL);
+
+        // Edge mode: the top's front edge selected, its arrows on it.
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .edge_mode()
+            .unwrap();
+        screen.run_steps(2);
+        let edge = screen
+            .state()
+            .studio()
+            .unwrap()
+            .edge_point("top+window_rim_top")
+            .unwrap();
+        let edge = picture_on_screen(&screen, edge);
+        click_at(&mut screen, edge);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "shape-edge"));
+    }
+
+    // Corner mode on the rock: its corners as dots, one picked, with the
+    // arrows that move it and its name in the panel.
+    {
+        let recipe = copy_of("rock.toml", "pictures_corner");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("rock"));
+            studio.corner_mode().unwrap();
+            studio.look_from(duck_mold_view::studio::viewport::Viewpoint::ThreeQuarter);
+        }
+        screen.run_steps(2);
+        let corner = screen
+            .state()
+            .studio()
+            .unwrap()
+            .corner_point("top_right_front+front_right_top+right_top_front")
+            .unwrap();
+        let corner = picture_on_screen(&screen, corner);
+        click_at(&mut screen, corner);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "shape-corner"));
+    }
+
+    // The Cut tool on the chair, in Face mode: the ring where the cut
+    // would go, across the face under the pointer, and its label.
+    {
+        let recipe = copy_of("chair.toml", "pictures_cut");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("chair"));
+            studio.face_mode().unwrap();
+            studio.look_from(duck_mold_view::studio::viewport::Viewpoint::ThreeQuarter);
+        }
+        screen.run_steps(2);
+        screen.key_press(egui::Key::K);
+        screen.run_steps(2);
+        // Along the top of the seat's front, between its middle and the
+        // slice towards the right.
+        let studio = screen.state().studio().unwrap();
+        let (middle, right) = (
+            studio.edge_point("top_front+front").unwrap(),
+            studio.edge_point("top_right_front+front_right").unwrap(),
+        );
+        let between = ((middle.0 + right.0) / 2.0, (middle.1 + right.1) / 2.0);
+        let point = picture_on_screen(&screen, between);
+        screen.hover_at(point);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "shape-cut"));
+    }
+
+    // Using a shaped part again: the part's menu, the window that makes
+    // a definition of it, and the library once it is saved there.
+    {
+        let recipe = copy_of("chair.toml", "pictures_reuse");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        // (Where the seat is, found in Face mode, then back to parts.)
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("chair"));
+            studio.face_mode().unwrap();
+        }
+        screen.run_steps(2);
+        let seat = face_on_screen(&screen, "top");
+        screen.state_mut().studio_mut().unwrap().part_mode();
+        screen.run_steps(2);
+        right_click_at(&mut screen, seat);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "reuse-menu"));
+        screen
+            .query_all_by_label_contains("Make a definition")
+            .next()
+            .unwrap()
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "reuse-define"));
+        screen.get_by_label("Cancel").click();
+        screen.run_steps(2);
+        right_click_at(&mut screen, seat);
+        screen.run_steps(2);
+        screen
+            .query_all_by_label_contains("Save to the library")
+            .next()
+            .unwrap()
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "reuse-library"));
     }
 
     assert!(

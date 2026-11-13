@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -1317,5 +1317,75 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 25, "the guide's tables list 25 fields");
+    assert_eq!(checked, 26, "the guide's tables list 26 fields");
+}
+
+#[test]
+fn a_box_is_shaped_from_the_command_line_and_its_faces_listed() {
+    let folder = folder("cli_shaping");
+    std::fs::write(
+        folder.join("wall.toml"),
+        "version = 0\n\n[palette]\nplaster = \"#E8E0D0\"\n\n[[parts]]\nname = \"wall\"\nshape = \"box\"\nsize = [3, 2.4, 0.2]\ncolor = \"plaster\"\n",
+    )
+    .unwrap();
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "wall.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    for words in [
+        &["inset", "wall", "front", "--by", "0.6", "--name", "window"][..],
+        &["inset", "wall", "window", "--by", "0.06", "--name", "glass"],
+        &["pull", "wall", "glass", "--by", "-0.08"],
+    ] {
+        let output = edit(words);
+        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    }
+    let text = std::fs::read_to_string(folder.join("wall.toml")).unwrap();
+    assert!(text.ends_with(
+        "color = \"plaster\"\nchanges = [\n  { inset = \"front\", by = 0.6, name = \"window\" },\n  { inset = \"window\", by = 0.06, name = \"glass\" },\n  { pull = \"glass\", by = -0.08 },\n]\n"
+    ));
+
+    // Several faces with commas; a face that isn't there is refused,
+    // with the closest, and nothing is written.
+    let output = edit(&["pull", "wall", "glas", "--by", "0.1"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains(
+            "parts[0].changes[3]: there is no face \"glas\" on \"wall\". Did you mean \"glass\"?"
+        ),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("wall.toml")).unwrap(),
+        text
+    );
+
+    let output = run(&folder, &["inspect", "wall.toml", "--faces"]);
+    let out = stdout(&output);
+    assert!(
+        out.contains("    wall   box, 3 changes   36 triangles\n"),
+        "{out}"
+    );
+    assert!(
+        out.contains("  faces        wall  (wall.toml): box, 3 changes, 18 faces\n"),
+        "{out}"
+    );
+    assert!(out.contains(
+        "    glass               faces front   1.68 x 1.08 m   next to: glass_side_bottom, glass_side_right, glass_side_top, glass_side_left\n"
+    ));
+    assert!(out.contains(
+        "    window              stands for: glass_rim_bottom, glass_rim_right, glass_rim_top, glass_rim_left\n"
+    ));
+    let report = json(&run(
+        &folder,
+        &["inspect", "wall.toml", "--faces", "--json"],
+    ));
+    assert_eq!(report["parts"][0]["changes"], 3);
+    assert_eq!(report["shaped"][0]["face_count"], 18);
+    assert_eq!(report["shaped"][0]["faces"][4]["name"], "glass");
+    // Without --faces, no list.
+    let report = json(&run(&folder, &["inspect", "wall.toml", "--json"]));
+    assert!(report.get("shaped").is_none());
 }

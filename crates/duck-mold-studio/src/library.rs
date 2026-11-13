@@ -18,6 +18,8 @@ pub struct Thumbs {
     /// Which reading of the library they were made from.
     reads: usize,
     textures: HashMap<String, TextureHandle>,
+    /// The Add menu's pictures of the shapes.
+    pub shapes: crate::gallery::ShapePictures,
 }
 
 impl Thumbs {

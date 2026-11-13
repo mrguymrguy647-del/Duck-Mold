@@ -1,5 +1,5 @@
-# A small house: walls, a roof made of two wedges, a door, two windows,
-# a chimney and a skylight. Everything is placed by sockets.
+# A small house: walls, a roof made of two wedges, a door, two framed
+# windows, a chimney and a skylight. Everything is placed by sockets.
 #
 #   duck-mold inspect examples/house.toml
 #
@@ -15,6 +15,7 @@ tiles = "#B5523B"
 door  = "#6B4A2B"
 glass = "#9CC8E0"
 brick = "#8A4B3A"
+frame = "#F2EEE6"
 
 # The roof is an assembly: a part made of parts. A wedge is a ramp, full
 # height at its back and sloping down to its front edge. The second half
@@ -43,6 +44,20 @@ to = "front_half.back"
 # that something can be put on the roof from outside.
 [define.roof.sockets]
 skylight = { from = "front_half.slope" }
+
+# A window, framed. Its front is inset: `front` is then the frame round
+# the edge, and `pane` the face in the middle, which is pushed back into
+# the frame. The walls that pushing makes (`pane_side`) are the frame's
+# inside. Defined once, used twice.
+[define.window]
+shape = "box"
+size = [0.5, 0.5, 0.06]
+color = "frame"
+changes = [
+  { inset = "front", by = 0.05, name = "pane" },
+  { pull = "pane", by = -0.03 },
+]
+colors = { pane = "glass" }
 
 # The walls, with a socket for everything that goes on them. A shift of
 # -1 up-and-down puts a socket on the bottom edge of its side.
@@ -81,17 +96,13 @@ foot = { on = "back", shift = [0, -1, 0] }
 
 [[parts]]
 name = "window_left"
-shape = "box"
-size = [0.5, 0.5, 0.06]
-color = "glass"
+use = "window"
 attach = "back"
 to = "walls.window_left"
 
 [[parts]]
 name = "window_right"
-shape = "box"
-size = [0.5, 0.5, 0.06]
-color = "glass"
+use = "window"
 attach = "back"
 to = "walls.window_right"
 

@@ -1824,19 +1824,11 @@ fn the_panel_lists_a_parts_sockets_to_rename_and_remove() {
     screen.get_by_label("1 use");
     screen.get_by_label("not used");
     // The one in use can't be removed; the other can.
-    assert_eq!(screen.query_all_by_label("remove socket").count(), 2);
-    screen
-        .query_all_by_label("remove socket")
-        .next()
-        .unwrap()
-        .click();
+    assert_eq!(screen.query_all_by_label("x").count(), 2);
+    screen.query_all_by_label("x").next().unwrap().click();
     screen.run_steps(3);
     assert!(text_of(&recipe).contains("spot = { on = \"top\" }"));
-    screen
-        .query_all_by_label("remove socket")
-        .nth(1)
-        .unwrap()
-        .click();
+    screen.query_all_by_label("x").nth(1).unwrap().click();
     screen.run_steps(3);
     let now = text_of(&recipe);
     assert!(!now.contains("spot_2"), "{now}");
@@ -1869,6 +1861,46 @@ fn the_panel_lists_a_parts_sockets_to_rename_and_remove() {
     assert!(now.contains("lid = { on = \"top\" }"), "{now}");
     assert!(now.contains("to = \"crate.lid\""), "{now}");
     assert!(!screen.state().studio().unwrap().has_mistakes());
+
+    // Which way it faces is a choice: "out" is what it was; the cap
+    // turns to face the front, and back.
+    let choice = |screen: &Harness<'static, StudioApp>, now: &str| {
+        screen
+            .query_all_by_value(now)
+            .find(|node| node.accesskit_node().role() == egui::accesskit::Role::ComboBox)
+            .expect("the socket's facing")
+            .rect()
+            .center()
+    };
+    let at = choice(&screen, "out");
+    click_at(&mut screen, at);
+    screen.run_steps(3);
+    screen.get_by_label("front").click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(
+        now.contains("lid = { on = \"top\", facing = \"front\" }"),
+        "{now}"
+    );
+    screen.get_by_label_contains("Turned the socket crate.lid to face front");
+    let bounds = |screen: &Harness<'static, StudioApp>, part: &str| {
+        screen
+            .state()
+            .studio()
+            .unwrap()
+            .part(part)
+            .unwrap()
+            .bounds
+            .unwrap()
+    };
+    let (cap, held) = (bounds(&screen, "cap"), bounds(&screen, "crate"));
+    assert!(cap.min.z >= held.center().z, "{cap:?} {held:?}");
+    let at = choice(&screen, "front");
+    click_at(&mut screen, at);
+    screen.run_steps(3);
+    screen.get_by_label("out").click();
+    screen.run_steps(3);
+    assert!(text_of(&recipe).contains("lid = { on = \"top\" }"));
 
     // Edit > Tidy sockets takes the Studio's unused ones.
     screen
@@ -1988,6 +2020,58 @@ fn an_example_on_the_start_page_opens_a_copy_of_your_own() {
     assert!(models.join("parts/crate.glb").is_file());
     assert!(!screen.state().studio().unwrap().has_mistakes());
     assert!(screen.state().studio().unwrap().part("lamp").is_some());
+}
+
+#[test]
+fn hidden_parts_are_hidden_again_when_the_file_is_next_opened() {
+    use duck_mold_studio::recent::Recent;
+    let folder = folder("screens_hidden_kept");
+    let list = folder.join("settings/recent.txt");
+    let robot = folder.join("robot.toml");
+    std::fs::copy(examples().join("robot.toml"), &robot).unwrap();
+    let open = || {
+        let mut screen = harness(
+            StudioApp::with_file(&robot, false).remembering(Recent::kept_in(list.clone())),
+            false,
+        );
+        screen.run_steps(2);
+        screen
+    };
+    let mut screen = open();
+    for part in ["head", "left_arm"] {
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .set_hidden(part, true);
+    }
+    screen.run_steps(2);
+    drop(screen);
+    // Kept beside the list of files, not in the recipe.
+    let kept = std::fs::read_to_string(folder.join("settings/hidden.txt")).unwrap();
+    assert!(kept.ends_with("robot.toml\n\thead\n\tleft_arm\n"), "{kept}");
+    assert_eq!(
+        std::fs::read_to_string(&robot).unwrap(),
+        std::fs::read_to_string(examples().join("robot.toml")).unwrap()
+    );
+
+    // Opened again, they are hidden again, and the status line says so.
+    let mut screen = open();
+    assert_eq!(
+        screen.state().studio().unwrap().hidden(),
+        ["head", "left_arm"]
+    );
+    screen.get_by_label_contains("2 parts are hidden, as they were when this file was last open");
+    // Shown again, nothing is remembered.
+    screen.state_mut().studio_mut().unwrap().show_all();
+    screen.run_steps(2);
+    drop(screen);
+    let screen = open();
+    assert!(screen.state().studio().unwrap().hidden().is_empty());
+    assert_eq!(
+        std::fs::read_to_string(folder.join("settings/hidden.txt")).unwrap(),
+        ""
+    );
 }
 
 #[test]
@@ -2163,4 +2247,276 @@ fn skipped_tips_stay_away_and_looking_only_has_none() {
     assert!(screen.query_by_label_contains("Tip ").is_none());
     // With the tip up, the Studio still works: nothing is in the way.
     assert!(folder.join("settings/tips-seen").is_file());
+}
+
+#[test]
+fn tab_shapes_the_selected_box_with_the_pull_arrow_and_the_changes_list() {
+    use duck_mold_view::studio::handles::Grip;
+    use duck_mold_view::studio::{FaceTool, Mode};
+    use egui::Key;
+    let (recipe, mut screen) = yard("screens_shaping");
+    let mode = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().mode();
+
+    // A cylinder can't be shaped: the status line says why.
+    let post = on_screen(&screen, "post");
+    click_at(&mut screen, post);
+    screen.key_press(Key::Tab);
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+    screen.get_by_label_contains("Only a box can be shaped in this version");
+
+    // The crate can: Tab, or the Face button.
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    screen.key_press(Key::Tab);
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Face);
+    screen.get_by_label("Shaping: Face mode");
+    screen.get_by_label("Click a face of the box to select it.");
+    for tool in ["Pull", "Inset"] {
+        screen.get_by_label(tool);
+    }
+    // Part's tools are gone while shaping.
+    assert_eq!(screen.query_all_by_label("Rotate").count(), 0);
+    screen.get_by_label("Part").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+    screen.get_by_label("Face").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Face);
+
+    // A click picks the top; the panel says what it is.
+    let top = face_on_screen(&screen, "top");
+    click_at(&mut screen, top);
+    assert_eq!(screen.state().studio().unwrap().selected_faces(), ["top"]);
+    screen.get_by_label("faces up");
+    screen.get_by_label("0.50 x 0.50 m");
+
+    // The arrow pulls it up 0.4 m: one write.
+    let from = screen
+        .state()
+        .studio()
+        .unwrap()
+        .grip_at(Grip::Pull)
+        .unwrap();
+    let (start, end) = (
+        point_on_screen(&screen, from),
+        point_on_screen(&screen, from + duck_mold_core::math::vec3(0.0, 0.4, 0.0)),
+    );
+    drag(&mut screen, start, end);
+    let pulled = text_of(&recipe);
+    assert!(
+        pulled.contains("color = \"red\"\nchanges = [\n  { pull = \"top\", by = 0.4 },\n]\n"),
+        "{pulled}"
+    );
+    screen.get_by_label_contains("Pulled \"top\" of \"crate\" out by 0.4");
+    // The Changes list shows it.
+    screen.get_by_label("Changes");
+    screen.get_by_label("1. pull top");
+
+    // I and T change the tool.
+    screen.key_press(Key::I);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().face_tool, FaceTool::Inset);
+    screen.key_press(Key::T);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().face_tool, FaceTool::Pull);
+
+    // Delete removes no face, and says why.
+    screen.key_press(Key::Delete);
+    screen.run_steps(2);
+    screen.get_by_label_contains("Faces can't be removed: a shape must stay closed");
+    assert_eq!(text_of(&recipe), pulled);
+
+    // The right-click menu has the tools and the way back.
+    let top = face_on_screen(&screen, "top");
+    right_click_at(&mut screen, top);
+    screen.get_by_label_contains("Back to Part").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+    // And in Part mode, Shape.
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    screen.get_by_label_contains("Shape").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Face);
+
+    // The change taken away from the list: the crate is a box again.
+    screen.get_by_label("x").click();
+    screen.run_steps(3);
+    assert_eq!(text_of(&recipe), YARD);
+    // Undo brings it back.
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    assert_eq!(text_of(&recipe), pulled);
+
+    // Escape: the faces, Face mode, then the part.
+    let top = face_on_screen(&screen, "top");
+    click_at(&mut screen, top);
+    for (mode_after, selected_after) in [
+        (Mode::Face, Some("crate")),
+        (Mode::Part, Some("crate")),
+        (Mode::Part, None),
+    ] {
+        screen.key_press(Key::Escape);
+        screen.run_steps(2);
+        assert_eq!(mode(&screen), mode_after);
+        assert_eq!(selected(&screen).as_deref(), selected_after);
+    }
+}
+
+#[test]
+fn in_face_mode_g_r_s_take_the_face_tools_and_the_panel_shows_three_numbers() {
+    use duck_mold_view::studio::FaceTool;
+    use egui::Key;
+    let (recipe, mut screen) = yard("screens_face_tools");
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    screen.key_press(Key::Tab);
+    screen.run_steps(2);
+    for (key, tool) in [
+        (Key::G, FaceTool::Move),
+        (Key::R, FaceTool::Turn),
+        (Key::S, FaceTool::Scale),
+        (Key::I, FaceTool::Inset),
+        (Key::T, FaceTool::Pull),
+    ] {
+        screen.key_press(key);
+        screen.run_steps(2);
+        assert_eq!(screen.state().studio().unwrap().face_tool, tool, "{key:?}");
+    }
+    // The Part tools didn't change meanwhile.
+    assert_eq!(
+        screen.state().studio().unwrap().tool,
+        duck_mold_view::studio::handles::Tool::Move
+    );
+    // (Scale is a row of the panel too.)
+    for tool in ["Pull", "Move", "Turn", "Scale", "Inset"] {
+        assert!(screen.query_all_by_label(tool).count() >= 1, "{tool}");
+    }
+    // A move of the top, made the way an agent would, shows as three
+    // numbers in the Changes list.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .apply(&duck_mold_core::edit::Edit::MoveFace {
+            part: "crate".into(),
+            faces: vec!["top".into()],
+            by: [0.0, 0.2, 0.0],
+        })
+        .unwrap();
+    screen.run_steps(2);
+    screen.get_by_label("1. move top");
+    assert!(text_of(&recipe).contains("{ move = \"top\", by = [0, 0.2, 0] }"));
+}
+
+#[test]
+fn e_shows_the_edges_k_takes_the_cut_and_a_click_cuts_round_the_box() {
+    use duck_mold_view::studio::{FaceTool, Mode};
+    use egui::Key;
+    let (recipe, mut screen) = yard("screens_edges");
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    screen.key_press(Key::E);
+    screen.run_steps(2);
+    let mode = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().mode();
+    assert_eq!(mode(&screen), Mode::Edge);
+    screen.get_by_label("Shaping: Edge mode");
+    // Edge mode's tools: Move and Cut only.
+    assert_eq!(screen.query_all_by_label("Pull").count(), 0);
+    screen.get_by_label("Cut");
+    // A click on the top's front edge picks it.
+    let edge = screen
+        .state()
+        .studio()
+        .unwrap()
+        .edge_point("top+front")
+        .unwrap();
+    let edge = picture_on_screen(&screen, edge);
+    click_at(&mut screen, edge);
+    assert_eq!(
+        screen.state().studio().unwrap().selected_faces(),
+        ["top+front"]
+    );
+    screen.get_by_label("top+front");
+    screen.get_by_label("0.50 m long");
+    // K: the Cut tool; a click on the edge cuts round the box there.
+    screen.key_press(Key::K);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().face_tool, FaceTool::Cut);
+    click_at(&mut screen, edge);
+    let text = text_of(&recipe);
+    assert!(text.contains("{ cut = "), "{text}");
+    screen.get_by_label_contains("Cut \"crate\" towards");
+    // The Changes list shows where it is.
+    screen.get_by_label_contains("1. cut ");
+    // E again: back to parts.
+    screen.key_press(Key::E);
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+}
+
+#[test]
+fn c_shows_the_corners_and_a_click_picks_one() {
+    use duck_mold_view::studio::Mode;
+    use egui::Key;
+    let (_, mut screen) = yard("screens_corners");
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    screen.key_press(Key::C);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().mode(), Mode::Corner);
+    screen.get_by_label("Shaping: Corner mode");
+    assert_eq!(screen.query_all_by_label("Cut").count(), 0);
+    let corner = screen
+        .state()
+        .studio()
+        .unwrap()
+        .corner_point("top+front+left")
+        .unwrap();
+    let corner = picture_on_screen(&screen, corner);
+    click_at(&mut screen, corner);
+    assert_eq!(
+        screen.state().studio().unwrap().selected_faces(),
+        ["top+front+left"]
+    );
+    screen.get_by_label("top+front+left");
+    screen.get_by_label("at -0.25, 0.25, 0.25");
+    screen.key_press(Key::C);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().mode(), Mode::Part);
+}
+
+#[test]
+fn the_part_menu_makes_a_definition_and_saves_to_the_library() {
+    let (recipe, mut screen) = yard("screens_define");
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    screen
+        .query_all_by_label_contains("Make a definition")
+        .next()
+        .expect("the menu has Make a definition")
+        .click();
+    screen.run_steps(3);
+    screen.get_by_label("Make a definition");
+    // The name it offers is the part's; Make makes it.
+    screen.get_by_label("Make").click();
+    screen.run_steps(3);
+    let text = text_of(&recipe);
+    assert!(text.contains("[define.crate]\nshape = \"box\""), "{text}");
+    assert!(text.contains("name = \"crate\"\nuse = \"crate\""), "{text}");
+    assert_eq!(screen.query_all_by_label("Make a definition").count(), 0);
+
+    // Save to the library: a file in parts/, and a row in the library.
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    screen
+        .query_all_by_label_contains("Save to the library")
+        .next()
+        .expect("the menu has Save to the library")
+        .click();
+    screen.run_steps(3);
+    assert!(recipe.parent().unwrap().join("parts/crate.toml").exists());
+    screen.get_by_label_contains("Saved \"crate\" to the library");
 }

@@ -9,6 +9,54 @@
 use crate::math::{Bounds, Vec3};
 use crate::model::{Model, Part};
 use crate::recipe::Side;
+use crate::shaping::Shaped;
+
+/// On a shaped box: the face nearest `at` (in the part's own space), by
+/// name, and how far across the faces with that name `at` is.
+fn face_spot(shaped: &Shaped, at: Vec3) -> Option<Spot> {
+    let face = (0..shaped.faces.len()).min_by(|&a, &b| {
+        let away = |face: usize| {
+            let normal = shaped.normal(face).unwrap_or(Vec3::UP);
+            let plane = normal.dot(at - shaped.middle(face)).abs();
+            // Off the face's own box, a little further.
+            let corners = shaped.faces[face]
+                .corners
+                .iter()
+                .map(|&c| shaped.corners[c]);
+            let outside = Bounds::around(corners).map_or(0.0, |bounds| {
+                let below = bounds.min - at;
+                let above = at - bounds.max;
+                below.max(above).max(Vec3::ZERO).length()
+            });
+            plane + outside
+        };
+        away(a).total_cmp(&away(b))
+    })?;
+    let name = shaped.faces[face].name.clone();
+    let faces = shaped.faces_named(&name);
+    let middle = shaped.middle_of(&faces);
+    let bounds = Bounds::around(
+        faces
+            .iter()
+            .flat_map(|&one| shaped.faces[one].corners.iter().map(|&c| shaped.corners[c])),
+    )?;
+    let half = bounds.half();
+    let across = |at: f64, middle: f64, half: f64| {
+        if half <= 1e-9 {
+            0.0
+        } else {
+            (((at - middle) / half).clamp(-1.0, 1.0) * 1000.0).round() / 1000.0 + 0.0
+        }
+    };
+    Some(Spot {
+        on: name,
+        shift: [
+            across(at.x, middle.x, half.x),
+            across(at.y, middle.y, half.y),
+            across(at.z, middle.z, half.z),
+        ],
+    })
+}
 
 /// Where a socket goes, as `add-socket` and `set-socket` take it.
 #[derive(Debug, Clone, PartialEq)]
@@ -33,6 +81,10 @@ pub fn spot(model: &Model, part: &Part, point: Vec3, normal: Vec3) -> Option<Spo
     // declared: before it is mirrored, scaled, turned and moved.
     let back = part.place.turn.inverse()?;
     let own = |at: Vec3| back * (at - part.place.shift);
+    // A shaped box: on the face there, by its name.
+    if let Some(shaped) = &part.shaped {
+        return face_spot(shaped, own(point));
+    }
     let bounds = Bounds::around(
         model.faces[part.faces.clone()]
             .iter()
