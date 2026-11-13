@@ -297,6 +297,9 @@ pub struct Look<'a> {
     pub offset: Vec3,
     /// The selected parts: brightened, with the box round each drawn.
     pub selected: &'a [&'a Part],
+    /// Faces to brighten besides those of the selected parts: the face
+    /// the Paint tool is over.
+    pub lit: &'a [Range<usize>],
     /// The faces that aren't drawn: those of hidden parts.
     pub hidden: &'a [Range<usize>],
     /// Whether only the outline of each face is drawn, so that the
@@ -493,6 +496,7 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
             .selected
             .iter()
             .map(|part| part.faces.clone())
+            .chain(look.lit.iter().cloned())
             .collect();
         if look.wire {
             // Wireframe: the outline of every face, in the face's own

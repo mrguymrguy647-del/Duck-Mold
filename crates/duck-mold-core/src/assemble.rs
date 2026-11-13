@@ -159,6 +159,9 @@ struct Body {
     /// For a whole recipe: where its own zero ended up when it was
     /// shifted to put its zero point at zero.
     zero: Vec3,
+    /// The names a recipe's `colors` can give its own faces, by the
+    /// group each face is in.
+    names: Vec<String>,
 }
 
 /// A part placed in the list it belongs to.
@@ -188,6 +191,7 @@ impl Body {
             broken: true,
             whole: false,
             zero: Vec3::ZERO,
+            names: Vec::new(),
         }
     }
 
@@ -197,6 +201,7 @@ impl Body {
         file: Option<String>,
         faces: Vec<Polygon>,
         colors: Vec<Option<usize>>,
+        names: Vec<String>,
     ) -> Body {
         let mut body = Body {
             kind: PartKind {
@@ -212,6 +217,7 @@ impl Body {
             broken: false,
             whole: false,
             zero: Vec3::ZERO,
+            names,
         };
         body.measure();
         body
@@ -236,6 +242,7 @@ impl Body {
             broken,
             whole: false,
             zero: Vec3::ZERO,
+            names: Vec::new(),
         };
         body.measure();
         body
@@ -788,7 +795,15 @@ impl Assembler<'_> {
                     &words,
                     &|_| false,
                 );
-                Body::solid(shape.name(), None, faces, colors)
+                // The names of the groups of faces, as they are numbered.
+                let mut names: Vec<String> = shapes::face_names(shape)
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect();
+                if words.iter().any(|word| word == shapes::BEVEL) {
+                    names.push(shapes::BEVEL.to_owned());
+                }
+                Body::solid(shape.name(), None, faces, colors, names)
             }
             Source::Use(named) => {
                 let Some(define) = scope
@@ -879,7 +894,13 @@ impl Assembler<'_> {
                     let message = kept_colours_message(&mesh.file, &kept);
                     self.issues.push(entry.warning(Code::NoColor, message));
                 }
-                Body::solid("mesh", Some(mesh.file.clone()), faces, colors)
+                Body::solid(
+                    "mesh",
+                    Some(mesh.file.clone()),
+                    faces,
+                    colors,
+                    mesh.materials.clone(),
+                )
             }
             // A file that couldn't be read, or a part that couldn't be:
             // already reported.
@@ -1341,6 +1362,7 @@ fn emit(
             };
             let first = faces.len();
             let mut lost = 0;
+            let mut face_groups = Vec::new();
             for (polygon, &color) in node.body.faces.iter().zip(&node.body.colors) {
                 let placed = polygon.transformed(&place);
                 let face = Face {
@@ -1349,6 +1371,7 @@ fn emit(
                 };
                 if face.normal().is_some() {
                     faces.push(face);
+                    face_groups.push(polygon.group as u16);
                 } else {
                     lost += 1;
                 }
@@ -1387,6 +1410,8 @@ fn emit(
                 ),
                 faces: own,
                 parts,
+                face_names: node.body.names.clone(),
+                face_groups,
             }
         })
         .collect()

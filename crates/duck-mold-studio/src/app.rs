@@ -15,7 +15,7 @@ use eframe::egui::{self, Rect, RichText, Sense};
 
 use crate::actions::{self, Action};
 use crate::recent::Recent;
-use crate::{library, properties, theme, view};
+use crate::{library, palette, properties, theme, view};
 
 /// The Studio's window: a file that is open, or the start page.
 pub struct StudioApp {
@@ -29,6 +29,8 @@ pub struct StudioApp {
     shown_selected: Option<String>,
     /// What is being typed in the properties panel.
     draft: properties::Draft,
+    /// What is being typed or picked in the palette panel.
+    colours: palette::Draft,
     /// The library's small pictures.
     thumbs: library::Thumbs,
     /// The recipes opened lately, for the start page.
@@ -60,6 +62,7 @@ impl StudioApp {
             titled: String::new(),
             shown_selected: None,
             draft: properties::Draft::default(),
+            colours: palette::Draft::default(),
             thumbs: library::Thumbs::default(),
             recent: Recent::nowhere(),
             showing: None,
@@ -295,6 +298,13 @@ impl StudioApp {
             .default_size(270.0)
             .min_size(220.0)
             .show(ui, |ui| {
+                // The palette sits under the properties, in the same
+                // column.
+                egui::Panel::bottom("duck_mold_palette")
+                    .resizable(true)
+                    .default_size(190.0)
+                    .min_size(80.0)
+                    .show(ui, |ui| palette::panel(ui, studio, &mut self.colours));
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
                     .show(ui, |ui| properties::show(ui, studio, &mut self.draft));
@@ -330,6 +340,7 @@ impl StudioApp {
                 (egui::Key::R, Tool::Rotate),
                 (egui::Key::S, Tool::Scale),
                 (egui::Key::T, Tool::Size),
+                (egui::Key::P, Tool::Paint),
             ] {
                 if ui.input(|input| input.modifiers.is_none() && input.key_pressed(key)) {
                     studio.tool = tool;

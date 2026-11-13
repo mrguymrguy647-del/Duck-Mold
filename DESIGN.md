@@ -1730,6 +1730,35 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 7):* the palette panel and the Paint tool, with these
+things settled in the building:
+
+- **A part of the model knows the names of its faces** now: which of
+  its faces is the `top`, which the `side`. That is what lets a click
+  find the name to write in `colors`. (It is also the first thing
+  Phase 4's face editing needs.)
+- **Picking a colour takes the Paint tool.** With the tool in hand and
+  no colour picked, the brush has the palette's first colour. Clicking
+  the picked colour again puts the brush down and gives the arrows
+  back.
+- **With the Paint tool, a click paints and selects nothing**, and
+  Shift+click paints the whole part rather than adding to the
+  selection. Shift+click also takes away the colours the part's single
+  faces had, so the part really is one colour.
+- **`remove-color` is refused while the colour is in use**, naming
+  everything painted with it, a part's `color` or a face's, anywhere in
+  the recipe, definitions included. `--replace-with` repaints those
+  first. The Studio asks in a small window, with the first other
+  colour offered.
+- **The two forms** (a new colour; what to paint with instead) are
+  small windows in the middle, not rows of the panel: the panel is too
+  short to hold them without scrolling.
+- A colour square in the palette is the same colour picker the
+  properties panel has; letting go of the mouse makes the `set-color`
+  edit.
+- A recipe whose palette is another file can be painted with, but not
+  changed here: the edit says to change that file.
+
 *As built (step 6):* views, wireframe, the shadow and the menus, with
 these things settled in the building:
 

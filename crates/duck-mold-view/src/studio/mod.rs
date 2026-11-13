@@ -15,6 +15,7 @@ mod group;
 pub mod handles;
 pub mod history;
 pub mod library;
+mod paint;
 mod sockets;
 pub mod viewport;
 
@@ -128,6 +129,8 @@ pub struct Studio {
     undo: Vec<history::Step>,
     redo: Vec<history::Step>,
     library: library::Library,
+    /// The palette colour the Paint tool paints with.
+    pub(crate) paint: Option<String>,
     /// Which tool is in hand: what the handles on the selected part are.
     pub tool: handles::Tool,
     /// A handle being dragged, with the edit it would make.
@@ -167,6 +170,7 @@ impl Studio {
             undo: Vec::new(),
             redo: Vec::new(),
             library: library::Library::default(),
+            paint: None,
             tool: handles::Tool::Move,
             grab: None,
             preview: None,
@@ -733,12 +737,18 @@ impl Studio {
             .collect();
         let marks = self.marks(width, height);
         let hidden = self.unseen_in(model);
+        let lit = if self.view == (width, height) {
+            self.paint_aim()
+        } else {
+            Vec::new()
+        };
         viewport::draw(
             &Look {
                 model,
                 orbit: &self.orbit,
                 offset: self.offset(),
                 selected: &selected,
+                lit: &lit,
                 hidden: &hidden,
                 markers: &markers,
                 hot,

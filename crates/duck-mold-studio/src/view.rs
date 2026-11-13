@@ -215,7 +215,13 @@ pub fn show(
     if response.clicked()
         && let Some(pointer) = response.interact_pointer_pos()
     {
-        if shift {
+        if studio.tool == Tool::Paint && !studio.look_only() {
+            // The Paint tool: the face under the pointer gets the colour
+            // in hand; with Shift, the whole part does. What it did, or
+            // why not, is in the status line.
+            let _ = studio.paint_at(size, in_picture(pointer), shift);
+            view.adding = None;
+        } else if shift {
             // Shift+click: the part joins the selection, or leaves it.
             studio.click_adding(size, in_picture(pointer));
             view.adding = None;
@@ -266,7 +272,7 @@ pub fn show(
         tool: studio.tool,
         size: [size.0, size.1],
         pointer: pointer
-            .filter(|_| shows_markers)
+            .filter(|_| shows_markers || studio.tool == Tool::Paint)
             .map(in_picture)
             .map(|(x, y)| (x.round() as i32, y.round() as i32)),
         dragging: studio.dragging().is_some(),
@@ -310,6 +316,8 @@ pub fn show(
     let handles = shows_markers && studio.facts().is_some();
     let hint = if view.moving {
         "Let go to make the change. Escape lets go without changing anything."
+    } else if studio.tool == Tool::Paint && !studio.look_only() {
+        "Click a face to colour it. Shift+click colours the whole part. Pick the colour in the palette."
     } else if studio.selection().len() > 1 {
         "Drag a handle, or one of the parts, to change them together. Shift+click adds or takes out a part."
     } else if handles {
@@ -377,6 +385,12 @@ fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
             "Size",
             "T",
             "Knobs on a shape's faces: pull one to change its width, height, depth or radius",
+        ),
+        (
+            Tool::Paint,
+            "Paint",
+            "P",
+            "Click a face to colour it with the colour picked in the palette. Shift+click colours the whole part",
         ),
     ];
     for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {

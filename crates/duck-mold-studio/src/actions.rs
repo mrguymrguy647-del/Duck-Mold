@@ -73,7 +73,10 @@ pub enum Action {
 
 /// Every key and what it does, for Help's list and the README's.
 pub const KEYS: [(&str, &str); 21] = [
-    ("G, R, S, T", "The Move, Rotate, Scale and Size tools"),
+    (
+        "G, R, S, T, P",
+        "The Move, Rotate, Scale, Size and Paint tools",
+    ),
     ("Ctrl held while dragging", "No snapping"),
     ("Delete or Backspace", "Remove what is selected"),
     ("Ctrl+D", "Duplicate what is selected"),

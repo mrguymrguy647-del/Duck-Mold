@@ -720,6 +720,69 @@ fn the_newer_shapes_and_options_are_edited_from_the_command_line() {
 }
 
 #[test]
+fn a_colour_is_removed_and_a_faces_colour_taken_away_from_the_command_line() {
+    let folder = folder("cli_edit_colours");
+    // In use: it can't be done as asked (exit code 2, one line), which
+    // names what is painted with it.
+    let output = run(&folder, &["edit", "tree.toml", "remove-color", "bark"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains(
+            "the colour \"bark\" is in use: 1 thing is painted with it (trunk). Say what to paint them instead, like --replace-with leaf"
+        ),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        TREE
+    );
+    // Repainted first, it goes.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "remove-color",
+            "bark",
+            "--replace-with",
+            "leaf",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "remove-color");
+    assert_eq!(
+        report["edit"]["summary"],
+        "removed the colour \"bark\", and painted 1 thing with \"leaf\" instead"
+    );
+    assert_eq!(report["palette"].as_array().unwrap().len(), 1);
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(!text.contains("bark"), "{text}");
+
+    // A face gets a colour of its own, and loses it again.
+    let before = text;
+    for (face, wanted) in [("top=leaf", true), ("top=none", false)] {
+        let output = run(
+            &folder,
+            &["edit", "tree.toml", "set", "trunk", "--face-color", face],
+        );
+        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+        let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+        assert_eq!(
+            text.contains("colors = { top = \"leaf\" }"),
+            wanted,
+            "{text}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
 fn an_edit_that_cant_be_made_says_why_and_writes_nothing() {
     let folder = folder("cli_edit_refused");
     // No such part: exit code 2, one line, with the likely fix.

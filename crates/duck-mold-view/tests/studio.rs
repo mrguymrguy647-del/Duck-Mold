@@ -2983,3 +2983,195 @@ fn wireframe_shows_outlines_only_and_the_shadow_can_be_turned_off() {
     studio.shadow = false;
     assert_eq!(studio.picture(480, 360).pixels, under.pixels);
 }
+
+// ---- colour: the Paint tool and the palette --------------------------------------
+
+/// Where the middle of the top of a part's box is in the picture.
+fn top_of(studio: &Studio, part: &str) -> (f64, f64) {
+    let around = studio.part(part).unwrap().bounds.unwrap();
+    at_screen(
+        studio,
+        vec3(around.center().x, around.max.y, around.center().z) + studio.offset(),
+    )
+}
+
+#[test]
+fn the_paint_tool_colours_the_face_under_the_pointer() {
+    let (recipe, mut studio) = yard("paint");
+    let crate_top = top_of(&studio, "crate");
+    // The face a recipe can name, under the pointer.
+    assert_eq!(
+        studio.face_under(VIEW, crate_top),
+        Some(("crate".to_owned(), "top".to_owned()))
+    );
+    assert_eq!(studio.face_under(VIEW, (2.0, 2.0)), None);
+
+    // Picking a colour takes the Paint tool in hand.
+    assert_eq!(studio.tool, Tool::Move);
+    studio.pick_colour(Some("blue"));
+    assert_eq!(studio.tool, Tool::Paint);
+    assert_eq!(studio.paint_colour().as_deref(), Some("blue"));
+    assert_eq!(
+        studio.status(),
+        "Painting with \"blue\": click a face to colour it. Shift+click colours the whole part"
+    );
+    // The face lights up under the pointer before the click.
+    studio.hover(VIEW, None);
+    let plain = studio.picture(VIEW.0, VIEW.1);
+    studio.hover(VIEW, Some(crate_top));
+    let lit = studio.picture(VIEW.0, VIEW.1);
+    assert_ne!(lit.pixels, plain.pixels);
+    assert_eq!(file(&recipe), YARD);
+
+    // A click paints that face: a `set --face-color` edit.
+    let said = studio.paint_at(VIEW, crate_top, false).unwrap();
+    assert_eq!(said, "Set \"crate\": top blue");
+    let now = file(&recipe);
+    let (gone, new) = changed(YARD, &now);
+    assert!(gone.is_empty(), "{gone:?}");
+    assert_eq!(new, ["colors = { top = \"blue\" }"]);
+    // Another face of it, with another colour.
+    let front = {
+        let around = studio.part("crate").unwrap().bounds.unwrap();
+        at_screen(
+            &studio,
+            vec3(around.center().x, around.center().y, around.max.z) + studio.offset(),
+        )
+    };
+    assert_eq!(
+        studio.face_under(VIEW, front),
+        Some(("crate".to_owned(), "front".to_owned()))
+    );
+    studio.pick_colour(Some("stone"));
+    studio.paint_at(VIEW, front, false).unwrap();
+    assert!(
+        file(&recipe).contains("colors = { top = \"blue\", front = \"stone\" }"),
+        "{}",
+        file(&recipe)
+    );
+
+    // With Shift, the whole part: one colour, and no face has its own.
+    studio.pick_colour(Some("blue"));
+    let said = studio.paint_at(VIEW, crate_top, true).unwrap();
+    assert_eq!(
+        said,
+        "Set \"crate\": colour blue, top no colour of its own, front no colour of its own"
+    );
+    let now = file(&recipe);
+    assert_eq!(
+        changed(YARD, &now),
+        (vec!["color = \"red\""], vec!["color = \"blue\""])
+    );
+    // Each click was one step.
+    for _ in 0..3 {
+        studio.undo().unwrap();
+    }
+    assert_eq!(file(&recipe), YARD);
+
+    // On nothing, and when only looking, nothing is painted.
+    assert!(studio.paint_at(VIEW, (2.0, 2.0), false).is_err());
+    assert_eq!(
+        studio.status(),
+        "Nothing to paint there: click a face of a part"
+    );
+    let mut looking = Studio::open(&recipe, true);
+    looking.hover(VIEW, None);
+    looking.pick_colour(Some("blue"));
+    assert!(looking.paint_at(VIEW, crate_top, false).is_err());
+    assert_eq!(file(&recipe), YARD);
+}
+
+#[test]
+fn painting_a_part_made_from_a_definition_paints_them_all() {
+    let recipe = copy_of("robot", "paint_definition");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    studio.pick_colour(Some("red"));
+    // The left eye is made from the definition "eye": painting it
+    // paints the definition, and so the right eye.
+    let eye = studio.part("left_eye").unwrap().bounds.unwrap();
+    let at = at_screen(
+        &studio,
+        vec3(eye.center().x, eye.center().y, eye.max.z) + studio.offset(),
+    );
+    assert_eq!(
+        studio.face_under(VIEW, at),
+        Some(("left_eye".to_owned(), "front".to_owned()))
+    );
+    let said = studio.paint_at(VIEW, at, false).unwrap();
+    assert!(said.contains("also changed: right_eye"), "{said}");
+    let both = [
+        studio.part("left_eye").unwrap(),
+        studio.part("right_eye").unwrap(),
+    ];
+    let model = studio.model().unwrap();
+    let red = model.palette.iter().position(|color| color.name == "red");
+    for eye in both {
+        let front = eye.faces_named("front");
+        assert_eq!(front.len(), 1);
+        assert_eq!(model.faces[front[0]].color, red, "{}", eye.path);
+    }
+}
+
+#[test]
+fn the_palette_gets_a_colour_changes_one_and_loses_one() {
+    let (recipe, mut studio) = yard("palette");
+    assert_eq!(
+        studio
+            .palette()
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["stone", "red", "blue"]
+    );
+    // With nothing picked, the brush has the first colour.
+    assert_eq!(studio.paint_colour().as_deref(), Some("stone"));
+
+    // A new colour is the one to paint with.
+    let said = studio.add_colour("gold", [0xFF, 0xD7, 0x00]).unwrap();
+    assert_eq!(said, "Added the colour \"gold\" (#FFD700)");
+    assert!(file(&recipe).contains("blue  = \"#3A6FD0\"\ngold = \"#FFD700\"\n"));
+    assert_eq!(studio.paint_colour().as_deref(), Some("gold"));
+    // A name that is taken is refused.
+    assert!(studio.add_colour("red", [1, 2, 3]).is_err());
+
+    // Changing a colour changes what is painted with it.
+    studio.change_colour("red", [0x10, 0x20, 0x30]).unwrap();
+    assert!(file(&recipe).contains("red   = \"#102030\""));
+    let model = studio.model().unwrap();
+    let crate_face = &model.faces[studio.part("crate").unwrap().faces.start];
+    assert_eq!(
+        model.palette[crate_face.color.unwrap()].rgb,
+        [0x10, 0x20, 0x30]
+    );
+
+    // A colour nothing is painted with just goes.
+    assert!(!studio.colour_in_use("gold"));
+    assert_eq!(
+        studio.remove_colour("gold", None).unwrap(),
+        "Removed the colour \"gold\""
+    );
+    // One that is in use is refused until something takes its place.
+    assert!(studio.colour_in_use("red"));
+    let why = studio.remove_colour("red", None).unwrap_err();
+    assert!(
+        why.contains("is in use: 2 things are painted with it (crate, cap)"),
+        "{why}"
+    );
+    let said = studio.remove_colour("red", Some("blue")).unwrap();
+    assert_eq!(
+        said,
+        "Removed the colour \"red\", and painted 2 things with \"blue\" instead"
+    );
+    let now = file(&recipe);
+    assert!(!now.contains("red"), "{now}");
+    assert_eq!(now.matches("color = \"blue\"").count(), 4);
+    assert!(!studio.has_mistakes());
+    // The brush had no colour of its own left: it has the first again.
+    assert_eq!(studio.paint_colour().as_deref(), Some("stone"));
+    // Every one of these was a step.
+    for _ in 0..4 {
+        studio.undo().unwrap();
+    }
+    assert_eq!(file(&recipe), YARD);
+}

@@ -221,6 +221,12 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
         faces: 0..faces.len(),
         parts: Vec::new(),
+        face_names: mesh.materials.clone(),
+        face_groups: mesh
+            .material_of
+            .iter()
+            .map(|&material| material as u16)
+            .collect(),
     };
     Model {
         name,

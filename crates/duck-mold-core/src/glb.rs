@@ -804,6 +804,8 @@ fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Fa
                     .iter()
                     .flat_map(|face| face.corners.iter().copied()),
             ),
+            face_names: Vec::new(),
+            face_groups: Vec::new(),
             faces: own.clone(),
             parts: if *assembly {
                 part_tree(name, entries, faces)

@@ -662,6 +662,151 @@ fn palette_colours_are_added_and_changed() {
 }
 
 #[test]
+fn a_colour_is_removed_once_nothing_is_painted_with_it() {
+    let remove = |name: &str, replace_with: Option<&str>| Edit::RemoveColor {
+        name: name.into(),
+        replace_with: replace_with.map(str::to_owned),
+    };
+    // In use: refused, naming everything painted with it and what to do.
+    let report = refused(LAMP, &remove("steel", None)).report();
+    assert_eq!(report.errors[0].code, Code::Conflict);
+    assert_eq!(
+        report.errors[0].message,
+        "the colour \"steel\" is in use: 2 things are painted with it (base, pole). Say what to paint them instead, like --replace-with glow"
+    );
+    // A face's colour counts too, and so does a definition's.
+    let report = refused(LAMP, &remove("glow", None)).report();
+    assert!(
+        report.errors[0]
+            .message
+            .contains("1 thing is painted with it (define.bulb)"),
+        "{}",
+        report.errors[0].message
+    );
+    let with_face = done(
+        LAMP,
+        Syntax::Toml,
+        &set_with(
+            "base",
+            Changes {
+                face_colors: vec![("top".into(), "glow".into())],
+                ..Changes::default()
+            },
+        ),
+    );
+    let report = refused(&with_face.text, &remove("glow", None)).report();
+    assert!(
+        report.errors[0]
+            .message
+            .contains("2 things are painted with it (base (top), define.bulb)"),
+        "{}",
+        report.errors[0].message
+    );
+
+    // Repainted first, it goes: the palette line, and every use.
+    let applied = done(
+        &with_face.text,
+        Syntax::Toml,
+        &remove("glow", Some("steel")),
+    );
+    assert_eq!(
+        applied.summary,
+        "removed the colour \"glow\", and painted 2 things with \"steel\" instead"
+    );
+    assert!(!applied.text.contains("glow"), "{}", applied.text);
+    assert!(applied.text.contains("[define.bulb]\ncolor = \"steel\""));
+    assert!(applied.text.contains("colors = { top = \"steel\" }"));
+    assert!(
+        applied
+            .text
+            .contains("steel = \"#8A939B\"   # the stand\n\n# One bulb")
+    );
+    assert_eq!(applied.model.unwrap().palette.len(), 1);
+
+    // A colour nothing uses just goes.
+    let extra = done(
+        LAMP,
+        Syntax::Toml,
+        &Edit::AddColor {
+            name: "gold".into(),
+            hex: "#FFD700".into(),
+        },
+    );
+    let applied = done(&extra.text, Syntax::Toml, &remove("gold", None));
+    assert_eq!(applied.text, LAMP);
+    assert_eq!(applied.summary, "removed the colour \"gold\"");
+
+    // What can't be: a colour that isn't there, and replacing a colour
+    // with itself or with one that isn't there.
+    let report = refused(LAMP, &remove("pink", None)).report();
+    assert_eq!(report.errors[0].code, Code::UnknownColor);
+    for other in ["steel", "pink"] {
+        let report = refused(LAMP, &remove("steel", Some(other))).report();
+        assert_eq!(report.errors[0].code, Code::UnknownColor, "{other}");
+        assert!(
+            report.errors[0].message.contains("must be another colour"),
+            "{}",
+            report.errors[0].message
+        );
+    }
+}
+
+#[test]
+fn a_faces_own_colour_is_taken_away_again() {
+    let paint = |face: &str, color: &str| {
+        set_with(
+            "base",
+            Changes {
+                face_colors: vec![(face.into(), color.into())],
+                ..Changes::default()
+            },
+        )
+    };
+    let top = done(LAMP, Syntax::Toml, &paint("top", "glow"));
+    let both = done(&top.text, Syntax::Toml, &paint("side", "glow"));
+    // What the recipe says about the part names them.
+    let facts = describe(&both.text, Syntax::Toml, both.model.as_ref(), "base").unwrap();
+    assert_eq!(
+        facts.face_colors,
+        [
+            ("top".to_owned(), "glow".to_owned()),
+            ("side".to_owned(), "glow".to_owned())
+        ]
+    );
+    // One goes: the other stays.
+    let one = done(&both.text, Syntax::Toml, &paint("side", "none"));
+    assert_eq!(one.text, top.text);
+    assert_eq!(one.summary, "set \"base\": side no colour of its own");
+    // The last goes: so does the table, and the file is as it was.
+    let none = done(&one.text, Syntax::Toml, &paint("top", "none"));
+    assert_eq!(none.text, LAMP);
+    // Taking away what isn't there changes nothing.
+    let again = done(LAMP, Syntax::Toml, &paint("top", "none"));
+    assert_eq!(again.text, LAMP);
+}
+
+#[test]
+fn a_models_parts_know_the_names_of_their_faces() {
+    let model = done(LAMP, Syntax::Toml, &add_colour_x()).model.unwrap();
+    let base = part(&model, "base");
+    assert_eq!(base.face_names, ["top", "bottom", "side"]);
+    assert_eq!(base.face_groups.len(), base.faces.len());
+    // The first face of a cylinder is its top.
+    assert_eq!(base.face_name(base.faces.start), Some("top"));
+    assert_eq!(base.face_name(base.faces.start + 5), Some("side"));
+    assert_eq!(base.faces_named("top"), [base.faces.start]);
+    assert_eq!(base.faces_named("side").len(), 16);
+    assert!(base.faces_named("lid").is_empty());
+    // A face of another part isn't this part's.
+    let pole = part(&model, "pole");
+    assert_eq!(base.face_name(pole.faces.start), None);
+    assert_eq!(pole.face_name(pole.faces.start), Some("top"));
+    // A part made of parts has none of its own.
+    assert!(part(&model, "left_bulb").face_names.is_empty());
+    assert_eq!(part(&model, "left_bulb/glass").face_names, ["side"]);
+}
+
+#[test]
 fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
     // On a part that has sockets already: one more line.
     let add = Edit::AddSocket {
@@ -2300,6 +2445,10 @@ fn every_kind_of_edit_has_a_name() {
         Edit::SetColor {
             name: String::new(),
             hex: String::new(),
+        },
+        Edit::RemoveColor {
+            name: String::new(),
+            replace_with: None,
         },
         Edit::AddSocket {
             part: String::new(),

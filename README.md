@@ -208,6 +208,24 @@ is exported like any other. The top bar says how many are hidden;
 click that, or the "show" at the end of the part's line in the list,
 to bring them back.
 
+**Colour.** Under the properties is the **palette**: the recipe's
+colours, each a square with its name.
+
+- Click a **name** to paint with that colour: the Paint tool (P) is
+  then in hand. Click a face and it takes the colour; the face lights
+  up under the pointer first. Shift+click colours the whole part. A
+  face here is one the recipe can name: a box's `top`, a cylinder's
+  `side`, an arch's `inside`, a file part's material.
+- Click a **square** to change the colour itself. Everything painted
+  with it changes.
+- **New colour** adds one; **remove** takes one out. If it is in use,
+  the Studio asks which colour to paint those things with instead.
+
+In the file these are `set --face-color`, `set --color`, `set-color`,
+`add-color` and `remove-color` edits. Painting a part made from a
+definition paints the definition, so every part made from it; the
+status line names them.
+
 **Views and look.** In the top bar:
 
 - **Front**, **Side**, **Top** and **3/4** turn the camera to look from
@@ -234,7 +252,7 @@ About). Every line shows its key.
 
 | Key | Does |
 |---|---|
-| G, R, S, T | The Move, Rotate, Scale and Size tools |
+| G, R, S, T, P | The Move, Rotate, Scale, Size and Paint tools |
 | Ctrl held while dragging | No snapping |
 | Delete or Backspace | Remove what is selected |
 | Ctrl+D | Duplicate it. A copy of a free part stands beside it; a copy of a joined part is on the same socket |

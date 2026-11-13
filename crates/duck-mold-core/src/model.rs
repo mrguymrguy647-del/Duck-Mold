@@ -106,6 +106,37 @@ pub struct Part {
     pub bounds: Option<Bounds>,
     /// The parts inside it, if it is an assembly.
     pub parts: Vec<Part>,
+    /// The names a recipe's `colors` can give this part's own faces: a
+    /// shape's `top`, `side`...; a mesh's materials. Empty for a part
+    /// made of parts, and for a part read back from a `.glb`.
+    pub face_names: Vec<String>,
+    /// For each of its own faces, in order, which of `face_names` it
+    /// goes by. Empty where `face_names` is.
+    pub face_groups: Vec<u16>,
+}
+
+impl Part {
+    /// The name a recipe's `colors` gives one of the model's faces, if
+    /// the face is this part's own and has one.
+    pub fn face_name(&self, face: usize) -> Option<&str> {
+        let own = face.checked_sub(self.faces.start)?;
+        let group = *self.face_groups.get(own)?;
+        self.face_names.get(usize::from(group)).map(String::as_str)
+    }
+
+    /// Which of the model's faces go by `name`: every face of the part
+    /// that a recipe's `colors = { name = ... }` paints.
+    pub fn faces_named(&self, name: &str) -> Vec<usize> {
+        let Some(group) = self.face_names.iter().position(|known| known == name) else {
+            return Vec::new();
+        };
+        self.face_groups
+            .iter()
+            .enumerate()
+            .filter(|(_, own)| usize::from(**own) == group)
+            .map(|(at, _)| self.faces.start + at)
+            .collect()
+    }
 }
 
 /// What a part is made of.

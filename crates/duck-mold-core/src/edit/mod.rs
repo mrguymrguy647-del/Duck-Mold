@@ -259,6 +259,14 @@ pub enum Edit {
         /// `#RRGGBB`.
         hex: String,
     },
+    /// Takes a colour out of the recipe's palette.
+    RemoveColor {
+        /// Its name.
+        name: String,
+        /// The colour everything painted with it gets instead. Without
+        /// one, the edit is refused if anything is painted with it.
+        replace_with: Option<String>,
+    },
     /// Declares a socket on one side of a part.
     AddSocket {
         /// The part.
@@ -290,7 +298,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 11] = [
+    pub const COMMANDS: [&'static str; 12] = [
         "add",
         "remove",
         "rename",
@@ -299,6 +307,7 @@ impl Edit {
         "duplicate",
         "add-color",
         "set-color",
+        "remove-color",
         "add-socket",
         "set-socket",
         "unjoin",
@@ -315,6 +324,7 @@ impl Edit {
             Edit::Duplicate { .. } => "duplicate",
             Edit::AddColor { .. } => "add-color",
             Edit::SetColor { .. } => "set-color",
+            Edit::RemoveColor { .. } => "remove-color",
             Edit::AddSocket { .. } => "add-socket",
             Edit::SetSocket { .. } => "set-socket",
             Edit::Unjoin { .. } => "unjoin",
@@ -1051,6 +1061,18 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             for (face, color) in face_colors {
                 made_changed = true;
                 let colors = with(&table, key("colors"));
+                if color == "none" {
+                    // The face has no colour of its own again: it takes
+                    // the part's.
+                    if doc.entry(&colors, face).is_some() {
+                        doc.remove_field(&colors, face).map_err(cant)?;
+                        if doc.entries(&colors).is_some_and(<[_]>::is_empty) {
+                            doc.remove_field(&table, "colors").map_err(cant)?;
+                        }
+                    }
+                    said.push(format!("{face} no colour of its own"));
+                    continue;
+                }
                 if doc.entries(&colors).is_some() {
                     doc.set_field(&colors, face, &text(color), &[])
                         .map_err(cant)?;
@@ -1350,6 +1372,149 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 touched: None,
             })
         }
+        Edit::RemoveColor { name, replace_with } => {
+            let palette = [key("palette")];
+            if let Some(file) = doc.text_at(&[], "palette") {
+                return Err(problem(
+                    Code::Unsupported,
+                    format!(
+                        "this recipe's palette is the file \"{file}\": remove the colour there"
+                    ),
+                ));
+            }
+            let names: Vec<String> = doc
+                .entries(&palette)
+                .unwrap_or_default()
+                .iter()
+                .map(|entry| entry.key.clone())
+                .collect();
+            if !names.contains(name) {
+                return Err(problem(
+                    Code::UnknownColor,
+                    format!("there is no colour \"{name}\" in this recipe's palette"),
+                )
+                .got(name.as_str())
+                .one_of(name, names));
+            }
+            // Everything painted with it: a part's `color`, and a face's
+            // colour in `colors`, anywhere in the recipe.
+            let mut uses: Vec<(TreePath, String)> = Vec::new();
+            fn painted(
+                node: &Node,
+                path: &mut TreePath,
+                name: &str,
+                into: &mut Vec<(TreePath, String)>,
+            ) {
+                match &node.value {
+                    Value::Table(entries) => {
+                        // What to call this table: a part's name, if it
+                        // has one.
+                        let called = entries
+                            .iter()
+                            .find(|entry| entry.key == "name")
+                            .and_then(|entry| match &entry.node.value {
+                                Value::Str(text) => Some(text.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| doc::show(path));
+                        for entry in entries {
+                            path.push(key(&entry.key));
+                            match (&entry.node.value, entry.key.as_str()) {
+                                (Value::Str(color), "color") if color == name => {
+                                    into.push((path.clone(), called.clone()));
+                                }
+                                (Value::Table(faces), "colors") => {
+                                    for face in faces {
+                                        if matches!(&face.node.value, Value::Str(color) if color == name)
+                                        {
+                                            path.push(key(&face.key));
+                                            into.push((
+                                                path.clone(),
+                                                format!("{called} ({})", face.key),
+                                            ));
+                                            path.pop();
+                                        }
+                                    }
+                                }
+                                _ => painted(&entry.node, path, name, into),
+                            }
+                            path.pop();
+                        }
+                    }
+                    Value::Array(items) => {
+                        for (at, item) in items.iter().enumerate() {
+                            path.push(Step::Index(at));
+                            painted(item, path, name, into);
+                            path.pop();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for top in ["parts", "define"] {
+                if let Some(node) = doc.node(&[key(top)]) {
+                    painted(node, &mut vec![key(top)], name, &mut uses);
+                }
+            }
+            let mut summary = format!("removed the colour \"{name}\"");
+            match (replace_with, uses.is_empty()) {
+                (_, true) => {}
+                (None, false) => {
+                    let mut what: Vec<String> =
+                        uses.iter().map(|(_, called)| called.clone()).collect();
+                    what.dedup();
+                    let others: Vec<&String> =
+                        names.iter().filter(|other| *other != name).collect();
+                    let hint = match others.first() {
+                        Some(other) => {
+                            format!("Say what to paint them instead, like --replace-with {other}")
+                        }
+                        None => "Add another colour first, to paint them with instead".to_owned(),
+                    };
+                    return Err(problem(
+                        Code::Conflict,
+                        format!(
+                            "the colour \"{name}\" is in use: {} painted with it ({}). {hint}",
+                            if what.len() == 1 {
+                                "1 thing is".to_owned()
+                            } else {
+                                format!("{} things are", what.len())
+                            },
+                            what.join(", ")
+                        ),
+                    )
+                    .got(name.as_str()));
+                }
+                (Some(other), false) => {
+                    if other == name || !names.contains(other) {
+                        return Err(problem(
+                            Code::UnknownColor,
+                            format!(
+                                "\"{other}\" can't replace \"{name}\": it must be another colour of this recipe's palette"
+                            ),
+                        )
+                        .got(other.as_str())
+                        .one_of(other, names.iter().filter(|known| *known != name).cloned()));
+                    }
+                    for (path, _) in &uses {
+                        doc.set_value(path, &text(other)).map_err(cant)?;
+                    }
+                    summary.push_str(&format!(
+                        ", and painted {} with \"{other}\" instead",
+                        if uses.len() == 1 {
+                            "1 thing".to_owned()
+                        } else {
+                            format!("{} things", uses.len())
+                        }
+                    ));
+                }
+            }
+            doc.remove_field(&palette, name).map_err(cant)?;
+            Ok(Outcome {
+                summary,
+                touched: None,
+            })
+        }
         Edit::AddSocket {
             part,
             name,
@@ -1556,6 +1721,9 @@ pub struct Facts {
     pub sizes: Sizes,
     /// Its palette colour, its own or its definition's.
     pub color: Option<String>,
+    /// The colours its single faces have: `colors = { top = "grass" }`,
+    /// its own or its definition's.
+    pub face_colors: Vec<(String, String)>,
     /// The socket it is joined to: `body.neck`.
     pub to: Option<String>,
     /// Its own socket that joins there.
@@ -1704,6 +1872,26 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
         shape,
         sizes,
         color: text_of(made_node, "color").map(str::to_owned),
+        face_colors: match &made_node.value {
+            Value::Table(entries) => entries
+                .iter()
+                .find(|entry| entry.key == "colors")
+                .and_then(|entry| match &entry.node.value {
+                    Value::Table(faces) => Some(faces),
+                    _ => None,
+                })
+                .map(|faces| {
+                    faces
+                        .iter()
+                        .filter_map(|face| match &face.node.value {
+                            Value::Str(color) => Some((face.key.clone(), color.clone())),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        },
         to: text_of(own, "to").map(str::to_owned),
         attach: text_of(own, "attach").map(str::to_owned),
         twist: number(own, "twist").unwrap_or(0.0),
@@ -1777,7 +1965,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::Unjoin { part }
         | Edit::AddSocket { part, .. } => part,
         Edit::SetSocket { socket, .. } => socket.rsplit_once('.').map_or("", |(part, _)| part),
-        Edit::AddColor { .. } | Edit::SetColor { .. } => "",
+        Edit::AddColor { .. } | Edit::SetColor { .. } | Edit::RemoveColor { .. } => "",
     }
 }
 

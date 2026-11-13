@@ -102,7 +102,8 @@ pub enum Change {
         #[arg(long)]
         color: Option<String>,
         /// A colour for one face, like top=plank. Can be given more than
-        /// once.
+        /// once. top=none takes the face's own colour away again, so it
+        /// has the part's.
         #[arg(long = "face-color", value_name = "FACE=COLOUR")]
         face_colors: Vec<String>,
         /// Degrees to twist it around its join.
@@ -155,6 +156,18 @@ pub enum Change {
         name: String,
         /// The new colour, as #RRGGBB.
         hex: String,
+    },
+    /// Take a colour out of the recipe's palette.
+    ///
+    /// Refused if anything is painted with it, saying what, unless
+    /// --replace-with names the colour those get instead.
+    RemoveColor {
+        /// Its name.
+        name: String,
+        /// The palette colour to paint with instead, wherever this one
+        /// is used.
+        #[arg(long, value_name = "COLOUR")]
+        replace_with: Option<String>,
     },
     /// Declare a socket on one side of a part. It sits on the surface.
     AddSocket {
@@ -417,6 +430,10 @@ impl Change {
             Change::SetColor { name, hex } => Edit::SetColor {
                 name: name.clone(),
                 hex: hex.clone(),
+            },
+            Change::RemoveColor { name, replace_with } => Edit::RemoveColor {
+                name: name.clone(),
+                replace_with: replace_with.clone(),
             },
             Change::AddSocket {
                 part,

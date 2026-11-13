@@ -241,6 +241,31 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "hidden"));
     }
 
+    // Colour: the palette with a colour picked and the Paint tool in
+    // hand, over a face that lights up; a face painted; and the question
+    // asked when a colour in use is removed.
+    {
+        let mut screen = harness(
+            StudioApp::with_file(copy_of("house.toml", "pictures_paint"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .get_by_role_and_label(egui::accesskit::Role::Button, "glass")
+            .click();
+        screen.run_steps(3);
+        let at = on_screen(&screen, "door");
+        screen.hover_at(at);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "paint"));
+        click_at(&mut screen, at);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "painted"));
+        screen.query_all_by_label("remove").next().unwrap().click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "palette-remove"));
+    }
+
     // The look: wireframe, the view from the top, and the View menu.
     {
         let mut screen = harness(

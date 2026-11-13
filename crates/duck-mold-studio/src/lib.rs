@@ -11,6 +11,7 @@
 pub mod actions;
 pub mod app;
 pub mod library;
+pub mod palette;
 pub mod properties;
 pub mod recent;
 pub mod theme;

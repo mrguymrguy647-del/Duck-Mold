@@ -363,7 +363,8 @@ fn the_panel_shows_the_selected_part_and_changes_the_recipe() {
         .get_by_role_and_label(Role::ComboBox, "Colour")
         .click();
     screen.run_steps(2);
-    screen.get_by_label("red").click();
+    // (The later one: the palette panel lists the colour too.)
+    screen.query_all_by_label("red").last().unwrap().click();
     screen.run_steps(3);
     assert_eq!(new_lines(&recipe), ["color = \"red\""]);
     screen.get_by_label_contains("Set \"head\": colour red");
@@ -411,7 +412,8 @@ fn a_part_from_a_definition_says_so_before_any_edit() {
         .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Colour")
         .click();
     screen.run_steps(2);
-    screen.get_by_label("glow").click();
+    // (The later one: the palette panel lists the colour too.)
+    screen.query_all_by_label("glow").last().unwrap().click();
     screen.run_steps(3);
     assert_eq!(new_lines(&recipe), ["color = \"glow\""]);
     screen.get_by_label_contains("(also changed: right_arm/hand)");
@@ -803,7 +805,8 @@ fn undo_and_redo_are_buttons_and_keys() {
         .get_by_role_and_label(Role::ComboBox, "Colour")
         .click();
     screen.run_steps(2);
-    screen.get_by_label("red").click();
+    // (The later one: the palette panel lists the colour too.)
+    screen.query_all_by_label("red").last().unwrap().click();
     screen.run_steps(3);
     let coloured = std::fs::read(&recipe).unwrap();
     screen
@@ -1232,7 +1235,8 @@ fn shift_click_selects_several_and_the_panel_is_for_them_all() {
         .get_by_role_and_label(Role::ComboBox, "Colour")
         .click();
     screen.run_steps(2);
-    screen.get_by_label("stone").click();
+    // (The later one: the palette panel lists the colour too.)
+    screen.query_all_by_label("stone").last().unwrap().click();
     screen.run_steps(3);
     assert_eq!(text_of(&recipe).matches("color = \"stone\"").count(), 3);
     screen.get_by_label_contains("Coloured 2 parts stone");
@@ -1674,4 +1678,106 @@ fn the_menus_do_what_the_buttons_and_keys_do() {
     assert!(screen.state().studio().is_none());
     screen.get_by_label("Open a model");
     assert_eq!(text_of(&recipe), before);
+}
+
+// ---- colour: the palette panel and the Paint tool -------------------------------
+
+#[test]
+fn the_palette_panel_picks_a_colour_and_the_paint_tool_paints_with_it() {
+    use duck_mold_view::studio::handles::Tool;
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = yard("screens_paint");
+    screen.get_by_label("Palette");
+    screen.get_by_label("3 colours");
+
+    // A click on a colour's name takes the Paint tool, with that colour.
+    screen.get_by_role_and_label(Role::Button, "blue").click();
+    screen.run_steps(3);
+    {
+        let studio = screen.state().studio().unwrap();
+        assert_eq!(studio.tool, Tool::Paint);
+        assert_eq!(studio.paint_colour().as_deref(), Some("blue"));
+    }
+    // A click on the crate now paints the face under the pointer, and
+    // selects nothing.
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    let now = text_of(&recipe);
+    assert!(now.contains("colors = { "), "{now}");
+    assert!(now.contains(" = \"blue\" }"), "{now}");
+    assert!(selection(&screen).is_empty());
+    // With Shift, the whole part.
+    shift_click_at(&mut screen, crate_at);
+    let now = text_of(&recipe);
+    assert!(!now.contains("colors = "), "{now}");
+    assert!(
+        now.contains("size = [0.5, 0.5, 0.5]\ncolor = \"blue\""),
+        "{now}"
+    );
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    assert_eq!(text_of(&recipe), YARD);
+
+    // The key P takes the tool too; G gives the arrows back, and a
+    // click selects again.
+    screen.key_press(egui::Key::G);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().tool, Tool::Move);
+    screen.key_press(egui::Key::P);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().tool, Tool::Paint);
+    screen.key_press(egui::Key::G);
+    screen.run_steps(2);
+    click_at(&mut screen, crate_at);
+    assert_eq!(selection(&screen), ["crate"]);
+    assert_eq!(text_of(&recipe), YARD);
+    screen.key_press(egui::Key::Escape);
+    screen.run_steps(2);
+
+    // A new colour.
+    screen
+        .get_by_role_and_label(Role::Button, "New colour")
+        .click();
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "Called")
+        .focus();
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "Called")
+        .type_text("gold");
+    screen.run_steps(2);
+    screen.get_by_label("Add to palette").click();
+    screen.run_steps(3);
+    assert!(text_of(&recipe).contains("gold = \"#FFCC2E\""));
+    screen.get_by_label("4 colours");
+
+    // Removing: a colour nothing uses just goes; one in use asks what to
+    // paint with instead. (The lines are in the palette's order.)
+    let lines: Vec<_> = screen.query_all_by_label("remove").collect();
+    assert_eq!(lines.len(), 4);
+    lines[3].click();
+    screen.run_steps(3);
+    assert_eq!(text_of(&recipe), YARD);
+    screen.query_all_by_label("remove").nth(1).unwrap().click();
+    screen.run_steps(3);
+    screen.get_by_label("\"red\" is in use. What it paints gets another colour:");
+    assert_eq!(text_of(&recipe), YARD);
+    screen.get_by_label("Repaint and remove").click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(!now.contains("red"), "{now}");
+    // The first other colour was offered: stone.
+    assert_eq!(now.matches("color = \"stone\"").count(), 3);
+    screen.get_by_label("2 colours");
+    assert!(!screen.state().studio().unwrap().has_mistakes());
+
+    // Looking only: the colours are listed, and nothing can be clicked.
+    let mut looking = harness(StudioApp::with_file(&recipe, true), false);
+    looking.run_steps(2);
+    looking.get_by_label("Palette");
+    assert!(looking.query_by_label("New colour").is_none());
+    assert_eq!(looking.query_all_by_label("remove").count(), 0);
 }
