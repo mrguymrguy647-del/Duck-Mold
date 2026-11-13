@@ -2657,11 +2657,27 @@ fn every_kind_of_edit_has_a_name() {
             part: String::new(),
             number: 1,
             by: None,
+            by_xyz: None,
             at: None,
         },
         Edit::RemoveChange {
             part: String::new(),
             number: None,
+        },
+        Edit::MoveFace {
+            part: String::new(),
+            faces: Vec::new(),
+            by: [0.0; 3],
+        },
+        Edit::TurnFace {
+            part: String::new(),
+            faces: Vec::new(),
+            by: [0.0; 3],
+        },
+        Edit::ScaleFace {
+            part: String::new(),
+            faces: Vec::new(),
+            by: [1.0; 3],
         },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();

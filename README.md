@@ -189,6 +189,9 @@ recipe calls it (`top`, `front`...). Shift+click adds a face.
 | Tool | Key | Handle | Dragging it |
 |---|---|---|---|
 | Pull | T | An arrow out of the faces selected | Pulls them out the way they face, with new walls round them, or pushes them in to make a hollow. Steps of 10 cm (1 cm close up); Ctrl: free. |
+| Move | G | Three arrows, along the part's own directions | Slides the faces; the faces round them stretch to follow. |
+| Turn | R | Three rings | Turns the faces about their middle, 15 degrees at a time. The faces round them bend. |
+| Scale | S | Three boxes, and one in the middle | Makes the faces bigger or smaller one way, or all ways: a box with its top scaled down is a frustum. |
 | Inset | I | A knob on the middle of an edge | Dragged in, makes a smaller face inside each face: a frame round it, in steps of 1 cm. The new face in the middle is selected, ready to pull. |
 
 - What you do is a list of **changes** under the box in the recipe
@@ -207,8 +210,11 @@ recipe calls it (`top`, `front`...). Shift+click adds a face.
   without a bevel). Changing its shape to another drops its changes,
   and says so; Undo brings them back.
 
-In the file these are `pull`, `inset`, `set-change` and `remove-change`
-edits; `duck-mold inspect <recipe> --faces` lists every face's name.
+Dragging the same face again with Move, Turn or Scale adds to the line
+already there instead of writing another. In the file these are
+`pull`, `inset`, `move-face`, `turn-face`, `scale-face`, `set-change`
+and `remove-change` edits; `duck-mold inspect <recipe> --faces` lists
+every face's name.
 
 ![A wall in Face mode: the glass of its framed window selected, with the Changes list on the right](docs/studio-shaping.png)
 
@@ -311,7 +317,7 @@ keys, About). Every line shows its key.
 |---|---|
 | G, R, S, T, P | The Move, Rotate, Scale, Size and Paint tools |
 | Tab | Shape the selected box: Face mode. Tab again: back to parts |
-| T, I (shaping) | The Pull and Inset tools |
+| T, G, R, S, I (shaping) | The Pull, Move, Turn, Scale and Inset tools |
 | Ctrl held while dragging | No snapping |
 | Delete or Backspace | Remove what is selected |
 | Ctrl+D | Duplicate it. A copy of a free part stands beside it; a copy of a joined part is on the same socket |

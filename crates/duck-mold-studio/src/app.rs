@@ -444,6 +444,9 @@ impl StudioApp {
             if studio.mode() == Mode::Face {
                 for (pressed, tool) in [
                     (egui::Key::T, FaceTool::Pull),
+                    (egui::Key::G, FaceTool::Move),
+                    (egui::Key::R, FaceTool::Turn),
+                    (egui::Key::S, FaceTool::Scale),
                     (egui::Key::I, FaceTool::Inset),
                 ] {
                     if key(pressed) {

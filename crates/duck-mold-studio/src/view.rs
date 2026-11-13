@@ -337,8 +337,14 @@ pub fn show(
         "Click a face of the box to shape it. Shift+click adds a face. Tab goes back to parts."
     } else if shaping && studio.face_tool == FaceTool::Inset {
         "Drag the knob in to make a smaller face inside: a frame round it. Shift+click adds a face."
+    } else if shaping && studio.face_tool == FaceTool::Move {
+        "Drag an arrow to slide the face: the faces round it stretch. Shift+click adds a face."
+    } else if shaping && studio.face_tool == FaceTool::Turn {
+        "Drag a ring to turn the face about its middle. Shift+click adds a face."
+    } else if shaping && studio.face_tool == FaceTool::Scale {
+        "Drag a box to make the face bigger or smaller one way, or the middle one for all. Shift+click adds a face."
     } else if shaping {
-        "Drag the arrow to pull the face out, or push it in. Shift+click adds a face. I insets."
+        "Drag the arrow to pull the face out, or push it in. Shift+click adds a face. G, R, S, I: other tools."
     } else if studio.tool == Tool::Paint && !studio.look_only() {
         "Click a face to colour it. Shift+click colours the whole part. Pick the colour in the palette."
     } else if studio.selection().len() > 1 {
@@ -406,7 +412,7 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
         (
             Mode::Face,
             "Face",
-            "Shape the selected box: click its faces, pull them out, inset them (Tab)",
+            "Shape the selected box: click its faces, then pull, move, turn, scale or inset them (Tab)",
         ),
     ];
     for (at, (mode, name, tip)) in modes.into_iter().enumerate() {
@@ -436,6 +442,24 @@ fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
                 "Pull",
                 "T",
                 "An arrow out of the faces selected: drag it to pull them out, or push them in",
+            ),
+            (
+                FaceTool::Move,
+                "Move",
+                "G",
+                "Three arrows: slide the faces along the part's own directions; the faces round them stretch",
+            ),
+            (
+                FaceTool::Turn,
+                "Turn",
+                "R",
+                "Three rings: turn the faces about their middle",
+            ),
+            (
+                FaceTool::Scale,
+                "Scale",
+                "S",
+                "Three boxes, and one in the middle: make the faces bigger or smaller",
             ),
             (
                 FaceTool::Inset,

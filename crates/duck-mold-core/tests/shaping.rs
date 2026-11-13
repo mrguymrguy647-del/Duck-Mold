@@ -182,7 +182,7 @@ fn mistakes_in_a_change_say_what_and_where() {
             "changes = [{ by = 1 }]",
             Code::MissingField,
             "parts[0].changes[0]",
-            "a change needs one of \"pull\" or \"inset\" to say what it does, like { pull = \"top\", by = 0.5 }",
+            "a change needs one of \"pull\", \"inset\", \"move\", \"turn\" or \"scale\" to say what it does, like { pull = \"top\", by = 0.5 }",
         ),
         (
             "changes = [{ pull = \"top\", inset = \"top\", by = 1 }]",
@@ -557,7 +557,7 @@ fn whole(shaped: &Shaped) -> Result<(), String> {
 fn every_list_of_changes_gives_a_whole_shape_or_names_the_change_that_broke_it() {
     let mut dice = Dice(0x9E37_79B9_7F4A_7C15);
     let (mut made, mut refused) = (0, 0);
-    for _ in 0..250 {
+    for _ in 0..2000 {
         let size = [
             dice.between(0.2, 3.0),
             dice.between(0.2, 3.0),
@@ -577,7 +577,20 @@ fn every_list_of_changes_gives_a_whole_shape_or_names_the_change_that_broke_it()
                 faces.push(names[dice.below(names.len())].clone());
             }
             let small = size[0].min(size[1]).min(size[2]);
-            let change = if dice.below(2) == 0 {
+            let kind = dice.below(5);
+            let change = if kind == 2 {
+                let mut by = [0.0; 3];
+                by[dice.below(3)] = dice.between(-small, small);
+                Change::Move { faces, by }
+            } else if kind == 3 {
+                let mut by = [0.0; 3];
+                by[dice.below(3)] = dice.between(-60.0, 60.0);
+                Change::Turn { faces, by }
+            } else if kind == 4 {
+                let mut by = [1.0; 3];
+                by[dice.below(3)] = dice.between(0.3, 1.8);
+                Change::Scale { faces, by }
+            } else if kind == 0 {
                 let mut by = dice.between(-small, small);
                 if by.abs() < 0.01 {
                     by = 0.05;
@@ -617,7 +630,7 @@ fn every_list_of_changes_gives_a_whole_shape_or_names_the_change_that_broke_it()
     }
     // Both happen, plenty.
     assert!(
-        made > 600 && refused > 100,
+        made > 5000 && refused > 800,
         "{made} made, {refused} refused"
     );
 }
@@ -870,6 +883,7 @@ fn a_change_is_set_and_taken_away_by_its_number() {
             part: "wall".into(),
             number: 3,
             by: Some(-0.12),
+            by_xyz: None,
             at: None,
         },
     );
@@ -944,6 +958,7 @@ fn a_change_is_set_and_taken_away_by_its_number() {
                     part: "wall".into(),
                     number,
                     by,
+                    by_xyz: None,
                     at: None,
                 },
             )
@@ -992,6 +1007,7 @@ fn json_changes_are_set_and_taken_away_too() {
             part: "crate".into(),
             number: 1,
             by: Some(0.5),
+            by_xyz: None,
             at: None,
         },
     );
@@ -1046,4 +1062,219 @@ fn another_shape_drops_the_changes_and_says_so() {
         },
     );
     assert!(box_again.text.contains("changes = ["));
+}
+
+// ---- Phase 4, step 3: move, turn and scale a face ---------------------------------
+
+fn moved(faces: &[&str], by: [f64; 3]) -> Change {
+    Change::Move {
+        faces: faces.iter().map(|face| (*face).to_owned()).collect(),
+        by,
+    }
+}
+
+#[test]
+fn moving_turning_and_scaling_a_face_keeps_every_name() {
+    let plain = shape_box([1.0; 3], [1.0; 2], &[], None).unwrap().names();
+    // Up 0.5: a taller box.
+    let taller = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[moved(&["top"], [0.0, 0.5, 0.0])],
+        None,
+    )
+    .unwrap();
+    assert!((taller.volume() - 1.5).abs() < 1e-12);
+    assert_eq!(taller.names(), plain);
+    // The top half as wide: a frustum.
+    let frustum = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[Change::Scale {
+            faces: vec!["top".into()],
+            by: [0.5; 3],
+        }],
+        None,
+    )
+    .unwrap();
+    // (1 + 0.25 + 0.5) / 3.
+    assert!((frustum.volume() - 1.75 / 3.0).abs() < 1e-12);
+    assert_eq!(frustum.names(), plain);
+    // The top turned: the sides bend, and are drawn as two triangles
+    // each, folded outwards.
+    let twisted = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[Change::Turn {
+            faces: vec!["top".into()],
+            by: [0.0, 30.0, 0.0],
+        }],
+        None,
+    )
+    .unwrap();
+    assert_eq!(twisted.names(), plain);
+    whole(&twisted).unwrap();
+    let out = twisted.polygons();
+    assert_eq!(out.polygons.len(), 2 + 4 * 2);
+    // A face slid sideways: the faces round it lean.
+    let leaning = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[moved(&["top"], [0.3, 0.0, 0.0])],
+        None,
+    )
+    .unwrap();
+    whole(&leaning).unwrap();
+    assert!((leaning.volume() - 1.0).abs() < 1e-12);
+}
+
+#[test]
+fn a_move_that_turns_the_shape_inside_out_says_so() {
+    let mistake = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[moved(&["top"], [0.0, -1.5, 0.0])],
+        Some("rock"),
+    )
+    .unwrap_err();
+    assert_eq!(mistake.code, Code::BadShape);
+    assert_eq!(
+        mistake.message,
+        "moving \"top\" by [0, -1.5, 0] turns the shape inside out"
+    );
+    // Squeezed to nothing.
+    let mistake = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[moved(&["top"], [0.0, -1.0, 0.0])],
+        None,
+    )
+    .unwrap_err();
+    assert!(mistake.message.contains("flat"), "{}", mistake.message);
+}
+
+#[test]
+fn moves_turns_and_scales_are_read_and_checked() {
+    let model = built(&wall(
+        "changes = [\n  { move = \"top\", by = [0, 0.3, 0] },\n  { turn = \"front\", by = [0, 0, 10] },\n  { scale = \"back\", by = 0.5 },\n  { scale = \"left\", by = [1, 0.5, 0.5] },\n]",
+    ));
+    assert_eq!(first_part(&model).kind.changes, 4);
+    let cases: [(&str, Code, &str, &str); 5] = [
+        (
+            "changes = [{ move = \"top\", by = [0, 0, 0] }]",
+            Code::OutOfRange,
+            "parts[0].changes[0].by",
+            "a move of [0, 0, 0] changes nothing: give how far along x, y and z",
+        ),
+        (
+            "changes = [{ scale = \"top\", by = 1 }]",
+            Code::OutOfRange,
+            "parts[0].changes[0].by",
+            "a scale of 1 changes nothing: above 1 makes the faces bigger, below 1 smaller",
+        ),
+        (
+            "changes = [{ turn = \"top\" }]",
+            Code::MissingField,
+            "parts[0].changes[0]",
+            "a turn needs \"by\": degrees around x, y and z, like { turn = \"top\", by = [0, 15, 0] }",
+        ),
+        (
+            "changes = [{ move = \"top\", by = [0, 1, 0], name = \"lid\" }]",
+            Code::Conflict,
+            "parts[0].changes[0].name",
+            "a move makes no new faces, so it has nothing to name: remove \"name\"",
+        ),
+        (
+            "changes = [{ move = \"top\", by = 0.5 }]",
+            Code::TypeMismatch,
+            "parts[0].changes[0].by",
+            "this needs three numbers, like [0, 0.2, 0], not the number 0.5",
+        ),
+    ];
+    for (lines, code, path, message) in cases {
+        let error = one_error(&wall(lines));
+        assert_eq!(
+            (error.code, error.path.as_str(), error.message.as_str()),
+            (code, path, message),
+            "{lines}"
+        );
+    }
+}
+
+#[test]
+fn a_move_right_after_a_move_of_the_same_faces_adds_to_it() {
+    let start = wall("");
+    let move_top = |by: [f64; 3]| Edit::MoveFace {
+        part: "wall".into(),
+        faces: vec!["top".into()],
+        by,
+    };
+    let one = done(&start, Syntax::Toml, &move_top([0.0, 0.2, 0.0]));
+    assert_eq!(one.summary, "moved \"top\" of \"wall\" by [0, 0.2, 0]");
+    let two = done(&one.text, Syntax::Toml, &move_top([0.1, 0.1, 0.0]));
+    assert_eq!(
+        two.summary,
+        "moved \"top\" of \"wall\" by [0.1, 0.1, 0] (moved by [0.1, 0.3, 0] in all, in one change)"
+    );
+    assert!(
+        two.text
+            .contains("changes = [\n  { move = \"top\", by = [0.1, 0.3, 0] },\n]")
+    );
+    // Back where it was: the line goes.
+    let back = done(&two.text, Syntax::Toml, &move_top([-0.1, -0.3, 0.0]));
+    assert_eq!(back.text, start);
+    assert_eq!(
+        back.summary,
+        "moved \"top\" of \"wall\" by [-0.1, -0.3, 0]: back where it was, so the change is gone"
+    );
+    // Another face, or a move after something else: a line of its own.
+    let other = done(
+        &one.text,
+        Syntax::Toml,
+        &Edit::MoveFace {
+            part: "wall".into(),
+            faces: vec!["back".into()],
+            by: [0.0, 0.0, -0.1],
+        },
+    );
+    assert_eq!(other.text.matches("{ move = ").count(), 2);
+
+    // Scales multiply, and three alike stay one number.
+    let scale_top = |by: f64| Edit::ScaleFace {
+        part: "wall".into(),
+        faces: vec!["top".into()],
+        by: [by; 3],
+    };
+    let half = done(&start, Syntax::Toml, &scale_top(0.5));
+    assert!(half.text.contains("{ scale = \"top\", by = 0.5 }"));
+    let quarter = done(&half.text, Syntax::Toml, &scale_top(0.5));
+    assert!(quarter.text.contains("{ scale = \"top\", by = 0.25 }"));
+    assert_eq!(
+        quarter.summary,
+        "scaled \"top\" of \"wall\" by 0.5 (scaled by 0.25 in all, in one change)"
+    );
+    // Turns add.
+    let turn = |by: [f64; 3]| Edit::TurnFace {
+        part: "wall".into(),
+        faces: vec!["top".into()],
+        by,
+    };
+    let once = done(&start, Syntax::Toml, &turn([0.0, 15.0, 0.0]));
+    let twice = done(&once.text, Syntax::Toml, &turn([0.0, 15.0, 0.0]));
+    assert!(twice.text.contains("{ turn = \"top\", by = [0, 30, 0] }"));
+    // The panel reads three numbers, and set-change sets them.
+    let facts = duck_mold_core::edit::describe(&twice.text, Syntax::Toml, None, "wall").unwrap();
+    assert_eq!(facts.changes[0].by_xyz, Some([0.0, 30.0, 0.0]));
+    let set = done(
+        &twice.text,
+        Syntax::Toml,
+        &Edit::SetChange {
+            part: "wall".into(),
+            number: 1,
+            by: None,
+            by_xyz: Some([0.0, 45.0, 0.0]),
+            at: None,
+        },
+    );
+    assert!(set.text.contains("{ turn = \"top\", by = [0, 45, 0] }"));
 }

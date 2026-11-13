@@ -26,7 +26,7 @@
 use std::collections::{BTreeSet, HashMap};
 
 use crate::issue::Code;
-use crate::math::{Vec3, vec3};
+use crate::math::{Mat3, Vec3, vec3};
 use crate::recipe::Side;
 use crate::shapes::Polygon;
 
@@ -56,38 +56,54 @@ pub enum Change {
         /// `<face>_inset`.
         name: Option<String>,
     },
+    /// Moves faces by x, y and z metres, in the part's own directions.
+    /// The faces round them stretch to follow; nothing is added.
+    Move {
+        /// The faces, by name.
+        faces: Vec<String>,
+        /// How far along x, y and z.
+        by: [f64; 3],
+    },
+    /// Turns faces about their middle: degrees around x, then y, then z.
+    Turn {
+        /// The faces, by name.
+        faces: Vec<String>,
+        /// The degrees.
+        by: [f64; 3],
+    },
+    /// Makes faces bigger or smaller about their middle, along x, y and
+    /// z.
+    Scale {
+        /// The faces, by name.
+        faces: Vec<String>,
+        /// How much, each way: 1 is as they are.
+        by: [f64; 3],
+    },
 }
 
 impl Change {
-    /// Every word a recipe can write for a change: `pull`, `inset`.
-    pub const WORDS: [&'static str; 2] = ["pull", "inset"];
+    /// Every word a recipe can write for a change.
+    pub const WORDS: [&'static str; 5] = ["pull", "inset", "move", "turn", "scale"];
 
-    /// The word a recipe writes for it: `pull`, `inset`.
+    /// The word a recipe writes for it: `pull`, `inset`...
     pub fn word(&self) -> &'static str {
         match self {
             Change::Pull { .. } => "pull",
             Change::Inset { .. } => "inset",
+            Change::Move { .. } => "move",
+            Change::Turn { .. } => "turn",
+            Change::Scale { .. } => "scale",
         }
     }
 
     /// The faces it is made to, as written.
     pub fn faces(&self) -> &[String] {
         match self {
-            Change::Pull { faces, .. } | Change::Inset { faces, .. } => faces,
-        }
-    }
-
-    /// Its amount: `by`.
-    pub fn by(&self) -> f64 {
-        match self {
-            Change::Pull { by, .. } | Change::Inset { by, .. } => *by,
-        }
-    }
-
-    /// The name it gives the faces it makes, if one is written.
-    pub fn name(&self) -> Option<&str> {
-        match self {
-            Change::Pull { name, .. } | Change::Inset { name, .. } => name.as_deref(),
+            Change::Pull { faces, .. }
+            | Change::Inset { faces, .. }
+            | Change::Move { faces, .. }
+            | Change::Turn { faces, .. }
+            | Change::Scale { faces, .. } => faces,
         }
     }
 
@@ -101,8 +117,24 @@ impl Change {
             Change::Inset { faces, by, .. } => {
                 format!("insetting {} by {}", quoted(faces), number(*by))
             }
+            Change::Move { faces, by } => format!("moving {} by {}", quoted(faces), three(by)),
+            Change::Turn { faces, by } => {
+                format!("turning {} by {}", quoted(faces), three(by))
+            }
+            Change::Scale { faces, by } if by[0] == by[1] && by[1] == by[2] => {
+                format!("scaling {} by {}", quoted(faces), number(by[0]))
+            }
+            Change::Scale { faces, by } => {
+                format!("scaling {} by {}", quoted(faces), three(by))
+            }
         }
     }
+}
+
+/// `[0, 0.2, 0]`.
+fn three(values: &[f64; 3]) -> String {
+    let [x, y, z] = values.map(number);
+    format!("[{x}, {y}, {z}]")
 }
 
 /// `"a"`, `"a" and "b"`, `"a", "b" and "c"`.
@@ -582,6 +614,18 @@ impl Shaped {
         let touched = match change {
             Change::Pull { by, name, .. } => self.pull(&faces, *by, name.as_deref(), &taken)?,
             Change::Inset { by, name, .. } => self.inset(&faces, *by, name.as_deref(), &taken)?,
+            Change::Move { by, .. } => {
+                let by = Vec3::from(*by);
+                self.reshape(&faces, |point, _| point + by)
+            }
+            Change::Turn { by, .. } => {
+                let turn = Mat3::from_rotate(*by);
+                self.reshape(&faces, |point, middle| middle + turn * (point - middle))
+            }
+            Change::Scale { by, .. } => {
+                let by = Vec3::from(*by);
+                self.reshape(&faces, |point, middle| middle + (point - middle).times(by))
+            }
         };
         self.tidy();
         self.check(&touched, &change.doing(), scale)
@@ -934,6 +978,44 @@ impl Shaped {
             touched.push(face);
         }
         Ok(touched)
+    }
+
+    /// The middle of some faces, each counted by its area.
+    pub fn middle_of(&self, faces: &[usize]) -> Vec3 {
+        let mut weight = 0.0;
+        let mut sum = Vec3::ZERO;
+        for &face in faces {
+            let area = self.area(face);
+            sum = sum + self.middle(face) * area;
+            weight += area;
+        }
+        if weight > 0.0 {
+            sum * (1.0 / weight)
+        } else {
+            faces.first().map_or(Vec3::ZERO, |&face| self.middle(face))
+        }
+    }
+
+    /// Moves every corner of `faces` to where `to` says (given the
+    /// corner and the faces' middle). Gives every face that has one of
+    /// those corners: what may now pass through something.
+    fn reshape(&mut self, faces: &[usize], to: impl Fn(Vec3, Vec3) -> Vec3) -> Vec<usize> {
+        let middle = self.middle_of(faces);
+        let corners: BTreeSet<usize> = faces
+            .iter()
+            .flat_map(|&face| self.faces[face].corners.iter().copied())
+            .collect();
+        for &corner in &corners {
+            self.corners[corner] = to(self.corners[corner], middle);
+        }
+        (0..self.faces.len())
+            .filter(|&face| {
+                self.faces[face]
+                    .corners
+                    .iter()
+                    .any(|corner| corners.contains(corner))
+            })
+            .collect()
     }
 
     /// Drops the corners no face uses any more.

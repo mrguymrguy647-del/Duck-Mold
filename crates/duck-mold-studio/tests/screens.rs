@@ -2280,3 +2280,49 @@ fn tab_shapes_the_selected_box_with_the_pull_arrow_and_the_changes_list() {
         assert_eq!(selected(&screen).as_deref(), selected_after);
     }
 }
+
+#[test]
+fn in_face_mode_g_r_s_take_the_face_tools_and_the_panel_shows_three_numbers() {
+    use duck_mold_view::studio::FaceTool;
+    use egui::Key;
+    let (recipe, mut screen) = yard("screens_face_tools");
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    screen.key_press(Key::Tab);
+    screen.run_steps(2);
+    for (key, tool) in [
+        (Key::G, FaceTool::Move),
+        (Key::R, FaceTool::Turn),
+        (Key::S, FaceTool::Scale),
+        (Key::I, FaceTool::Inset),
+        (Key::T, FaceTool::Pull),
+    ] {
+        screen.key_press(key);
+        screen.run_steps(2);
+        assert_eq!(screen.state().studio().unwrap().face_tool, tool, "{key:?}");
+    }
+    // The Part tools didn't change meanwhile.
+    assert_eq!(
+        screen.state().studio().unwrap().tool,
+        duck_mold_view::studio::handles::Tool::Move
+    );
+    // (Scale is a row of the panel too.)
+    for tool in ["Pull", "Move", "Turn", "Scale", "Inset"] {
+        assert!(screen.query_all_by_label(tool).count() >= 1, "{tool}");
+    }
+    // A move of the top, made the way an agent would, shows as three
+    // numbers in the Changes list.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .apply(&duck_mold_core::edit::Edit::MoveFace {
+            part: "crate".into(),
+            faces: vec!["top".into()],
+            by: [0.0, 0.2, 0.0],
+        })
+        .unwrap();
+    screen.run_steps(2);
+    screen.get_by_label("1. move top");
+    assert!(text_of(&recipe).contains("{ move = \"top\", by = [0, 0.2, 0] }"));
+}

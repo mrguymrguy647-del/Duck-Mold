@@ -93,7 +93,10 @@ pub const KEYS: [(&str, &str); 23] = [
         "Tab",
         "Shape the selected box: click its faces. Tab again: back to parts",
     ),
-    ("T, I (shaping)", "The Pull and Inset tools"),
+    (
+        "T, G, R, S, I (shaping)",
+        "The Pull, Move, Turn, Scale and Inset tools",
+    ),
     ("Ctrl held while dragging", "No snapping"),
     ("Delete or Backspace", "Remove what is selected"),
     ("Ctrl+D", "Duplicate what is selected"),
@@ -265,11 +268,16 @@ pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) ->
     ui.label(RichText::new(title).weak().small());
     // Shaping: the tools, and the way back.
     if studio.mode() == Mode::Face {
-        if line(ui, true, "Pull", "T") {
-            chosen = Some(Action::FaceTool(FaceTool::Pull));
-        }
-        if line(ui, true, "Inset", "I") {
-            chosen = Some(Action::FaceTool(FaceTool::Inset));
+        for (tool, words, key) in [
+            (FaceTool::Pull, "Pull", "T"),
+            (FaceTool::Move, "Move", "G"),
+            (FaceTool::Turn, "Turn", "R"),
+            (FaceTool::Scale, "Scale", "S"),
+            (FaceTool::Inset, "Inset", "I"),
+        ] {
+            if line(ui, true, words, key) {
+                chosen = Some(Action::FaceTool(tool));
+            }
         }
         ui.separator();
         if line(ui, true, "Back to Part", "Tab") {

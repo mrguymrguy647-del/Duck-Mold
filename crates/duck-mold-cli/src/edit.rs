@@ -261,9 +261,48 @@ pub enum Change {
         part: String,
         /// Which change: 1 is the first.
         number: usize,
-        /// Its new amount, in metres.
-        #[arg(long, allow_hyphen_values = true)]
-        by: Option<f64>,
+        /// Its new amount: one number (a pull, an inset, a scale alike
+        /// each way), or x,y,z (a move, a turn, a scale).
+        #[arg(long, allow_hyphen_values = true, value_name = "N or X,Y,Z")]
+        by: Option<String>,
+    },
+    /// Move faces of a box by x,y,z metres, in its own directions. The
+    /// faces round them stretch to follow.
+    ///
+    /// Right after a move of the same faces, it adds to that one.
+    MoveFace {
+        /// The part.
+        part: String,
+        /// The faces, by name: top, or several with commas.
+        faces: String,
+        /// How far along x, y and z, in metres.
+        #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
+        by: String,
+    },
+    /// Turn faces of a box about their middle: degrees around x, y and z.
+    ///
+    /// Right after a turn of the same faces, it adds to that one.
+    TurnFace {
+        /// The part.
+        part: String,
+        /// The faces, by name.
+        faces: String,
+        /// Degrees around x, then y, then z.
+        #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
+        by: String,
+    },
+    /// Make faces of a box bigger or smaller about their middle.
+    ///
+    /// Right after a scale of the same faces, it multiplies that one.
+    ScaleFace {
+        /// The part.
+        part: String,
+        /// The faces, by name.
+        faces: String,
+        /// How much: one number for all three ways, or x,y,z. 1 is as
+        /// they are.
+        #[arg(long, value_name = "N or X,Y,Z")]
+        by: String,
     },
     /// Take one of a box's changes away (or, with --all, every one).
     ///
@@ -572,11 +611,45 @@ impl Change {
                 by: *by,
                 name: name.clone(),
             },
-            Change::SetChange { part, number, by } => Edit::SetChange {
+            Change::SetChange { part, number, by } => {
+                let (one, xyz) = match by.as_deref() {
+                    None => (None, None),
+                    Some(by) if by.contains(',') => (None, Some(three("--by", by)?)),
+                    Some(by) => (
+                        Some(by.trim().parse::<f64>().map_err(|_| {
+                            format!("--by needs a number, like 0.5, or three, like 0,0.2,0, not \"{by}\"")
+                        })?),
+                        None,
+                    ),
+                };
+                Edit::SetChange {
+                    part: part.clone(),
+                    number: *number,
+                    by: one,
+                    by_xyz: xyz,
+                    at: None,
+                }
+            }
+            Change::MoveFace { part, faces, by } => Edit::MoveFace {
                 part: part.clone(),
-                number: *number,
-                by: *by,
-                at: None,
+                faces: face_list(faces),
+                by: three("--by", by)?,
+            },
+            Change::TurnFace { part, faces, by } => Edit::TurnFace {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: three("--by", by)?,
+            },
+            Change::ScaleFace { part, faces, by } => Edit::ScaleFace {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: if by.contains(',') {
+                    three("--by", by)?
+                } else {
+                    [by.trim().parse::<f64>().map_err(|_| {
+                        format!("--by needs a number, like 0.5, or three, like 1,0.5,1, not \"{by}\"")
+                    })?; 3]
+                },
             },
             Change::RemoveChange { part, number, .. } => Edit::RemoveChange {
                 part: part.clone(),

@@ -58,6 +58,9 @@ pub struct Draft {
     socket_names: Vec<String>,
     /// The amount of each of the part's changes, as it is being typed.
     change_by: Vec<f64>,
+    /// The three amounts of each change that has three (a move, a
+    /// turn), as they are being typed.
+    change_xyz: Vec<[f64; 3]>,
 }
 
 impl Draft {
@@ -84,6 +87,11 @@ impl Draft {
             .changes
             .iter()
             .map(|change| change.by.unwrap_or(0.0))
+            .collect();
+        self.change_xyz = facts
+            .changes
+            .iter()
+            .map(|change| change.by_xyz.unwrap_or([0.0; 3]))
             .collect();
     }
 }
@@ -137,7 +145,10 @@ fn changes_section(
     path: &str,
     edits: &mut Vec<Edit>,
 ) {
-    if facts.changes.is_empty() || draft.change_by.len() != facts.changes.len() {
+    if facts.changes.is_empty()
+        || draft.change_by.len() != facts.changes.len()
+        || draft.change_xyz.len() != facts.changes.len()
+    {
         return;
     }
     ui.add_space(8.0);
@@ -152,30 +163,66 @@ fn changes_section(
                 words.push_str(&format!(" ({name})"));
             }
             ui.label(words);
-            let range = if change.word == "pull" {
-                -1000.0..=1000.0
-            } else {
-                0.001..=1000.0
-            };
-            let field = ui
-                .add(
-                    DragValue::new(&mut draft.change_by[at])
-                        .speed(0.01)
-                        .range(range)
-                        .max_decimals(3)
-                        .suffix(" m"),
-                )
-                .on_hover_text("How far, in metres");
-            if (field.drag_stopped() || field.lost_focus())
-                && Some(draft.change_by[at]) != change.by
-                && draft.change_by[at] != 0.0
-            {
-                edits.push(Edit::SetChange {
-                    part: path.to_owned(),
-                    number,
-                    by: Some(draft.change_by[at]),
-                    at: None,
-                });
+            let settled = |field: &egui::Response| field.drag_stopped() || field.lost_focus();
+            if change.by_xyz.is_some() {
+                // A move, a turn or a scale: x, y and z.
+                let (speed, suffix, hover) = match change.word.as_str() {
+                    "turn" => (1.0, "°", "Degrees around x, y and z"),
+                    "scale" => (0.01, "", "How much bigger, along x, y and z"),
+                    _ => (0.01, "", "How far along x, y and z, in metres"),
+                };
+                let mut done = false;
+                for axis in 0..3 {
+                    let field = ui
+                        .add(
+                            DragValue::new(&mut draft.change_xyz[at][axis])
+                                .speed(speed)
+                                .max_decimals(3)
+                                .suffix(suffix),
+                        )
+                        .on_hover_text(hover);
+                    done |= settled(&field);
+                }
+                if done && Some(draft.change_xyz[at]) != change.by_xyz {
+                    edits.push(Edit::SetChange {
+                        part: path.to_owned(),
+                        number,
+                        by: None,
+                        by_xyz: Some(draft.change_xyz[at]),
+                        at: None,
+                    });
+                }
+            } else if change.by.is_some() {
+                let (range, suffix) = match change.word.as_str() {
+                    "pull" => (-1000.0..=1000.0, " m"),
+                    "scale" => (0.001..=1000.0, ""),
+                    _ => (0.001..=1000.0, " m"),
+                };
+                let field = ui
+                    .add(
+                        DragValue::new(&mut draft.change_by[at])
+                            .speed(0.01)
+                            .range(range)
+                            .max_decimals(3)
+                            .suffix(suffix),
+                    )
+                    .on_hover_text(if change.word == "scale" {
+                        "How much bigger, all ways"
+                    } else {
+                        "How far, in metres"
+                    });
+                if settled(&field)
+                    && Some(draft.change_by[at]) != change.by
+                    && draft.change_by[at] != 0.0
+                {
+                    edits.push(Edit::SetChange {
+                        part: path.to_owned(),
+                        number,
+                        by: Some(draft.change_by[at]),
+                        by_xyz: None,
+                        at: None,
+                    });
+                }
             }
             if ui
                 .small_button("x")

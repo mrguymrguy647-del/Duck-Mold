@@ -258,6 +258,9 @@ colors = { window = "wood", glass = "sky" }
 |---|---|---|
 | `{ pull = "top", by = 0.5 }` | Pulls the face out the way it faces, by `by` metres, with new walls round it. A negative `by` pushes it in (a hollow). Several faces, `pull = ["a", "b"]`, that touch are pulled as one piece. | The face keeps its name. Walls `<face>_side_<side>` (`top_side_front`...); with `name = "leg"`: `leg_front`..., and `leg` for all of them. |
 | `{ inset = "front", by = 0.1 }` | A smaller face inside the face, `by` metres in from every edge (less than half its width). The shape doesn't change: there are more faces to work with. | The middle: `<face>_inset`, or `name`. The ring round it: `<middle>_rim_<side>`; the face's old name now stands for the ring. |
+| `{ move = "top", by = [0, 0, 0.2] }` | Moves the face by x, y, z metres; the faces round it stretch to follow. | None. |
+| `{ turn = "top", by = [0, 15, 0] }` | Turns the face about its middle: degrees around x, then y, then z. Faces round it bend (each is drawn as two triangles). | None. |
+| `{ scale = "top", by = 0.5 }` | Makes the face bigger or smaller about its middle: one number, or `[x, y, z]`. `scale = "top", by = 0.5` on a box makes a frustum. | None. |
 
 - **Names are words, never numbers**, and never change when the size or
   an amount does. `duck-mold inspect <recipe> --faces` lists every face
@@ -593,7 +596,10 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
 | `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
 | `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
-| `duck-mold edit <recipe> set-change <part> <number> --by <metres>` | Changes the amount of one change, counted from 1 as they are written. Later changes, and every name, stay. |
+| `duck-mold edit <recipe> set-change <part> <number> --by <amount>` | Changes the amount of one change, counted from 1 as they are written: one number, or `x,y,z` for a move, a turn or a scale. Later changes, and every name, stay. |
+| `duck-mold edit <recipe> move-face <part> <faces> --by x,y,z` | Adds a move of faces to a box's `changes`. Right after a move of the same faces, it adds to that one instead of making a second line. |
+| `duck-mold edit <recipe> turn-face <part> <faces> --by x,y,z` | Adds a turn of faces (degrees around x, y, z, about their middle). Adds to a turn of the same faces right before it. |
+| `duck-mold edit <recipe> scale-face <part> <faces> --by n` | Adds a scale of faces (one number, or `x,y,z`). Multiplies a scale of the same faces right before it. |
 | `duck-mold edit <recipe> remove-change <part> <number>` | Takes one change away (`--all`: every one, and the part is a plain box again). Refused if a later change or a colour names a face only that change made: the mistakes it would cause are listed. |
 
 - **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,

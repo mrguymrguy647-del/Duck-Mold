@@ -293,11 +293,14 @@ impl Studio {
     /// What the bottom of the viewport says about snapping.
     pub fn snap_text(&self) -> String {
         if self.mode == Mode::Face {
-            let step = match self.face_tool {
-                FaceTool::Pull => self.snap_step(),
-                FaceTool::Inset => INSET_STEP,
+            return match self.face_tool {
+                FaceTool::Pull | FaceTool::Move => {
+                    format!("Snap {} m  (Ctrl: off)", short(self.snap_step()))
+                }
+                FaceTool::Inset => format!("Snap {} m  (Ctrl: off)", short(INSET_STEP)),
+                FaceTool::Turn => format!("Snap {}°  (Ctrl: off)", short(TURN_STEP)),
+                FaceTool::Scale => format!("Snap x {}  (Ctrl: off)", short(SCALE_STEP)),
             };
-            return format!("Snap {} m  (Ctrl: off)", short(step));
         }
         format!(
             "Snap {} m, {}°  (Ctrl: off)",
@@ -503,14 +506,27 @@ impl Studio {
         let inward_own = normal.cross(to - from).normalized()?;
         let inward_way = part.place.turn * inward_own;
         let away = self.orbit.to_view(centre).z.max(0.05);
+        // The part's own directions: a face moves, turns and scales
+        // along them, as the recipe measures.
+        let mut own = [Vec3::ZERO; 3];
+        let mut units = [1.0; 3];
+        for at in 0..3 {
+            let column = part.place.turn.column(at);
+            units[at] = column.length().max(1e-9);
+            own[at] = column * (1.0 / units[at]);
+        }
         Some(Gizmo {
             part: part.path.clone(),
             centre,
             reach: LENGTH * away / viewport::focal(self.view.1.max(1)),
-            list: [Vec3::ZERO; 3],
-            units: [1.0; 3],
-            own: [Vec3::ZERO; 3],
-            sense: 1.0,
+            list: own,
+            units,
+            own,
+            sense: if part.place.turn.determinant() < 0.0 {
+                -1.0
+            } else {
+                1.0
+            },
             joined: None,
             knobs: Vec::new(),
             group: None,
@@ -622,6 +638,38 @@ impl Studio {
                     points: vec![face.knob],
                     color: INSET,
                 }),
+                FaceTool::Move => {
+                    for (at, color) in AXIS_COLORS.into_iter().enumerate() {
+                        handles.push(Handle {
+                            grip: Grip::Arrow(at),
+                            points: arrow(gizmo.own[at]),
+                            color,
+                        });
+                    }
+                }
+                FaceTool::Turn => {
+                    for (at, color) in AXIS_COLORS.into_iter().enumerate() {
+                        handles.push(Handle {
+                            grip: Grip::Ring(at),
+                            points: ring(gizmo.own[at]),
+                            color,
+                        });
+                    }
+                }
+                FaceTool::Scale => {
+                    for (at, color) in AXIS_COLORS.into_iter().enumerate() {
+                        handles.push(Handle {
+                            grip: Grip::Box(at),
+                            points: arrow(gizmo.own[at]),
+                            color,
+                        });
+                    }
+                    handles.push(Handle {
+                        grip: Grip::Middle,
+                        points: vec![centre],
+                        color: MIDDLE,
+                    });
+                }
             }
             return handles;
         }
@@ -988,6 +1036,13 @@ impl Studio {
         let (eye, ray) = self.pointer_ray(at);
         let step = self.snap_step();
         let gizmo = &grab.gizmo;
+        if gizmo.face.is_some() {
+            let Some((edits, label)) = self.face_drag(grab, eye, ray, at, free) else {
+                return;
+            };
+            self.hold_edits(edits, label);
+            return;
+        }
         if let Some(group) = &gizmo.group {
             let Some((edits, label)) = self.group_drag(grab, group, eye, ray, at, free) else {
                 return;
@@ -1180,58 +1235,8 @@ impl Studio {
                     (_, Some(_)) => (Vec::new(), String::new()),
                 }
             }
-            // ---- faces of a box pulled out or pushed in (Face mode)
-            (Grip::Pull, _) => {
-                let Some(face) = &gizmo.face else {
-                    return;
-                };
-                let Some(now) = nearest_on_line(gizmo.centre, face.out, eye, ray) else {
-                    return;
-                };
-                let by = snapped((now - grab.hold) / face.out_unit, step, free);
-                let by = (by * 10_000.0).round() / 10_000.0 + 0.0;
-                if by == 0.0 {
-                    (Vec::new(), "pull 0 m".to_owned())
-                } else {
-                    (
-                        vec![Edit::Pull {
-                            part: part.clone(),
-                            faces: face.faces.clone(),
-                            by,
-                            name: None,
-                        }],
-                        format!(
-                            "{} {} m",
-                            if by < 0.0 { "in" } else { "out" },
-                            short(by.abs())
-                        ),
-                    )
-                }
-            }
-            // ---- a smaller face inside each face (Face mode)
-            (Grip::Inset, _) => {
-                let Some(face) = &gizmo.face else {
-                    return;
-                };
-                let Some(now) = nearest_on_line(face.knob, face.inward, eye, ray) else {
-                    return;
-                };
-                let by = snapped((now - grab.hold) / face.inward_unit, INSET_STEP, free);
-                let by = (by * 10_000.0).round() / 10_000.0 + 0.0;
-                if by <= 0.0 {
-                    (Vec::new(), "inset 0 m".to_owned())
-                } else {
-                    (
-                        vec![Edit::Inset {
-                            part: part.clone(),
-                            faces: face.faces.clone(),
-                            by,
-                            name: None,
-                        }],
-                        format!("inset {} m", short(by)),
-                    )
-                }
-            }
+            // (Face mode's handles are worked out above.)
+            (Grip::Pull | Grip::Inset, _) => return,
             // ---- a face of a shape, pulled out or in
             (Grip::Knob(which), _) => {
                 let Some(knob) = gizmo.knobs.get(which) else {
@@ -1446,6 +1451,147 @@ impl Studio {
                         .collect(),
                     format!("x {}", short(factor)),
                 )
+            }
+            _ => return None,
+        })
+    }
+
+    /// The edit a drag of a handle makes in Face mode, and what to say
+    /// by the pointer.
+    fn face_drag(
+        &self,
+        grab: &Grab,
+        eye: Vec3,
+        ray: Vec3,
+        at: (f64, f64),
+        free: bool,
+    ) -> Option<(Vec<Edit>, String)> {
+        let gizmo = &grab.gizmo;
+        let face = gizmo.face.as_ref()?;
+        let part = gizmo.part.clone();
+        let faces = face.faces.clone();
+        let step = self.snap_step();
+        let tidy = |number: f64| (number * 10_000.0).round() / 10_000.0 + 0.0;
+        let axis_names = ["x", "y", "z"];
+        Some(match grab.grip {
+            // ---- out or in
+            Grip::Pull => {
+                let now = nearest_on_line(gizmo.centre, face.out, eye, ray)?;
+                let by = tidy(snapped((now - grab.hold) / face.out_unit, step, free));
+                if by == 0.0 {
+                    (Vec::new(), "pull 0 m".to_owned())
+                } else {
+                    (
+                        vec![Edit::Pull {
+                            part,
+                            faces,
+                            by,
+                            name: None,
+                        }],
+                        format!(
+                            "{} {} m",
+                            if by < 0.0 { "in" } else { "out" },
+                            short(by.abs())
+                        ),
+                    )
+                }
+            }
+            // ---- a smaller face inside
+            Grip::Inset => {
+                let now = nearest_on_line(face.knob, face.inward, eye, ray)?;
+                let by = tidy(snapped(
+                    (now - grab.hold) / face.inward_unit,
+                    INSET_STEP,
+                    free,
+                ));
+                if by <= 0.0 {
+                    (Vec::new(), "inset 0 m".to_owned())
+                } else {
+                    (
+                        vec![Edit::Inset {
+                            part,
+                            faces,
+                            by,
+                            name: None,
+                        }],
+                        format!("inset {} m", short(by)),
+                    )
+                }
+            }
+            // ---- slid along one of the part's own directions
+            Grip::Arrow(which) => {
+                let now = nearest_on_line(gizmo.centre, gizmo.own[which], eye, ray)?;
+                let moved = tidy(snapped((now - grab.hold) / gizmo.units[which], step, free));
+                let mut by = [0.0; 3];
+                by[which] = moved;
+                let label = format!("{} {} m", axis_names[which], short(moved));
+                if moved == 0.0 {
+                    (Vec::new(), label)
+                } else {
+                    (vec![Edit::MoveFace { part, faces, by }], label)
+                }
+            }
+            // ---- turned about their middle
+            Grip::Ring(which) => {
+                let turned = self.ring_turn(grab, gizmo.own[which], eye, ray, at)?;
+                // Counted the way `rotate` and `turn` count: see the ring
+                // of a part.
+                let mut quarter = [0.0; 3];
+                quarter[which] = 90.0;
+                let mut unit = [0.0; 3];
+                unit[which] = 1.0;
+                let probe = vec3(0.3, 0.5, 0.7);
+                let same = (Mat3::around(unit.into(), 90.0) * probe
+                    - Mat3::from_rotate(quarter) * probe)
+                    .length()
+                    < 1e-6;
+                let turned = turned * gizmo.sense * if same { 1.0 } else { -1.0 };
+                let turned = tidy(snapped(turned, TURN_STEP, free));
+                let mut by = [0.0; 3];
+                by[which] = turned;
+                let label = format!("{}°", short(turned));
+                if turned == 0.0 {
+                    (Vec::new(), label)
+                } else {
+                    (vec![Edit::TurnFace { part, faces, by }], label)
+                }
+            }
+            // ---- bigger or smaller one way
+            Grip::Box(which) => {
+                let now = nearest_on_line(gizmo.centre, gizmo.own[which], eye, ray)?;
+                if grab.hold.abs() < 1e-9 {
+                    return None;
+                }
+                let least = if free { 0.01 } else { SCALE_STEP };
+                let factor = tidy(snapped(now / grab.hold, SCALE_STEP, free).max(least));
+                let mut by = [1.0; 3];
+                by[which] = factor;
+                let label = format!("{} x {}", axis_names[which], short(factor));
+                if factor == 1.0 {
+                    (Vec::new(), label)
+                } else {
+                    (vec![Edit::ScaleFace { part, faces, by }], label)
+                }
+            }
+            // ---- bigger or smaller all round: right and up grow them
+            Grip::Middle => {
+                let pulled = (at.0 - grab.pressed.0) - (at.1 - grab.pressed.1);
+                let least = if free { 0.01 } else { SCALE_STEP };
+                let factor =
+                    tidy(snapped((1.0 + pulled / 120.0).max(0.05), SCALE_STEP, free).max(least));
+                let label = format!("x {}", short(factor));
+                if factor == 1.0 {
+                    (Vec::new(), label)
+                } else {
+                    (
+                        vec![Edit::ScaleFace {
+                            part,
+                            faces,
+                            by: [factor; 3],
+                        }],
+                        label,
+                    )
+                }
             }
             _ => return None,
         })

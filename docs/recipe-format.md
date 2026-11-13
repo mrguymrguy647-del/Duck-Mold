@@ -198,6 +198,9 @@ Each change is a table with one of these, and the fields it takes:
 |---|---|---|
 | `pull` | `pull` (a face name, or a list of them), `by` (metres, not 0: -1000 to 1000), `name` (optional) | Pulls the faces out the way they face by `by`, and fills the gap with new walls. A negative `by` pushes them in, making a hollow. Faces in the list that share an edge are pulled as one piece, with walls only round its outside, the way the faces face together. |
 | `inset` | `inset` (a face name, or a list), `by` (metres, above 0), `name` (optional) | Makes a smaller face inside each face, `by` in from every edge, with a ring of four-sided faces round it. `by` must be less than half the face's width. Nothing moves: there are just more faces. |
+| `move` | `move` (a face name, or a list), `by` (`[x, y, z]` metres, not all 0) | Moves the faces; the faces round them stretch to follow. No new faces. |
+| `turn` | `turn` (a face name, or a list), `by` (`[x, y, z]` degrees, not all 0) | Turns the faces about their middle (the middle of them all, for several): around x, then y, then z. Faces round them may bend: a bent four-sided face is drawn as two triangles, folded the way that bulges out, and keeps its name. |
+| `scale` | `scale` (a face name, or a list), `by` (one number above 0, or `[x, y, z]`; not 1) | Makes the faces bigger or smaller about their middle. |
 
 Amounts are metres, in the part's own directions, before its `scale`,
 `mirror`, `rotate` and `move`. Resizing the box keeps them: a frame
@@ -210,6 +213,7 @@ size or amount changes it:
 |---|---|---|
 | `pull` | Keeps its name: it is the end of what was pulled. | One wall along each edge, `<face>_side_<side>`, where the side is the edge's side of the face (`top_side_front`). With `name = "leg"`: `leg_front`, `leg_left`... `<face>_side`, or the `name`, stands for all the walls. |
 | `inset` | Its name now stands for the ring left round the new face. | The face in the middle: `<face>_inset`, or the `name`. The ring's pieces: `<middle>_rim_<side>` (`window_rim_top`). |
+| `move`, `turn`, `scale` | Keeps its name. | None. |
 
 The side words (`top`, `left`, `front`...) are passed down from the
 box's faces to the faces the changes make, not measured, so a turned

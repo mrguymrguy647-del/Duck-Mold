@@ -36,6 +36,13 @@ pub enum Mode {
 pub enum FaceTool {
     /// One arrow out of the faces: pull them out or push them in (T).
     Pull,
+    /// Three arrows: slide the faces; the faces round them stretch (G).
+    Move,
+    /// Three rings: turn the faces about their middle (R).
+    Turn,
+    /// Three boxes and one in the middle: make the faces bigger or
+    /// smaller (S).
+    Scale,
     /// A knob on an edge: drag it in to make a smaller face inside (I).
     Inset,
 }

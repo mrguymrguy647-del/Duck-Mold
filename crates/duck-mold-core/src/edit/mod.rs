@@ -325,10 +325,45 @@ pub enum Edit {
         part: String,
         /// Which change, counted from 1.
         number: usize,
-        /// Its new `by`.
+        /// Its new `by`, for a change that takes one number.
         by: Option<f64>,
+        /// Its new `by`, for one that takes three (a move, a turn, a
+        /// scale).
+        by_xyz: Option<[f64; 3]>,
         /// Its new `at` (a cut's).
         at: Option<f64>,
+    },
+    /// Moves faces of a box by x, y and z metres, in its own directions:
+    /// a `move` in its `changes`. Right after a move of the same faces,
+    /// it adds to that one instead.
+    MoveFace {
+        /// The part.
+        part: String,
+        /// The faces, by name.
+        faces: Vec<String>,
+        /// How far along x, y and z.
+        by: [f64; 3],
+    },
+    /// Turns faces of a box about their middle: a `turn`. Right after a
+    /// turn of the same faces, it adds to that one.
+    TurnFace {
+        /// The part.
+        part: String,
+        /// The faces, by name.
+        faces: Vec<String>,
+        /// Degrees around x, y and z.
+        by: [f64; 3],
+    },
+    /// Makes faces of a box bigger or smaller about their middle: a
+    /// `scale`. Right after a scale of the same faces, it multiplies
+    /// that one.
+    ScaleFace {
+        /// The part.
+        part: String,
+        /// The faces, by name.
+        faces: Vec<String>,
+        /// How much along x, y and z: 1 is as they are.
+        by: [f64; 3],
     },
     /// Takes one of a box's changes away, or all of them.
     RemoveChange {
@@ -355,7 +390,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 19] = [
+    pub const COMMANDS: [&'static str; 22] = [
         "add",
         "remove",
         "rename",
@@ -375,6 +410,9 @@ impl Edit {
         "inset",
         "set-change",
         "remove-change",
+        "move-face",
+        "turn-face",
+        "scale-face",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -399,6 +437,9 @@ impl Edit {
             Edit::Inset { .. } => "inset",
             Edit::SetChange { .. } => "set-change",
             Edit::RemoveChange { .. } => "remove-change",
+            Edit::MoveFace { .. } => "move-face",
+            Edit::TurnFace { .. } => "turn-face",
+            Edit::ScaleFace { .. } => "scale-face",
         }
     }
 }
@@ -1914,6 +1955,7 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             part,
             number,
             by,
+            by_xyz,
             at,
         } => {
             let (found, list, count, definition) = changes_of(doc, part)?;
@@ -1930,13 +1972,24 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 )
                 .got(*number));
             }
-            if by.is_none() && at.is_none() {
+            if by.is_none() && by_xyz.is_none() && at.is_none() {
                 return Err(problem(Code::MissingField, "nothing to set: give --by"));
             }
             let change = with(&list, Step::Index(number - 1));
             let words = change_words(doc, &change);
             const ORDER: [&str; 3] = ["by", "at", "name"];
             let mut said = Vec::new();
+            if let Some(by) = by_xyz {
+                if doc.entry(&change, "by").is_none() {
+                    return Err(problem(
+                        Code::UnknownField,
+                        format!("change {number} of \"{part}\" ({words}) has no \"by\""),
+                    ));
+                }
+                let value = Val::three(by.map(|number| tidy_number(number, 4)));
+                said.push(format!("by {}", value.write(doc.syntax)));
+                doc.set_field(&change, "by", &value, &ORDER).map_err(cant)?;
+            }
             for (field, value) in [("by", by), ("at", at)] {
                 let Some(value) = value else {
                     continue;
@@ -1998,6 +2051,37 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                     format!("took away change {number} of \"{part}\" ({words})")
                 }
             };
+            if let Some(definition) = definition {
+                summary.push_str(&format!(" (in the definition \"{definition}\")"));
+            }
+            Ok(Outcome {
+                summary,
+                touched: Some(found),
+            })
+        }
+        Edit::MoveFace { part, faces, by }
+        | Edit::TurnFace { part, faces, by }
+        | Edit::ScaleFace { part, faces, by } => {
+            let (word, together, doing, done) = match edit {
+                Edit::MoveFace { .. } => ("move", Together::Add, "moved", "moved"),
+                Edit::TurnFace { .. } => ("turn", Together::Add, "turned", "turned"),
+                _ => ("scale", Together::Times, "scaled", "scaled"),
+            };
+            let one = matches!(together, Together::Times);
+            let (found, definition, joined) = add_or_join(doc, part, word, faces, *by, together)?;
+            let names = crate::shaping::quoted(faces);
+            let mut summary = format!(
+                "{doing} {names} of \"{part}\" by {}",
+                amount_words(*by, one)
+            );
+            match joined {
+                None => {}
+                Some(Some(all)) => summary.push_str(&format!(
+                    " ({done} by {} in all, in one change)",
+                    amount_words(all, one)
+                )),
+                Some(None) => summary.push_str(": back where it was, so the change is gone"),
+            }
             if let Some(definition) = definition {
                 summary.push_str(&format!(" (in the definition \"{definition}\")"));
             }
@@ -2099,6 +2183,131 @@ fn add_change(
         None => found,
     };
     Ok((found, definition))
+}
+
+/// How a move, a turn or a scale of the same faces right after another
+/// is put together with it.
+#[derive(Clone, Copy)]
+enum Together {
+    /// Moves and turns add up.
+    Add,
+    /// Scales multiply.
+    Times,
+}
+
+/// Adds a move, turn or scale (`word`) of `faces` by `by` to a part's
+/// changes, or, when the last change is the same of the same faces,
+/// puts the two together in that one. Gives where it went, the
+/// definition, and the amount in all if it was put together (`None`:
+/// a new line; `Some(None)`: the two cancel out and the line went).
+#[allow(clippy::type_complexity)]
+fn add_or_join(
+    doc: &mut Doc,
+    part: &str,
+    word: &str,
+    faces: &[String],
+    by: [f64; 3],
+    together: Together,
+) -> Result<(Found, Option<String>, Option<Option<[f64; 3]>>), Stop> {
+    let faces_written = faces_val(faces)?;
+    let found = find(doc, part)?;
+    let (table, definition) = making(doc, &found);
+    let list = with(&table, key("changes"));
+    let count = doc.items(&list).map_or(0, <[_]>::len);
+    let is_same = |doc: &Doc| -> Option<[f64; 3]> {
+        let last = with(&list, Step::Index(count.checked_sub(1)?));
+        let entries = doc.entries(&last)?;
+        if entries.len() != 2
+            || entries
+                .iter()
+                .any(|entry| entry.key != word && entry.key != "by")
+        {
+            return None;
+        }
+        let written = &doc.entry(&last, word)?.node.value;
+        let same_faces = match (written, &faces_written) {
+            (Value::Str(one), Val::Str(other)) => one == other,
+            (Value::Array(items), Val::List(others)) => {
+                items.len() == others.len()
+                    && items.iter().zip(others).all(|(item, other)| {
+                        matches!((&item.value, other), (Value::Str(a), Val::Str(b)) if a == b)
+                    })
+            }
+            _ => false,
+        };
+        if !same_faces {
+            return None;
+        }
+        match &doc.entry(&last, "by")?.node.value {
+            Value::Array(items) if items.len() == 3 => {
+                let numbers: Vec<f64> = items
+                    .iter()
+                    .filter_map(|item| item.value.as_number())
+                    .collect();
+                <[f64; 3]>::try_from(numbers).ok()
+            }
+            other => other.as_number().map(|all| [all; 3]),
+        }
+    };
+    let found_for = |definition: &Option<String>, found: Found| match definition {
+        Some(definition) => Found {
+            definition: Some(definition.clone()),
+            inside: String::new(),
+            ..found
+        },
+        None => found,
+    };
+    if let Some(was) = is_same(doc) {
+        let mut all = [0.0; 3];
+        for at in 0..3 {
+            all[at] = tidy_number(
+                match together {
+                    Together::Add => was[at] + by[at],
+                    Together::Times => was[at] * by[at],
+                },
+                4,
+            );
+        }
+        let last = with(&list, Step::Index(count - 1));
+        let nothing = match together {
+            Together::Add => all == [0.0; 3],
+            Together::Times => all == [1.0; 3],
+        };
+        if nothing {
+            // Back where it started: the line goes.
+            if count == 1 {
+                doc.remove_field(&table, "changes").map_err(cant)?;
+            } else {
+                doc.remove_item(&list, count - 1).map_err(cant)?;
+            }
+            return Ok((found_for(&definition, found), definition, Some(None)));
+        }
+        let value = match together {
+            Together::Times if all[0] == all[1] && all[1] == all[2] => Val::Num(all[0]),
+            _ => Val::three(all),
+        };
+        doc.set_field(&last, "by", &value, &["by"]).map_err(cant)?;
+        return Ok((found_for(&definition, found), definition, Some(Some(all))));
+    }
+    let value = match together {
+        Together::Times if by[0] == by[1] && by[1] == by[2] => Val::Num(tidy_number(by[0], 4)),
+        _ => Val::three(by.map(|number| tidy_number(number, 4))),
+    };
+    let (found, definition) = add_change(
+        doc,
+        part,
+        vec![(word.to_owned(), faces_written), ("by".to_owned(), value)],
+    )?;
+    Ok((found, definition, None))
+}
+
+/// `[0, 0.2, 0]`, or one number for three alike when `one` is set.
+fn amount_words(by: [f64; 3], one: bool) -> String {
+    if one && by[0] == by[1] && by[1] == by[2] {
+        return doc::number_text(by[0]);
+    }
+    let [x, y, z] = by.map(doc::number_text);
+    format!("[{x}, {y}, {z}]")
 }
 
 /// Where a part's changes are written, and how many there are, with the
@@ -2319,8 +2528,10 @@ pub struct ChangeFact {
     pub word: String,
     /// The faces it names.
     pub faces: Vec<String>,
-    /// Its `by`.
+    /// Its `by`, when it is one number.
     pub by: Option<f64>,
+    /// Its `by`, when it is three: a move, a turn, a scale each way.
+    pub by_xyz: Option<[f64; 3]>,
     /// The name it gives what it makes, if it has one.
     pub name: Option<String>,
 }
@@ -2502,6 +2713,7 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
                     word: action.key.clone(),
                     faces,
                     by: number(item, "by"),
+                    by_xyz: three(item, "by"),
                     name: text_of(item, "name").map(str::to_owned),
                 })
             })
@@ -2581,7 +2793,10 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::Pull { part, .. }
         | Edit::Inset { part, .. }
         | Edit::SetChange { part, .. }
-        | Edit::RemoveChange { part, .. } => part,
+        | Edit::RemoveChange { part, .. }
+        | Edit::MoveFace { part, .. }
+        | Edit::TurnFace { part, .. }
+        | Edit::ScaleFace { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }
         | Edit::RemoveSocket { socket } => socket.rsplit_once('.').map_or("", |(part, _)| part),

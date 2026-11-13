@@ -3491,6 +3491,7 @@ fn the_inset_knob_makes_a_face_inside_and_selects_it() {
             part: "crate".into(),
             number: 2,
             by: Some(-0.05),
+            by_xyz: None,
             at: None,
         })
         .unwrap();
@@ -3513,4 +3514,95 @@ fn the_inset_knob_makes_a_face_inside_and_selects_it() {
     // Its faces are gone, so none is selected; the box's own still are.
     assert!(studio.selected_faces().is_empty());
     assert_eq!(studio.mode(), Mode::Face);
+}
+
+// ---- Phase 4, step 3: moving, turning and scaling a face --------------------------
+
+#[test]
+fn a_face_is_moved_turned_and_scaled_and_drags_of_one_kind_make_one_line() {
+    let (recipe, mut studio) = boxes("face_move");
+    studio.face_mode().unwrap();
+    let top = studio.face_point("top").unwrap();
+    studio.click_face(VIEW, top, false);
+
+    // Move: three arrows along the crate's own directions.
+    studio.face_tool = FaceTool::Move;
+    assert_eq!(
+        studio.grips(),
+        [Grip::Arrow(0), Grip::Arrow(1), Grip::Arrow(2)]
+    );
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + vec3(0.1, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("x 0.1 m"));
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Moved \"top\" of \"crate\" by [0.1, 0, 0]");
+    // A second drag of the same face adds to the same line.
+    pull(
+        &mut studio,
+        Grip::Arrow(1),
+        |from| from + vec3(0.0, 0.2, 0.0),
+        false,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert!(
+        said.ends_with("(moved by [0.1, 0.2, 0] in all, in one change)"),
+        "{said}"
+    );
+    let now = file(&recipe);
+    assert_eq!(now.matches("{ move = ").count(), 1);
+    assert!(
+        now.contains("  { move = \"top\", by = [0.1, 0.2, 0] },\n"),
+        "{now}"
+    );
+    // One step each to undo.
+    studio.undo().unwrap();
+    assert!(file(&recipe).contains("  { move = \"top\", by = [0.1, 0, 0] },\n"));
+    studio.redo().unwrap();
+
+    // Turn: three rings, 15 degrees at a time.
+    studio.face_tool = FaceTool::Turn;
+    assert_eq!(
+        studio.grips(),
+        [Grip::Ring(0), Grip::Ring(1), Grip::Ring(2)]
+    );
+    assert_eq!(studio.snap_text(), "Snap 15°  (Ctrl: off)");
+    let ring = studio.grip_at(Grip::Ring(1)).unwrap();
+    // The ring's point taken 20° round the upright line through the
+    // top's middle: it snaps to 15°.
+    let centre = {
+        let part = studio.part("crate").unwrap();
+        let bounds = part.bounds.unwrap();
+        vec3(bounds.center().x, bounds.max.y, bounds.center().z) + studio.offset()
+    };
+    let arm = ring - centre;
+    let turned = Mat3::around(Vec3::UP, 20.0) * arm;
+    pull(&mut studio, Grip::Ring(1), |_| centre + turned, false);
+    let label = studio.drag_label().unwrap().to_owned();
+    assert!(label == "15°" || label == "-15°", "{label}");
+    studio.release().unwrap().unwrap();
+    assert!(
+        file(&recipe).contains("{ turn = \"top\", by = [0, "),
+        "{}",
+        file(&recipe)
+    );
+
+    // Scale: the middle box makes the face smaller all round.
+    studio.face_tool = FaceTool::Scale;
+    assert_eq!(
+        studio.grips(),
+        [Grip::Box(0), Grip::Box(1), Grip::Box(2), Grip::Middle]
+    );
+    let middle = studio.grip_point(Grip::Middle).unwrap();
+    assert_eq!(studio.grab(VIEW, middle), Some(Grip::Middle));
+    studio.drag(VIEW, (middle.0 - 30.0, middle.1 + 30.0), false);
+    assert_eq!(studio.drag_label(), Some("x 0.5"));
+    studio.release().unwrap().unwrap();
+    assert!(file(&recipe).contains("  { scale = \"top\", by = 0.5 },\n"));
+    check_picture("studio-face-scaled", &studio.picture(VIEW.0, VIEW.1));
+    // Every name is as it was, and the top still selected.
+    assert_eq!(studio.selected_faces(), ["top"]);
 }

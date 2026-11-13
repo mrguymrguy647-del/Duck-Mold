@@ -632,7 +632,10 @@ pub(crate) const PART_FIELDS: [&str; 27] = [
 ];
 
 /// The fields a change can have.
-const CHANGE_FIELDS: [&str; 4] = ["pull", "inset", "by", "name"];
+const CHANGE_FIELDS: [&str; 7] = ["pull", "inset", "move", "turn", "scale", "by", "name"];
+
+/// The most degrees a turn can be, either way.
+const TURN_RANGE: (f64, f64) = (-36_000.0, 36_000.0);
 
 /// "a cylinder", "an arch".
 fn a_shape(name: &str) -> String {
@@ -1459,7 +1462,7 @@ impl Decoder<'_> {
                     Code::MissingField,
                     path,
                     fields.pos,
-                    "a change needs one of \"pull\" or \"inset\" to say what it does, like { pull = \"top\", by = 0.5 }",
+                    "a change needs one of \"pull\", \"inset\", \"move\", \"turn\" or \"scale\" to say what it does, like { pull = \"top\", by = 0.5 }",
                 );
                 self.finish(fields, &CHANGE_FIELDS);
                 return None;
@@ -1486,26 +1489,88 @@ impl Decoder<'_> {
         };
         let word = action.key.as_str();
         let faces = self.face_list(&action.node, &fields.sub(word), word);
-        let by = match fields.take("by") {
-            Some(entry) => self.change_amount(entry, &fields.sub("by"), word),
-            None => {
+        let by_path = fields.sub("by");
+        let by_entry = fields.take("by");
+        if by_entry.is_none() {
+            let example = match word {
+                "pull" => "0.5",
+                "inset" => "0.1",
+                "move" => "[0, 0.2, 0]",
+                "turn" => "[0, 15, 0]",
+                _ => "0.5",
+            };
+            let what = match word {
+                "move" => "how far along x, y and z, in metres",
+                "turn" => "degrees around x, y and z",
+                "scale" => "how much bigger or smaller: one number, or one for each of x, y and z",
+                _ => "how far, in metres",
+            };
+            let message = format!(
+                "a {word} needs \"by\": {what}, like {{ {word} = \"top\", by = {example} }}"
+            );
+            self.error(Code::MissingField, path, fields.pos, message);
+        }
+        let name = match fields.take("name") {
+            Some(entry) if matches!(word, "move" | "turn" | "scale") => {
                 let message = format!(
-                    "a {word} needs \"by\": how far, in metres, like {{ {word} = \"top\", by = {} }}",
-                    if word == "pull" { "0.5" } else { "0.1" }
+                    "a {word} makes no new faces, so it has nothing to name: remove \"name\""
                 );
-                self.error(Code::MissingField, path, fields.pos, message);
+                self.error(Code::Conflict, &fields.sub("name"), entry.key_pos, message);
                 None
             }
+            Some(entry) => self.name(&entry.node, &fields.sub("name")),
+            None => None,
         };
-        let name = fields
-            .take("name")
-            .and_then(|entry| self.name(&entry.node, &fields.sub("name")));
         self.finish(fields, &CHANGE_FIELDS);
-        let (faces, by) = (faces?, by?);
-        Some(match word {
-            "pull" => Change::Pull { faces, by, name },
-            _ => Change::Inset { faces, by, name },
-        })
+        let faces = faces?;
+        let by = by_entry?;
+        let by_pos = by.node.pos;
+        match word {
+            "pull" | "inset" => {
+                let by = self.change_amount(by, &by_path, word)?;
+                Some(if word == "pull" {
+                    Change::Pull { faces, by, name }
+                } else {
+                    Change::Inset { faces, by, name }
+                })
+            }
+            "move" => {
+                let by = self.three(&by.node, &by_path, MOVE_RANGE, "[0, 0.2, 0]")?;
+                self.changes_something(by != [0.0; 3], &by_path, by_pos, word)?;
+                Some(Change::Move { faces, by })
+            }
+            "turn" => {
+                let by = self.three(&by.node, &by_path, TURN_RANGE, "[0, 15, 0]")?;
+                self.changes_something(by != [0.0; 3], &by_path, by_pos, word)?;
+                Some(Change::Turn { faces, by })
+            }
+            _ => {
+                let by_node = &by.node;
+                let by = match &by_node.value {
+                    Value::Array(_) => self.three(by_node, &by_path, SCALE_RANGE, "[1, 0.5, 1]")?,
+                    _ => [self.ranged(by_node, &by_path, SCALE_RANGE, "0.5")?; 3],
+                };
+                self.changes_something(by != [1.0; 3], &by_path, by_node.pos, word)?;
+                Some(Change::Scale { faces, by })
+            }
+        }
+    }
+
+    /// A move, turn or scale that changes nothing is a mistake: it is
+    /// surely not what was meant.
+    fn changes_something(&mut self, does: bool, path: &str, pos: Pos, word: &str) -> Option<()> {
+        if does {
+            return Some(());
+        }
+        let message = match word {
+            "scale" => {
+                "a scale of 1 changes nothing: above 1 makes the faces bigger, below 1 smaller"
+            }
+            "turn" => "a turn of [0, 0, 0] changes nothing: give the degrees around x, y and z",
+            _ => "a move of [0, 0, 0] changes nothing: give how far along x, y and z",
+        };
+        self.error(Code::OutOfRange, path, pos, message);
+        None
     }
 
     /// A change's `by`, checked for what the change can take.
