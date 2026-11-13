@@ -2325,3 +2325,119 @@ fn a_part_from_the_library_or_a_definition_stands_free_too() {
     let mut looking = Studio::open(&recipe, true);
     assert!(looking.add_free(&Made::Shape("box".into())).is_err());
 }
+
+// ---- the newer shapes ----------------------------------------------------------
+
+#[test]
+fn every_shape_can_be_added_at_any_size() {
+    use duck_mold_core::recipe::Shape;
+    // A big model and a tiny one: a new shape's sizes must fit each
+    // other whatever they are measured from.
+    for (test, size) in [("shapes_big", 3.0), ("shapes_tiny", 0.04)] {
+        let recipe = folder(test).join("one.toml");
+        let start = format!(
+            "version = 0\n[palette]\nstone = \"#C0C0C0\"\n[[parts]]\nname = \"block\"\nshape = \"box\"\nsize = [{size}, {size}, {size}]\ncolor = \"stone\"\n"
+        );
+        std::fs::write(&recipe, &start).unwrap();
+        let mut studio = Studio::open(&recipe, false);
+        studio.hover(VIEW, None);
+        for shape in Shape::NAMES {
+            // Standing free on the ground.
+            let said = studio.add_free(&Made::Shape(shape.into()));
+            assert!(said.is_ok(), "{shape} at {size}: {said:?}");
+            assert!(!studio.has_mistakes(), "{shape}: {:?}", studio.problems());
+            assert_eq!(studio.selected(), Some(shape));
+            let new = studio.part(shape).unwrap().bounds.unwrap().size();
+            let biggest = new.x.max(new.y).max(new.z);
+            assert!(
+                biggest > size * 0.3 && biggest < size * 0.7,
+                "{shape} is {biggest} beside {size}"
+            );
+            studio.undo().unwrap();
+            // And joined to the block's top.
+            let said = studio.add_to_socket("block", "top", &Made::Shape(shape.into()));
+            assert!(said.is_ok(), "{shape} at {size}: {said:?}");
+            assert!(!studio.has_mistakes(), "{shape}: {:?}", studio.problems());
+            studio.undo().unwrap();
+            assert_eq!(file(&recipe), start);
+        }
+    }
+}
+
+#[test]
+fn a_ring_and_a_pill_have_knobs_for_their_sizes() {
+    let recipe = folder("size_newer").join("newer.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\n[[parts]]\nname = \"ring\"\nshape = \"torus\"\nradius = 0.5\ntube = 0.1\n\n[[parts]]\nname = \"pill\"\nshape = \"capsule\"\nradius = 0.2\nheight = 1\nmove = [2, 0.4, 0]\n\n[[parts]]\nname = \"steps\"\nshape = \"stairs\"\nsize = [1, 1, 1]\nmove = [-2, 0.4, 0]\n",
+    )
+    .unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    studio.tool = Tool::Size;
+
+    // A ring: one knob on its outside for how big it is, one on top for
+    // how thick.
+    assert!(studio.select(Some("ring")));
+    assert_eq!(studio.grips(), [Grip::Knob(0), Grip::Knob(1)]);
+    let outside = studio.grip_at(Grip::Knob(0)).unwrap() - studio.offset();
+    let ring = studio.part("ring").unwrap().bounds.unwrap();
+    assert!((outside.x - ring.max.x).abs() < 1e-9, "{outside:?}");
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.2, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("radius 0.7 m"));
+    studio.release().unwrap().unwrap();
+    pull(
+        &mut studio,
+        Grip::Knob(1),
+        |from| from + vec3(0.0, 0.1, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("tube 0.2 m"));
+    assert_eq!(studio.release().unwrap().unwrap(), "Set \"ring\": tube 0.2");
+    assert!(file(&recipe).contains("radius = 0.7\ntube = 0.2\n"));
+    // Thicker than the hole is wide can't be: the drag says why, and
+    // letting go changes nothing.
+    let before = file(&recipe);
+    pull(
+        &mut studio,
+        Grip::Knob(1),
+        |from| from + vec3(0.0, 0.6, 0.0),
+        false,
+    );
+    let refused = studio.release().unwrap();
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(file(&recipe), before);
+
+    // A pill: top, bottom and side, like a cylinder.
+    assert!(studio.select(Some("pill")));
+    assert_eq!(
+        studio.grips(),
+        [Grip::Knob(0), Grip::Knob(1), Grip::Knob(2)]
+    );
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.0, 0.5, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("height 1.5 m"));
+    studio.release().unwrap().unwrap();
+
+    // Stairs are measured like a box: six knobs.
+    assert!(studio.select(Some("steps")));
+    assert_eq!(studio.grips(), (0..6).map(Grip::Knob).collect::<Vec<_>>());
+    pull(
+        &mut studio,
+        Grip::Knob(4),
+        |from| from + vec3(0.0, 0.0, 1.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("depth 2 m"));
+    studio.release().unwrap().unwrap();
+    assert!(file(&recipe).contains("size = [1, 1, 2]"));
+}

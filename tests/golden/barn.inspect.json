@@ -1,0 +1,259 @@
+{
+  "ok": true,
+  "summary": "barn: 4.40 x 3.60 x 4.93 m, 336 triangles, 7 parts, 5 colours, rests on the ground, nothing floating, 1 overlap",
+  "source": "examples/barn.toml",
+  "name": "barn",
+  "size": [
+    4.4,
+    3.6,
+    4.93
+  ],
+  "bounds": {
+    "min": [
+      -2.2,
+      0.0,
+      -2.465
+    ],
+    "max": [
+      2.2,
+      3.6,
+      2.465
+    ]
+  },
+  "triangles": 336,
+  "vertices": 684,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "red",
+      "hex": "#B23A2E",
+      "triangles": 14
+    },
+    {
+      "name": "white",
+      "hex": "#F1ECE0",
+      "triangles": 12
+    },
+    {
+      "name": "roof",
+      "hex": "#5B5F66",
+      "triangles": 230
+    },
+    {
+      "name": "door",
+      "hex": "#7A4A2A",
+      "triangles": 20
+    },
+    {
+      "name": "steel",
+      "hex": "#B9C0C6",
+      "triangles": 60
+    }
+  ],
+  "parts": [
+    {
+      "name": "walls",
+      "kind": "box",
+      "triangles": 12,
+      "size": [
+        3.0,
+        2.0,
+        4.0
+      ],
+      "bounds": {
+        "min": [
+          -2.0,
+          0.0,
+          -2.315
+        ],
+        "max": [
+          1.0,
+          2.0,
+          1.685
+        ]
+      },
+      "colors": [
+        "red"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "roof",
+      "kind": "prism",
+      "triangles": 8,
+      "size": [
+        3.4,
+        1.2,
+        4.3
+      ],
+      "bounds": {
+        "min": [
+          -2.2,
+          2.0,
+          -2.465
+        ],
+        "max": [
+          1.2,
+          3.2,
+          1.835
+        ]
+      },
+      "colors": [
+        "red",
+        "roof"
+      ],
+      "attached_to": "walls.top",
+      "parts": []
+    },
+    {
+      "name": "door",
+      "kind": "box",
+      "triangles": 12,
+      "size": [
+        1.3,
+        1.5,
+        0.08
+      ],
+      "bounds": {
+        "min": [
+          -1.15,
+          0.0,
+          1.685
+        ],
+        "max": [
+          0.15,
+          1.5,
+          1.765
+        ]
+      },
+      "colors": [
+        "door"
+      ],
+      "attached_to": "walls.door",
+      "parts": []
+    },
+    {
+      "name": "loft_window",
+      "kind": "box",
+      "triangles": 12,
+      "size": [
+        0.6,
+        0.4,
+        0.06
+      ],
+      "bounds": {
+        "min": [
+          -0.8,
+          1.55,
+          1.685
+        ],
+        "max": [
+          -0.2,
+          1.95,
+          1.745
+        ]
+      },
+      "colors": [
+        "white"
+      ],
+      "attached_to": "walls.loft",
+      "parts": []
+    },
+    {
+      "name": "ramp",
+      "kind": "wedge",
+      "triangles": 8,
+      "size": [
+        1.3,
+        0.12,
+        0.7
+      ],
+      "bounds": {
+        "min": [
+          -1.15,
+          0.0,
+          1.765
+        ],
+        "max": [
+          0.15,
+          0.12,
+          2.465
+        ]
+      },
+      "colors": [
+        "door"
+      ],
+      "attached_to": "door.ramp",
+      "parts": []
+    },
+    {
+      "name": "silo",
+      "kind": "cylinder",
+      "triangles": 60,
+      "size": [
+        1.2,
+        3.0,
+        1.2
+      ],
+      "bounds": {
+        "min": [
+          1.0,
+          0.0,
+          -1.915
+        ],
+        "max": [
+          2.2,
+          3.0,
+          -0.715
+        ]
+      },
+      "colors": [
+        "steel"
+      ],
+      "attached_to": "walls.silo",
+      "parts": []
+    },
+    {
+      "name": "silo_cap",
+      "kind": "capsule",
+      "triangles": 224,
+      "size": [
+        1.2,
+        1.2,
+        1.2
+      ],
+      "bounds": {
+        "min": [
+          1.0,
+          2.4,
+          -1.915
+        ],
+        "max": [
+          2.2,
+          3.6,
+          -0.715
+        ]
+      },
+      "colors": [
+        "roof"
+      ],
+      "attached_to": "silo.top",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "silo_cap",
+      "b": "silo",
+      "depth": 0.6,
+      "hidden": false
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

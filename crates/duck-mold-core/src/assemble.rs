@@ -292,7 +292,7 @@ impl Body {
             .cloned()
     }
 
-    /// Whether it is one of the five built-in shapes.
+    /// Whether it is one of the built-in shapes.
     fn is_shape(&self) -> bool {
         !self.broken && self.nodes.is_empty() && Shape::NAMES.contains(&self.kind.shape.as_str())
     }
@@ -320,6 +320,11 @@ impl Body {
             return Landing::Already;
         };
         if side == Side::Center || self.whole || self.broken {
+            return Landing::Already;
+        }
+        // An arch stands on its two feet: what is under it is the ground
+        // between them, not the top of its doorway.
+        if side == Side::Bottom && self.is_shape() && self.kind.shape == "arch" {
             return Landing::Already;
         }
         let size = bounds.size();
@@ -769,17 +774,17 @@ impl Assembler<'_> {
     fn source(&mut self, part: &PartDef, scope: &Scope<'_>) -> Body {
         match &part.source {
             Source::Shape(shape) => {
-                let faces = shapes::build(shape);
+                let faces = shapes::build_trimmed(shape, &part.trim);
                 if !self.count(&faces, &part.loc) {
                     return Body::broken();
                 }
-                let words: Vec<String> = shapes::face_words(shape)
+                let words: Vec<String> = shapes::face_words(shape, &part.trim)
                     .into_iter()
                     .map(str::to_owned)
                     .collect();
                 let colors = self.paint_faces(
                     &faces,
-                    &|name| shapes::face_groups(shape, name),
+                    &|name| shapes::face_groups(shape, &part.trim, name),
                     &words,
                     &|_| false,
                 );

@@ -163,6 +163,48 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "add-free"));
     }
 
+    // The newer shapes: an arch with its sizes in the panel and the Size
+    // tool's knobs on it; a tower's tapered, bevelled shaft; and a ring
+    // with a knob for how big it is and one for how thick.
+    {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("gate.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("arch"));
+        screen.key_press(egui::Key::T);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "shape-arch"));
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("left_tower/shaft"));
+        screen.key_press(egui::Key::G);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "shape-bevel-taper"));
+    }
+    {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("doughnut.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("dough"));
+        screen.key_press(egui::Key::T);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "shape-torus"));
+    }
+
     // A recipe saved with a mistake: the problems, and the last good
     // model still up.
     {

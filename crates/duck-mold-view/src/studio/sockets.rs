@@ -94,15 +94,35 @@ fn clean_name(base: &str) -> String {
 }
 
 /// The sizes of a new shape about `across` big each way, to two figures.
+/// Every size is given, so that none is left at a default that doesn't
+/// fit the others.
 fn sizes_for(shape: &str, across: f64) -> Sizes {
     let across = across.max(0.01);
     let unit = 10f64.powf(across.log10().floor() - 1.0);
-    let across = ((across / unit).round() * unit * 1e6).round() / 1e6;
+    let tidy = |number: f64| ((number / unit).round().max(1.0) * unit * 1e6).round() / 1e6;
+    let across = tidy(across);
     let radius = ((across / 2.0) * 1e6).round() / 1e6;
     let mut sizes = Sizes::default();
     match shape {
-        "box" | "wedge" => sizes.size = Some([across; 3]),
+        "box" | "wedge" | "pyramid" | "prism" | "stairs" => sizes.size = Some([across; 3]),
+        "arch" => {
+            sizes.size = Some([across, across, tidy(across * 0.25)]);
+            sizes.wall = Some(tidy(across * 0.15));
+        }
         "sphere" => sizes.radius = Some(radius),
+        "capsule" => {
+            sizes.radius = Some(tidy(across * 0.25));
+            sizes.height = Some(across);
+        }
+        "torus" => {
+            sizes.radius = Some(tidy(across * 0.35));
+            sizes.tube = Some(tidy(across * 0.15));
+        }
+        "tube" => {
+            sizes.radius = Some(radius);
+            sizes.wall = Some(tidy(across * 0.1));
+            sizes.height = Some(across);
+        }
         _ => {
             sizes.radius = Some(radius);
             sizes.height = Some(across);
@@ -510,7 +530,7 @@ impl Studio {
         self.release()
     }
 
-    /// What can be added to a socket beside the five shapes: the parts
+    /// What can be added to a socket beside the built-in shapes: the parts
     /// the recipe defines.
     pub fn definitions(&self) -> Vec<String> {
         duck_mold_core::source::Syntax::from_path(&self.path)

@@ -21,7 +21,8 @@ pub enum Change {
         /// stands free.
         #[arg(long, value_name = "PART.SOCKET")]
         to: Option<String>,
-        /// One of the five shapes: box, cylinder, sphere, cone, wedge.
+        /// A built-in shape: box, cylinder, sphere, cone, wedge, capsule,
+        /// torus, tube, pyramid, prism, stairs or arch.
         #[arg(long, group = "made")]
         shape: Option<String>,
         /// A part the recipe defines.
@@ -190,15 +191,35 @@ pub struct SizeOptions {
     /// Width, height and depth of a box or a wedge: x,y,z.
     #[arg(long, value_name = "X,Y,Z")]
     size: Option<String>,
-    /// The radius of a cylinder, a sphere or a cone.
+    /// The radius of a round shape.
     #[arg(long)]
     radius: Option<f64>,
-    /// The height of a cylinder or a cone.
+    /// How thick a torus's ring is: from its middle to its surface.
+    #[arg(long)]
+    tube: Option<f64>,
+    /// How thick the wall of a tube or an arch is.
+    #[arg(long)]
+    wall: Option<f64>,
+    /// The height of a cylinder, a cone, a capsule or a tube.
     #[arg(long)]
     height: Option<f64>,
     /// How many flat sides a round shape has.
     #[arg(long)]
     segments: Option<u32>,
+    /// How many steps stairs have.
+    #[arg(long)]
+    steps: Option<u32>,
+    /// How much to cut off the edges of a box or a cylinder, in metres.
+    /// 0 makes them sharp again.
+    #[arg(long)]
+    bevel: Option<f64>,
+    /// How many flat cuts go round each cut edge: 1 to 4.
+    #[arg(long, value_name = "COUNT")]
+    bevel_steps: Option<u32>,
+    /// How wide the top of a box, a cylinder or a tube is, as a share of
+    /// its bottom: one number, or x,z. 1 makes the sides straight again.
+    #[arg(long, value_name = "N or X,Z")]
+    taper: Option<String>,
 }
 
 /// `1,2,0.5` as three numbers.
@@ -221,8 +242,30 @@ impl SizeOptions {
                 .map(|size| three("--size", size))
                 .transpose()?,
             radius: self.radius,
+            tube: self.tube,
+            wall: self.wall,
             height: self.height,
             segments: self.segments,
+            steps: self.steps,
+            bevel: self.bevel,
+            bevel_steps: self.bevel_steps,
+            taper: self
+                .taper
+                .as_deref()
+                .map(|written| {
+                    let numbers: Vec<f64> = written
+                        .split(',')
+                        .filter_map(|number| number.trim().parse().ok())
+                        .collect();
+                    match numbers.as_slice() {
+                        [all] => Ok([*all; 2]),
+                        [across, deep] => Ok([*across, *deep]),
+                        _ => Err(format!(
+                            "--taper needs one number, like 0.5, or two, like 0.5,1, not \"{written}\""
+                        )),
+                    }
+                })
+                .transpose()?,
         })
     }
 }

@@ -1,0 +1,195 @@
+{
+  "ok": true,
+  "summary": "mug: 1.236 x 0.71 x 1.20 m, 820 triangles, 5 parts, 3 colours, rests on the ground, nothing floating, 1 overlap",
+  "source": "examples/mug.toml",
+  "name": "mug",
+  "size": [
+    1.236062,
+    0.71,
+    1.2
+  ],
+  "bounds": {
+    "min": [
+      -0.618031,
+      0.0,
+      -0.6
+    ],
+    "max": [
+      0.618031,
+      0.71,
+      0.6
+    ]
+  },
+  "triangles": 820,
+  "vertices": 1520,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "china",
+      "hex": "#F2EEE4",
+      "triangles": 284
+    },
+    {
+      "name": "blue",
+      "hex": "#2F6FB5",
+      "triangles": 444
+    },
+    {
+      "name": "coffee",
+      "hex": "#4A2C17",
+      "triangles": 92
+    }
+  ],
+  "parts": [
+    {
+      "name": "saucer",
+      "kind": "cylinder",
+      "triangles": 188,
+      "size": [
+        1.2,
+        0.05,
+        1.2
+      ],
+      "bounds": {
+        "min": [
+          -0.618031,
+          0.0,
+          -0.6
+        ],
+        "max": [
+          0.581969,
+          0.05,
+          0.6
+        ]
+      },
+      "colors": [
+        "china"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "base",
+      "kind": "cylinder",
+      "triangles": 92,
+      "size": [
+        0.6,
+        0.04,
+        0.6
+      ],
+      "bounds": {
+        "min": [
+          -0.318031,
+          0.05,
+          -0.3
+        ],
+        "max": [
+          0.281969,
+          0.09,
+          0.3
+        ]
+      },
+      "colors": [
+        "blue"
+      ],
+      "attached_to": "saucer.top",
+      "parts": []
+    },
+    {
+      "name": "cup",
+      "kind": "tube",
+      "triangles": 192,
+      "size": [
+        0.75,
+        0.62,
+        0.75
+      ],
+      "bounds": {
+        "min": [
+          -0.393031,
+          0.09,
+          -0.375
+        ],
+        "max": [
+          0.356969,
+          0.71,
+          0.375
+        ]
+      },
+      "colors": [
+        "china",
+        "blue"
+      ],
+      "attached_to": "base.top",
+      "parts": []
+    },
+    {
+      "name": "handle",
+      "kind": "torus",
+      "triangles": 256,
+      "size": [
+        0.325328,
+        0.325329,
+        0.06
+      ],
+      "bounds": {
+        "min": [
+          0.292703,
+          0.236623,
+          -0.03
+        ],
+        "max": [
+          0.618031,
+          0.561952,
+          0.03
+        ]
+      },
+      "colors": [
+        "blue"
+      ],
+      "attached_to": "cup.handle",
+      "parts": []
+    },
+    {
+      "name": "coffee",
+      "kind": "cylinder",
+      "triangles": 92,
+      "size": [
+        0.6288,
+        0.5,
+        0.6288
+      ],
+      "bounds": {
+        "min": [
+          -0.332431,
+          0.09,
+          -0.3144
+        ],
+        "max": [
+          0.296369,
+          0.59,
+          0.3144
+        ]
+      },
+      "colors": [
+        "coffee"
+      ],
+      "attached_to": "base.top",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "cup",
+      "b": "handle",
+      "depth": 0.023097,
+      "hidden": false
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

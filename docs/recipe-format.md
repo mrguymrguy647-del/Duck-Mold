@@ -80,7 +80,7 @@ Each entry of `parts`, and each entry of `define`, is a part.
 
 | Field | Kind | The part is |
 |---|---|---|
-| `shape` | text | One of the built-in shapes: `box`, `cylinder`, `sphere`, `cone`, `wedge`. |
+| `shape` | text | One of the built-in shapes: `box`, `cylinder`, `sphere`, `cone`, `wedge`, `capsule`, `torus`, `tube`, `pyramid`, `prism`, `stairs`, `arch`. |
 | `use` | text | A copy of the part with that name under `define` (in the same file). |
 | `file` | text | Another recipe (`.toml`, `.json`) or a mesh (`.obj`, `.gltf`, `.glb`). The path starts from the recipe's folder. |
 | `parts` | list of parts | An assembly: a part made of parts. |
@@ -136,10 +136,43 @@ All are centred on their own middle.
 | | `height` | `1` | 0.001 to 1000 | Point at the top. |
 | | `segments` | `16` | 3 to 64 | How many flat sides. |
 | `wedge` | `size` | `[1, 1, 1]` | 0.001 to 1000 each | A ramp: full height at the back, sloping down to the front edge. |
+| `capsule` | `radius` | `0.25` | 0.001 to 1000 | A cylinder with a round end at top and bottom: a pill. |
+| | `height` | `1` | at least twice the radius | From the lowest point to the highest, round ends included. |
+| | `segments` | `16` | 3 to 64 | How many flat sides round it. |
+| `torus` | `radius` | `0.5` | 0.001 to 1000 | A ring lying flat. From the middle of the hole to the middle of the ring. |
+| | `tube` | `0.15` | less than `radius` | How thick the ring is: from its middle to its surface. It is `radius + tube` out to its outside. |
+| | `segments` | `16` | 3 to 64 | How many flat sides go round the hole. |
+| `tube` | `radius` | `0.5` | 0.001 to 1000 | An upright pipe, open at both ends. To its outside. |
+| | `wall` | `0.1` | less than `radius` | How thick its wall is. |
+| | `height` | `1` | 0.001 to 1000 | |
+| | `segments` | `16` | 3 to 64 | How many flat sides. |
+| `pyramid` | `size` | `[1, 1, 1]` | 0.001 to 1000 each | Four slopes meeting in a point above the middle. |
+| `prism` | `size` | `[1, 1, 1]` | 0.001 to 1000 each | A roof: a slope on the left and one on the right, meeting in a ridge that runs from front to back. |
+| `stairs` | `size` | `[1, 1, 1]` | 0.001 to 1000 each | Steps going up from the front edge to the full height at the back. |
+| | `steps` | `4` | 1 to 64 | How many. |
+| `arch` | `size` | `[1, 1, 1]` | 0.001 to 1000 each | A wall with a doorway through it from front to back. |
+| | `wall` | `0.2` | less than half the width, and less than the height | How thick the arch is beside the doorway and above it. |
+| | `segments` | `8` | 2 to 64 | How many flat pieces the doorway's round top has. Where the arch is too low for a half circle, the top is flatter. |
 
 A size field that the shape doesn't have (`radius` on a box) is an
 error. So is a size field on a part that isn't a built-in shape: use
-`scale` there.
+`scale` there. Sizes that don't fit each other (a capsule shorter than
+it is wide, a ring thicker than its hole) are errors that say what
+would fit.
+
+**Two options.**
+
+| Field | On | Default | Range | |
+|---|---|---|---|---|
+| `bevel` | `box`, `cylinder` | `0` | 0 to just under half the smallest side (a cylinder: its radius, and half its height) | Cuts the edges off: every edge of a box, the top and bottom rims of a cylinder. The number is how much is cut, in metres. The new faces are called `bevel`. |
+| `bevel_steps` | `box`, `cylinder` | `1` | 1 to 4 | How many flat cuts go round each edge. 1 is one flat cut; more are rounder (and more triangles). |
+| `taper` | `box`, `cylinder`, `tube` | `1` | 0.01 to 10 | How wide the top is, as a share of the bottom: `0.5` is half as wide, `2` twice. One number, or `[x, z]` to narrow the two ways differently. The bottom stays as it is. |
+
+A shape with a bevel or a taper is still as big as its sizes say at its
+widest. A socket on a side still sits on the surface: on a tapered
+side it leans with the side, and at the very edge of a bevelled face it
+is on the cut and leans with that. Give such a socket a `facing` of its
+own (`facing = "front"`) where it should look straight out.
 
 A round shape's first flat side faces right (+x). When `segments` is a
 multiple of 4, flat sides face left, right, front and back, and a
@@ -154,6 +187,15 @@ multiple of 4, flat sides face left, right, front and back, and a
 | `sphere` | `side` | segments × (segments − 2), for even counts |
 | `cone` | `side`, `bottom` | 2 × segments − 2 |
 | `wedge` | `slope`, `bottom`, `back`, `left`, `right` | 8 |
+| `capsule` | `side`, `top`, `bottom` (the two round ends) | 2 × segments, and 4 × segments × rings − 2 × segments for the ends, where rings is segments ÷ 4 (at least 2): 224 for 16 |
+| `torus` | `side` | 2 × segments × round, where round is how many sides go round the ring itself: half of segments, up to the next multiple of 4 (at least 4): 256 for 16 |
+| `tube` | `side` (the outside), `inside`, `top`, `bottom` | 8 × segments |
+| `pyramid` | `front`, `back`, `left`, `right`, `bottom`; and `sides` for the four slopes together | 6 |
+| `prism` | `left`, `right` (the slopes), `front`, `back` (the ends), `bottom` | 8 |
+| `stairs` | `top` (where you step), `front` (the risers), `back`, `left`, `right`, `bottom` | 12 × steps |
+| `arch` | `front`, `back`, `left`, `right`, `top`, `bottom` (under its two feet), `inside` (the doorway) | 4 × segments + 24 |
+| a bevelled `box` | the box's, and `bevel` | 12 + 24 × steps + 8 × steps × steps: 44 for one step |
+| a bevelled `cylinder` | the cylinder's, and `bevel` | 4 × segments × steps more than the cylinder |
 | an `.obj` file | its material names (`default` for faces before any material) | as in the file |
 | a `.gltf` or `.glb` file | its material names (`material_N` for one with no name, `default` for faces with no material); for a `.glb` Duck Mold wrote, its palette names | as in the file |
 
@@ -194,13 +236,21 @@ middle, facing up). A wedge has an eighth, `slope`: the middle of its
 slope, facing straight out of it. These names can't be declared again
 (`slope` only on a wedge).
 
-**On the surface.** A socket of one of the five shapes sits on the
+**On the surface.** A socket of one of the built-in shapes sits on the
 shape's surface. It starts on the side of the box around the shape; if
 the shape isn't there, it moves straight in until it touches the shape,
 and faces straight out of the surface there (on an edge between two
 faces, halfway between them). A socket already on the surface doesn't
 move. So a cone's `left`, `right`, `front` and `back` are halfway up
 its slant, and a wedge's `top` and `front` are the middle of its slope.
+A pyramid's `top` is its point and a prism's the middle of its ridge;
+their side sockets are halfway up their slopes, leaning with them.
+Where nothing lies straight behind the box side, the socket stays on
+the box: a torus's and a tube's `top` and `bottom` are in the middle of
+the opening, level with the rim (where a lid goes, or what it stands
+on), and an arch's `front` and `back` are in the mouth of its doorway.
+One exception: an arch's `bottom` is on the ground between its feet,
+not up under the top of the doorway.
 A part made of parts and a part made from a mesh file follow the same
 rule, through every face inside them; where nothing lies straight behind
 the box side, the socket stays on the box. A whole recipe's own sockets

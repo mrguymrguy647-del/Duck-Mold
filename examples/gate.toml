@@ -1,0 +1,93 @@
+# A castle gate: the `arch` shape, with `taper` and `bevel`.
+#
+#   duck-mold studio examples/gate.toml
+#
+# It shows: an arch (a wall with a round-topped doorway through it:
+# `wall` is how thick it is beside and above the doorway, `segments`
+# how many flat pieces the round top has), towers that are narrower at
+# the top (`taper`) with their edges cut (`bevel`), one tower defined
+# once and used twice, and faces coloured by name (`inside`, `bevel`).
+# An arch's `bottom` socket is on the ground between its feet.
+
+version = 0
+name = "gate"
+description = "A castle gate: an arch between two towers."
+
+[palette]
+stone = "#A9A49A"
+light = "#C9C4B8"
+dark  = "#6F6B63"
+roof  = "#8C3B2E"
+wood  = "#6B4A2B"
+
+# A tower: a tapered block with cut edges, a ledge and a pointed roof.
+[define.tower]
+
+[[define.tower.parts]]
+name = "shaft"
+shape = "box"
+size = [1.4, 4, 1.4]
+taper = 0.8
+bevel = 0.08
+color = "stone"
+colors = { bevel = "light" }
+
+[[define.tower.parts]]
+name = "ledge"
+shape = "box"
+size = [1.5, 0.3, 1.5]
+bevel = 0.05
+color = "dark"
+attach = "bottom"
+to = "shaft.top"
+
+[[define.tower.parts]]
+name = "roof"
+shape = "pyramid"
+size = [1.5, 1.2, 1.5]
+color = "roof"
+attach = "bottom"
+to = "ledge.top"
+
+# The foot of each side. The shaft's edges are cut there, so the facing
+# is said: otherwise it would lean with the cut.
+[define.tower.sockets]
+foot_right = { on = "right", shift = [0, -1, 0], facing = "right" }
+foot_left  = { on = "left", shift = [0, -1, 0], facing = "left" }
+
+[[parts]]
+name = "arch"
+shape = "arch"
+size = [3, 3.2, 1]
+wall = 0.5
+segments = 12
+color = "stone"
+colors = { inside = "dark", top = "light" }
+
+[parts.sockets]
+left_foot  = { on = "left", shift = [0, -1, 0] }
+right_foot = { on = "right", shift = [0, -1, 0] }
+door       = { on = "bottom", shift = [0, 0, -0.6], facing = "up" }
+
+[[parts]]
+name = "left_tower"
+use = "tower"
+attach = "foot_right"
+to = "arch.left_foot"
+
+[[parts]]
+name = "right_tower"
+use = "tower"
+attach = "foot_left"
+to = "arch.right_foot"
+
+# The door stands in the doorway, on the ground between the arch's
+# feet. (The socket there faces up, so that the door's `bottom` meets it
+# standing; left to face down, as the underside does, it would hang.)
+[[parts]]
+name = "door"
+shape = "box"
+size = [2, 1.7, 0.12]
+color = "wood"
+attach = "bottom"
+to = "arch.door"

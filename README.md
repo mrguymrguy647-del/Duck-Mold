@@ -172,7 +172,7 @@ part:
   already stands there, joined to nothing. It is selected, with the
   Move arrows on it, so you can drag it straight away.
 - The selected part's sockets show as small round dots. Click a dot
-  and pick what to add there: one of the five shapes, or a
+  and pick what to add there: one of the twelve shapes, or a
   part the recipe defines. The new part is about half the size of the
   one it sits on, has its colour, and is selected, ready to change.
 - To join a part that is already there, drag it onto a dot of another
@@ -299,7 +299,9 @@ error: lamp.toml:26: parts[2].segments: 100 is too big. Allowed: 3 to 64.
   every time, and the same recipe always gives exactly the same file. So
   keep the recipe; the `.glb` can always be made again.
 - **Parts and sockets.** A part is a shape (box, cylinder, sphere, cone,
-  wedge), a mesh from a file (`.obj`, `.gltf` or `.glb`, from Blender or
+  wedge, capsule, torus, tube, pyramid, prism, stairs or arch; a box
+  or a cylinder can have its edges cut with `bevel`, and a box, a
+  cylinder or a tube a narrower top with `taper`), a mesh from a file (`.obj`, `.gltf` or `.glb`, from Blender or
   any modelling program), or an assembly of other parts.
   Parts are joined socket to socket, by name. A part can declare sockets
   of its own: `neck = { on = "top" }`.
@@ -327,6 +329,13 @@ A recipe can be written as TOML (the examples) or as JSON
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
 | [duck.toml](examples/duck.toml) | A ball stretched into a body with a three-number `scale`, parts placed at points of a round surface, one wing used twice. Its picture is the Studio's icon. |
+| [dog.toml](examples/dog.toml) | `capsule`: a body lying down, a leg used four times, sockets on a round surface with a `facing` of their own. |
+| [doughnut.toml](examples/doughnut.toml) | `torus`: a ring, a second one squashed for the icing, sprinkles at points of its surface, and a plate with a `bevel`. |
+| [mug.toml](examples/mug.toml) | `tube`: a pipe widened towards the top with `taper`, its inside a different colour, and a ring on edge for the handle. |
+| [temple.toml](examples/temple.toml) | `pyramid`: a roof on four columns, platforms with cut edges, and `stairs` up the front. |
+| [barn.toml](examples/barn.toml) | `prism`: a ridged roof in one part, its ends coloured by name, and a silo with a round cap. |
+| [slide.toml](examples/slide.toml) | `stairs`: steps up to a platform that is placed with `move`, and a ramp down the other side. |
+| [gate.toml](examples/gate.toml) | `arch`: a doorway between two towers that are tapered and bevelled, defined once and used twice. |
 
 Each is commented line by line.
 
@@ -388,7 +397,7 @@ Duck-Mold/
     │   │   ├── recipe.rs      the recipe's fields, read from that tree and checked
     │   │   ├── load.rs        the files a recipe names: palettes, recipes, meshes
     │   │   ├── math.rs        points, turns, and an exact sine and cosine
-    │   │   ├── shapes.rs      box, cylinder, sphere, cone, wedge
+    │   │   ├── shapes.rs      the twelve shapes, bevel and taper
     │   │   ├── mesh.rs        reading .obj files
     │   │   ├── gltf.rs        reading .gltf and .glb files
     │   │   ├── assemble.rs    parts, sockets, joins, nesting, colour

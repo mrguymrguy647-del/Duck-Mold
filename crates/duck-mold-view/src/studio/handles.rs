@@ -134,6 +134,8 @@ enum Sized {
     Height,
     /// `radius`.
     Radius,
+    /// `tube`: how thick a ring is.
+    Tube,
 }
 
 /// A knob of the Size tool: it sits on a face and pulls it out or in.
@@ -377,7 +379,22 @@ impl Studio {
             }
         }
         if let Some(radius) = sizes.radius {
-            knobs.extend(knob(0, 1.0, radius, Sized::Radius, false));
+            // On the surface: a ring's is its thickness further out.
+            let reach = radius + sizes.tube.unwrap_or(0.0);
+            knobs.extend(knob(0, 1.0, reach, Sized::Radius, false));
+        }
+        if let (Some(radius), Some(tube)) = (sizes.radius, sizes.tube) {
+            // On top of the ring, over the middle of its thickness.
+            let way = part.place.turn * Vec3::UP;
+            if let Some(out) = way.normalized() {
+                knobs.push(Knob {
+                    at: part.place.apply(vec3(radius, tube, 0.0)) + offset,
+                    out,
+                    unit: way.length(),
+                    sized: Sized::Tube,
+                    carry: Vec3::ZERO,
+                });
+            }
         }
         knobs
     }
@@ -459,7 +476,7 @@ impl Studio {
                         points: vec![knob.at],
                         color: match knob.sized {
                             Sized::Side(which) => AXIS_COLORS[which],
-                            Sized::Height => AXIS_COLORS[1],
+                            Sized::Height | Sized::Tube => AXIS_COLORS[1],
                             Sized::Radius => AXIS_COLORS[0],
                         },
                     });
@@ -900,6 +917,7 @@ impl Studio {
                     ),
                     Sized::Height => (was.height.unwrap_or(1.0), "height"),
                     Sized::Radius => (was.radius.unwrap_or(0.5), "radius"),
+                    Sized::Tube => (was.tube.unwrap_or(0.15), "tube"),
                 };
                 // Never down to nothing: a centimetre at the least.
                 let grown = snapped((now - grab.hold) / knob.unit, step, free).max(0.01 - was_size);
@@ -913,6 +931,7 @@ impl Studio {
                     }
                     Sized::Height => sizes.height = Some(is),
                     Sized::Radius => sizes.radius = Some(is),
+                    Sized::Tube => sizes.tube = Some(is),
                 }
                 // A free part's middle goes half as far, so the face
                 // opposite stays where it is. A joined part is held by

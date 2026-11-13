@@ -38,8 +38,7 @@ use doc::{Doc, Step, TreePath, Val, key, with};
 /// What a new part is made of.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Made {
-    /// One of the five shapes: `box`, `cylinder`, `sphere`, `cone`,
-    /// `wedge`.
+    /// One of the built-in shapes: `box`, `cylinder`, `torus`...
     Shape(String),
     /// A part the recipe defines: `use = "arm"`.
     Use(String),
@@ -50,14 +49,29 @@ pub enum Made {
 /// The sizes a shape can have. Only those that are given are written.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sizes {
-    /// `size = [x, y, z]`, for a box or a wedge.
+    /// `size = [x, y, z]`, for a box, a wedge, a pyramid, a prism,
+    /// stairs or an arch.
     pub size: Option<[f64; 3]>,
-    /// `radius`, for a cylinder, a sphere or a cone.
+    /// `radius`, for a round shape.
     pub radius: Option<f64>,
-    /// `height`, for a cylinder or a cone.
+    /// `tube`: how thick a torus's ring is.
+    pub tube: Option<f64>,
+    /// `wall`: how thick a tube's or an arch's wall is.
+    pub wall: Option<f64>,
+    /// `height`, for a cylinder, a cone, a capsule or a tube.
     pub height: Option<f64>,
     /// `segments`: how many flat sides a round shape has.
     pub segments: Option<u32>,
+    /// `steps`: how many steps stairs have.
+    pub steps: Option<u32>,
+    /// `bevel`: how much is cut off the edges of a box or a cylinder.
+    /// 0 takes the bevel away.
+    pub bevel: Option<f64>,
+    /// `bevel_steps`: how many flat cuts go round each edge.
+    pub bevel_steps: Option<u32>,
+    /// `taper`: how wide (x) and deep (z) the top of a box, a cylinder
+    /// or a tube is, as a share of the bottom. 1 and 1 take it away.
+    pub taper: Option<[f64; 2]>,
 }
 
 impl Sizes {
@@ -65,19 +79,60 @@ impl Sizes {
         *self == Sizes::default()
     }
 
-    fn fields(&self) -> Vec<(String, Val)> {
+    /// The fields to write, in the order a recipe has them. A bevel of 0
+    /// and a taper of 1 are no bevel and no taper: `None` says the
+    /// field is to go.
+    fn fields(&self) -> Vec<(String, Option<Val>)> {
         let mut fields = Vec::new();
+        let mut put = |name: &str, value: Option<Val>| fields.push((name.to_owned(), value));
         if let Some(size) = self.size {
-            fields.push(("size".to_owned(), Val::three(size)));
+            put("size", Some(Val::three(size)));
         }
         if let Some(radius) = self.radius {
-            fields.push(("radius".to_owned(), Val::Num(radius)));
+            put("radius", Some(Val::Num(radius)));
+        }
+        if let Some(tube) = self.tube {
+            put("tube", Some(Val::Num(tube)));
+        }
+        if let Some(wall) = self.wall {
+            put("wall", Some(Val::Num(wall)));
         }
         if let Some(height) = self.height {
-            fields.push(("height".to_owned(), Val::Num(height)));
+            put("height", Some(Val::Num(height)));
         }
         if let Some(segments) = self.segments {
-            fields.push(("segments".to_owned(), Val::Num(f64::from(segments))));
+            put("segments", Some(Val::Num(f64::from(segments))));
+        }
+        if let Some(steps) = self.steps {
+            put("steps", Some(Val::Num(f64::from(steps))));
+        }
+        if let Some(bevel) = self.bevel {
+            if bevel == 0.0 {
+                put("bevel", None);
+                put("bevel_steps", None);
+            } else {
+                put("bevel", Some(Val::Num(bevel)));
+            }
+        }
+        if let Some(steps) = self.bevel_steps
+            && self.bevel != Some(0.0)
+        {
+            put(
+                "bevel_steps",
+                (steps > 1).then_some(Val::Num(f64::from(steps))),
+            );
+        }
+        if let Some([across, deep]) = self.taper {
+            put(
+                "taper",
+                if across == 1.0 && deep == 1.0 {
+                    None
+                } else if across == deep {
+                    Some(Val::Num(across))
+                } else {
+                    Some(Val::List(vec![Val::Num(across), Val::Num(deep)]))
+                },
+            );
         }
         fields
     }
@@ -533,20 +588,9 @@ fn free_name(base: &str, taken: &[String]) -> String {
 
 /// The size fields and face names a shape has.
 fn shape_words(shape: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
-    Some(match shape {
-        "box" => (
-            &["size"],
-            &["top", "bottom", "left", "right", "front", "back", "sides"],
-        ),
-        "wedge" => (&["size"], &["slope", "bottom", "back", "left", "right"]),
-        "cylinder" => (
-            &["radius", "height", "segments"],
-            &["top", "bottom", "side"],
-        ),
-        "cone" => (&["radius", "height", "segments"], &["side", "bottom"]),
-        "sphere" => (&["radius", "segments"], &["side"]),
-        _ => return None,
-    })
+    Shape::NAMES
+        .contains(&shape)
+        .then(|| (Shape::size_fields(shape), Shape::face_words(shape)))
 }
 
 fn set(doc: &mut Doc, table: &[Step], name: &str, value: Val) -> Result<(), Stop> {
@@ -690,7 +734,12 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 ("name".to_owned(), text(name)),
                 (field.to_owned(), text(what)),
             ];
-            fields.extend(sizes.fields());
+            fields.extend(
+                sizes
+                    .fields()
+                    .into_iter()
+                    .filter_map(|(name, value)| Some((name, value?))),
+            );
             if let Some(color) = color {
                 fields.push(("color".to_owned(), text(color)));
             }
@@ -952,7 +1001,7 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 }
                 set(doc, &table, "shape", text(shape))?;
                 // Sizes and face colours the new shape doesn't have go.
-                for field in ["size", "radius", "height", "segments"] {
+                for field in Shape::SIZE_FIELDS {
                     if !size_fields.contains(&field) {
                         doc.remove_field(&table, field).map_err(cant)?;
                     }
@@ -975,8 +1024,24 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             }
             for (name, value) in sizes.fields() {
                 made_changed = true;
-                said.push(format!("{name} {}", value.write(doc.syntax)));
-                set(doc, &table, &name, value)?;
+                match value {
+                    Some(value) => {
+                        said.push(format!("{name} {}", value.write(doc.syntax)));
+                        set(doc, &table, &name, value)?;
+                    }
+                    // No bevel, or no taper: the field goes.
+                    None => {
+                        if doc.entry(&table, &name).is_some() {
+                            doc.remove_field(&table, &name).map_err(cant)?;
+                        }
+                        if name != "bevel_steps" {
+                            said.push(format!("no {name}"));
+                        } else if sizes.bevel != Some(0.0) {
+                            // One cut is what a bevel has unsaid.
+                            said.push("bevel_steps 1".to_owned());
+                        }
+                    }
+                }
             }
             if let Some(color) = color {
                 made_changed = true;
@@ -1044,7 +1109,7 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             if said.is_empty() {
                 return Err(problem(
                     Code::MissingField,
-                    "nothing to set: give at least one of --shape, --size, --radius, --height, --segments, --color, --face-color, --twist, --move, --rotate, --scale",
+                    "nothing to set: give at least one of --shape, --size, --radius, --tube, --wall, --height, --segments, --steps, --bevel, --bevel-steps, --taper, --color, --face-color, --twist, --move, --rotate, --scale",
                 ));
             }
             // Changing what a definition is made of changes every part
@@ -1453,7 +1518,7 @@ fn share(found: &Found, model: Option<&Model>, part: &str) -> Option<Shared> {
 }
 
 /// The names of the parts the recipe defines, to `use`: what the Studio
-/// offers beside the five shapes when a part is added.
+/// offers beside the built-in shapes when a part is added.
 pub fn definitions(text: &str, syntax: Syntax) -> Vec<String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let Ok(doc) = Doc::parse(text, syntax) else {
@@ -1528,6 +1593,20 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
             _ => None,
         }
     }
+    fn two(node: &Node, name: &str) -> Option<[f64; 2]> {
+        let Value::Table(entries) = &node.value else {
+            return None;
+        };
+        let Value::Array(items) = &entries.iter().find(|entry| entry.key == name)?.node.value
+        else {
+            return None;
+        };
+        let numbers: Vec<f64> = items
+            .iter()
+            .filter_map(|item| item.value.as_number())
+            .collect();
+        <[f64; 2]>::try_from(numbers).ok()
+    }
     fn three(node: &Node, name: &str) -> Option<[f64; 3]> {
         let Value::Table(entries) = &node.value else {
             return None;
@@ -1566,19 +1645,42 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
         .map(str::to_owned);
     let mut sizes = Sizes::default();
     if let Some((fields, _)) = shape.as_deref().and_then(shape_words) {
-        let round = if shape.as_deref() == Some("sphere") {
-            12
-        } else {
-            16
+        let shape = shape.as_deref().unwrap_or_default();
+        let whole = |name: &str, default: u32| {
+            Some(number(made_node, name).map_or(default, |count| count.max(0.0) as u32))
         };
         for field in fields {
             match *field {
                 "size" => sizes.size = Some(three(made_node, "size").unwrap_or([1.0; 3])),
-                "radius" => sizes.radius = Some(number(made_node, "radius").unwrap_or(0.5)),
+                "radius" => {
+                    let default = if shape == "capsule" { 0.25 } else { 0.5 };
+                    sizes.radius = Some(number(made_node, "radius").unwrap_or(default));
+                }
+                "tube" => sizes.tube = Some(number(made_node, "tube").unwrap_or(0.15)),
+                "wall" => {
+                    let default = if shape == "arch" { 0.2 } else { 0.1 };
+                    sizes.wall = Some(number(made_node, "wall").unwrap_or(default));
+                }
                 "height" => sizes.height = Some(number(made_node, "height").unwrap_or(1.0)),
+                "segments" => {
+                    sizes.segments = whole(
+                        "segments",
+                        match shape {
+                            "sphere" => 12,
+                            "arch" => 8,
+                            _ => 16,
+                        },
+                    );
+                }
+                "steps" => sizes.steps = whole("steps", 4),
+                "bevel" => sizes.bevel = Some(number(made_node, "bevel").unwrap_or(0.0)),
+                "bevel_steps" => sizes.bevel_steps = whole("bevel_steps", 1),
                 _ => {
-                    sizes.segments = Some(
-                        number(made_node, "segments").map_or(round, |count| count.max(0.0) as u32),
+                    sizes.taper = Some(
+                        number(made_node, "taper")
+                            .map(|all| [all; 2])
+                            .or_else(|| two(made_node, "taper"))
+                            .unwrap_or([1.0; 2]),
                     );
                 }
             }

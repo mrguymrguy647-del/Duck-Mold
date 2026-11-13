@@ -347,7 +347,9 @@ fn add_list(
     // Kept inside the viewport, beside the click.
     let at = pos2(
         (adding.at.x + 12.0).min(within.right() - 190.0),
-        (adding.at.y + 12.0).min(within.bottom() - 260.0),
+        (adding.at.y + 12.0)
+            .min(within.bottom() - 400.0)
+            .max(within.top() + 8.0),
     );
     egui::Window::new(title)
         .id(egui::Id::unique("duck_mold_add_list"))
@@ -371,16 +373,28 @@ fn add_list(
 /// parts this recipe defines, and the library. Gives the one clicked.
 pub fn choices(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) -> Option<Made> {
     let mut chosen = None;
-    for shape in Shape::NAMES {
-        // "Box", "Cylinder"...
-        let mut label = shape.to_owned();
-        if let Some(first) = label.get_mut(0..1) {
-            first.make_ascii_uppercase();
-        }
-        if ui.button(label).clicked() {
-            chosen = Some(Made::Shape(shape.to_owned()));
-        }
-    }
+    // The shapes, in two columns so the list stays short.
+    egui::Grid::new("duck_mold_shape_choices")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| {
+            for (at, shape) in Shape::NAMES.into_iter().enumerate() {
+                // "Box", "Cylinder"...
+                let mut label = shape.to_owned();
+                if let Some(first) = label.get_mut(0..1) {
+                    first.make_ascii_uppercase();
+                }
+                if ui
+                    .add_sized([78.0, 20.0], egui::Button::new(label))
+                    .clicked()
+                {
+                    chosen = Some(Made::Shape(shape.to_owned()));
+                }
+                if at % 2 == 1 {
+                    ui.end_row();
+                }
+            }
+        });
     let defined = studio.definitions();
     if !defined.is_empty() {
         ui.separator();

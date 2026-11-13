@@ -1,0 +1,377 @@
+{
+  "ok": true,
+  "summary": "temple: 4.40 x 3.64 x 5.04 m, 686 triangles, 11 parts, 4 colours, rests on the ground, nothing floating, 3 overlaps",
+  "source": "examples/temple.toml",
+  "name": "temple",
+  "size": [
+    4.4,
+    3.64,
+    5.04
+  ],
+  "bounds": {
+    "min": [
+      -2.2,
+      0.0,
+      -2.52
+    ],
+    "max": [
+      2.2,
+      3.64,
+      2.52
+    ]
+  },
+  "triangles": 686,
+  "vertices": 1354,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "stone",
+      "hex": "#C9BFA5",
+      "triangles": 460
+    },
+    {
+      "name": "dark",
+      "hex": "#9A8F78",
+      "triangles": 56
+    },
+    {
+      "name": "gold",
+      "hex": "#E2B33C",
+      "triangles": 120
+    },
+    {
+      "name": "red",
+      "hex": "#A8402E",
+      "triangles": 50
+    }
+  ],
+  "parts": [
+    {
+      "name": "ground",
+      "kind": "box",
+      "triangles": 44,
+      "size": [
+        4.4,
+        0.3,
+        4.4
+      ],
+      "bounds": {
+        "min": [
+          -2.2,
+          0.0,
+          -2.52
+        ],
+        "max": [
+          2.2,
+          0.3,
+          1.88
+        ]
+      },
+      "colors": [
+        "dark"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "platform",
+      "kind": "box",
+      "triangles": 44,
+      "size": [
+        3.4,
+        0.3,
+        3.4
+      ],
+      "bounds": {
+        "min": [
+          -1.7,
+          0.3,
+          -2.02
+        ],
+        "max": [
+          1.7,
+          0.6,
+          1.38
+        ]
+      },
+      "colors": [
+        "stone"
+      ],
+      "attached_to": "ground.top",
+      "parts": []
+    },
+    {
+      "name": "steps",
+      "kind": "stairs",
+      "triangles": 48,
+      "size": [
+        1.2,
+        0.6,
+        1.2
+      ],
+      "bounds": {
+        "min": [
+          -0.6,
+          0.0,
+          1.32
+        ],
+        "max": [
+          0.6,
+          0.6,
+          2.52
+        ]
+      },
+      "colors": [
+        "stone"
+      ],
+      "attached_to": "platform.steps",
+      "parts": []
+    },
+    {
+      "name": "column_front_left",
+      "kind": "cylinder",
+      "uses": "column",
+      "triangles": 92,
+      "size": [
+        0.28,
+        1.3,
+        0.28
+      ],
+      "bounds": {
+        "min": [
+          -1.415,
+          0.6,
+          0.815
+        ],
+        "max": [
+          -1.135,
+          1.9,
+          1.095
+        ]
+      },
+      "colors": [
+        "stone"
+      ],
+      "attached_to": "platform.front_left",
+      "parts": []
+    },
+    {
+      "name": "column_front_right",
+      "kind": "cylinder",
+      "uses": "column",
+      "triangles": 92,
+      "size": [
+        0.28,
+        1.3,
+        0.28
+      ],
+      "bounds": {
+        "min": [
+          1.135,
+          0.6,
+          0.815
+        ],
+        "max": [
+          1.415,
+          1.9,
+          1.095
+        ]
+      },
+      "colors": [
+        "stone"
+      ],
+      "attached_to": "platform.front_right",
+      "parts": []
+    },
+    {
+      "name": "column_back_left",
+      "kind": "cylinder",
+      "uses": "column",
+      "triangles": 92,
+      "size": [
+        0.28,
+        1.3,
+        0.28
+      ],
+      "bounds": {
+        "min": [
+          -1.415,
+          0.6,
+          -1.735
+        ],
+        "max": [
+          -1.135,
+          1.9,
+          -1.455
+        ]
+      },
+      "colors": [
+        "stone"
+      ],
+      "attached_to": "platform.back_left",
+      "parts": []
+    },
+    {
+      "name": "column_back_right",
+      "kind": "cylinder",
+      "uses": "column",
+      "triangles": 92,
+      "size": [
+        0.28,
+        1.3,
+        0.28
+      ],
+      "bounds": {
+        "min": [
+          1.135,
+          0.6,
+          -1.735
+        ],
+        "max": [
+          1.415,
+          1.9,
+          -1.455
+        ]
+      },
+      "colors": [
+        "stone"
+      ],
+      "attached_to": "platform.back_right",
+      "parts": []
+    },
+    {
+      "name": "altar",
+      "kind": "box",
+      "triangles": 44,
+      "size": [
+        0.6,
+        0.5,
+        0.6
+      ],
+      "bounds": {
+        "min": [
+          -0.3,
+          0.6,
+          -0.62
+        ],
+        "max": [
+          0.3,
+          1.1,
+          -0.02
+        ]
+      },
+      "colors": [
+        "red"
+      ],
+      "attached_to": "platform.top",
+      "parts": []
+    },
+    {
+      "name": "slab",
+      "kind": "box",
+      "triangles": 12,
+      "size": [
+        3.2,
+        0.2,
+        3.2
+      ],
+      "bounds": {
+        "min": [
+          -1.5998,
+          1.9,
+          -1.9202
+        ],
+        "max": [
+          1.6002,
+          2.1,
+          1.2798
+        ]
+      },
+      "colors": [
+        "dark"
+      ],
+      "attached_to": "column_front_left.top",
+      "parts": []
+    },
+    {
+      "name": "roof",
+      "kind": "pyramid",
+      "triangles": 6,
+      "size": [
+        3.2,
+        1.4,
+        3.2
+      ],
+      "bounds": {
+        "min": [
+          -1.5998,
+          2.1,
+          -1.9202
+        ],
+        "max": [
+          1.6002,
+          3.5,
+          1.2798
+        ]
+      },
+      "colors": [
+        "red"
+      ],
+      "attached_to": "slab.top",
+      "parts": []
+    },
+    {
+      "name": "tip",
+      "kind": "sphere",
+      "triangles": 120,
+      "size": [
+        0.28,
+        0.28,
+        0.28
+      ],
+      "bounds": {
+        "min": [
+          -0.1398,
+          3.36,
+          -0.4602
+        ],
+        "max": [
+          0.1402,
+          3.64,
+          -0.1802
+        ]
+      },
+      "colors": [
+        "gold"
+      ],
+      "attached_to": "roof.top",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "ground",
+      "b": "steps",
+      "depth": 0.15,
+      "hidden": false
+    },
+    {
+      "a": "platform",
+      "b": "steps",
+      "depth": 0.06,
+      "hidden": false
+    },
+    {
+      "a": "roof",
+      "b": "tip",
+      "depth": 0.130916,
+      "hidden": false
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

@@ -1730,6 +1730,46 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 4):* the seven shapes, `bevel`, `bevel_steps` and
+`taper`, as designed, with these things settled in the building:
+
+- **Every face is still flat and bulges nowhere inwards**, which is
+  what sockets and Phase 4's face editing count on. So an arch's front
+  is a leg at each side and triangles from its two top corners to the
+  round top; stairs' sides are one upright strip per step; a tube's
+  ends are one four-cornered face per side. Every edge of every shape
+  is shared by exactly two faces: no cracks.
+- **Which way a face points** is found two ways. A shape that bulges
+  outwards everywhere is turned by where its middle is, as before. The
+  four that don't (torus, tube, stairs, arch) start from the face
+  furthest to the right and go from face to face across shared edges.
+- **A low arch** (less tall than half its width, plus its wall) has a
+  flatter round top instead of being an error.
+- **A capsule no taller than it is wide** is all ends: it has no
+  `side` faces.
+- **Taper bends some faces** (a cylinder narrowed more one way than the
+  other, the upright cut of a bevelled box narrowed two ways). A face
+  it bends is cut into triangles, which are always flat.
+- **Bevel and taper together**: the bevel is made first, then the
+  taper, so the widest place is where the bevel ends, a little above
+  the bottom, and the shape is a hair narrower than its `size` there.
+- **Sockets at a cut edge lean with the cut.** That is the old rule
+  (a socket sits on the surface and faces out of it), but it surprised
+  me twice in the examples: a socket declared at the foot of a bevelled
+  box's side, and the join of two sockets that face the same way. The
+  examples say `facing` there, and the docs say why.
+- **The Size tool** has a second knob on a torus, on top of the ring,
+  for `tube`; its `radius` knob is on the outside of the ring. `wall`,
+  `steps`, `bevel` and `taper` are in the panel, not on knobs.
+- **New shapes are added with every size said**, each a share of the
+  size they are added at, because a default (a wall of 0.2 m) can be
+  bigger than the whole shape.
+- **The lists of shapes** (the Add menu, and the one a dot opens) are
+  in two columns: twelve in one column didn't fit the screen with the
+  library under them.
+- `set --bevel 0` and `--taper 1` take the field out of the recipe
+  rather than writing a 0 or a 1.
+
 *As built (step 3):* the Add menu, and `add` with no `--to`.
 
 - **Where the new part goes.** "In front of the camera" is the ground

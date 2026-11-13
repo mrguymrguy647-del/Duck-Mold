@@ -28,8 +28,14 @@ pub struct Draft {
     name: String,
     size: [f64; 3],
     radius: f64,
+    tube: f64,
+    wall: f64,
     height: f64,
     segments: u32,
+    steps: u32,
+    bevel: f64,
+    bevel_steps: u32,
+    taper: [f64; 2],
     twist: f64,
     position: [f64; 3],
     rotation: [f64; 3],
@@ -50,8 +56,14 @@ impl Draft {
         self.name = facts.name.clone().unwrap_or_default();
         self.size = facts.sizes.size.unwrap_or([1.0; 3]);
         self.radius = facts.sizes.radius.unwrap_or(0.5);
+        self.tube = facts.sizes.tube.unwrap_or(0.15);
+        self.wall = facts.sizes.wall.unwrap_or(0.1);
         self.height = facts.sizes.height.unwrap_or(1.0);
         self.segments = facts.sizes.segments.unwrap_or(16);
+        self.steps = facts.sizes.steps.unwrap_or(4);
+        self.bevel = facts.sizes.bevel.unwrap_or(0.0);
+        self.bevel_steps = facts.sizes.bevel_steps.unwrap_or(1);
+        self.taper = facts.sizes.taper.unwrap_or([1.0; 2]);
         self.twist = facts.twist;
         self.position = facts.position;
         self.rotation = facts.rotation;
@@ -295,6 +307,32 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     }
                     ui.end_row();
                 }
+                if facts.sizes.tube.is_some() {
+                    let label = ui
+                        .label("Tube")
+                        .on_hover_text("How thick the ring is: from its middle to its surface");
+                    let field = ui.add(metres(&mut draft.tube)).labelled_by(label.id);
+                    if settled(&field) && Some(draft.tube) != facts.sizes.tube {
+                        edits.push(sized(Sizes {
+                            tube: Some(draft.tube),
+                            ..Sizes::default()
+                        }));
+                    }
+                    ui.end_row();
+                }
+                if facts.sizes.wall.is_some() {
+                    let label = ui
+                        .label("Wall")
+                        .on_hover_text("How thick the wall is, in metres");
+                    let field = ui.add(metres(&mut draft.wall)).labelled_by(label.id);
+                    if settled(&field) && Some(draft.wall) != facts.sizes.wall {
+                        edits.push(sized(Sizes {
+                            wall: Some(draft.wall),
+                            ..Sizes::default()
+                        }));
+                    }
+                    ui.end_row();
+                }
                 if facts.sizes.height.is_some() {
                     let label = ui.label("Height");
                     let field = ui.add(metres(&mut draft.height)).labelled_by(label.id);
@@ -310,10 +348,10 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     let label = ui
                         .label("Sides")
                         .on_hover_text("How many flat sides the round shape has");
-                    let fewest = if facts.shape.as_deref() == Some("sphere") {
-                        4
-                    } else {
-                        3
+                    let fewest = match facts.shape.as_deref() {
+                        Some("sphere") => 4,
+                        Some("arch") => 2,
+                        _ => 3,
                     };
                     let field = ui
                         .add(DragValue::new(&mut draft.segments).range(fewest..=64))
@@ -324,6 +362,84 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                             ..Sizes::default()
                         }));
                     }
+                    ui.end_row();
+                }
+
+                if facts.sizes.steps.is_some() {
+                    let label = ui.label("Steps").on_hover_text("How many steps");
+                    let field = ui
+                        .add(DragValue::new(&mut draft.steps).range(1..=64))
+                        .labelled_by(label.id);
+                    if settled(&field) && Some(draft.steps) != facts.sizes.steps {
+                        edits.push(sized(Sizes {
+                            steps: Some(draft.steps),
+                            ..Sizes::default()
+                        }));
+                    }
+                    ui.end_row();
+                }
+                if facts.sizes.bevel.is_some() {
+                    let label = ui.label("Bevel").on_hover_text(
+                        "How much is cut off the edges, in metres (0 for sharp edges), and how many flat cuts go round each edge (1 to 4)",
+                    );
+                    ui.horizontal(|ui| {
+                        let field = ui
+                            .add(
+                                DragValue::new(&mut draft.bevel)
+                                    .speed(0.005)
+                                    .range(0.0..=1000.0)
+                                    .max_decimals(3),
+                            )
+                            .labelled_by(label.id)
+                            .on_hover_text("How much is cut off, in metres");
+                        if settled(&field) && Some(draft.bevel) != facts.sizes.bevel {
+                            edits.push(sized(Sizes {
+                                bevel: Some(draft.bevel),
+                                ..Sizes::default()
+                            }));
+                        }
+                        let cuts = ui
+                            .add_enabled(
+                                draft.bevel > 0.0,
+                                DragValue::new(&mut draft.bevel_steps)
+                                    .range(1..=4)
+                                    .suffix(" cuts"),
+                            )
+                            .on_hover_text("How many flat cuts go round each edge");
+                        if settled(&cuts) && Some(draft.bevel_steps) != facts.sizes.bevel_steps {
+                            edits.push(sized(Sizes {
+                                bevel_steps: Some(draft.bevel_steps),
+                                ..Sizes::default()
+                            }));
+                        }
+                    });
+                    ui.end_row();
+                }
+                if facts.sizes.taper.is_some() {
+                    let label = ui.label("Taper").on_hover_text(
+                        "How wide (x) and deep (z) the top is, as a share of the bottom: 1 is straight sides, 0.5 is half as wide",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut done = false;
+                        for (at, axis) in ["wide", "deep"].into_iter().enumerate() {
+                            let field = ui
+                                .add(
+                                    DragValue::new(&mut draft.taper[at])
+                                        .speed(0.01)
+                                        .range(0.01..=10.0)
+                                        .max_decimals(2),
+                                )
+                                .labelled_by(label.id)
+                                .on_hover_text(format!("How {axis} the top is"));
+                            done |= settled(&field);
+                        }
+                        if done && Some(draft.taper) != facts.sizes.taper {
+                            edits.push(sized(Sizes {
+                                taper: Some(draft.taper),
+                                ..Sizes::default()
+                            }));
+                        }
+                    });
                     ui.end_row();
                 }
 

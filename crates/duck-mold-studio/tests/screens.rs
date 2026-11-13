@@ -497,7 +497,7 @@ fn a_click_on_a_socket_offers_what_to_add_there() {
     let (recipe, mut screen) = robot_with("screens_socket", "head");
     let on_right = socket_on_screen(&screen, "head", "right");
     click_at(&mut screen, on_right);
-    // The list: the five shapes, then the parts the recipe defines.
+    // The list: the shapes, then the parts the recipe defines.
     screen.get_by_label("Add a part on head.right");
     for shape in ["Box", "Cylinder", "Sphere", "Cone", "Wedge"] {
         screen.get_by_label(shape);
@@ -1070,4 +1070,105 @@ fn the_add_menu_stands_a_new_part_on_the_ground_ready_to_move() {
     screen.get_by_label("Undo").click();
     screen.run_steps(2);
     assert_eq!(std::fs::read_to_string(&recipe).unwrap(), before);
+}
+
+// ---- the newer shapes ------------------------------------------------------------
+
+#[test]
+fn the_panel_has_a_row_for_every_size_and_option_of_the_newer_shapes() {
+    use egui::accesskit::Role;
+    // Which rows each part should have, and which it shouldn't.
+    for (example, part, rows, not) in [
+        (
+            "gate.toml",
+            "arch",
+            &["Size", "Wall", "Sides"][..],
+            &["Radius", "Bevel", "Taper", "Steps"][..],
+        ),
+        (
+            "gate.toml",
+            "left_tower/shaft",
+            &["Size", "Bevel", "Taper"][..],
+            &["Wall", "Sides"][..],
+        ),
+        (
+            "temple.toml",
+            "steps",
+            &["Size", "Steps"][..],
+            &["Bevel", "Taper", "Radius"][..],
+        ),
+        (
+            "doughnut.toml",
+            "dough",
+            &["Radius", "Tube", "Sides"][..],
+            // (Not "Size": that is also the name of a tool's button.)
+            &["Height", "Wall"][..],
+        ),
+        (
+            "mug.toml",
+            "cup",
+            &["Radius", "Wall", "Height", "Sides", "Taper"][..],
+            &["Bevel", "Tube"][..],
+        ),
+        (
+            "dog.toml",
+            "body",
+            &["Radius", "Height", "Sides"][..],
+            &["Bevel", "Taper"][..],
+        ),
+    ] {
+        let recipe = copy_of(
+            example,
+            &format!("screens_newer_{}", part.replace('/', "_")),
+        );
+        let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+        screen.run_steps(2);
+        assert!(screen.state_mut().studio_mut().unwrap().select(Some(part)));
+        screen.run_steps(3);
+        for row in rows {
+            assert!(
+                screen.query_all_by_label(row).count() >= 1,
+                "{part} should have a row {row}"
+            );
+        }
+        for row in not {
+            assert_eq!(
+                screen.query_all_by_label(row).count(),
+                0,
+                "{part} shouldn't have a row {row}"
+            );
+        }
+    }
+
+    // Every shape is in the "Made of" list, and choosing one changes the
+    // recipe: the gate's door becomes a pyramid.
+    let recipe = copy_of("gate.toml", "screens_newer_made_of");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    assert!(
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("door"))
+    );
+    screen.run_steps(3);
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Made of")
+        .click();
+    screen.run_steps(2);
+    for shape in duck_mold_core::recipe::Shape::NAMES {
+        assert!(
+            screen.query_all_by_label(shape).count() >= 1,
+            "{shape} isn't offered"
+        );
+    }
+    screen.query_all_by_label("pyramid").last().unwrap().click();
+    screen.run_steps(3);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(
+        text.contains("name = \"door\"\nshape = \"pyramid\"\nsize = [2, 1.7, 0.12]"),
+        "{text}"
+    );
+    assert!(!screen.state().studio().unwrap().has_mistakes());
 }

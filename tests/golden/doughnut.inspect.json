@@ -1,0 +1,351 @@
+{
+  "ok": true,
+  "summary": "doughnut: 1.50 x 0.491 x 1.50 m, 1676 triangles, 10 parts, 6 colours, rests on the ground, nothing floating, 1 overlap",
+  "source": "examples/doughnut.toml",
+  "name": "doughnut",
+  "size": [
+    1.5,
+    0.491232,
+    1.5
+  ],
+  "bounds": {
+    "min": [
+      -0.75,
+      0.0,
+      -0.75
+    ],
+    "max": [
+      0.75,
+      0.491232,
+      0.75
+    ]
+  },
+  "triangles": 1676,
+  "vertices": 3396,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "plate",
+      "hex": "#E8E4DA",
+      "triangles": 188
+    },
+    {
+      "name": "dough",
+      "hex": "#C98A4B",
+      "triangles": 576
+    },
+    {
+      "name": "icing",
+      "hex": "#F27FA5",
+      "triangles": 576
+    },
+    {
+      "name": "yellow",
+      "hex": "#FFD23F",
+      "triangles": 144
+    },
+    {
+      "name": "blue",
+      "hex": "#4FB3E8",
+      "triangles": 96
+    },
+    {
+      "name": "white",
+      "hex": "#FFFFFF",
+      "triangles": 96
+    }
+  ],
+  "parts": [
+    {
+      "name": "plate",
+      "kind": "cylinder",
+      "triangles": 188,
+      "size": [
+        1.5,
+        0.06,
+        1.5
+      ],
+      "bounds": {
+        "min": [
+          -0.75,
+          0.0,
+          -0.75
+        ],
+        "max": [
+          0.75,
+          0.06,
+          0.75
+        ]
+      },
+      "colors": [
+        "plate"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "dough",
+      "kind": "torus",
+      "triangles": 576,
+      "size": [
+        1.04,
+        0.34,
+        1.04
+      ],
+      "bounds": {
+        "min": [
+          -0.52,
+          0.06,
+          -0.52
+        ],
+        "max": [
+          0.52,
+          0.4,
+          0.52
+        ]
+      },
+      "colors": [
+        "dough"
+      ],
+      "attached_to": "plate.top",
+      "parts": []
+    },
+    {
+      "name": "icing",
+      "kind": "torus",
+      "triangles": 576,
+      "size": [
+        1.08,
+        0.228,
+        1.08
+      ],
+      "bounds": {
+        "min": [
+          -0.54,
+          0.218,
+          -0.54
+        ],
+        "max": [
+          0.54,
+          0.446,
+          0.54
+        ]
+      },
+      "colors": [
+        "icing"
+      ],
+      "attached_to": "dough.icing",
+      "parts": []
+    },
+    {
+      "name": "sprinkle_a",
+      "kind": "capsule",
+      "uses": "sprinkle",
+      "triangles": 48,
+      "size": [
+        0.102095,
+        0.050535,
+        0.069604
+      ],
+      "bounds": {
+        "min": [
+          0.280686,
+          0.438448,
+          0.018376
+        ],
+        "max": [
+          0.382781,
+          0.488983,
+          0.08798
+        ]
+      },
+      "colors": [
+        "yellow"
+      ],
+      "attached_to": "icing.a",
+      "parts": []
+    },
+    {
+      "name": "sprinkle_b",
+      "kind": "capsule",
+      "uses": "sprinkle",
+      "triangles": 48,
+      "size": [
+        0.069587,
+        0.049153,
+        0.102347
+      ],
+      "bounds": {
+        "min": [
+          0.128794,
+          0.44081,
+          0.264776
+        ],
+        "max": [
+          0.198381,
+          0.489963,
+          0.367123
+        ]
+      },
+      "colors": [
+        "blue"
+      ],
+      "attached_to": "icing.b",
+      "parts": []
+    },
+    {
+      "name": "sprinkle_c",
+      "kind": "capsule",
+      "uses": "sprinkle",
+      "triangles": 48,
+      "size": [
+        0.094541,
+        0.045457,
+        0.0898
+      ],
+      "bounds": {
+        "min": [
+          -0.180683,
+          0.442711,
+          0.276351
+        ],
+        "max": [
+          -0.086142,
+          0.488168,
+          0.366151
+        ]
+      },
+      "colors": [
+        "white"
+      ],
+      "attached_to": "icing.c",
+      "parts": []
+    },
+    {
+      "name": "sprinkle_d",
+      "kind": "capsule",
+      "uses": "sprinkle",
+      "triangles": 48,
+      "size": [
+        0.096631,
+        0.051162,
+        0.085418
+      ],
+      "bounds": {
+        "min": [
+          -0.396982,
+          0.44007,
+          0.022913
+        ],
+        "max": [
+          -0.300351,
+          0.491232,
+          0.108331
+        ]
+      },
+      "colors": [
+        "yellow"
+      ],
+      "attached_to": "icing.d",
+      "parts": []
+    },
+    {
+      "name": "sprinkle_e",
+      "kind": "capsule",
+      "uses": "sprinkle",
+      "triangles": 48,
+      "size": [
+        0.063748,
+        0.05102,
+        0.104407
+      ],
+      "bounds": {
+        "min": [
+          -0.304119,
+          0.440029,
+          -0.281248
+        ],
+        "max": [
+          -0.240371,
+          0.491049,
+          -0.176841
+        ]
+      },
+      "colors": [
+        "blue"
+      ],
+      "attached_to": "icing.e",
+      "parts": []
+    },
+    {
+      "name": "sprinkle_f",
+      "kind": "capsule",
+      "uses": "sprinkle",
+      "triangles": 48,
+      "size": [
+        0.108028,
+        0.045187,
+        0.057814
+      ],
+      "bounds": {
+        "min": [
+          -0.027014,
+          0.442124,
+          -0.388482
+        ],
+        "max": [
+          0.081014,
+          0.487311,
+          -0.330668
+        ]
+      },
+      "colors": [
+        "white"
+      ],
+      "attached_to": "icing.f",
+      "parts": []
+    },
+    {
+      "name": "sprinkle_g",
+      "kind": "capsule",
+      "uses": "sprinkle",
+      "triangles": 48,
+      "size": [
+        0.081904,
+        0.05111,
+        0.098811
+      ],
+      "bounds": {
+        "min": [
+          0.237099,
+          0.439513,
+          -0.253018
+        ],
+        "max": [
+          0.319003,
+          0.490623,
+          -0.154207
+        ]
+      },
+      "colors": [
+        "yellow"
+      ],
+      "attached_to": "icing.g",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "icing",
+      "b": "dough",
+      "depth": 0.152616,
+      "hidden": false
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

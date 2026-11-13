@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -588,6 +588,134 @@ fn add_without_a_socket_stands_the_part_on_the_ground() {
     assert_eq!(
         std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
         before
+    );
+}
+
+#[test]
+fn the_newer_shapes_and_options_are_edited_from_the_command_line() {
+    let folder = folder("cli_edit_shapes");
+    // The trunk gets cut rims and a narrower top.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--bevel",
+            "0.03",
+            "--bevel-steps",
+            "2",
+            "--taper",
+            "0.6",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output)
+            .starts_with("edited tree.toml: set \"trunk\": bevel 0.03, bevel_steps 2, taper 0.6\n"),
+        "{}",
+        stdout(&output)
+    );
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(
+        text.contains("segments = 8\nbevel = 0.03\nbevel_steps = 2\ntaper = 0.6\ncolor = \"bark\""),
+        "{text}"
+    );
+    // Two numbers narrow it one way more than the other; 1 makes it
+    // straight again, and 0 its rims sharp.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "trunk", "--taper", "0.6,0.9"],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        std::fs::read_to_string(folder.join("tree.toml"))
+            .unwrap()
+            .contains("taper = [0.6, 0.9]")
+    );
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--taper",
+            "1",
+            "--bevel",
+            "0",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        TREE
+    );
+
+    // A ring round the trunk, steps beside it and an arch over it.
+    for (name, words) in [
+        (
+            "swing",
+            &["--shape", "torus", "--radius", "0.4", "--tube", "0.05"][..],
+        ),
+        (
+            "ladder",
+            &["--shape", "stairs", "--size", "0.5,0.6,0.6", "--steps", "3"][..],
+        ),
+        (
+            "gate",
+            &["--shape", "arch", "--size", "2,2.5,0.3", "--wall", "0.25"][..],
+        ),
+        (
+            "pipe",
+            &[
+                "--shape", "tube", "--radius", "0.2", "--wall", "0.02", "--height", "0.5",
+            ][..],
+        ),
+    ] {
+        let mut arguments = vec!["edit", "tree.toml", "add", name, "--color", "bark"];
+        arguments.extend_from_slice(words);
+        let output = run(&folder, &arguments);
+        assert_eq!(output.status.code(), Some(0), "{name}: {}", stderr(&output));
+    }
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    for written in [
+        "shape = \"torus\"\nradius = 0.4\ntube = 0.05\n",
+        "shape = \"stairs\"\nsize = [0.5, 0.6, 0.6]\nsteps = 3\n",
+        "shape = \"arch\"\nsize = [2, 2.5, 0.3]\nwall = 0.25\n",
+        "shape = \"tube\"\nradius = 0.2\nwall = 0.02\nheight = 0.5\n",
+    ] {
+        assert!(text.contains(written), "{written} isn't in:\n{text}");
+    }
+    let output = run(&folder, &["inspect", "tree.toml", "--json"]);
+    assert_eq!(json(&output)["parts"].as_array().unwrap().len(), 6);
+
+    // Words that are wrong: exit code 2, and nothing written.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "trunk", "--taper", "1,2,3"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--taper needs one number"),
+        "{}",
+        stderr(&output)
+    );
+    // An option the shape can't have: exit code 1, with why.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "leaves", "--bevel", "0.1"],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("only a box and a cylinder have edges to cut"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        text
     );
 }
 

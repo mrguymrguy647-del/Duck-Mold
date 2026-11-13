@@ -249,9 +249,12 @@ fn an_unknown_shape_lists_the_real_ones() {
     assert_eq!(
         issue.allowed,
         Some(Allowed::OneOf {
-            options: ["box", "cylinder", "sphere", "cone", "wedge"]
-                .map(String::from)
-                .to_vec()
+            options: [
+                "box", "cylinder", "sphere", "cone", "wedge", "capsule", "torus", "tube",
+                "pyramid", "prism", "stairs", "arch"
+            ]
+            .map(String::from)
+            .to_vec()
         })
     );
     // Nothing more is said about the sizes of a shape that doesn't exist.

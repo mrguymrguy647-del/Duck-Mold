@@ -1,0 +1,85 @@
+# A mug of coffee: the `tube` shape.
+#
+#   duck-mold studio examples/mug.toml
+#
+# It shows: a tube (a pipe, open at both ends: `radius` to the outside,
+# `wall` for how thick it is) narrowed towards the bottom with `taper`,
+# a ring (`torus`) turned on its side for the handle, and a cylinder
+# with a cut rim (`bevel`) for the saucer. A tube's `top` and `bottom`
+# sockets are in the middle of its opening.
+
+version = 0
+name = "mug"
+description = "A mug of coffee on a saucer."
+
+[palette]
+china  = "#F2EEE4"
+blue   = "#2F6FB5"
+coffee = "#4A2C17"
+
+[[parts]]
+name = "saucer"
+shape = "cylinder"
+radius = 0.6
+height = 0.05
+segments = 24
+bevel = 0.02
+color = "china"
+
+# The bottom of the mug: a disc the tube stands on.
+[[parts]]
+name = "base"
+shape = "cylinder"
+radius = 0.3
+height = 0.04
+segments = 24
+color = "blue"
+attach = "bottom"
+to = "saucer.top"
+
+# Wider at the top than at the bottom.
+[[parts]]
+name = "cup"
+shape = "tube"
+radius = 0.3
+wall = 0.035
+height = 0.62
+segments = 24
+taper = 1.25
+color = "blue"
+colors = { inside = "china", top = "china" }
+attach = "bottom"
+to = "base.top"
+
+[parts.sockets]
+handle = { on = "right", shift = [0, 0.05, 0] }
+
+# A ring. `grip` is a point inside it, just in from its left rim; the
+# join puts that point on the cup's side, and the twist stands the ring
+# on edge. So the rim of the ring is in the cup's wall, and the rest
+# sticks out.
+[[parts]]
+name = "handle"
+shape = "torus"
+radius = 0.13
+tube = 0.03
+segments = 16
+color = "blue"
+attach = "grip"
+to = "cup.handle"
+twist = 90
+
+[parts.sockets]
+grip = { at = [-0.135, 0, 0], facing = "left" }
+
+# The coffee stands on the base, inside the cup, and widens with it.
+[[parts]]
+name = "coffee"
+shape = "cylinder"
+radius = 0.262
+height = 0.5
+segments = 24
+taper = 1.2
+color = "coffee"
+attach = "bottom"
+to = "base.top"

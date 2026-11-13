@@ -908,11 +908,16 @@ fn describe_reads_what_the_recipe_says_about_a_part() {
     assert_eq!(base.shape.as_deref(), Some("cylinder"));
     assert_eq!(
         base.sizes,
+        // What a cylinder has, with the default for what the recipe
+        // leaves out: no bevel, and straight sides.
         Sizes {
-            size: None,
             radius: Some(0.3),
             height: Some(0.05),
             segments: Some(16),
+            bevel: Some(0.0),
+            bevel_steps: Some(1),
+            taper: Some([1.0; 2]),
+            ..Sizes::default()
         }
     );
     assert_eq!(base.color.as_deref(), Some("steel"));
@@ -1374,6 +1379,280 @@ fn a_free_part_and_a_join_dont_mix() {
 }
 
 #[test]
+fn cut_edges_and_a_narrowed_top_are_set_and_taken_away() {
+    let sizes = |sizes: Sizes| {
+        set_with(
+            "pole",
+            Changes {
+                sizes,
+                ..Changes::default()
+            },
+        )
+    };
+    // The pole is a box: its edges are cut, in two flat cuts, and its
+    // top made half as wide.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &sizes(Sizes {
+            bevel: Some(0.01),
+            bevel_steps: Some(2),
+            taper: Some([0.5, 0.5]),
+            ..Sizes::default()
+        }),
+    );
+    let (gone, new) = changed(LAMP, &applied.text);
+    assert!(gone.is_empty(), "{gone:?}");
+    // After the size, in the order a recipe has them.
+    assert_eq!(new, ["bevel = 0.01", "bevel_steps = 2", "taper = 0.5"]);
+    assert_eq!(
+        applied.summary,
+        "set \"pole\": bevel 0.01, bevel_steps 2, taper 0.5"
+    );
+    let cut = applied.model.as_ref().unwrap();
+    assert!(part(cut, "pole").faces.len() > 6);
+    // The recipe says so when asked.
+    let facts = describe(&applied.text, Syntax::Toml, applied.model.as_ref(), "pole").unwrap();
+    assert_eq!(
+        (
+            facts.sizes.bevel,
+            facts.sizes.bevel_steps,
+            facts.sizes.taper
+        ),
+        (Some(0.01), Some(2), Some([0.5, 0.5]))
+    );
+
+    // A top that is narrowed one way only is two numbers.
+    let two = done(
+        &applied.text,
+        Syntax::Toml,
+        &sizes(Sizes {
+            taper: Some([0.5, 1.0]),
+            ..Sizes::default()
+        }),
+    );
+    assert!(two.text.contains("taper = [0.5, 1]\n"), "{}", two.text);
+    let facts = describe(&two.text, Syntax::Toml, two.model.as_ref(), "pole").unwrap();
+    assert_eq!(facts.sizes.taper, Some([0.5, 1.0]));
+
+    // No bevel takes its steps away with it; straight sides take the
+    // taper away. The file is as it was.
+    let plain = done(
+        &two.text,
+        Syntax::Toml,
+        &sizes(Sizes {
+            bevel: Some(0.0),
+            taper: Some([1.0, 1.0]),
+            ..Sizes::default()
+        }),
+    );
+    assert_eq!(plain.text, LAMP);
+    assert_eq!(plain.summary, "set \"pole\": no bevel, no taper");
+
+    // One cut is what a bevel has when nothing is said: it isn't written.
+    let one = done(
+        &applied.text,
+        Syntax::Toml,
+        &sizes(Sizes {
+            bevel_steps: Some(1),
+            ..Sizes::default()
+        }),
+    );
+    assert!(!one.text.contains("bevel_steps"), "{}", one.text);
+    assert!(one.text.contains("bevel = 0.01\n"));
+
+    // Changing the shape to one that has no edges to cut drops both.
+    let ball = done(
+        &applied.text,
+        Syntax::Toml,
+        &set_with(
+            "pole",
+            Changes {
+                shape: Some("sphere".into()),
+                ..Changes::default()
+            },
+        ),
+    );
+    for gone in ["bevel", "taper", "size"] {
+        assert!(
+            !ball.text.contains(&format!("\n{gone}")),
+            "{gone} is still there:\n{}",
+            ball.text
+        );
+    }
+    // A cut too deep for the shape is refused, with why.
+    let report = refused(
+        LAMP,
+        &sizes(Sizes {
+            bevel: Some(0.03),
+            ..Sizes::default()
+        }),
+    )
+    .report();
+    assert_eq!(report.errors[0].code, Code::OutOfRange);
+    assert!(
+        report.errors[0].message.contains("must be less than 0.025"),
+        "{}",
+        report.errors[0].message
+    );
+}
+
+#[test]
+fn the_newer_shapes_are_added_set_and_described() {
+    let add = |name: &str, shape: &str, sizes: Sizes| Edit::Add {
+        name: name.into(),
+        made: Made::Shape(shape.into()),
+        to: Some("pole.top".into()),
+        attach: None,
+        sizes,
+        color: Some("glow".into()),
+        twist: None,
+        free: Free::default(),
+    };
+    // A ring.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &add(
+            "halo",
+            "torus",
+            Sizes {
+                radius: Some(0.2),
+                tube: Some(0.03),
+                ..Sizes::default()
+            },
+        ),
+    );
+    assert!(
+        applied.text.ends_with(
+            "name = \"halo\"\nshape = \"torus\"\nradius = 0.2\ntube = 0.03\ncolor = \"glow\"\nattach = \"bottom\"\nto = \"pole.top\"\n"
+        ),
+        "{}",
+        applied.text
+    );
+    let facts = describe(&applied.text, Syntax::Toml, applied.model.as_ref(), "halo").unwrap();
+    assert_eq!(
+        facts.sizes,
+        Sizes {
+            radius: Some(0.2),
+            tube: Some(0.03),
+            segments: Some(16),
+            ..Sizes::default()
+        }
+    );
+    // Thicker than its hole is wide: refused.
+    let report = refused(
+        &applied.text,
+        &set_with(
+            "halo",
+            Changes {
+                sizes: Sizes {
+                    tube: Some(0.25),
+                    ..Sizes::default()
+                },
+                ..Changes::default()
+            },
+        ),
+    )
+    .report();
+    assert!(
+        report.errors[0].message.contains("close its own hole"),
+        "{}",
+        report.errors[0].message
+    );
+
+    // Stairs, an arch and a tube, with what each leaves out filled in.
+    for (shape, given, described) in [
+        (
+            "stairs",
+            Sizes {
+                size: Some([0.2, 0.2, 0.4]),
+                steps: Some(5),
+                ..Sizes::default()
+            },
+            Sizes {
+                size: Some([0.2, 0.2, 0.4]),
+                steps: Some(5),
+                ..Sizes::default()
+            },
+        ),
+        (
+            "arch",
+            Sizes {
+                size: Some([1.0, 1.0, 0.2]),
+                ..Sizes::default()
+            },
+            Sizes {
+                size: Some([1.0, 1.0, 0.2]),
+                wall: Some(0.2),
+                segments: Some(8),
+                ..Sizes::default()
+            },
+        ),
+        (
+            "tube",
+            Sizes {
+                wall: Some(0.05),
+                ..Sizes::default()
+            },
+            Sizes {
+                radius: Some(0.5),
+                wall: Some(0.05),
+                height: Some(1.0),
+                segments: Some(16),
+                taper: Some([1.0, 1.0]),
+                ..Sizes::default()
+            },
+        ),
+        (
+            "capsule",
+            Sizes::default(),
+            Sizes {
+                radius: Some(0.25),
+                height: Some(1.0),
+                segments: Some(16),
+                ..Sizes::default()
+            },
+        ),
+        (
+            "pyramid",
+            Sizes::default(),
+            Sizes {
+                size: Some([1.0; 3]),
+                ..Sizes::default()
+            },
+        ),
+    ] {
+        let applied = done(LAMP, Syntax::Toml, &add("new", shape, given));
+        let facts = describe(&applied.text, Syntax::Toml, applied.model.as_ref(), "new").unwrap();
+        assert_eq!(facts.shape.as_deref(), Some(shape));
+        assert_eq!(facts.sizes, described, "{shape}");
+        assert!(applied.model.is_some(), "{shape}");
+    }
+
+    // A size the shape doesn't have is refused, naming the ones it has.
+    let report = refused(
+        LAMP,
+        &add(
+            "new",
+            "prism",
+            Sizes {
+                wall: Some(0.1),
+                ..Sizes::default()
+            },
+        ),
+    )
+    .report();
+    assert!(
+        report.errors[0]
+            .message
+            .contains("a prism has no \"wall\": its size is given by \"size\""),
+        "{}",
+        report.errors[0].message
+    );
+}
+
+#[test]
 fn a_joined_part_isnt_moved_or_turned_but_says_how() {
     let failure = refused(
         LAMP,
@@ -1768,7 +2047,8 @@ fn windows_line_endings_and_the_invisible_mark_survive() {
 fn examples() -> Vec<(String, String)> {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     [
-        "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck",
+        "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck", "dog", "doughnut",
+        "mug", "temple", "barn", "slide", "gate",
     ]
     .into_iter()
     .map(|name| {

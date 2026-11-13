@@ -450,3 +450,209 @@ fn a_part_from_a_mesh_file_has_its_sockets_on_its_surface() {
     let (at, _) = socket(&model, "p", "flag");
     assert_eq!(at, vec3(0.5, 0.0, 0.5));
 }
+
+// ---- the newer shapes -------------------------------------------------------
+
+fn near(a: Vec3, b: Vec3) -> bool {
+    (a - b).length() < 1e-9
+}
+
+#[test]
+fn a_ring_and_a_tube_have_their_top_in_the_middle_of_the_opening() {
+    // Nothing is under the middle of a ring: its top and bottom stay on
+    // the box, level with the rim, where a lid or a table top goes.
+    let ring = one("shape = \"torus\"\nradius = 0.5\ntube = 0.15");
+    let (at, facing) = socket(&ring, "p", "top");
+    assert!(near(at, vec3(0.0, 0.15, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 1.0, 0.0)));
+    let (at, facing) = socket(&ring, "p", "bottom");
+    assert!(near(at, vec3(0.0, -0.15, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(0.0, -1.0, 0.0)));
+    // Its sides are on the outside of the ring.
+    let (at, facing) = socket(&ring, "p", "right");
+    assert!(near(at, vec3(0.65, 0.0, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(1.0, 0.0, 0.0)));
+    let (at, _) = socket(&ring, "p", "front");
+    assert!(near(at, vec3(0.0, 0.0, 0.65)), "{at:?}");
+
+    let pipe = one("shape = \"tube\"\nradius = 0.5\nwall = 0.1\nheight = 2");
+    let (at, facing) = socket(&pipe, "p", "top");
+    assert!(near(at, vec3(0.0, 1.0, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 1.0, 0.0)));
+    let (at, facing) = socket(&pipe, "p", "left");
+    assert!(near(at, vec3(-0.5, 0.0, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(-1.0, 0.0, 0.0)));
+}
+
+#[test]
+fn an_arch_stands_on_the_ground_between_its_feet() {
+    let arch = one("shape = \"arch\"\nsize = [2, 3, 0.5]\nwall = 0.25");
+    // The bottom is not up under the top of the doorway.
+    let (at, facing) = socket(&arch, "p", "bottom");
+    assert!(near(at, vec3(0.0, -1.5, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(0.0, -1.0, 0.0)));
+    // The front and the back are in the doorway's mouth.
+    let (at, facing) = socket(&arch, "p", "front");
+    assert!(near(at, vec3(0.0, 0.0, 0.25)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 0.0, 1.0)));
+    let (at, _) = socket(&arch, "p", "back");
+    assert!(near(at, vec3(0.0, 0.0, -0.25)), "{at:?}");
+    // The rest is on the wall.
+    let (at, _) = socket(&arch, "p", "top");
+    assert!(near(at, vec3(0.0, 1.5, 0.0)), "{at:?}");
+    let (at, facing) = socket(&arch, "p", "left");
+    assert!(near(at, vec3(-1.0, 0.0, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(-1.0, 0.0, 0.0)));
+    // A socket declared under it stays on the ground too.
+    let arch = one(
+        "shape = \"arch\"\nsize = [2, 3, 0.5]\nwall = 0.25\n[parts.sockets]\nmat = { on = \"bottom\", shift = [0.2, 0, 0.1] }",
+    );
+    let (at, _) = socket(&arch, "p", "mat");
+    // (A shift is a share of half the size: 0.1 of 0.25 deep.)
+    assert!(near(at, vec3(0.2, -1.5, 0.025)), "{at:?}");
+}
+
+#[test]
+fn a_pyramid_and_a_roof_have_sockets_on_their_slopes() {
+    let pyramid = one("shape = \"pyramid\"\nsize = [2, 1, 2]");
+    // The top is the point, looking up.
+    let (at, facing) = socket(&pyramid, "p", "top");
+    assert!(near(at, vec3(0.0, 0.5, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 1.0, 0.0)), "{facing:?}");
+    // A side is halfway up its slope, looking out of it.
+    let (at, facing) = socket(&pyramid, "p", "right");
+    assert!(near(at, vec3(0.5, 0.0, 0.0)), "{at:?}");
+    assert!(near(facing, unit(vec3(1.0, 1.0, 0.0))), "{facing:?}");
+    let (at, facing) = socket(&pyramid, "p", "front");
+    assert!(near(at, vec3(0.0, 0.0, 0.5)), "{at:?}");
+    assert!(near(facing, unit(vec3(0.0, 1.0, 1.0))), "{facing:?}");
+
+    let roof = one("shape = \"prism\"\nsize = [2, 1, 3]");
+    // The top is the middle of the ridge.
+    let (at, facing) = socket(&roof, "p", "top");
+    assert!(near(at, vec3(0.0, 0.5, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 1.0, 0.0)), "{facing:?}");
+    let (at, facing) = socket(&roof, "p", "left");
+    assert!(near(at, vec3(-0.5, 0.0, 0.0)), "{at:?}");
+    assert!(near(facing, unit(vec3(-1.0, 1.0, 0.0))), "{facing:?}");
+    // The ends are flat.
+    let (at, facing) = socket(&roof, "p", "back");
+    assert!(near(at, vec3(0.0, 0.0, -1.5)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 0.0, -1.0)));
+}
+
+#[test]
+fn stairs_and_a_capsule_have_sockets_on_their_surface() {
+    let stairs = one("shape = \"stairs\"\nsize = [1, 1, 2]\nsteps = 4");
+    // The front is on a riser, the top on a step, both on the surface.
+    let (at, facing) = socket(&stairs, "p", "front");
+    assert!(near(at, vec3(0.0, 0.0, 0.5)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 0.0, 1.0)), "{facing:?}");
+    let (at, facing) = socket(&stairs, "p", "top");
+    assert!(near(at, vec3(0.0, 0.25, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 1.0, 0.0)), "{facing:?}");
+    let (at, _) = socket(&stairs, "p", "back");
+    assert!(near(at, vec3(0.0, 0.0, -1.0)), "{at:?}");
+
+    let pill = one("shape = \"capsule\"\nradius = 0.25\nheight = 1");
+    let (at, facing) = socket(&pill, "p", "top");
+    assert!(near(at, vec3(0.0, 0.5, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(0.0, 1.0, 0.0)), "{facing:?}");
+    let (at, facing) = socket(&pill, "p", "right");
+    assert!(near(at, vec3(0.25, 0.0, 0.0)), "{at:?}");
+    assert!(near(facing, vec3(1.0, 0.0, 0.0)), "{facing:?}");
+}
+
+#[test]
+fn cut_edges_and_a_narrowed_top_keep_sockets_on_the_surface() {
+    // A box narrowed to half at the top: its sides lean in, and a socket
+    // halfway up is on the lean, three quarters of the way out.
+    let block = one("shape = \"box\"\nsize = [2, 2, 2]\ntaper = 0.5");
+    let (at, facing) = socket(&block, "p", "right");
+    assert!(near(at, vec3(0.75, 0.0, 0.0)), "{at:?}");
+    assert!(near(facing, unit(vec3(4.0, 1.0, 0.0))), "{facing:?}");
+    let (at, _) = socket(&block, "p", "top");
+    assert!(near(at, vec3(0.0, 1.0, 0.0)), "{at:?}");
+    // Cut edges don't move the middles of the faces.
+    let block = one("shape = \"box\"\nsize = [2, 2, 2]\nbevel = 0.2\nbevel_steps = 2");
+    for (name, at) in [
+        ("right", vec3(1.0, 0.0, 0.0)),
+        ("top", vec3(0.0, 1.0, 0.0)),
+        ("back", vec3(0.0, 0.0, -1.0)),
+    ] {
+        assert!(near(socket(&block, "p", name).0, at), "{name}");
+    }
+    // A socket slid to the very edge of a face is on the cut.
+    let block = one(
+        "shape = \"box\"\nsize = [2, 2, 2]\nbevel = 0.2\n[parts.sockets]\nrim = { on = \"top\", shift = [0.9, 0, 0] }",
+    );
+    let (at, facing) = socket(&block, "p", "rim");
+    assert!(near(at, vec3(0.9, 0.9, 0.0)), "{at:?}");
+    assert!(near(facing, unit(vec3(1.0, 1.0, 0.0))), "{facing:?}");
+}
+
+#[test]
+fn sizes_that_dont_fit_each_other_say_so() {
+    let wrong = |part: &str| errors(&format!("version = 0\n[[parts]]\nname = \"p\"\n{part}\n"));
+    let found = wrong("shape = \"capsule\"\nradius = 0.5\nheight = 0.8");
+    assert_eq!(found[0].code, Code::OutOfRange);
+    assert!(
+        found[0]
+            .message
+            .contains("at least twice its radius: 1 or more"),
+        "{}",
+        found[0].message
+    );
+    let found = wrong("shape = \"torus\"\nradius = 0.2\ntube = 0.2");
+    assert!(
+        found[0].message.contains("close its own hole"),
+        "{}",
+        found[0].message
+    );
+    assert_eq!(found[0].path, "parts[0].tube");
+    let found = wrong("shape = \"tube\"\nradius = 0.2\nwall = 0.3");
+    assert!(found[0].message.contains("no hole"), "{}", found[0].message);
+    let found = wrong("shape = \"arch\"\nsize = [1, 2, 1]\nwall = 0.5");
+    assert!(
+        found[0].message.contains("no doorway"),
+        "{}",
+        found[0].message
+    );
+    let found = wrong("shape = \"box\"\nsize = [1, 0.2, 1]\nbevel = 0.1");
+    assert!(
+        found[0].message.contains("must be less than 0.1"),
+        "{}",
+        found[0].message
+    );
+    let found = wrong("shape = \"cylinder\"\nbevel_steps = 5\nbevel = 0.1");
+    assert_eq!(found[0].code, Code::OutOfRange);
+    // An option on a shape that can't have it.
+    let found = wrong("shape = \"sphere\"\nbevel = 0.1");
+    assert_eq!(found[0].code, Code::UnknownField);
+    assert!(
+        found[0].message.contains("only a box and a cylinder"),
+        "{}",
+        found[0].message
+    );
+    let found = wrong("shape = \"cone\"\ntaper = 0.5");
+    assert!(
+        found[0]
+            .message
+            .contains("only a box, a cylinder and a tube"),
+        "{}",
+        found[0].message
+    );
+    let found = wrong("shape = \"box\"\ntaper = [1, 2, 3]");
+    assert_eq!(found[0].code, Code::TypeMismatch);
+    let found = wrong("shape = \"box\"\ntaper = 0");
+    assert_eq!(found[0].code, Code::OutOfRange);
+    // A size that belongs to another shape names this one's own.
+    let found = wrong("shape = \"stairs\"\nradius = 1");
+    assert!(
+        found[0]
+            .message
+            .contains("a stairs has no \"radius\": its size is given by \"size\" and \"steps\""),
+        "{}",
+        found[0].message
+    );
+}
