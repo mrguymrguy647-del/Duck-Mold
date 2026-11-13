@@ -3635,8 +3635,8 @@ It works on every model, not just boxes.
 |  head      | [Turn]                     ___                               |   step_left     |
 |  left_arm *| [Move]                    |o o|        (faint: the key       |   step_right    |
 |   upper    |                         __|___|__       before and after)    | > wave          |
-|   elbow    |                  \\    |         |                           |   wave_out      |
-|   forearm  |                   \\   |   []    |                           | New  Copy       |
+|   elbow    |                  \     |         |                           |   wave_out      |
+|   forearm  |                   \    |   []    |                           | New  Copy       |
 |   hand     |                 ( (O) )|         |                           | Mirror  Rename  |
 |  right_arm |              rings at  |_________|                           | Remove          |
 |  left_leg  |              the         ||   ||                             |-----------------|
