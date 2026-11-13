@@ -2851,10 +2851,47 @@ fn every_kind_of_edit_has_a_name() {
         },
         Edit::RemovePose {
             pose: String::new(),
+            with_keys: false,
         },
         Edit::MirrorPose {
             pose: String::new(),
             as_name: None,
+        },
+        Edit::AddAnimation {
+            name: String::new(),
+            looping: false,
+        },
+        Edit::SetAnimation {
+            animation: String::new(),
+            looping: None,
+            smooth: None,
+            length: None,
+        },
+        Edit::RenameAnimation {
+            animation: String::new(),
+            new_name: String::new(),
+        },
+        Edit::RemoveAnimation {
+            animation: String::new(),
+        },
+        Edit::AddKey {
+            animation: String::new(),
+            pose: String::new(),
+            at: 0.0,
+        },
+        Edit::MoveKey {
+            animation: String::new(),
+            key: 1,
+            at: 0.0,
+        },
+        Edit::SetKey {
+            animation: String::new(),
+            key: 1,
+            pose: String::new(),
+        },
+        Edit::RemoveKey {
+            animation: String::new(),
+            key: 1,
         },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();

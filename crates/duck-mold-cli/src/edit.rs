@@ -356,10 +356,92 @@ pub enum Change {
         /// Its new name.
         new_name: String,
     },
-    /// Remove a pose.
+    /// Remove a pose. Refused while a key of an animation uses it,
+    /// unless --with-keys.
     RemovePose {
         /// The pose.
         pose: String,
+        /// Take the keys that use the pose away with it.
+        #[arg(long)]
+        with_keys: bool,
+    },
+    /// Add an animation, with no keys yet: give it keys with add-key.
+    AddAnimation {
+        /// The new animation's name.
+        name: String,
+        /// It starts again after its last key.
+        #[arg(long = "loop")]
+        looping: bool,
+    },
+    /// Change whether an animation loops, whether it is smooth, and how
+    /// long it lasts.
+    SetAnimation {
+        /// The animation.
+        animation: String,
+        /// true: it starts again after its last key. false: it plays
+        /// once.
+        #[arg(long = "loop", value_name = "true|false")]
+        looping: Option<bool>,
+        /// true: the motion flows through each pose and starts and ends
+        /// gently. false: it goes straight from pose to pose at a
+        /// steady speed, like a wheel.
+        #[arg(long, value_name = "true|false")]
+        smooth: Option<bool>,
+        /// How long it lasts, in seconds: every key's time is scaled, so
+        /// the whole animation is faster or slower.
+        #[arg(long, value_name = "SECONDS")]
+        length: Option<f64>,
+    },
+    /// Rename an animation.
+    RenameAnimation {
+        /// The animation.
+        animation: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Remove an animation. Its poses stay.
+    RemoveAnimation {
+        /// The animation.
+        animation: String,
+    },
+    /// Add a key to an animation: a pose, and the time it is reached.
+    /// The first key is at 0.
+    AddKey {
+        /// The animation.
+        animation: String,
+        /// The pose: one of the recipe's, or rest.
+        pose: String,
+        /// Its time, in seconds from the animation's start.
+        #[arg(long, value_name = "SECONDS")]
+        at: f64,
+    },
+    /// Give a key another time.
+    MoveKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1 as inspect --animation prints them.
+        key: usize,
+        /// Its new time, in seconds.
+        #[arg(long, value_name = "SECONDS")]
+        at: f64,
+    },
+    /// Give a key another pose.
+    SetKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// Its new pose.
+        #[arg(long, value_name = "POSE")]
+        pose: String,
+    },
+    /// Remove a key. If it is the first, the keys after it move earlier
+    /// so that the animation still starts at 0.
+    RemoveKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
     },
     /// Make the mirror image of a pose, left to right: what left_arm
     /// did, right_arm does, and a part in the middle turns the other
@@ -837,7 +919,62 @@ impl Change {
                 pose: pose.clone(),
                 new_name: new_name.clone(),
             },
-            Change::RemovePose { pose } => Edit::RemovePose { pose: pose.clone() },
+            Change::RemovePose { pose, with_keys } => Edit::RemovePose {
+                pose: pose.clone(),
+                with_keys: *with_keys,
+            },
+            Change::AddAnimation { name, looping } => Edit::AddAnimation {
+                name: name.clone(),
+                looping: *looping,
+            },
+            Change::SetAnimation {
+                animation,
+                looping,
+                smooth,
+                length,
+            } => Edit::SetAnimation {
+                animation: animation.clone(),
+                looping: *looping,
+                smooth: *smooth,
+                length: *length,
+            },
+            Change::RenameAnimation {
+                animation,
+                new_name,
+            } => Edit::RenameAnimation {
+                animation: animation.clone(),
+                new_name: new_name.clone(),
+            },
+            Change::RemoveAnimation { animation } => Edit::RemoveAnimation {
+                animation: animation.clone(),
+            },
+            Change::AddKey {
+                animation,
+                pose,
+                at,
+            } => Edit::AddKey {
+                animation: animation.clone(),
+                pose: pose.clone(),
+                at: *at,
+            },
+            Change::MoveKey { animation, key, at } => Edit::MoveKey {
+                animation: animation.clone(),
+                key: *key,
+                at: *at,
+            },
+            Change::SetKey {
+                animation,
+                key,
+                pose,
+            } => Edit::SetKey {
+                animation: animation.clone(),
+                key: *key,
+                pose: pose.clone(),
+            },
+            Change::RemoveKey { animation, key } => Edit::RemoveKey {
+                animation: animation.clone(),
+                key: *key,
+            },
             Change::MirrorPose { pose, as_name } => Edit::MirrorPose {
                 pose: pose.clone(),
                 as_name: as_name.clone(),

@@ -180,6 +180,7 @@ The top of the file:
 | `sockets` | Extra sockets on the whole model. |
 | `origin` | The model's zero point: a socket, like `"bottom"` (the default), `"center"` or `"trunk.bottom"`. |
 | `poses` | The model's poses, by name: which parts are turned, and how far (section 11). |
+| `animations` | The model's animations, by name: poses at times (section 11). |
 
 A part (an entry of `parts`, or of `define`) gets its shape from
 **exactly one** of:
@@ -511,6 +512,9 @@ Warnings (the model is still built; exit code 0):
 | `unused` | A palette colour or a defined part that nothing uses, or a `color` that changes nothing because every face inside already has one. |
 | `floating` | A part touches nothing. |
 | `limit_broken` | A pose turns a part past its `limits`, or moves a part that is `"fixed"`. The model still builds. |
+| `loop_jumps` | An animation loops and doesn't end on the pose it starts with. The model still builds. |
+| `unknown_pose` | A key, or a command, names a pose the recipe doesn't have. `rest` is always one. |
+| `unknown_animation` | A command names an animation the recipe doesn't have. |
 | `hidden` | A part is entirely inside another. |
 | `off_ground` | The model's lowest point isn't at y = 0. |
 | `skipped` | Something in a mesh file was passed over. |
@@ -616,8 +620,16 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> set-pose <pose> <part> --turn x,y,z` | Turns a part in a pose, in degrees about its pivot (section 11); `--move x,y,z` slides it, in metres. Makes the pose if it isn't there. `--rest` puts the part back at rest in that pose. |
 | `duck-mold edit <recipe> add-pose <name>` | A new pose with every part at rest; `--from <pose>` makes it a copy of another. |
 | `duck-mold edit <recipe> rename-pose <pose> <new name>` | Renames a pose where it stands. |
-| `duck-mold edit <recipe> remove-pose <pose>` | Removes a pose. |
+| `duck-mold edit <recipe> remove-pose <pose>` | Removes a pose. Refused while a key of an animation uses it; `--with-keys` takes those keys away too. |
 | `duck-mold edit <recipe> mirror-pose <pose> --as <name>` | The mirror image of a pose, left to right: `left` and `right` swap in the parts' names, turns around y and z go the other way (inside a mirrored part they keep their numbers), a move to one side goes to the other. `--as` an existing pose replaces it; without `--as` the pose itself is mirrored. Make `step_left`, then `mirror-pose step_left --as step_right`. |
+| `duck-mold edit <recipe> add-animation <name>` | A new animation with no keys yet (section 11). `--loop`: it starts again after its last key. |
+| `duck-mold edit <recipe> add-key <animation> <pose> --at <seconds>` | The animation reaches that pose at that time. The key goes where its time puts it; the first key is at 0. The pose is one of the recipe's, or `rest`. |
+| `duck-mold edit <recipe> move-key <animation> <number> --at <seconds>` | Gives a key another time. Keys are numbered from 1, as `inspect --animation` prints them. Key 1 stays at 0. |
+| `duck-mold edit <recipe> set-key <animation> <number> --pose <pose>` | Gives a key another pose. |
+| `duck-mold edit <recipe> remove-key <animation> <number>` | Removes a key. If it is the first, the keys after it move earlier so the animation still starts at 0. |
+| `duck-mold edit <recipe> set-animation <animation> --loop true\|false --smooth true\|false --length <seconds>` | Any of the three. `--length` scales every key's time: the whole animation gets faster or slower. |
+| `duck-mold edit <recipe> rename-animation <animation> <new name>` | Renames an animation where it stands. |
+| `duck-mold edit <recipe> remove-animation <animation>` | Removes an animation. Its poses stay. |
 | `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
 | `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
 | `duck-mold edit <recipe> set-change <part> <number> --by <amount>` | Changes the amount of one change, counted from 1 as they are written: one number, or `x,y,z` for a move, a turn or a scale. Later changes, and every name, stay. |
@@ -798,8 +810,96 @@ Renaming a part with `rename` renames its lines in every pose (and the
 lines of the parts inside it); removing a part removes them, and the
 summary says how many.
 
-Animations are written in the recipe too; they come with the next step
-of this phase.
+### Animations
+
+An animation is a list of **keys**: a pose, and the time it is reached.
+It is written at the top of the recipe, by name:
+
+```toml
+[animations.walk]
+loop = true                          # starts again after its last key
+keys = [
+  { at = 0, pose = "step_left" },    # seconds from the start; the first key is at 0
+  { at = 0.4, pose = "step_right" },
+  { at = 0.8, pose = "step_left" },  # a loop ends on the pose it starts with
+]
+
+[animations.roll]                    # a cart's wheel
+loop = true
+smooth = false                       # straight from pose to pose, at a steady speed
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 1, pose = "wheel_round" },  # wheel = [360, 0, 0]: once round
+]
+```
+
+- `at` is in seconds. The first key is at 0; each key is later than the
+  one before. The animation lasts until its last key.
+- `pose` is one of the recipe's poses, or `rest`. The same pose can be
+  used by many keys and many animations.
+- Between two keys every number of a part's turn and move goes from one
+  pose's to the next's. So `[0, 0, 0]` to `[360, 0, 0]` is a full turn,
+  and `[0, 0, 0]` to `[0, 0, 0]` is no motion.
+- `smooth` (true unless written `false`): the motion flows through each
+  pose without stopping, slows to a stop where a part turns back (the
+  top of a wave), and starts and ends gently. It never goes past a
+  pose on the way to it, so poses within a part's limits keep the whole
+  animation within them. `smooth = false` suits wheels and clock hands.
+- `loop` (false unless written `true`): a loop must end on the pose it
+  starts with, or the model jumps when it starts again; that is the
+  warning `loop_jumps`. (A wheel at 360 is where it was at 0: fine.)
+- A walk doesn't move the model along the ground: the game does that.
+  Animate in place.
+
+**Check an animation** with `duck-mold inspect <recipe> --animation
+<name>`. It looks at every frame, 30 a second, and reports the worst it
+finds and when:
+
+```text
+robot, the animation "walk"  (robot.toml)
+  length       0.8 s  (25 frames at 30 a second)
+  plays        round and round (it loops)
+  motion       smooth: it flows through each pose, and starts and ends gently
+  keys         1  0 s    step_left
+               2  0.4 s  step_right
+               3  0.8 s  step_left
+  moves        left_arm, right_arm, left_leg, right_leg
+  ground       its lowest point sinks 0.04 into the ground at 0.1 s
+  floating     none in any frame
+  overlapping  left_leg/thigh is 0.045 inside body at 0 s   (not so at rest)
+  limits       none broken in any frame
+  loop         ends as it starts
+```
+
+With `--json`: `animation`, `length`, `loops`, `smooth`, `keys` (each
+with `key`, `at`, `pose`), `frames`, `moves`, `ground`
+(`stays_on_ground`, `lowest_y`, `lowest_at`, `highest_y`,
+`highest_at`), `floating`, `overlapping` and `limits_broken` (each
+with `at`, the time it is worst, and `new`: not so at rest), and for a
+loop `ends_as_it_starts`. The plain `inspect --json` lists
+`animations`: each `name`, `length`, `loops`, `keys`.
+
+**Look at an animation** with `duck-mold render <recipe> --animation
+<name>`: a strip of 8 frames side by side, evenly spaced in time, all
+from the same place, each with its time in its corner, written as
+`<recipe>.<animation>.strip.png`. `--frames <2 to 60>` for another
+number; `--view front|right|back|three-quarter` for where they are
+drawn from (a walk shows best from `right`, a wave from `front`). Read
+the picture to see the motion; `--json` says where each frame is
+(`strip`: `at`, `left`, `top`, `size`).
+
+```bash
+duck-mold edit robot.toml add-animation walk --loop
+duck-mold edit robot.toml add-key walk step_left --at 0
+duck-mold edit robot.toml add-key walk step_right --at 0.4
+duck-mold edit robot.toml add-key walk step_left --at 0.8
+duck-mold inspect robot.toml --animation walk --json
+duck-mold render robot.toml --animation walk --view right
+```
+
+Renaming a pose renames it in every key that uses it. A pose that keys
+use can't be removed from under them: change the keys, or
+`remove-pose <pose> --with-keys`.
 
 ## 12. Mistakes to avoid
 

@@ -3374,6 +3374,28 @@ keys = [
   is fine.)
 - The same pose can be used by many keys and many animations.
 
+*As built (step 4):* as above, with these details. "Smooth" is a curve
+through the keys that never goes past a key's value on its way to it
+(so an animation whose poses are within the limits stays within them):
+a number that keeps going the same way through a key passes it at a
+speed between those of the two sides, and one that turns back stops
+there. The two ends are at a stop, unless the animation loops: then the
+end runs into the start, so a wheel turns at one speed all the way
+round even with `smooth` on. An animation may have no keys (that is
+what `add-animation` makes); it is a warning until it gets one. The
+edit commands keep the first key at 0: `move-key` refuses to move key
+1, and removing key 1 moves the others earlier. `move-key` past
+another key changes places with it. `remove-pose --with-keys` is here
+now. `inspect --animation` has its own report (not the model's with
+lines added): length, loop, smooth, keys, what moves, how the lowest
+point goes, and the worst floating, overlapping and broken limit of any
+frame with its time. The strip is named `robot.walk.strip.png`, not
+`robot.walk.png`, because a pose and an animation may share a name
+(the robot's `wave`); each frame's time is in its corner, not under
+it; and `--view` chooses where the frames are drawn from (a walk shows
+best from the side). A loop's strip stops one step before its end,
+which is its start again.
+
 ### What happens when things are renamed or removed
 
 Poses name parts, and keys name poses. The edit commands keep them

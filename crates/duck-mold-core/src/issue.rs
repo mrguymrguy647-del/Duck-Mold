@@ -88,6 +88,11 @@ pub enum Code {
     LimitBroken,
     /// A pose's name that the recipe doesn't have.
     UnknownPose,
+    /// An animation's name that the recipe doesn't have.
+    UnknownAnimation,
+    /// An animation that loops and doesn't end on the pose it starts
+    /// with: the model would jump when it starts again.
+    LoopJumps,
 }
 
 impl Code {
@@ -122,6 +127,8 @@ impl Code {
             Code::BadShape => "bad_shape",
             Code::LimitBroken => "limit_broken",
             Code::UnknownPose => "unknown_pose",
+            Code::UnknownAnimation => "unknown_animation",
+            Code::LoopJumps => "loop_jumps",
         }
     }
 }

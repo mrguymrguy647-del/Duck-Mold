@@ -1317,7 +1317,7 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 28, "the guide's tables list 28 fields");
+    assert_eq!(checked, 29, "the guide's tables list 29 fields");
 }
 
 #[test]
@@ -1496,6 +1496,186 @@ fn limits_are_set_and_the_joins_listed_from_the_command_line() {
         "{}",
         stderr(&output)
     );
+    assert_eq!(text(), TREE);
+}
+
+#[test]
+fn animations_are_made_checked_and_drawn_from_the_command_line() {
+    let folder = folder("cli_animations");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+
+    // The tree sways: its leaves tip one way, then the other, and back.
+    for words in [
+        &["set-pose", "lean", "leaves", "--turn", "0,0,-20"][..],
+        &["mirror-pose", "lean", "--as", "lean_back"],
+        &["add-animation", "sway", "--loop"],
+        &["add-key", "sway", "rest", "--at", "0"],
+        &["add-key", "sway", "lean", "--at", "0.5"],
+        &["add-key", "sway", "lean_back", "--at", "1.5"],
+        &["add-key", "sway", "rest", "--at", "2"],
+    ] {
+        let output = edit(words);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{words:?}: {}",
+            stderr(&output)
+        );
+    }
+    assert!(
+        text().ends_with(
+            "[animations.sway]\nloop = true\nkeys = [\n  { at = 0, pose = \"rest\" },\n  { at = 0.5, pose = \"lean\" },\n  { at = 1.5, pose = \"lean_back\" },\n  { at = 2, pose = \"rest\" },\n]\n"
+        ),
+        "{}",
+        text()
+    );
+
+    // The report on it: every frame looked at.
+    let output = run(&folder, &["inspect", "tree.toml", "--animation", "sway"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(
+        report.starts_with(
+            "tree, the animation \"sway\"  (tree.toml)\n  length       2 s  (61 frames at 30 a second)\n  plays        round and round (it loops)\n"
+        ),
+        "{report}"
+    );
+    assert!(
+        report.contains("  keys         1  0 s    rest\n               2  0.5 s  lean\n"),
+        "{report}"
+    );
+    assert!(report.contains("  moves        leaves\n"), "{report}");
+    assert!(
+        report.contains(
+            "  limits       none broken in any frame\n  loop         ends as it starts\n"
+        ),
+        "{report}"
+    );
+    let report = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--animation", "sway", "--json"],
+    ));
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["animation"], "sway");
+    assert_eq!(report["length"], 2.0);
+    assert_eq!(report["frames"], 61);
+    assert_eq!(report["keys"][2]["pose"], "lean_back");
+    assert_eq!(report["ends_as_it_starts"], true);
+    // The plain report names the model's animations.
+    let plain = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    assert_eq!(plain["animations"][0]["name"], "sway");
+    assert_eq!(plain["animations"][0]["loops"], true);
+    assert_eq!(plain["animations"][0]["keys"], 4);
+    // A name that isn't there gets the closest one.
+    let output = run(&folder, &["inspect", "tree.toml", "--animation", "swa"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output)
+            .contains("there is no animation \"swa\" in this recipe. Did you mean \"sway\"?"),
+        "{}",
+        stderr(&output)
+    );
+
+    // The strip: frames side by side, named after the model and the
+    // animation.
+    let output = run(
+        &folder,
+        &[
+            "render",
+            "tree.toml",
+            "--animation",
+            "sway",
+            "--size",
+            "128",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("wrote tree.sway.strip.png (1031 x 140 pixels, "),
+        "{}",
+        stdout(&output)
+    );
+    assert!(folder.join("tree.sway.strip.png").is_file());
+    let output = run(
+        &folder,
+        &[
+            "render",
+            "tree.toml",
+            "--animation",
+            "sway",
+            "--frames",
+            "4",
+            "--view",
+            "front",
+            "--size",
+            "128",
+            "-o",
+            "four.png",
+            "--json",
+        ],
+    );
+    let report = json(&output);
+    assert_eq!(report["output"], "four.png");
+    assert_eq!(report["width"], 4 * 128 + 3);
+    assert_eq!(report["view"], "front");
+    assert_eq!(report["strip"].as_array().unwrap().len(), 4);
+    assert_eq!(report["strip"][1]["at"], 0.5);
+    assert_eq!(report["strip"][1]["left"], 129);
+    assert_eq!(report["animation"], "sway");
+    for (words, said) in [
+        (
+            &["--frames", "1"][..],
+            "a strip has from 2 to 60 frames, not 1",
+        ),
+        (&["--view", "top"], "there is no view \"top\""),
+    ] {
+        let mut arguments = vec!["render", "tree.toml", "--animation", "sway"];
+        arguments.extend_from_slice(words);
+        let output = run(&folder, &arguments);
+        assert_eq!(output.status.code(), Some(2), "{words:?}");
+        assert!(stderr(&output).contains(said), "{}", stderr(&output));
+    }
+
+    // Keys and the animation itself, changed and taken away again.
+    let output = edit(&["remove-pose", "lean"]);
+    assert_eq!(output.status.code(), Some(2), "{}", stdout(&output));
+    assert!(
+        stderr(&output).contains("the pose \"lean\" is used by the animation \"sway\" (key 2)"),
+        "{}",
+        stderr(&output)
+    );
+    for words in [
+        &["move-key", "sway", "2", "--at", "0.6"][..],
+        &["set-key", "sway", "3", "--pose", "rest"],
+        &[
+            "set-animation",
+            "sway",
+            "--loop",
+            "false",
+            "--smooth",
+            "false",
+            "--length",
+            "1",
+        ],
+        &["remove-key", "sway", "3"],
+        &["remove-pose", "lean", "--with-keys"],
+        &["rename-animation", "sway", "wind"],
+        &["remove-animation", "wind"],
+        &["remove-pose", "lean_back"],
+    ] {
+        let output = edit(words);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{words:?}: {}",
+            stderr(&output)
+        );
+    }
     assert_eq!(text(), TREE);
 }
 

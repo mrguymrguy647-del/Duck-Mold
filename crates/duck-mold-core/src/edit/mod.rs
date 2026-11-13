@@ -472,10 +472,13 @@ pub enum Edit {
         /// Its new name.
         new_name: String,
     },
-    /// Removes a pose.
+    /// Removes a pose. Refused while a key of an animation uses it,
+    /// unless `with_keys`.
     RemovePose {
         /// The pose.
         pose: String,
+        /// Take the keys that use it away with it.
+        with_keys: bool,
     },
     /// Makes the mirror image of a pose, left to right: what the left
     /// arm did, the right arm does.
@@ -486,13 +489,79 @@ pub enum Edit {
         /// is mirrored.
         as_name: Option<String>,
     },
+    /// Adds an animation, with no keys yet.
+    AddAnimation {
+        /// Its name.
+        name: String,
+        /// True if it starts again after its last key.
+        looping: bool,
+    },
+    /// Changes whether an animation loops, whether it is smooth, and
+    /// how long it lasts. What is `None` stays as it is.
+    SetAnimation {
+        /// The animation.
+        animation: String,
+        /// Whether it starts again after its last key.
+        looping: Option<bool>,
+        /// Whether the motion flows through each pose (true) or goes
+        /// straight from pose to pose at a steady speed (false).
+        smooth: Option<bool>,
+        /// How long it lasts, in seconds: every key's time is scaled.
+        length: Option<f64>,
+    },
+    /// Renames an animation.
+    RenameAnimation {
+        /// The animation.
+        animation: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Removes an animation. Its poses stay.
+    RemoveAnimation {
+        /// The animation.
+        animation: String,
+    },
+    /// Adds a key to an animation: a pose, and the time it is reached.
+    AddKey {
+        /// The animation.
+        animation: String,
+        /// The pose: one of the recipe's, or `rest`.
+        pose: String,
+        /// Seconds from the animation's start.
+        at: f64,
+    },
+    /// Gives a key another time.
+    MoveKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1 as `inspect` prints them.
+        key: usize,
+        /// Its new time, in seconds.
+        at: f64,
+    },
+    /// Gives a key another pose.
+    SetKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// Its new pose.
+        pose: String,
+    },
+    /// Removes a key.
+    RemoveKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+    },
 }
 
 impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 32] = [
+    pub const COMMANDS: [&'static str; 40] = [
         "add",
         "remove",
         "rename",
@@ -525,6 +594,14 @@ impl Edit {
         "rename-pose",
         "remove-pose",
         "mirror-pose",
+        "add-animation",
+        "set-animation",
+        "rename-animation",
+        "remove-animation",
+        "add-key",
+        "move-key",
+        "set-key",
+        "remove-key",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -562,6 +639,14 @@ impl Edit {
             Edit::RenamePose { .. } => "rename-pose",
             Edit::RemovePose { .. } => "remove-pose",
             Edit::MirrorPose { .. } => "mirror-pose",
+            Edit::AddAnimation { .. } => "add-animation",
+            Edit::SetAnimation { .. } => "set-animation",
+            Edit::RenameAnimation { .. } => "rename-animation",
+            Edit::RemoveAnimation { .. } => "remove-animation",
+            Edit::AddKey { .. } => "add-key",
+            Edit::MoveKey { .. } => "move-key",
+            Edit::SetKey { .. } => "set-key",
+            Edit::RemoveKey { .. } => "remove-key",
         }
     }
 }
@@ -1106,7 +1191,31 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
         } => motion::set_pose(doc, pose, part, *turn, *move_by, *rest),
         Edit::AddPose { name, from } => motion::add_pose(doc, name, from.as_deref()),
         Edit::RenamePose { pose, new_name } => motion::rename_pose(doc, pose, new_name),
-        Edit::RemovePose { pose } => motion::remove_pose(doc, pose),
+        Edit::RemovePose { pose, with_keys } => motion::remove_pose(doc, pose, *with_keys),
+        Edit::AddAnimation { name, looping } => motion::add_animation(doc, name, *looping),
+        Edit::SetAnimation {
+            animation,
+            looping,
+            smooth,
+            length,
+        } => motion::set_animation(doc, animation, *looping, *smooth, *length),
+        Edit::RenameAnimation {
+            animation,
+            new_name,
+        } => motion::rename_animation(doc, animation, new_name),
+        Edit::RemoveAnimation { animation } => motion::remove_animation(doc, animation),
+        Edit::AddKey {
+            animation,
+            pose,
+            at,
+        } => motion::add_key(doc, animation, pose, *at),
+        Edit::MoveKey { animation, key, at } => motion::move_key(doc, animation, *key, *at),
+        Edit::SetKey {
+            animation,
+            key,
+            pose,
+        } => motion::set_key(doc, animation, *key, pose),
+        Edit::RemoveKey { animation, key } => motion::remove_key(doc, animation, *key),
         Edit::MirrorPose { pose, as_name } => {
             motion::mirror_pose(doc, pose, as_name.as_deref(), model)
         }
@@ -3286,6 +3395,14 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::RenamePose { .. }
         | Edit::RemovePose { .. }
         | Edit::MirrorPose { .. }
+        | Edit::AddAnimation { .. }
+        | Edit::SetAnimation { .. }
+        | Edit::RenameAnimation { .. }
+        | Edit::RemoveAnimation { .. }
+        | Edit::AddKey { .. }
+        | Edit::MoveKey { .. }
+        | Edit::SetKey { .. }
+        | Edit::RemoveKey { .. }
         | Edit::TidySockets => "",
     }
 }

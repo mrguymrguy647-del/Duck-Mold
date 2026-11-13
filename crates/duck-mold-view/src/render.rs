@@ -22,12 +22,16 @@
 
 use std::path::Path;
 
-use duck_mold_core::inspect::{Inspection, inspect, inspect_pose};
+use duck_mold_core::inspect::{
+    AnimationInspection, Inspection, inspect, inspect_animation, inspect_pose,
+};
 use duck_mold_core::issue::{Code, Issue};
 use duck_mold_core::load::display_path;
+use duck_mold_core::math::Bounds;
 use duck_mold_core::math::{Vec3, sin_cos_degrees, vec3};
 use duck_mold_core::model::Model;
 use duck_mold_core::motion;
+use duck_mold_core::motion::{Animation, Motion};
 use duck_mold_core::tools::{self, Failure};
 use duckforge::prelude::{Camera3D, Canvas, Color, Mesh, Rect, Transform, vec2};
 use serde::Serialize;
@@ -266,13 +270,20 @@ fn fit(text: &str, room: usize, scale: u32) -> String {
 /// then always stands at the same place, looking straight ahead, and
 /// Duck Forge does no turning of its own.
 fn draw_view(model: &Model, view: &View, size: usize) -> Canvas {
-    let mut canvas = Canvas::new(size, size);
-    canvas.clear(BACKGROUND);
     let Some(bounds) = model.bounds() else {
+        let mut canvas = Canvas::new(size, size);
+        canvas.clear(BACKGROUND);
         return canvas; // nothing to draw
     };
-    let middle = bounds.center();
-    let radius = bounds.half().length();
+    draw_view_of(model, view, size, bounds.center(), bounds.half().length())
+}
+
+/// Draws one view, `size` pixels square, of what is within `radius` of
+/// `middle`: several pictures drawn with the same two show the model
+/// from the same place, at the same size.
+fn draw_view_of(model: &Model, view: &View, size: usize, middle: Vec3, radius: f64) -> Canvas {
+    let mut canvas = Canvas::new(size, size);
+    canvas.clear(BACKGROUND);
     let shrink = if radius > 0.0 { 1.0 / radius } else { 1.0 };
     let (right, up, away) = view.axes();
     let mesh = forge_mesh(model, |point| {
@@ -408,5 +419,275 @@ pub fn render_file(
         width: sheet.width,
         height: sheet.height,
         views: sheet.views,
+    })
+}
+
+// ---- an animation as a strip of frames -------------------------------------------------
+
+/// How many frames `render --animation` draws, unless `--frames` says
+/// otherwise.
+pub const DEFAULT_FRAMES: usize = 8;
+/// The fewest and the most frames a strip can have.
+pub const FRAMES_RANGE: (usize, usize) = (2, 60);
+/// The widest a strip can be, in pixels.
+const WIDEST_STRIP: usize = 32_768;
+
+/// Where one frame is in a strip, for `--json`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FramePlace {
+    /// The frame's time, in seconds from the animation's start.
+    pub at: f64,
+    /// The frame's left edge, in pixels from the picture's left edge.
+    pub left: usize,
+    /// The frame's top edge, in pixels from the picture's top edge.
+    pub top: usize,
+    /// How wide and tall it is, in pixels.
+    pub size: usize,
+}
+
+/// A finished strip of frames.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Strip {
+    /// How wide, in pixels.
+    pub width: usize,
+    /// How tall, in pixels.
+    pub height: usize,
+    /// The pixels, row by row from the top, each `0x00RRGGBB`.
+    pub pixels: Vec<u32>,
+    /// The view the frames are drawn from: `three_quarter`, `front`...
+    pub view: &'static str,
+    /// Where each frame is.
+    pub frames: Vec<FramePlace>,
+}
+
+impl Strip {
+    /// The picture as a PNG file.
+    pub fn to_png(&self) -> Vec<u8> {
+        png_of(self.width, self.height, &self.pixels)
+    }
+}
+
+/// The view with this name, as `--view` writes it: `front`, `right`,
+/// `back` or `three-quarter`.
+fn view_named(name: &str) -> Option<&'static View> {
+    let name = name.replace('-', "_");
+    VIEWS.iter().find(|view| view.name == name)
+}
+
+/// The times of a strip's frames: evenly spaced, from the animation's
+/// start. One that plays once ends on its last moment; one that loops
+/// stops a step before, because its end is its start again.
+pub fn strip_times(animation: &Animation, frames: usize) -> Vec<f64> {
+    let length = animation.length();
+    let steps = if animation.looping {
+        frames
+    } else {
+        frames.saturating_sub(1)
+    }
+    .max(1);
+    (0..frames)
+        .map(|frame| length * frame as f64 / steps as f64)
+        .collect()
+}
+
+/// Draws an animation as a strip: `frames` pictures of the model side
+/// by side, evenly spaced in time, all from the same place and at the
+/// same size, each with its time in its corner, and `caption` under
+/// them.
+pub fn render_strip(
+    model: &Model,
+    animation: &Animation,
+    caption: &str,
+    size: usize,
+    frames: usize,
+    view: &str,
+) -> Strip {
+    let view = view_named(view).unwrap_or(&VIEWS[VIEWS.len() - 1]);
+    let moving = Motion::of(model, animation);
+    // The camera takes in the model wherever the animation puts it, so
+    // that it never leaves the picture: every frame of it, not only the
+    // ones drawn.
+    let mut all: Option<Bounds> = model.bounds();
+    for at in motion::frame_times(animation.length()) {
+        let posed = motion::posed(model, &moving.joints_at(at));
+        all = match (all, posed.bounds()) {
+            (Some(all), Some(more)) => Some(all.with(&more)),
+            (all, more) => all.or(more),
+        };
+    }
+    let (middle, radius) = all.map_or((Vec3::ZERO, 1.0), |bounds| {
+        (bounds.center(), bounds.half().length())
+    });
+
+    let scale = text_scale(size);
+    let pad = 2 * scale as usize;
+    let under = Canvas::line_height(scale) as usize + 2 * pad;
+    let row = frames * size + frames.saturating_sub(1); // the frames and the lines between
+    let (width, height) = (row, size + 1 + under);
+    let mut sheet = Canvas::new(width, height);
+    sheet.clear(BACKGROUND);
+    let mut places = Vec::with_capacity(frames);
+    for (frame, at) in strip_times(animation, frames).into_iter().enumerate() {
+        let left = frame * (size + 1);
+        let posed = motion::posed(model, &moving.joints_at(at));
+        let picture = draw_view_of(&posed, view, size, middle, radius);
+        for (index, &pixel) in picture.pixels().iter().enumerate() {
+            let (x, y) = (left + index % size, index / size);
+            sheet.set_pixel(x as i32, y as i32, Color::from_hex(pixel));
+        }
+        sheet.draw_text(
+            &time_label(at),
+            vec2((left + pad) as f32, pad as f32),
+            scale,
+            TEXT,
+        );
+        if frame > 0 {
+            sheet.fill_rect(Rect::new((left - 1) as f32, 0.0, 1.0, size as f32), LINE);
+        }
+        places.push(FramePlace {
+            at,
+            left,
+            top: 0,
+            size,
+        });
+    }
+    sheet.fill_rect(Rect::new(0.0, size as f32, width as f32, 1.0), LINE);
+    let caption = fit(caption, width - 2 * pad, scale);
+    let caption_top = height - under + (under - Canvas::text_height(scale) as usize) / 2;
+    sheet.draw_text(&caption, vec2(pad as f32, caption_top as f32), scale, TEXT);
+    Strip {
+        width,
+        height,
+        pixels: sheet.pixels().to_vec(),
+        view: view.name,
+        frames: places,
+    }
+}
+
+/// A frame's time as it is written in its corner: `0.4 s`.
+fn time_label(at: f64) -> String {
+    let rounded = (at * 100.0).round() / 100.0 + 0.0;
+    format!("{rounded} s")
+}
+
+/// What `duck-mold render --animation` did: the report on the
+/// animation, and the picture it wrote.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RenderedAnimation {
+    /// The same report `inspect --animation` gives.
+    #[serde(flatten)]
+    pub inspection: AnimationInspection,
+    /// The picture that was written, as it was named.
+    pub output: String,
+    /// How big the file is.
+    pub bytes: usize,
+    /// How wide the picture is, in pixels.
+    pub width: usize,
+    /// How tall the picture is, in pixels.
+    pub height: usize,
+    /// The view the frames are drawn from.
+    pub view: &'static str,
+    /// Where each frame is in the picture, and its time.
+    pub strip: Vec<FramePlace>,
+}
+
+/// A mistake in what `render` was asked for.
+fn usage(code: Code, field: &str, message: String) -> Issue {
+    Issue::error(code, field, message)
+}
+
+/// `duck-mold render --animation`: builds a recipe and writes one of
+/// its animations as a strip of frames. Without `output`, the picture
+/// goes next to the recipe, named after both: `robot.walk.strip.png`.
+pub fn render_animation_file(
+    path: &Path,
+    output: Option<&Path>,
+    size: usize,
+    animation: &str,
+    frames: usize,
+    view: Option<&str>,
+) -> Result<RenderedAnimation, Failure> {
+    let fail = |issue: Issue| Err(Failure::Usage(Box::new(issue)));
+    if !(SMALLEST_SIZE..=LARGEST_SIZE).contains(&size) {
+        return fail(
+            usage(
+                Code::OutOfRange,
+                "size",
+                if size < SMALLEST_SIZE {
+                    format!("--size {size} is too small for the times to fit")
+                } else {
+                    format!("--size {size} is bigger than a frame can be")
+                },
+            )
+            .got(size)
+            .range(SMALLEST_SIZE as f64, LARGEST_SIZE as f64)
+            .suggest(format!("--size {DEFAULT_SIZE}")),
+        );
+    }
+    let (fewest, most) = FRAMES_RANGE;
+    if !(fewest..=most).contains(&frames) {
+        return fail(
+            usage(
+                Code::OutOfRange,
+                "frames",
+                format!("a strip has from {fewest} to {most} frames, not {frames}"),
+            )
+            .got(frames)
+            .range(fewest as f64, most as f64)
+            .suggest(format!("--frames {DEFAULT_FRAMES}")),
+        );
+    }
+    if frames * (size + 1) > WIDEST_STRIP {
+        return fail(
+            usage(
+                Code::OutOfRange,
+                "frames",
+                format!(
+                    "{frames} frames of {size} pixels make a picture wider than {WIDEST_STRIP} pixels: ask for fewer frames or a smaller --size"
+                ),
+            )
+            .got(frames),
+        );
+    }
+    let view = view.unwrap_or("three-quarter");
+    if view_named(view).is_none() {
+        return fail(
+            usage(
+                Code::TypeMismatch,
+                "view",
+                format!("there is no view \"{view}\""),
+            )
+            .got(view)
+            .one_of(view, ["front", "right", "back", "three-quarter"]),
+        );
+    }
+    let built = tools::build(path)?;
+    let moving = tools::animation_named(&built.model, animation, &built.source)?.clone();
+    let rest = inspect(&built.model, &built.source, built.warnings);
+    let inspection = inspect_animation(&rest, &built.model, &moving, &built.source);
+    let strip = render_strip(
+        &built.model,
+        &moving,
+        &inspection.headline(),
+        size,
+        frames,
+        view,
+    );
+    let png = strip.to_png();
+    let output = match output {
+        Some(output) => output.to_path_buf(),
+        // `robot.walk.strip.png`: a pose of the same name is
+        // `robot.walk.png`.
+        None => path.with_extension(format!("{animation}.strip.png")),
+    };
+    tools::write_file(&output, &png)?;
+    Ok(RenderedAnimation {
+        inspection,
+        output: display_path(&output),
+        bytes: png.len(),
+        width: strip.width,
+        height: strip.height,
+        view: strip.view,
+        strip: strip.frames,
     })
 }

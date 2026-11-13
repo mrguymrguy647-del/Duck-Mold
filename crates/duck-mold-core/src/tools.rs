@@ -14,14 +14,15 @@ use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
 use crate::gltf::{is_duck_mold_glb, read_gltf};
 use crate::inspect::{
-    Inspection, MaterialUse, face_report, inspect, inspect_pose, join_report, socket_report,
+    AnimationInspection, Inspection, MaterialUse, face_report, inspect, inspect_animation,
+    inspect_pose, join_report, socket_report,
 };
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
 use crate::mesh::{MeshFile, read_obj};
 use crate::model::{Face, Model, Part, PartKind};
-use crate::motion::{self, Pose};
+use crate::motion::{self, Animation, Pose};
 use crate::recipe::{Loc, PaletteColor, REST};
 
 /// Why an operation gave nothing.
@@ -246,6 +247,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         sockets: Vec::new(),
         carried: Vec::new(),
         poses: Vec::new(),
+        animations: Vec::new(),
         zero: Vec3::ZERO,
     }
 }
@@ -329,6 +331,50 @@ pub fn pose_named(model: &Model, name: &str, source: &str) -> Result<Pose, Failu
                 Code::UnknownPose,
                 "",
                 format!("there is no pose \"{name}\" in this recipe"),
+            )
+            .in_file(source)
+            .got(name)
+            .one_of(name, names),
+        ))
+    })
+}
+
+/// `duck-mold inspect --animation`: the report on one of a recipe's
+/// animations, with every frame looked at.
+pub fn inspect_animation_file(path: &Path, name: &str) -> Result<AnimationInspection, Failure> {
+    let built = build(path)?;
+    let animation = animation_named(&built.model, name, &built.source)?.clone();
+    let rest = inspect(&built.model, &built.source, built.warnings);
+    Ok(inspect_animation(
+        &rest,
+        &built.model,
+        &animation,
+        &built.source,
+    ))
+}
+
+/// The model's animation with this name, or a sentence saying which it
+/// has.
+pub fn animation_named<'m>(
+    model: &'m Model,
+    name: &str,
+    source: &str,
+) -> Result<&'m Animation, Failure> {
+    model.animation(name).ok_or_else(|| {
+        let names: Vec<&str> = model
+            .animations
+            .iter()
+            .map(|animation| animation.name.as_str())
+            .collect();
+        Failure::Usage(Box::new(
+            Issue::error(
+                Code::UnknownAnimation,
+                "",
+                if names.is_empty() {
+                    format!("there is no animation \"{name}\" in this recipe: it has no animations")
+                } else {
+                    format!("there is no animation \"{name}\" in this recipe")
+                },
             )
             .in_file(source)
             .got(name)

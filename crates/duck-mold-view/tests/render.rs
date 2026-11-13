@@ -9,7 +9,7 @@ use duck_mold_core::issue::Issue;
 use duck_mold_core::load::load_text;
 use duck_mold_core::model::Model;
 use duck_mold_core::source::Syntax;
-use duck_mold_view::render::{BACKGROUND, Sheet, render_sheet};
+use duck_mold_view::render::{BACKGROUND, Sheet, render_sheet, render_strip, strip_times};
 
 /// Builds a recipe that must have no errors.
 fn built(text: &str) -> Model {
@@ -209,6 +209,7 @@ fn a_model_with_no_faces_gives_empty_views() {
         sockets: Vec::new(),
         carried: Vec::new(),
         poses: Vec::new(),
+        animations: Vec::new(),
         zero: duck_mold_core::math::Vec3::ZERO,
     };
     let sheet = render_sheet(&model, "nothing", 128);
@@ -235,5 +236,153 @@ fn a_long_caption_is_cut_short_to_fit() {
         caption
             .into_iter()
             .any(|y| { (0..sheet.width).any(|x| sheet.pixel(x, y) != BACKGROUND.to_u32()) })
+    );
+}
+
+// ---- an animation as a strip of frames -------------------------------------------------
+
+/// A red pole on a white base. In `down` it lies over to the model's
+/// left, which is the left of a picture from the front too.
+const FLAG: &str = r##"
+version = 0
+name = "flag"
+
+[palette]
+red = "#E02020"
+white = "#F0F0F0"
+
+[[parts]]
+name = "base"
+shape = "box"
+size = [0.4, 0.1, 0.4]
+color = "white"
+
+[[parts]]
+name = "pole"
+shape = "box"
+size = [0.1, 1.0, 0.1]
+color = "red"
+attach = "bottom"
+to = "base.top"
+
+[poses.down]
+pole = [0, 0, -90]
+
+[animations.fall]
+smooth = false
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 1, pose = "down" },
+]
+
+[animations.swing]
+loop = true
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 1, pose = "down" },
+  { at = 2, pose = "rest" },
+]
+"##;
+
+/// How many red pixels a frame has, how many of them are in its top
+/// half, and how far from its left edge the leftmost is.
+fn red_in(strip: &duck_mold_view::Strip, frame: usize) -> (usize, usize, usize) {
+    let place = &strip.frames[frame];
+    let (mut all, mut top, mut leftmost) = (0, 0, place.size);
+    // The top rows hold the frame's time: leave them out.
+    for y in place.size / 8..place.size {
+        for x in 0..place.size {
+            let pixel = strip.pixels[(place.top + y) * strip.width + place.left + x];
+            if colour_name(pixel) == "red" {
+                all += 1;
+                top += usize::from(y < place.size / 2);
+                leftmost = leftmost.min(x);
+            }
+        }
+    }
+    (all, top, leftmost)
+}
+
+#[test]
+fn a_strip_shows_an_animation_frame_by_frame_from_one_place() {
+    let model = built(FLAG);
+    let fall = model.animation("fall").unwrap();
+    let strip = render_strip(&model, fall, "flag", 128, 5, "front");
+    // Five frames side by side, a line between each two, and the caption
+    // under them.
+    assert_eq!(strip.width, 5 * 128 + 4);
+    assert!(strip.height > 128 && strip.height < 128 + 32);
+    assert_eq!(strip.view, "front");
+    let times: Vec<f64> = strip.frames.iter().map(|frame| frame.at).collect();
+    assert_eq!(times, [0.0, 0.25, 0.5, 0.75, 1.0]);
+    let lefts: Vec<usize> = strip.frames.iter().map(|frame| frame.left).collect();
+    assert_eq!(lefts, [0, 129, 258, 387, 516]);
+    // The pole stands in the first frame and lies over to the left in
+    // the last: its red leaves the top half and reaches far to the left.
+    let (all, top, leftmost) = red_in(&strip, 0);
+    assert!(
+        all > 100 && top > all / 2 && leftmost > 64,
+        "{all} {top} {leftmost}"
+    );
+    let (all_after, top_after, leftmost_after) = red_in(&strip, 4);
+    assert!(
+        top_after == 0 && leftmost_after < 32,
+        "{all_after} {top_after} {leftmost_after}"
+    );
+    // Half way, it is half way over.
+    let (_, top_between, leftmost_between) = red_in(&strip, 2);
+    assert!(top_between > 0 && top_between < top, "{top_between}");
+    assert!(leftmost_between < leftmost && leftmost_between > leftmost_after);
+    // It is the same pole all the way: the same size in every frame,
+    // because every frame is drawn from the same place. (A pole on its
+    // side shows the same area as one standing.)
+    assert!(
+        all.abs_diff(all_after) < all / 8,
+        "{all} then {all_after} red pixels"
+    );
+    // The same animation always gives the same picture.
+    assert_eq!(
+        strip.to_png(),
+        render_strip(&model, fall, "flag", 128, 5, "front").to_png()
+    );
+    // Another view is another picture.
+    assert_ne!(
+        strip.pixels,
+        render_strip(&model, fall, "flag", 128, 5, "three-quarter").pixels
+    );
+    assert_eq!(
+        render_strip(&model, fall, "flag", 128, 5, "three-quarter").view,
+        "three_quarter"
+    );
+}
+
+#[test]
+fn a_loops_strip_stops_a_step_before_its_end() {
+    let model = built(FLAG);
+    // One that plays once ends on its last moment.
+    assert_eq!(
+        strip_times(model.animation("fall").unwrap(), 3),
+        [0.0, 0.5, 1.0]
+    );
+    // One that loops ends where it starts, so its last frame would be
+    // its first again: the strip stops a step short.
+    assert_eq!(
+        strip_times(model.animation("swing").unwrap(), 4),
+        [0.0, 0.5, 1.0, 1.5]
+    );
+    let strip = render_strip(
+        &model,
+        model.animation("swing").unwrap(),
+        "flag",
+        128,
+        4,
+        "front",
+    );
+    let (_, top, _) = red_in(&strip, 0);
+    let (_, top_down, leftmost_down) = red_in(&strip, 2);
+    assert!(top > 100);
+    assert!(
+        top_down == 0 && leftmost_down < 32,
+        "{top_down} {leftmost_down}"
     );
 }

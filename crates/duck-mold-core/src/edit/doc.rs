@@ -1003,6 +1003,32 @@ impl Doc {
         Ok(count)
     }
 
+    /// Puts a value into a list that is written between brackets, before
+    /// the item that is at `at` now, the way the items are written: on a
+    /// line of its own, or on the same line. At the end of the list it
+    /// is [`push_item`](Self::push_item).
+    pub fn insert_item(&mut self, list: &[Step], at: usize, value: &Val) -> Done {
+        let Some(node) = self.node(list) else {
+            return cant(format!("there is no list {} in the recipe", show(list)));
+        };
+        let Value::Array(items) = &node.value else {
+            return cant(format!("{} in the recipe is not a list", show(list)));
+        };
+        let Some(next) = items.get(at) else {
+            return self.push_item(list, value).map(|_| ());
+        };
+        let item = value.flat().write(self.syntax);
+        let target = next.span.start;
+        let line = self.line_start(target);
+        if self.text[line..target].trim().is_empty() {
+            let indent = self.text[line..target].to_owned();
+            let newline = self.newline();
+            self.splice(line..line, &format!("{indent}{item},{newline}"))
+        } else {
+            self.splice(target..target, &format!("{item}, "))
+        }
+    }
+
     /// The bytes of one item of a list of tables, with what separates it
     /// from the next: what to take out to remove it.
     fn item_range(&self, list: &[Step], at: usize) -> Result<Range<usize>, Cant> {

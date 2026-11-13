@@ -1287,6 +1287,7 @@ fn poses_are_added_copied_renamed_and_removed() {
         &text,
         &Edit::RemovePose {
             pose: "wave".into(),
+            with_keys: false,
         },
     );
     assert_eq!(
@@ -1299,6 +1300,7 @@ fn poses_are_added_copied_renamed_and_removed() {
         &removed.text,
         &Edit::RemovePose {
             pose: "crouch".into(),
+            with_keys: false,
         },
     );
     assert_eq!(both.text, PUPPET);
@@ -1590,14 +1592,930 @@ fn pose_edits_work_on_json_too() {
         &renamed.text,
         &Edit::RemovePose {
             pose: "peek".into(),
+            with_keys: false,
         },
     );
     let none = on(
         &fewer.text,
         &Edit::RemovePose {
             pose: "open".into(),
+            with_keys: false,
         },
     );
     assert!(none.model.as_ref().unwrap().poses.is_empty());
     assert!(!none.text.contains("poses"), "{}", none.text);
+}
+
+// ---- step 4: animations ----------------------------------------------------------------
+
+use duck_mold_core::inspect::{inspect, inspect_animation};
+use duck_mold_core::motion::{Motion, ends_as_it_starts, frame_times};
+
+const ANIMATIONS: &str = r##"[poses.up]
+left_arm = [0, 0, -100]
+
+[poses.higher]
+left_arm = [0, 0, -160]
+
+[poses.nod]
+head = [20, 0, 0]
+
+[poses.round]
+head = [0, 360, 0]
+
+[poses.hop]
+body = { move = [0, 0.3, 0] }
+
+[animations.wave]
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 0.5, pose = "up" },
+  { at = 1.0, pose = "higher" },
+  { at = 2.0, pose = "rest" },
+]
+
+[animations.spin]
+loop = true
+smooth = false
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 2, pose = "round" },
+]
+
+[animations.nodding]
+loop = true
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 0.4, pose = "nod" },
+  { at = 0.8, pose = "rest" },
+]
+"##;
+
+fn animated() -> String {
+    with_poses(ANIMATIONS)
+}
+
+/// How far a part is turned and moved at a time of an animation.
+fn at_time(model: &Model, animation: &str, part: &str, at: f64) -> ([f64; 3], [f64; 3]) {
+    let moving = Motion::of(model, model.animation(animation).expect("the animation"));
+    moving
+        .joints_at(at)
+        .into_iter()
+        .find(|joint| joint.part == part)
+        .map_or(([0.0; 3], [0.0; 3]), |joint| (joint.turn, joint.move_by))
+}
+
+#[test]
+fn animations_are_read_from_the_recipe() {
+    let (model, issues) = build(&animated());
+    assert!(issues.is_empty(), "{issues:#?}");
+    let model = model.unwrap();
+    let names: Vec<&str> = model
+        .animations
+        .iter()
+        .map(|animation| animation.name.as_str())
+        .collect();
+    assert_eq!(names, ["wave", "spin", "nodding"]);
+    let wave = model.animation("wave").unwrap();
+    // It plays once and is smooth unless the recipe says otherwise.
+    assert!(!wave.looping && wave.smooth);
+    assert_eq!(wave.length(), 2.0);
+    let keys: Vec<(f64, &str)> = wave
+        .keys
+        .iter()
+        .map(|key| (key.at, key.pose.as_str()))
+        .collect();
+    assert_eq!(
+        keys,
+        [(0.0, "rest"), (0.5, "up"), (1.0, "higher"), (2.0, "rest")]
+    );
+    let spin = model.animation("spin").unwrap();
+    assert!(spin.looping && !spin.smooth);
+    assert!(model.animation("jump").is_none());
+    // The plain report names them on one line.
+    let report = inspect(&model, "test.toml", Vec::new());
+    assert!(
+        report
+            .to_text()
+            .contains("  animations   wave (2 s), spin (2 s, loops), nodding (0.8 s, loops)\n"),
+        "{}",
+        report.to_text()
+    );
+}
+
+#[test]
+fn mistakes_in_animations_say_what_to_write() {
+    let with = |animation: &str| with_poses(&format!("{POSES}\n{animation}"));
+    // A key names a pose there isn't.
+    let found = errors(&with(
+        "[animations.hello]\nkeys = [{ at = 0, pose = \"rest\" }, { at = 1, pose = \"wavee\" }]\n",
+    ));
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(found[0].code, Code::UnknownPose);
+    assert_eq!(
+        found[0].message,
+        "the animation \"hello\" has a key with the pose \"wavee\", but there is no pose with that name"
+    );
+    assert_eq!(found[0].suggestion.as_deref(), Some("wave"));
+    assert_eq!(found[0].path, "animations.hello.keys[1]");
+    // The first key isn't at 0.
+    let found = errors(&with(
+        "[animations.hello]\nkeys = [{ at = 0.5, pose = \"wave\" }]\n",
+    ));
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(found[0].code, Code::OutOfRange);
+    assert_eq!(
+        found[0].message,
+        "an animation starts with a key at 0, and this first key is at 0.5. Put it at 0, or add a key at 0 before it"
+    );
+    // A key isn't later than the one before.
+    let found = errors(&with(
+        "[animations.hello]\nkeys = [{ at = 0, pose = \"rest\" }, { at = 1, pose = \"wave\" }, { at = 1, pose = \"rest\" }]\n",
+    ));
+    assert_eq!(found.len(), 1, "{found:#?}");
+    assert_eq!(
+        found[0].message,
+        "each key is later than the one before it: this one is at 1 and the one before is at 1"
+    );
+    // Every other way of getting it wrong, each with its place.
+    let found = errors(&with(
+        "[animations.hello]\nloop = 3\nsmooth = \"no\"\nspeed = 2\nkeys = [{ at = -1, pose = \"rest\" }, { at = 0 }, { pose = \"wave\" }, { at = 0, pose = 4, pse = 1 }, 7]\n\n[animations.\"two words\"]\nkeys = []\n\n[animations.other]\nkeys = 3\n",
+    ));
+    let said: Vec<(Code, &str)> = found
+        .iter()
+        .map(|issue| (issue.code, issue.path.as_str()))
+        .collect();
+    assert_eq!(
+        said,
+        [
+            (Code::TypeMismatch, "animations.hello.loop"),
+            (Code::TypeMismatch, "animations.hello.smooth"),
+            (Code::UnknownField, "animations.hello.speed"),
+            (Code::OutOfRange, "animations.hello.keys[0].at"),
+            (Code::MissingField, "animations.hello.keys[1]"),
+            (Code::MissingField, "animations.hello.keys[2]"),
+            (Code::TypeMismatch, "animations.hello.keys[3].pose"),
+            (Code::UnknownField, "animations.hello.keys[3].pse"),
+            (Code::TypeMismatch, "animations.hello.keys[4]"),
+            (Code::TypeMismatch, "animations.two words"),
+            (Code::TypeMismatch, "animations.other.keys"),
+        ],
+        "{found:#?}"
+    );
+}
+
+#[test]
+fn a_loop_ends_as_it_starts_or_there_is_a_warning() {
+    let text = with_poses(&format!(
+        "{ANIMATIONS}\n[animations.jumpy]\nloop = true\nkeys = [\n  {{ at = 0, pose = \"rest\" }},\n  {{ at = 1, pose = \"up\" }},\n]\n\n[animations.empty]\n"
+    ));
+    let (model, issues) = build(&text);
+    let model = model.expect("warnings don't stop the model");
+    let said: Vec<(Code, &str)> = issues
+        .iter()
+        .map(|issue| (issue.code, issue.message.as_str()))
+        .collect();
+    assert_eq!(
+        said,
+        [
+            (
+                Code::LoopJumps,
+                "the animation \"jumpy\" loops, but it starts on the pose \"rest\" and ends on \"up\": the model would jump when it starts again. End it with a key of the pose \"rest\""
+            ),
+            (
+                Code::Unused,
+                "the animation \"empty\" has no keys yet, so it does nothing. Give it one with add-key, or write keys = [{ at = 0, pose = \"rest\" }]"
+            ),
+        ],
+        "{issues:#?}"
+    );
+    assert!(issues.iter().all(|issue| !issue.is_error()));
+    assert!(!ends_as_it_starts(
+        &model,
+        model.animation("jumpy").unwrap()
+    ));
+    // A head turned once round is where it was: `spin` is fine.
+    assert!(ends_as_it_starts(&model, model.animation("spin").unwrap()));
+    assert!(ends_as_it_starts(
+        &model,
+        model.animation("nodding").unwrap()
+    ));
+    // One that plays once may end anywhere.
+    let once = text.replace("[animations.jumpy]\nloop = true\n", "[animations.jumpy]\n");
+    let (_, issues) = build(&once);
+    assert!(
+        issues.iter().all(|issue| issue.code != Code::LoopJumps),
+        "{issues:#?}"
+    );
+}
+
+#[test]
+fn without_smooth_every_number_goes_straight_from_one_pose_to_the_next() {
+    let model = built(&animated());
+    // A full turn is a full turn: half way through, the head has turned
+    // half way round, not "nowhere".
+    for (at, turned) in [
+        (0.0, 0.0),
+        (0.5, 90.0),
+        (1.0, 180.0),
+        (1.7, 306.0),
+        (2.0, 360.0),
+    ] {
+        let (turn, moved) = at_time(&model, "spin", "head", at);
+        assert!((turn[1] - turned).abs() < 1e-9, "at {at}: {turn:?}");
+        assert_eq!((turn[0], turn[2], moved), (0.0, 0.0, [0.0; 3]));
+    }
+    // Before the start it is as at the start, and after the end as at
+    // the end.
+    assert_eq!(at_time(&model, "spin", "head", -1.0).0, [0.0; 3]);
+    assert_eq!(at_time(&model, "spin", "head", 5.0).0, [0.0, 360.0, 0.0]);
+    // Only the parts that some key moves are named.
+    let moving = Motion::of(&model, model.animation("spin").unwrap());
+    assert_eq!(moving.parts(), ["head"]);
+    assert_eq!((moving.length, moving.looping), (2.0, true));
+}
+
+#[test]
+fn a_smooth_animation_passes_through_its_poses_and_never_goes_past_them() {
+    let model = built(&animated());
+    let z = |at: f64| at_time(&model, "wave", "left_arm", at).0[2];
+    // At each key the part is exactly as the key's pose has it.
+    for (at, turned) in [(0.0, 0.0), (0.5, -100.0), (1.0, -160.0), (2.0, 0.0)] {
+        assert!((z(at) - turned).abs() < 1e-9, "at {at}: {}", z(at));
+    }
+    // It starts and ends gently: a tenth of the way to the first pose
+    // in time is much less than a tenth of the way in angle.
+    assert!(z(0.05) > -4.0 && z(0.05) < 0.0, "{}", z(0.05));
+    assert!(z(1.95) > -2.0 && z(1.95) < 0.0, "{}", z(1.95));
+    // It doesn't stop at a pose it is passing through (the arm is still
+    // going up at 0.5)...
+    let speed = |at: f64| (z(at + 0.001) - z(at - 0.001)) / 0.002;
+    assert!(speed(0.5) < -100.0, "{}", speed(0.5));
+    // ...and does where it turns back (the top of the wave, at 1).
+    assert!(speed(1.0).abs() < 1.0, "{}", speed(1.0));
+    // Its speed never jumps.
+    let mut before = speed(0.002);
+    for step in 1..1000 {
+        let at = 0.002 + 1.996 * f64::from(step) / 1000.0;
+        let now = speed(at);
+        assert!((now - before).abs() < 12.0, "at {at}: {before} then {now}");
+        before = now;
+    }
+    // Between two keys it never leaves what lies between their poses:
+    // an animation whose poses keep within the limits keeps within them.
+    let keys = [(0.0, 0.0), (0.5, -100.0), (1.0, -160.0), (2.0, 0.0)];
+    for pair in keys.windows(2) {
+        let ((from, low), (to, high)) = (pair[0], pair[1]);
+        let (low, high) = (f64::min(low, high), f64::max(low, high));
+        for step in 0..=200 {
+            let at = from + (to - from) * f64::from(step) / 200.0;
+            assert!(
+                z(at) >= low - 1e-9 && z(at) <= high + 1e-9,
+                "at {at}: {} is outside {low} to {high}",
+                z(at)
+            );
+        }
+    }
+}
+
+#[test]
+fn a_smooth_loop_runs_through_its_end_into_its_start() {
+    // The wheel again, smooth this time: its end runs into its start, so
+    // it keeps one speed all the way round and doesn't slow at the seam.
+    let model = built(&animated().replace("smooth = false\n", ""));
+    for (at, turned) in [
+        (0.0, 0.0),
+        (0.5, 90.0),
+        (1.0, 180.0),
+        (1.5, 270.0),
+        (2.0, 360.0),
+    ] {
+        let (turn, _) = at_time(&model, "spin", "head", at);
+        assert!((turn[1] - turned).abs() < 1e-9, "at {at}: {turn:?}");
+    }
+    // A nod that loops turns back at both its keys, so it rests there.
+    let x = |at: f64| at_time(&model, "nodding", "head", at).0[0];
+    assert!(x(0.02) < 0.2, "{}", x(0.02));
+    assert!((x(0.4) - 20.0).abs() < 1e-9);
+    assert!((x(0.2) - 10.0).abs() < 1e-9, "{}", x(0.2));
+}
+
+#[test]
+fn frames_are_thirty_a_second_and_the_very_end() {
+    assert_eq!(frame_times(0.0), [0.0]);
+    let times = frame_times(0.8);
+    assert_eq!(times.len(), 25);
+    assert_eq!((times[0], times[24]), (0.0, 0.8));
+    assert!((times[1] - 1.0 / 30.0).abs() < 1e-12);
+    // A length that isn't a whole number of frames gets its end too.
+    let times = frame_times(0.75);
+    assert_eq!(times.len(), 24);
+    assert!((times[22] - 22.0 / 30.0).abs() < 1e-12);
+    assert_eq!(times[23], 0.75);
+    for length in [0.1, 0.7, 1.0, 1.3, 2.9, 10.0] {
+        let times = frame_times(length);
+        assert_eq!(*times.last().unwrap(), length);
+        assert!(times.windows(2).all(|pair| pair[1] > pair[0]), "{length}");
+        assert_eq!(
+            times.len(),
+            (length * 30.0).round() as usize + 1,
+            "{length}"
+        );
+    }
+}
+
+#[test]
+fn inspect_animation_reports_the_worst_of_every_frame() {
+    let text = with_line(
+        "to = \"body.neck\"",
+        "limits = { x = [-10, 10], y = \"free\" }",
+    );
+    let text = format!(
+        "{text}\n{ANIMATIONS}\n[animations.jump]\nkeys = [\n  {{ at = 0, pose = \"rest\" }},\n  {{ at = 0.3, pose = \"hop\" }},\n  {{ at = 0.6, pose = \"rest\" }},\n]\n\n[poses.inward]\nleft_arm = [0, 0, 60]\n\n[animations.fold]\nkeys = [\n  {{ at = 0, pose = \"rest\" }},\n  {{ at = 1, pose = \"inward\" }},\n]\n"
+    );
+    let (model, issues) = build(&text);
+    let model = model.unwrap();
+    let rest = inspect(&model, "test.toml", issues);
+    // A jump: the model leaves the ground, and comes back.
+    let jump = inspect_animation(&rest, &model, model.animation("jump").unwrap(), "test.toml");
+    assert_eq!(jump.frames, 19);
+    assert_eq!(jump.moves, ["body"]);
+    assert!(!jump.ground.stays_on_ground);
+    assert!((jump.ground.highest_y - 0.3).abs() < 1e-9);
+    assert!((jump.ground.highest_at - 0.3).abs() < 1e-9);
+    assert_eq!((jump.ground.lowest_y, jump.ground.lowest_at), (0.0, 0.0));
+    assert_eq!(jump.ends_as_it_starts, None);
+    assert!(jump.floating.is_empty() && jump.overlapping.is_empty());
+    assert_eq!(
+        jump.summary,
+        "puppet, \"jump\": 0.6 s, 3 keys, plays once, is 0.30 above the ground at 0.3 s, nothing floating, nothing overlapping, no limits broken"
+    );
+    assert_eq!(
+        jump.headline(),
+        "puppet, \"jump\": 0.6 s, 3 keys, plays once"
+    );
+    // A nod past the head's limit: it is said once, at its worst.
+    let nod = inspect_animation(
+        &rest,
+        &model,
+        model.animation("nodding").unwrap(),
+        "test.toml",
+    );
+    assert_eq!(nod.limits_broken.len(), 1, "{:#?}", nod.limits_broken);
+    assert_eq!(nod.limits_broken[0].part, "head");
+    assert_eq!(
+        nod.limits_broken[0].text,
+        "turns \"head\" 20 around x: its limit is -10 to 10"
+    );
+    assert!((nod.limits_broken[0].at - 0.4).abs() < 1e-9);
+    assert_eq!(nod.ends_as_it_starts, Some(true));
+    assert!(nod.ground.stays_on_ground);
+    // An arm folded in through the body: that is new, and the report
+    // says how deep at the worst, and when.
+    let fold = inspect_animation(&rest, &model, model.animation("fold").unwrap(), "test.toml");
+    let poke = fold
+        .overlapping
+        .iter()
+        .find(|overlap| overlap.b == "body")
+        .unwrap_or_else(|| panic!("{:#?}", fold.overlapping));
+    assert!(
+        poke.a.starts_with("left_arm/") && poke.new && poke.depth > 0.05 && poke.at > 0.0,
+        "{:#?}",
+        fold.overlapping
+    );
+    let text = fold.to_text();
+    assert!(
+        text.contains(&format!("  overlapping  {} is ", poke.a))
+            && text.contains(&format!(
+                " inside body at {} s   (not so at rest)\n",
+                (poke.at * 1000.0).round() / 1000.0
+            )),
+        "{text}"
+    );
+    let wave = inspect_animation(&rest, &model, model.animation("wave").unwrap(), "test.toml");
+    assert_eq!(wave.frames, 61);
+    let text = wave.to_text();
+    assert!(
+        text.starts_with(
+            "puppet, the animation \"wave\"  (test.toml)\n  length       2 s  (61 frames at 30 a second)\n  plays        once\n  motion       smooth: it flows through each pose, and starts and ends gently\n  keys         1  0 s    rest\n               2  0.5 s  up\n               3  1 s    higher\n               4  2 s    rest\n  moves        left_arm\n  ground       its lowest point stays on the ground\n  floating     none in any frame\n  overlapping  left_arm/upper is "
+        ),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("  limits       none broken in any frame\n"),
+        "{text}"
+    );
+    let spin = inspect_animation(&rest, &model, model.animation("spin").unwrap(), "test.toml");
+    let text = spin.to_text();
+    assert!(
+        text.contains("  plays        round and round (it loops)\n  motion       straight from pose to pose, at a steady speed\n"),
+        "{text}"
+    );
+    assert!(
+        text.ends_with("  loop         ends as it starts\n"),
+        "{text}"
+    );
+    // As data, for agents.
+    let json = serde_json::to_value(&nod).unwrap();
+    assert_eq!(json["animation"], "nodding");
+    assert_eq!(json["loops"], true);
+    assert_eq!(json["keys"][1]["key"], 2);
+    assert_eq!(json["keys"][1]["pose"], "nod");
+    assert_eq!(json["limits_broken"][0]["part"], "head");
+    assert_eq!(json["ends_as_it_starts"], true);
+    assert!(
+        serde_json::to_value(&jump)
+            .unwrap()
+            .get("ends_as_it_starts")
+            .is_none()
+    );
+}
+
+fn add_key(animation: &str, pose: &str, at: f64) -> Edit {
+    Edit::AddKey {
+        animation: animation.into(),
+        pose: pose.into(),
+        at,
+    }
+}
+
+#[test]
+fn an_animation_is_made_and_given_its_keys() {
+    let text = with_poses(POSES);
+    let made = done(
+        &text,
+        &Edit::AddAnimation {
+            name: "hello".into(),
+            looping: false,
+        },
+    );
+    assert_eq!(
+        made.text,
+        format!("{text}\n[animations.hello]\nkeys = []\n")
+    );
+    assert_eq!(
+        made.summary,
+        "added the animation \"hello\": it has no keys yet; give it its first with add-key hello <pose> --at 0"
+    );
+    // The first key, then two more: the later one first, to see the
+    // earlier one go in between.
+    let one = done(&made.text, &add_key("hello", "rest", 0.0));
+    assert_eq!(
+        one.text,
+        format!("{text}\n[animations.hello]\nkeys = [\n  {{ at = 0, pose = \"rest\" }},\n]\n")
+    );
+    assert_eq!(
+        one.summary,
+        "added key 1 to \"hello\": the pose \"rest\" at 0 s"
+    );
+    let two = done(&one.text, &add_key("hello", "rest", 1.2));
+    assert_eq!(
+        added(&one.text, &two.text),
+        ["  { at = 1.2, pose = \"rest\" },"]
+    );
+    let three = done(&two.text, &add_key("hello", "wave", 0.4));
+    assert_eq!(
+        three.summary,
+        "added key 2 to \"hello\": the pose \"wave\" at 0.4 s"
+    );
+    assert_eq!(
+        three.text,
+        format!(
+            "{text}\n[animations.hello]\nkeys = [\n  {{ at = 0, pose = \"rest\" }},\n  {{ at = 0.4, pose = \"wave\" }},\n  {{ at = 1.2, pose = \"rest\" }},\n]\n"
+        )
+    );
+    let hello = three.model.as_ref().unwrap().animation("hello").unwrap();
+    assert_eq!(hello.length(), 1.2);
+    assert_eq!(hello.keys.len(), 3);
+    // One that loops says so, and a second animation goes under the
+    // first.
+    let looping = done(
+        &three.text,
+        &Edit::AddAnimation {
+            name: "sway".into(),
+            looping: true,
+        },
+    );
+    assert_eq!(
+        looping.text,
+        format!(
+            "{}\n[animations.sway]\nloop = true\nkeys = []\n",
+            three.text
+        )
+    );
+    // What can't be.
+    let no = |text: &str, edit: &Edit| refused(text, edit).report().errors[0].clone();
+    let issue = no(&three.text, &add_key("helo", "wave", 2.0));
+    assert_eq!(issue.code, Code::UnknownAnimation);
+    assert_eq!(issue.suggestion.as_deref(), Some("hello"));
+    let issue = no(&three.text, &add_key("hello", "wav", 2.0));
+    assert_eq!(issue.code, Code::UnknownPose);
+    assert_eq!(issue.suggestion.as_deref(), Some("wave"));
+    let issue = no(&three.text, &add_key("hello", "crouch", 0.4));
+    assert_eq!(
+        issue.message,
+        "\"hello\" already has a key at 0.4 s: key 2, the pose \"wave\". Change its pose with set-key hello 2 --pose crouch, or choose another time"
+    );
+    let issue = no(&made.text, &add_key("hello", "wave", 0.5));
+    assert_eq!(
+        issue.message,
+        "an animation starts with a key at 0, and \"hello\" has no keys yet: add this one with --at 0, or add the pose it starts from first"
+    );
+    let issue = no(&three.text, &add_key("hello", "wave", -1.0));
+    assert_eq!(issue.code, Code::OutOfRange);
+    let issue = no(
+        &three.text,
+        &Edit::AddAnimation {
+            name: "hello".into(),
+            looping: false,
+        },
+    );
+    assert_eq!(issue.code, Code::DuplicateName);
+}
+
+#[test]
+fn keys_are_moved_changed_and_removed() {
+    let text = animated();
+    // A key moved without passing another changes one number.
+    let moved = done(
+        &text,
+        &Edit::MoveKey {
+            animation: "wave".into(),
+            key: 2,
+            at: 0.7,
+        },
+    );
+    assert_eq!(
+        added(&text, &moved.text),
+        ["  { at = 0.7, pose = \"up\" },"]
+    );
+    assert_eq!(lost(&text, &moved.text), ["  { at = 0.5, pose = \"up\" },"]);
+    assert_eq!(
+        moved.summary,
+        "moved key 2 of \"wave\" (the pose \"up\") from 0.5 s to 0.7 s"
+    );
+    // Moved past the next key, it changes places with it.
+    let past = done(
+        &text,
+        &Edit::MoveKey {
+            animation: "wave".into(),
+            key: 2,
+            at: 1.5,
+        },
+    );
+    assert_eq!(
+        past.summary,
+        "moved key 2 of \"wave\" (the pose \"up\") from 0.5 s to 1.5 s: it is key 3 now"
+    );
+    assert!(
+        past.text.contains(
+            "keys = [\n  { at = 0, pose = \"rest\" },\n  { at = 1.0, pose = \"higher\" },\n  { at = 1.5, pose = \"up\" },\n  { at = 2.0, pose = \"rest\" },\n]\n"
+        ),
+        "{}",
+        past.text
+    );
+    // Another pose for a key.
+    let set = done(
+        &text,
+        &Edit::SetKey {
+            animation: "wave".into(),
+            key: 3,
+            pose: "nod".into(),
+        },
+    );
+    assert_eq!(added(&text, &set.text), ["  { at = 1.0, pose = \"nod\" },"]);
+    assert_eq!(
+        set.summary,
+        "key 3 of \"wave\", at 1 s, is the pose \"nod\" now (it was \"higher\")"
+    );
+    // A key taken out of the middle: one line goes.
+    let gone = done(
+        &text,
+        &Edit::RemoveKey {
+            animation: "wave".into(),
+            key: 3,
+        },
+    );
+    assert_eq!(
+        lost(&text, &gone.text),
+        ["  { at = 1.0, pose = \"higher\" },"]
+    );
+    assert!(added(&text, &gone.text).is_empty());
+    assert_eq!(
+        gone.summary,
+        "removed key 3 of \"wave\" (the pose \"higher\" at 1 s)"
+    );
+    // The first key taken out: the rest start earlier, so the animation
+    // still starts at 0.
+    let first = done(
+        &text,
+        &Edit::RemoveKey {
+            animation: "wave".into(),
+            key: 1,
+        },
+    );
+    assert!(
+        first.text.contains(
+            "[animations.wave]\nkeys = [\n  { at = 0, pose = \"up\" },\n  { at = 0.5, pose = \"higher\" },\n  { at = 1.5, pose = \"rest\" },\n]\n"
+        ),
+        "{}",
+        first.text
+    );
+    assert_eq!(
+        first.summary,
+        "removed key 1 of \"wave\" (the pose \"rest\" at 0 s): the keys after it are 0.5 s earlier, so that the animation still starts at 0"
+    );
+    // The last key there is: the list is left empty.
+    let mut text_now = text.clone();
+    for _ in 0..2 {
+        text_now = done(
+            &text_now,
+            &Edit::RemoveKey {
+                animation: "spin".into(),
+                key: 1,
+            },
+        )
+        .text;
+    }
+    assert!(
+        text_now.contains("[animations.spin]\nloop = true\nsmooth = false\nkeys = []\n"),
+        "{text_now}"
+    );
+    // What can't be.
+    let no = |edit: &Edit| refused(&text, edit).report().errors[0].clone();
+    let issue = no(&Edit::MoveKey {
+        animation: "wave".into(),
+        key: 1,
+        at: 0.2,
+    });
+    assert_eq!(
+        issue.message,
+        "key 1 is where \"wave\" starts, at 0, and stays there: move the keys after it. To make the whole animation faster or slower: set-animation wave --length <seconds>"
+    );
+    let issue = no(&Edit::MoveKey {
+        animation: "wave".into(),
+        key: 2,
+        at: 1.0,
+    });
+    assert_eq!(
+        issue.message,
+        "\"wave\" already has a key at 1 s: key 3, the pose \"higher\""
+    );
+    let issue = no(&Edit::RemoveKey {
+        animation: "wave".into(),
+        key: 5,
+    });
+    assert_eq!(
+        issue.message,
+        "the animation \"wave\" has 4 keys: they are numbered from 1 to 4"
+    );
+    let issue = no(&Edit::SetKey {
+        animation: "wave".into(),
+        key: 0,
+        pose: "nod".into(),
+    });
+    assert_eq!(issue.code, Code::OutOfRange);
+    let issue = no(&Edit::SetKey {
+        animation: "wave".into(),
+        key: 2,
+        pose: "nodd".into(),
+    });
+    assert_eq!(issue.code, Code::UnknownPose);
+    assert_eq!(issue.suggestion.as_deref(), Some("nod"));
+}
+
+#[test]
+fn an_animation_is_set_renamed_and_removed() {
+    let text = animated();
+    let set = |looping, smooth, length| Edit::SetAnimation {
+        animation: "wave".into(),
+        looping,
+        smooth,
+        length,
+    };
+    // What an animation is anyway isn't written: it plays once, and it
+    // is smooth.
+    let looped = done(&text, &set(Some(true), None, None));
+    assert!(
+        looped
+            .text
+            .contains("[animations.wave]\nloop = true\nkeys = [")
+    );
+    assert_eq!(looped.summary, "the animation \"wave\" loops");
+    let back = done(&looped.text, &set(Some(false), None, None));
+    assert_eq!(back.text, text);
+    let straight = done(&text, &set(None, Some(false), None));
+    assert!(
+        straight
+            .text
+            .contains("[animations.wave]\nsmooth = false\nkeys = [")
+    );
+    assert_eq!(
+        straight.summary,
+        "the animation \"wave\" goes straight from pose to pose"
+    );
+    assert_eq!(
+        done(&straight.text, &set(None, Some(true), None)).text,
+        text
+    );
+    // A new length scales every key's time.
+    let faster = done(&text, &set(None, None, Some(1.0)));
+    assert!(
+        faster.text.contains(
+            "[animations.wave]\nkeys = [\n  { at = 0, pose = \"rest\" },\n  { at = 0.25, pose = \"up\" },\n  { at = 0.5, pose = \"higher\" },\n  { at = 1, pose = \"rest\" },\n]\n"
+        ),
+        "{}",
+        faster.text
+    );
+    assert_eq!(
+        faster.summary,
+        "the animation \"wave\" lasts 1 s (it was 2 s)"
+    );
+    let all = done(&text, &set(Some(true), Some(false), Some(3.0)));
+    assert_eq!(
+        all.summary,
+        "the animation \"wave\" loops, and goes straight from pose to pose, and lasts 3 s (it was 2 s)"
+    );
+    let wave = all.model.as_ref().unwrap().animation("wave").unwrap();
+    assert!(wave.looping && !wave.smooth);
+    assert_eq!(wave.length(), 3.0);
+    // Renamed where it stands; removed with nothing else touched.
+    let renamed = done(
+        &text,
+        &Edit::RenameAnimation {
+            animation: "spin".into(),
+            new_name: "turn_round".into(),
+        },
+    );
+    assert_eq!(added(&text, &renamed.text), ["[animations.turn_round]"]);
+    assert_eq!(lost(&text, &renamed.text), ["[animations.spin]"]);
+    let removed = done(
+        &text,
+        &Edit::RemoveAnimation {
+            animation: "spin".into(),
+        },
+    );
+    assert!(added(&text, &removed.text).is_empty());
+    assert!(!removed.text.contains("spin"));
+    assert_eq!(
+        removed.summary,
+        "removed the animation \"spin\" (its poses stay)"
+    );
+    assert_eq!(removed.model.as_ref().unwrap().animations.len(), 2);
+    assert_eq!(removed.model.as_ref().unwrap().poses.len(), 5);
+    // What can't be.
+    let no = |edit: &Edit| refused(&text, edit).report().errors[0].clone();
+    assert_eq!(no(&set(None, None, None)).code, Code::MissingField);
+    assert_eq!(no(&set(None, None, Some(0.0))).code, Code::OutOfRange);
+    assert_eq!(no(&set(None, None, Some(0.0001))).code, Code::OutOfRange);
+    let issue = no(&Edit::RenameAnimation {
+        animation: "spin".into(),
+        new_name: "wave".into(),
+    });
+    assert_eq!(issue.code, Code::DuplicateName);
+    let issue = no(&Edit::RemoveAnimation {
+        animation: "spinn".into(),
+    });
+    assert_eq!(issue.code, Code::UnknownAnimation);
+    assert_eq!(issue.suggestion.as_deref(), Some("spin"));
+}
+
+#[test]
+fn renaming_and_removing_a_pose_keeps_the_keys_right() {
+    let text = animated();
+    // Every key that uses a pose follows its new name.
+    let renamed = done(
+        &text,
+        &Edit::RenamePose {
+            pose: "up".into(),
+            new_name: "raised".into(),
+        },
+    );
+    assert_eq!(
+        added(&text, &renamed.text),
+        ["[poses.raised]", "  { at = 0.5, pose = \"raised\" },"]
+    );
+    assert_eq!(
+        renamed.summary,
+        "renamed the pose \"up\" to \"raised\", and in the key that uses it"
+    );
+    assert!(renamed.issues.is_empty(), "{:#?}", renamed.issues);
+    // A pose that keys use isn't removed from under them...
+    let failure = refused(
+        &text,
+        &Edit::RemovePose {
+            pose: "nod".into(),
+            with_keys: false,
+        },
+    );
+    assert_eq!(
+        failure.report().errors[0].message,
+        "the pose \"nod\" is used by the animation \"nodding\" (key 2): change those keys with set-key first, or take them away with the pose: remove-pose nod --with-keys"
+    );
+    // ...unless the keys are to go with it.
+    let removed = done(
+        &text,
+        &Edit::RemovePose {
+            pose: "nod".into(),
+            with_keys: true,
+        },
+    );
+    assert_eq!(
+        lost(&text, &removed.text),
+        [
+            "[poses.nod]",
+            "head = [20, 0, 0]",
+            "  { at = 0.4, pose = \"nod\" },"
+        ]
+    );
+    assert_eq!(
+        removed.summary,
+        "removed the pose \"nod\", and the key that used it, in the animation \"nodding\" (key 2)"
+    );
+    // A pose no key uses goes as before.
+    let hop = done(
+        &text,
+        &Edit::RemovePose {
+            pose: "hop".into(),
+            with_keys: false,
+        },
+    );
+    assert_eq!(hop.summary, "removed the pose \"hop\"");
+}
+
+#[test]
+fn animation_edits_work_on_json_too() {
+    let json = r#"{
+  "version": 0,
+  "parts": [
+    { "name": "base", "shape": "box" },
+    { "name": "lid", "shape": "box", "size": [1, 0.1, 1], "attach": "bottom", "to": "base.top" }
+  ],
+  "poses": { "open": { "lid": [-100, 0, 0] } }
+}
+"#;
+    let on = |text: &str, edit: &Edit| {
+        apply(
+            text,
+            Syntax::Json,
+            Path::new("test.json"),
+            "test.json",
+            edit,
+        )
+        .unwrap_or_else(|failure| panic!("{edit:?}: {:#?}", failure.report()))
+    };
+    let made = on(
+        json,
+        &Edit::AddAnimation {
+            name: "opening".into(),
+            looping: false,
+        },
+    );
+    let one = on(&made.text, &add_key("opening", "rest", 0.0));
+    let two = on(&one.text, &add_key("opening", "open", 1.0));
+    let three = on(&two.text, &add_key("opening", "open", 0.5));
+    let opening = three.model.as_ref().unwrap().animation("opening").unwrap();
+    let keys: Vec<(f64, &str)> = opening
+        .keys
+        .iter()
+        .map(|key| (key.at, key.pose.as_str()))
+        .collect();
+    assert_eq!(keys, [(0.0, "rest"), (0.5, "open"), (1.0, "open")]);
+    let looped = on(
+        &three.text,
+        &Edit::SetAnimation {
+            animation: "opening".into(),
+            looping: Some(true),
+            smooth: Some(false),
+            length: Some(2.0),
+        },
+    );
+    let opening = looped.model.as_ref().unwrap().animation("opening").unwrap();
+    assert!(opening.looping && !opening.smooth);
+    assert_eq!(opening.length(), 2.0);
+    let fewer = on(
+        &looped.text,
+        &Edit::RemoveKey {
+            animation: "opening".into(),
+            key: 2,
+        },
+    );
+    assert_eq!(
+        fewer
+            .model
+            .as_ref()
+            .unwrap()
+            .animation("opening")
+            .unwrap()
+            .keys
+            .len(),
+        2
+    );
+    let gone = on(
+        &fewer.text,
+        &Edit::RemoveAnimation {
+            animation: "opening".into(),
+        },
+    );
+    assert_eq!(gone.text, json);
 }

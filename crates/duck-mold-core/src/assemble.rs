@@ -25,10 +25,10 @@ use crate::issue::{Code, Issue};
 use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
-use crate::motion::{self, Joint, Pose};
+use crate::motion::{self, Animation, Joint, Key, Pose};
 use crate::recipe::{
-    Axis, Define, Limits, Loc, PaletteColor, PartDef, Placement, PoseDef, Recipe, Shape, Side,
-    SocketDef, SocketKind, SocketRef, Source, hex, rgb_of,
+    AnimationDef, Axis, Define, Limits, Loc, PaletteColor, PartDef, Placement, PoseDef, REST,
+    Recipe, Shape, Side, SocketDef, SocketKind, SocketRef, Source, hex, rgb_of,
 };
 use crate::shapes::{self, Landing, Polygon};
 use crate::shaping::{self, Shaped};
@@ -113,9 +113,11 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
         sockets: body.all_sockets(&Transform::IDENTITY),
         carried: body.passed.clone(),
         poses: Vec::new(),
+        animations: Vec::new(),
         zero: body.zero,
     };
     model.poses = poses(&model, &recipe.poses, assembler.issues);
+    model.animations = animations(&model, &recipe.animations, assembler.issues);
     if assembler.issues.iter().any(Issue::is_error) {
         return None;
     }
@@ -173,6 +175,74 @@ fn poses(model: &Model, written: &[PoseDef], issues: &mut Vec<Issue>) -> Vec<Pos
                 loc: pose.loc.clone(),
                 joints,
             }
+        })
+        .collect()
+}
+
+/// The recipe's animations, checked against the model's poses: every
+/// key names a pose there is, and an animation that loops ends as it
+/// starts.
+fn animations(model: &Model, written: &[AnimationDef], issues: &mut Vec<Issue>) -> Vec<Animation> {
+    let names: Vec<&str> = std::iter::once(REST)
+        .chain(model.poses.iter().map(|pose| pose.name.as_str()))
+        .collect();
+    written
+        .iter()
+        .map(|animation| {
+            let mut keys = Vec::new();
+            for key in &animation.keys {
+                if !names.contains(&key.pose.as_str()) {
+                    let issue = key
+                        .loc
+                        .error(
+                            Code::UnknownPose,
+                            format!(
+                                "the animation \"{}\" has a key with the pose \"{}\", but there is no pose with that name",
+                                animation.name, key.pose
+                            ),
+                        )
+                        .got(key.pose.as_str())
+                        .one_of(&key.pose, names.iter().copied());
+                    issues.push(issue);
+                    continue;
+                }
+                keys.push(Key {
+                    at: key.at,
+                    pose: key.pose.clone(),
+                    loc: key.loc.clone(),
+                });
+            }
+            let built = Animation {
+                name: animation.name.clone(),
+                loc: animation.loc.clone(),
+                looping: animation.looping,
+                smooth: animation.smooth,
+                keys,
+            };
+            if animation.keys.is_empty() {
+                issues.push(animation.loc.warning(
+                    Code::Unused,
+                    format!(
+                        "the animation \"{}\" has no keys yet, so it does nothing. Give it one with add-key, or write keys = [{{ at = 0, pose = \"rest\" }}]",
+                        animation.name
+                    ),
+                ));
+            } else if animation.looping
+                && built.keys.len() == animation.keys.len()
+                && !motion::ends_as_it_starts(model, &built)
+            {
+                // (With a key left out for its mistake, the ends can't be
+                // compared: the mistake is said already.)
+                let (first, last) = (&built.keys[0], &built.keys[built.keys.len() - 1]);
+                issues.push(last.loc.warning(
+                    Code::LoopJumps,
+                    format!(
+                        "the animation \"{}\" loops, but it starts on the pose \"{}\" and ends on \"{}\": the model would jump when it starts again. End it with a key of the pose \"{}\"",
+                        animation.name, first.pose, last.pose, first.pose
+                    ),
+                ));
+            }
+            built
         })
         .collect()
 }

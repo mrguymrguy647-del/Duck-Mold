@@ -73,6 +73,12 @@ enum Command {
         /// whether the pose breaks a part's limits.
         #[arg(long, value_name = "NAME")]
         pose: Option<String>,
+        /// Report on one of the model's animations instead: its keys,
+        /// and the worst that any of its frames (30 a second) gets
+        /// wrong: parts that float or overlap, limits broken, how far
+        /// it leaves the ground, and whether a loop ends as it starts.
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["pose", "sockets", "faces", "joins"])]
+        animation: Option<String>,
     },
     /// Build a recipe and write the model as a .glb file.
     ///
@@ -113,6 +119,19 @@ enum Command {
         /// The picture is then named after the pose too: robot.wave.png.
         #[arg(long, value_name = "NAME")]
         pose: Option<String>,
+        /// Draw one of the model's animations instead, as a strip of
+        /// frames side by side, evenly spaced in time, each with its
+        /// time in its corner. The picture is named robot.walk.strip.png.
+        #[arg(long, value_name = "NAME", conflicts_with = "pose")]
+        animation: Option<String>,
+        /// With --animation: how many frames the strip has (2 to 60).
+        #[arg(long, value_name = "NUMBER", default_value_t = render::DEFAULT_FRAMES, requires = "animation")]
+        frames: usize,
+        /// With --animation: where the frames are drawn from: front,
+        /// right, back or three-quarter (from the front right, a little
+        /// above; the default).
+        #[arg(long, value_name = "VIEW", requires = "animation")]
+        view: Option<String>,
     },
     /// Open the Studio: the window where a model is built with the mouse.
     ///
@@ -203,10 +222,28 @@ fn main() -> ExitCode {
         Command::Inspect {
             file,
             json,
+            animation: Some(animation),
+            ..
+        } => match tools::inspect_animation_file(&file, &animation) {
+            Ok(inspection) => {
+                if json {
+                    say_json(&inspection);
+                } else {
+                    say(inspection.to_text().trim_end());
+                    complain_about(&inspection.warnings);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(failure) => fail(&failure, json),
+        },
+        Command::Inspect {
+            file,
+            json,
             sockets,
             faces,
             joins,
             pose,
+            animation: None,
         } => match tools::inspect_file_listing(
             &file,
             &tools::Also {
@@ -251,7 +288,43 @@ fn main() -> ExitCode {
             output,
             size,
             json,
+            animation: Some(animation),
+            frames,
+            view,
+            ..
+        } => match render::render_animation_file(
+            &file,
+            output.as_deref(),
+            size,
+            &animation,
+            frames,
+            view.as_deref(),
+        ) {
+            Ok(rendered) => {
+                if json {
+                    say_json(&rendered);
+                } else {
+                    say(&format!(
+                        "wrote {} ({} x {} pixels, {} bytes): {}",
+                        rendered.output,
+                        rendered.width,
+                        rendered.height,
+                        rendered.bytes,
+                        rendered.inspection.summary
+                    ));
+                    complain_about(&rendered.inspection.warnings);
+                }
+                ExitCode::SUCCESS
+            }
+            Err(failure) => fail(&failure, json),
+        },
+        Command::Render {
+            file,
+            output,
+            size,
+            json,
             pose,
+            ..
         } => match render::render_file(&file, output.as_deref(), size, pose.as_deref()) {
             Ok(rendered) => {
                 if json {

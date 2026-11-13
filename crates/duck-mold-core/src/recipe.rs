@@ -77,7 +77,44 @@ pub struct Recipe {
     pub origin: Option<Origin>,
     /// The poses: parts turned and moved from where they stand at rest.
     pub poses: Vec<PoseDef>,
+    /// The animations: poses at times.
+    pub animations: Vec<AnimationDef>,
 }
+
+/// An animation, as the recipe writes it: a name, and the poses it goes
+/// through, each with the time it is reached.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimationDef {
+    /// Its name.
+    pub name: String,
+    /// Where it was written.
+    pub loc: Loc,
+    /// True if it starts again after its last key (`loop = true`).
+    pub looping: bool,
+    /// True if the motion flows through each pose and starts and ends
+    /// gently; false if it goes straight from pose to pose at a steady
+    /// speed (`smooth = false`).
+    pub smooth: bool,
+    /// The keys, in the order of their times.
+    pub keys: Vec<KeyDef>,
+}
+
+/// One key of an animation: a pose, and when it is reached.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyDef {
+    /// Seconds from the animation's start.
+    pub at: f64,
+    /// The pose's name.
+    pub pose: String,
+    /// Where it was written.
+    pub loc: Loc,
+}
+
+/// The fields of an animation, in the order they are written.
+pub(crate) const ANIMATION_FIELDS: [&str; 3] = ["loop", "smooth", "keys"];
+
+/// How late a key can be, in seconds: an hour.
+pub const LONGEST_ANIMATION: f64 = 3600.0;
 
 /// A pose, as the recipe writes it: a name, and a line for every part
 /// that isn't at rest.
@@ -813,7 +850,7 @@ fn a_shape(name: &str) -> String {
 }
 
 /// The fields at the top of a recipe.
-pub(crate) const TOP_FIELDS: [&str; 10] = [
+pub(crate) const TOP_FIELDS: [&str; 11] = [
     "version",
     "name",
     "description",
@@ -824,6 +861,7 @@ pub(crate) const TOP_FIELDS: [&str; 10] = [
     "sockets",
     "origin",
     "poses",
+    "animations",
 ];
 
 /// Names kept for later phases, and what each is for.
@@ -1125,6 +1163,7 @@ impl Decoder<'_> {
             sockets: Vec::new(),
             origin: None,
             poses: Vec::new(),
+            animations: Vec::new(),
         };
         let Some(mut fields) = self.table(root, "", "a recipe: a table of fields") else {
             return recipe;
@@ -1253,6 +1292,9 @@ impl Decoder<'_> {
         if let Some(entry) = fields.take("poses") {
             recipe.poses = self.poses(&entry.node, "poses");
         }
+        if let Some(entry) = fields.take("animations") {
+            recipe.animations = self.animations(&entry.node, "animations");
+        }
 
         self.finish(fields, &TOP_FIELDS);
         recipe
@@ -1365,6 +1407,158 @@ impl Decoder<'_> {
             });
         }
         poses
+    }
+
+    /// `true` or `false`.
+    fn yes_or_no(&mut self, node: &Node, path: &str) -> Option<bool> {
+        match &node.value {
+            Value::Bool(yes) => Some(*yes),
+            other => {
+                let message = format!("this needs true or false, not {}", other.describe());
+                self.error(Code::TypeMismatch, path, node.pos, message).got = Some(other.to_got());
+                None
+            }
+        }
+    }
+
+    /// Reads `animations`: a table of animations by name, each with its
+    /// `keys` (a pose and the time it is reached), and `loop` and
+    /// `smooth` if they are written.
+    fn animations(&mut self, node: &Node, path: &str) -> Vec<AnimationDef> {
+        let Some(table) = self.table(
+            node,
+            path,
+            "a table of animations by name, like [animations.walk]",
+        ) else {
+            return Vec::new();
+        };
+        let mut animations = Vec::new();
+        for animation in table.entries {
+            let own_path = join(path, &animation.key);
+            if !is_name(&animation.key) {
+                let message = format!(
+                    "\"{}\" can't be a name: use letters, digits, \"_\" and \"-\" only",
+                    animation.key
+                );
+                self.error(Code::TypeMismatch, &own_path, animation.key_pos, message);
+                continue;
+            }
+            let Some(mut fields) = self.table(
+                &animation.node,
+                &own_path,
+                "a table with the animation's keys, like keys = [{ at = 0, pose = \"rest\" }]",
+            ) else {
+                continue;
+            };
+            let looping = fields
+                .take("loop")
+                .and_then(|entry| self.yes_or_no(&entry.node, &join(&own_path, "loop")))
+                .unwrap_or(false);
+            let smooth = fields
+                .take("smooth")
+                .and_then(|entry| self.yes_or_no(&entry.node, &join(&own_path, "smooth")))
+                .unwrap_or(true);
+            let keys = match fields.take("keys") {
+                Some(entry) => self.keys(&entry.node, &join(&own_path, "keys")),
+                None => Vec::new(),
+            };
+            self.finish(fields, &ANIMATION_FIELDS);
+            animations.push(AnimationDef {
+                name: animation.key.clone(),
+                loc: self.loc(&own_path, animation.key_pos),
+                looping,
+                smooth,
+                keys,
+            });
+        }
+        animations
+    }
+
+    /// Reads an animation's `keys`: a list of `{ at = seconds, pose =
+    /// "name" }`. The first is at 0 and each is later than the one
+    /// before.
+    fn keys(&mut self, node: &Node, path: &str) -> Vec<KeyDef> {
+        let Value::Array(items) = &node.value else {
+            let message = format!(
+                "this needs a list of keys, like [{{ at = 0, pose = \"rest\" }}], not {}",
+                node.value.describe()
+            );
+            self.error(Code::TypeMismatch, path, node.pos, message).got = Some(node.value.to_got());
+            return Vec::new();
+        };
+        let mut keys: Vec<KeyDef> = Vec::new();
+        for (index, item) in items.iter().enumerate() {
+            let item_path = format!("{path}[{index}]");
+            let Some(mut fields) = self.table(
+                item,
+                &item_path,
+                "a key, like { at = 0.4, pose = \"wave\" }",
+            ) else {
+                continue;
+            };
+            let at = match fields.take("at") {
+                Some(entry) => self.ranged(
+                    &entry.node,
+                    &join(&item_path, "at"),
+                    (0.0, LONGEST_ANIMATION),
+                    "0.4",
+                ),
+                None => {
+                    self.error(
+                        Code::MissingField,
+                        &item_path,
+                        item.pos,
+                        "a key needs \"at\", its time in seconds, like at = 0.4",
+                    );
+                    None
+                }
+            };
+            let pose = match fields.take("pose") {
+                Some(entry) => self.text(&entry.node, &join(&item_path, "pose"), "wave"),
+                None => {
+                    self.error(
+                        Code::MissingField,
+                        &item_path,
+                        item.pos,
+                        "a key needs \"pose\", the name of the pose it reaches, like pose = \"wave\"",
+                    );
+                    None
+                }
+            };
+            self.finish(fields, &["at", "pose"]);
+            let (Some(at), Some(pose)) = (at, pose) else {
+                continue;
+            };
+            match keys.last() {
+                None if at != 0.0 => {
+                    let message = format!(
+                        "an animation starts with a key at 0, and this first key is at {}. Put it at 0, or add a key at 0 before it",
+                        plain(at)
+                    );
+                    let issue =
+                        self.error(Code::OutOfRange, &join(&item_path, "at"), item.pos, message);
+                    issue.got = Some(at.into());
+                    issue.suggestion = Some("at = 0".to_owned());
+                }
+                Some(before) if at <= before.at => {
+                    let message = format!(
+                        "each key is later than the one before it: this one is at {} and the one before is at {}",
+                        plain(at),
+                        plain(before.at)
+                    );
+                    self.error(Code::OutOfRange, &join(&item_path, "at"), item.pos, message)
+                        .got = Some(at.into());
+                    continue;
+                }
+                _ => {}
+            }
+            keys.push(KeyDef {
+                at,
+                pose,
+                loc: self.loc(&item_path, item.pos),
+            });
+        }
+        keys
     }
 
     /// A table of `name = "#RRGGBB"`.

@@ -163,6 +163,7 @@ impl Loader<'_> {
                     sockets: Vec::new(),
                     origin: None,
                     poses: Vec::new(),
+                    animations: Vec::new(),
                 };
             }
         };
