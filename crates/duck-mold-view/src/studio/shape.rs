@@ -29,6 +29,9 @@ pub enum Mode {
     /// The faces of the selected box: a click selects a face, the
     /// handles shape the box.
     Face,
+    /// The edges of the selected box: a click selects an edge, the
+    /// arrows move it.
+    Edge,
 }
 
 /// The tool in hand in Face mode.
@@ -45,6 +48,9 @@ pub enum FaceTool {
     Scale,
     /// A knob on an edge: drag it in to make a smaller face inside (I).
     Inset,
+    /// A ring round the part, across the edge under the pointer: a
+    /// click cuts there (K).
+    Cut,
 }
 
 /// The faces' outlines.
@@ -127,7 +133,7 @@ impl Studio {
     /// Tab: into Face mode, or back to Part mode.
     pub fn toggle_face_mode(&mut self) -> Result<String, String> {
         match self.mode {
-            Mode::Part => self.face_mode(),
+            Mode::Part | Mode::Edge => self.face_mode(),
             Mode::Face => {
                 self.part_mode();
                 Ok(self.status().to_owned())
@@ -135,7 +141,40 @@ impl Studio {
         }
     }
 
-    /// The faces selected, by their own names.
+    /// Goes into Edge mode, to move the selected box's edges, or cut it
+    /// (E). Says why not if it can't be shaped.
+    pub fn edge_mode(&mut self) -> Result<String, String> {
+        if let Some(why) = self.why_not_shaped() {
+            self.say(why.clone());
+            return Err(why);
+        }
+        self.cancel_drag();
+        self.mode = Mode::Edge;
+        self.faces.clear();
+        if !matches!(self.face_tool, FaceTool::Move | FaceTool::Cut) {
+            self.face_tool = FaceTool::Move;
+        }
+        let said = format!(
+            "The edges of \"{}\": click one, then drag its arrows. K cuts round the part. E goes back to parts",
+            self.selected.as_deref().unwrap_or_default()
+        );
+        self.say(said.clone());
+        Ok(said)
+    }
+
+    /// E: into Edge mode, or back to Part mode.
+    pub fn toggle_edge_mode(&mut self) -> Result<String, String> {
+        match self.mode {
+            Mode::Edge => {
+                self.part_mode();
+                Ok(self.status().to_owned())
+            }
+            _ => self.edge_mode(),
+        }
+    }
+
+    /// The faces selected, by their own names; in Edge mode, the edges
+    /// (`top+front`).
     pub fn selected_faces(&self) -> &[String] {
         &self.faces
     }
@@ -163,7 +202,7 @@ impl Studio {
     /// The selected part as it is shown, and its shape with its faces,
     /// edges and corners: the shape its changes made, or the plain box.
     pub fn shaped_selected(&self) -> Option<(&Part, Shaped)> {
-        if self.mode != Mode::Face {
+        if self.mode == Mode::Part {
             return None;
         }
         let path = self.selected.as_deref()?;
@@ -199,28 +238,36 @@ impl Studio {
         at: (f64, f64),
         adding: bool,
     ) -> Option<String> {
-        let face = self.face_at(size, at);
+        let edges = self.mode == Mode::Edge;
+        let face = if edges {
+            self.edge_at(size, at)
+        } else {
+            self.face_at(size, at)
+        };
         self.select_face(face.as_deref(), adding);
         if let Some(face) = &face {
-            let said = match self.faces.len() {
-                0 => "No face selected".to_owned(),
-                1 => format!("The face \"{face}\": drag its arrow to pull it"),
-                count => format!("{count} faces: they are pulled together"),
+            let said = match (self.faces.len(), edges) {
+                (0, true) => "No edge selected".to_owned(),
+                (0, false) => "No face selected".to_owned(),
+                (1, true) => format!("The edge \"{face}\": drag its arrows to move it"),
+                (1, false) => format!("The face \"{face}\": drag its arrow to pull it"),
+                (count, true) => format!("{count} edges: they move together"),
+                (count, false) => format!("{count} faces: they are pulled together"),
             };
             self.say(said);
         }
         face
     }
 
-    /// Escape, one step at a time: a held handle, then the faces, then
-    /// Face mode, then the selection. False when there was nothing to
+    /// Escape, one step at a time: a held handle, then the faces (or
+    /// edges), then Face (or Edge) mode, then the selection. False when there was nothing to
     /// let go of.
     pub fn escape(&mut self) -> bool {
         if self.grab.is_some() {
             self.cancel_drag();
             return true;
         }
-        if self.mode == Mode::Face {
+        if self.mode != Mode::Part {
             if self.faces.is_empty() {
                 self.part_mode();
             } else {
@@ -239,7 +286,7 @@ impl Studio {
     /// the part can't be shaped any more, and only faces that are still
     /// there selected.
     pub(super) fn keep_face_mode(&mut self) {
-        if self.mode != Mode::Face {
+        if self.mode == Mode::Part {
             return;
         }
         if self.why_not_shaped().is_some() {
@@ -248,8 +295,13 @@ impl Studio {
             return;
         }
         if let Some((_, shaped)) = self.shaped_selected() {
-            let names = shaped.own_names();
-            self.faces.retain(|face| names.contains(face));
+            if self.mode == Mode::Face {
+                let names = shaped.own_names();
+                self.faces.retain(|face| names.contains(face));
+            } else {
+                self.faces
+                    .retain(|edge| !shaped.corners_named_or_none(edge).is_empty());
+            }
         }
     }
 
@@ -289,7 +341,7 @@ impl Studio {
 
     /// The faces of the part that aren't faded in Face mode: the box's.
     pub(super) fn face_focus(&self) -> Option<Range<usize>> {
-        if self.mode != Mode::Face {
+        if self.mode == Mode::Part {
             return None;
         }
         let path = self.selected.as_deref()?;
@@ -299,6 +351,16 @@ impl Studio {
     /// The outlines of the box's faces, drawn over it: thin for every
     /// face that looks this way, thick and yellow for those selected.
     pub(super) fn face_marks(&self) -> Vec<Mark> {
+        let mut marks = match self.mode {
+            Mode::Edge => self.edge_marks(),
+            _ => self.face_outlines(),
+        };
+        marks.extend(self.cut_marks());
+        marks
+    }
+
+    /// Face mode's outlines of the faces.
+    fn face_outlines(&self) -> Vec<Mark> {
         let Some((part, _)) = self.shaped_selected() else {
             return Vec::new();
         };
@@ -348,6 +410,22 @@ impl Studio {
     /// The middle of the faces selected and the way they face together,
     /// in the part's own space: `None` if none is selected.
     pub(super) fn faces_middle(&self, shaped: &Shaped) -> Option<(Vec3, Vec3)> {
+        if self.mode == Mode::Edge {
+            // The middle of the edges' corners; they face the way the
+            // faces round them do.
+            let corners: std::collections::BTreeSet<usize> = self
+                .faces
+                .iter()
+                .flat_map(|edge| shaped.corners_named_or_none(edge))
+                .collect();
+            if corners.is_empty() {
+                return None;
+            }
+            let sum = corners
+                .iter()
+                .fold(Vec3::ZERO, |sum, &corner| sum + shaped.corners[corner]);
+            return Some((sum * (1.0 / corners.len() as f64), Vec3::UP));
+        }
         let mut weight = 0.0;
         let mut middle = Vec3::ZERO;
         let mut facing = Vec3::ZERO;

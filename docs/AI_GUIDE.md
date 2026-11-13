@@ -261,6 +261,8 @@ colors = { window = "wood", glass = "sky" }
 | `{ move = "top", by = [0, 0, 0.2] }` | Moves the face by x, y, z metres; the faces round it stretch to follow. | None. |
 | `{ turn = "top", by = [0, 15, 0] }` | Turns the face about its middle: degrees around x, then y, then z. Faces round it bend (each is drawn as two triangles). | None. |
 | `{ scale = "top", by = 0.5 }` | Makes the face bigger or smaller about its middle: one number, or `[x, y, z]`. `scale = "top", by = 0.5` on a box makes a frustum. | None. |
+| `{ move = "top+front", by = [0, 0.1, 0] }` | Moves an edge: where the faces `top` and `front` meet (in either order). | None. |
+| `{ cut = "right", at = 0.8 }` | Cuts all the way round, with a flat cut facing right, 0.8 of the way from the middle to the right side of the box (0 to just under 1). Every face it crosses becomes two; nothing moves. | The piece towards the middle keeps the name; the slice towards the side is `<face>_<side>` (`top_right`), or `<face>_<name>`. |
 
 - **Names are words, never numbers**, and never change when the size or
   an amount does. `duck-mold inspect <recipe> --faces` lists every face
@@ -600,6 +602,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> move-face <part> <faces> --by x,y,z` | Adds a move of faces to a box's `changes`. Right after a move of the same faces, it adds to that one instead of making a second line. |
 | `duck-mold edit <recipe> turn-face <part> <faces> --by x,y,z` | Adds a turn of faces (degrees around x, y, z, about their middle). Adds to a turn of the same faces right before it. |
 | `duck-mold edit <recipe> scale-face <part> <faces> --by n` | Adds a scale of faces (one number, or `x,y,z`). Multiplies a scale of the same faces right before it. |
+| `duck-mold edit <recipe> move-edge <part> <a+b> --by x,y,z` | Adds a move of an edge (where faces `a` and `b` meet; several with commas). Adds to a move of the same edges right before it. |
+| `duck-mold edit <recipe> cut <part> --toward <side> --at <share>` | Adds a cut all the way round, facing a side, `--at` of the way from the middle (0) to that side (just under 1). `--name` names the slices. `set-change --at` moves it. |
 | `duck-mold edit <recipe> remove-change <part> <number>` | Takes one change away (`--all`: every one, and the part is a plain box again). Refused if a later change or a colour names a face only that change made: the mistakes it would cause are listed. |
 
 - **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,

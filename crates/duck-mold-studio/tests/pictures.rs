@@ -445,6 +445,25 @@ fn the_screens_look_as_they_did() {
         });
         screen.run_steps(2);
         assert_eq!(std::fs::read_to_string(&recipe).unwrap(), WALL);
+
+        // Edge mode: the top's front edge selected, its arrows on it.
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .edge_mode()
+            .unwrap();
+        screen.run_steps(2);
+        let edge = screen
+            .state()
+            .studio()
+            .unwrap()
+            .edge_point("top+window_rim_top")
+            .unwrap();
+        let edge = picture_on_screen(&screen, edge);
+        click_at(&mut screen, edge);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "shape-edge"));
     }
 
     assert!(

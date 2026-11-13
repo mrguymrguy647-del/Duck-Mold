@@ -81,10 +81,12 @@ pub enum Action {
     Shape,
     /// Take this tool in hand in Face mode.
     FaceTool(FaceTool),
+    /// The selected box's edges: Edge mode, or back to Part mode (E).
+    EdgeMode,
 }
 
 /// Every key and what it does, for Help's list and the README's.
-pub const KEYS: [(&str, &str); 23] = [
+pub const KEYS: [(&str, &str); 24] = [
     (
         "G, R, S, T, P",
         "The Move, Rotate, Scale, Size and Paint tools",
@@ -94,8 +96,12 @@ pub const KEYS: [(&str, &str); 23] = [
         "Shape the selected box: click its faces. Tab again: back to parts",
     ),
     (
-        "T, G, R, S, I (shaping)",
-        "The Pull, Move, Turn, Scale and Inset tools",
+        "E",
+        "The selected box's edges: click one to move it. E again: back to parts",
+    ),
+    (
+        "T, G, R, S, I, K (shaping)",
+        "The Pull, Move, Turn, Scale, Inset and Cut tools",
     ),
     ("Ctrl held while dragging", "No snapping"),
     ("Delete or Backspace", "Remove what is selected"),
@@ -267,21 +273,38 @@ pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) ->
     };
     ui.label(RichText::new(title).weak().small());
     // Shaping: the tools, and the way back.
-    if studio.mode() == Mode::Face {
+    if studio.mode() != Mode::Part {
+        let edges = studio.mode() == Mode::Edge;
         for (tool, words, key) in [
             (FaceTool::Pull, "Pull", "T"),
             (FaceTool::Move, "Move", "G"),
             (FaceTool::Turn, "Turn", "R"),
             (FaceTool::Scale, "Scale", "S"),
             (FaceTool::Inset, "Inset", "I"),
+            (FaceTool::Cut, "Cut", "K"),
         ] {
+            if edges && !matches!(tool, FaceTool::Move | FaceTool::Cut) {
+                continue;
+            }
             if line(ui, true, words, key) {
                 chosen = Some(Action::FaceTool(tool));
             }
         }
         ui.separator();
-        if line(ui, true, "Back to Part", "Tab") {
-            chosen = Some(Action::Shape);
+        if edges {
+            if line(ui, true, "Faces", "Tab") {
+                chosen = Some(Action::Shape);
+            }
+            if line(ui, true, "Back to Part", "E") {
+                chosen = Some(Action::EdgeMode);
+            }
+        } else {
+            if line(ui, true, "Edges", "E") {
+                chosen = Some(Action::EdgeMode);
+            }
+            if line(ui, true, "Back to Part", "Tab") {
+                chosen = Some(Action::Shape);
+            }
         }
         if chosen.is_some() {
             ui.close();
@@ -290,6 +313,9 @@ pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) ->
     }
     if line(ui, edits && one.is_some(), "Shape", "Tab") {
         chosen = Some(Action::Shape);
+    }
+    if line(ui, edits && one.is_some(), "Edges", "E") {
+        chosen = Some(Action::EdgeMode);
     }
     if line(ui, edits, "Duplicate", "Ctrl+D") {
         chosen = Some(Action::Duplicate);

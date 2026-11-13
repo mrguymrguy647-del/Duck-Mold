@@ -265,6 +265,40 @@ pub enum Change {
         /// each way), or x,y,z (a move, a turn, a scale).
         #[arg(long, allow_hyphen_values = true, value_name = "N or X,Y,Z")]
         by: Option<String>,
+        /// A cut's new place: from 0 (the middle) to just under 1 (the
+        /// side).
+        #[arg(long)]
+        at: Option<f64>,
+    },
+    /// Move edges of a box (where two faces meet: top+front) by x,y,z
+    /// metres, in its own directions.
+    ///
+    /// Right after a move of the same edges, it adds to that one.
+    MoveEdge {
+        /// The part.
+        part: String,
+        /// The edges: top+front, or several with commas.
+        edges: String,
+        /// How far along x, y and z, in metres.
+        #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
+        by: String,
+    },
+    /// Cut all the way round a box, with a flat cut facing a side: every
+    /// face it crosses becomes two, to shape further.
+    Cut {
+        /// The part.
+        part: String,
+        /// The side the cut faces: top, bottom, left, right, front or
+        /// back.
+        #[arg(long)]
+        toward: String,
+        /// How far from the middle (0) to that side (just under 1).
+        #[arg(long)]
+        at: f64,
+        /// What the slices towards the side are called: <face>_<name>.
+        /// Without it: <face>_<side>, like top_right.
+        #[arg(long)]
+        name: Option<String>,
     },
     /// Move faces of a box by x,y,z metres, in its own directions. The
     /// faces round them stretch to follow.
@@ -611,7 +645,12 @@ impl Change {
                 by: *by,
                 name: name.clone(),
             },
-            Change::SetChange { part, number, by } => {
+            Change::SetChange {
+                part,
+                number,
+                by,
+                at,
+            } => {
                 let (one, xyz) = match by.as_deref() {
                     None => (None, None),
                     Some(by) if by.contains(',') => (None, Some(three("--by", by)?)),
@@ -627,9 +666,25 @@ impl Change {
                     number: *number,
                     by: one,
                     by_xyz: xyz,
-                    at: None,
+                    at: *at,
                 }
             }
+            Change::MoveEdge { part, edges, by } => Edit::MoveEdge {
+                part: part.clone(),
+                edges: face_list(edges),
+                by: three("--by", by)?,
+            },
+            Change::Cut {
+                part,
+                toward,
+                at,
+                name,
+            } => Edit::Cut {
+                part: part.clone(),
+                toward: toward.clone(),
+                at: *at,
+                name: name.clone(),
+            },
             Change::MoveFace { part, faces, by } => Edit::MoveFace {
                 part: part.clone(),
                 faces: face_list(faces),

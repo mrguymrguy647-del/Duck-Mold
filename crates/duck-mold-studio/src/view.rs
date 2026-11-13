@@ -222,9 +222,14 @@ pub fn show(
     if response.clicked()
         && let Some(pointer) = response.interact_pointer_pos()
     {
-        if studio.mode() == Mode::Face {
-            // Face mode: the face under the pointer is selected; with
-            // Shift, added or taken out.
+        if studio.mode() != Mode::Part && studio.face_tool == FaceTool::Cut {
+            // The Cut tool: cut where the ring is. What it did, or why
+            // not, is in the status line.
+            let _ = studio.cut_at(size, in_picture(pointer), free);
+            view.adding = None;
+        } else if studio.mode() != Mode::Part {
+            // Face or Edge mode: the face (or edge) under the pointer is
+            // selected; with Shift, added or taken out.
             studio.click_face(size, in_picture(pointer), shift);
             view.adding = None;
         } else if studio.tool == Tool::Paint && !studio.look_only() {
@@ -272,7 +277,7 @@ pub fn show(
         }
     }
 
-    let shaping = studio.mode() == Mode::Face;
+    let shaping = studio.mode() != Mode::Part;
     let shows_markers = (studio.selected().is_some() && !studio.look_only()) || shaping;
     let now = Drawn {
         builds: studio.builds(),
@@ -333,6 +338,12 @@ pub fn show(
         || (shaping && !studio.selected_faces().is_empty());
     let hint = if view.moving {
         "Let go to make the change. Escape lets go without changing anything."
+    } else if shaping && studio.face_tool == FaceTool::Cut {
+        "Point at an edge: the ring shows where the cut goes, all the way round. Click to cut. Ctrl: not in tenths."
+    } else if studio.mode() == Mode::Edge && studio.selected_faces().is_empty() {
+        "Click an edge of the box to move it. Shift+click adds an edge. K cuts. E goes back to parts."
+    } else if studio.mode() == Mode::Edge {
+        "Drag an arrow to move the edge: the faces on both sides follow. Shift+click adds an edge."
     } else if shaping && studio.selected_faces().is_empty() {
         "Click a face of the box to shape it. Shift+click adds a face. Tab goes back to parts."
     } else if shaping && studio.face_tool == FaceTool::Inset {
@@ -371,6 +382,14 @@ pub fn show(
             egui::FontId::proportional(12.0),
             quiet,
         );
+    }
+    // Where the Cut tool would cut, beside the pointer.
+    if let (Some(label), Some(pointer)) = (studio.cut_label(), pointer) {
+        let at = pointer + egui::vec2(16.0, -18.0);
+        let text = painter.layout_no_wrap(label, egui::FontId::proportional(13.0), Color32::WHITE);
+        let back = Rect::from_min_size(at, text.size()).expand(4.0);
+        painter.rect_filled(back, 4.0, Color32::from_black_alpha(200));
+        painter.galley(at, text, Color32::WHITE);
     }
     // What the drag has done so far, beside the pointer: in red, with
     // why, when letting go would change nothing.
@@ -414,6 +433,11 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
             "Face",
             "Shape the selected box: click its faces, then pull, move, turn, scale or inset them (Tab)",
         ),
+        (
+            Mode::Edge,
+            "Edge",
+            "The selected box's edges: click one and move it, or cut round the box (E)",
+        ),
     ];
     for (at, (mode, name, tip)) in modes.into_iter().enumerate() {
         let place = Rect::from_min_size(
@@ -425,7 +449,14 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
         let button = egui::Button::selectable(studio.mode() == mode, name);
         if ui.put(place, button).on_hover_text(tip).clicked() && studio.mode() != mode {
             // Why not, if it can't, is in the status line.
-            let _ = studio.toggle_face_mode();
+            let _ = match mode {
+                Mode::Part => {
+                    studio.part_mode();
+                    Ok(String::new())
+                }
+                Mode::Face => studio.face_mode(),
+                Mode::Edge => studio.edge_mode(),
+            };
         }
     }
 }
@@ -435,8 +466,8 @@ fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
     if studio.look_only() {
         return;
     }
-    if studio.mode() == Mode::Face {
-        let tools = [
+    if studio.mode() != Mode::Part {
+        let face_tools = [
             (
                 FaceTool::Pull,
                 "Pull",
@@ -467,7 +498,20 @@ fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
                 "I",
                 "A knob on an edge: drag it in to make a smaller face inside, with a frame round it",
             ),
+            (
+                FaceTool::Cut,
+                "Cut",
+                "K",
+                "A ring round the part where you point: click to cut there, so there are more faces to shape",
+            ),
         ];
+        // Edge mode has Move and Cut.
+        let tools: Vec<_> = face_tools
+            .into_iter()
+            .filter(|(tool, ..)| {
+                studio.mode() == Mode::Face || matches!(tool, FaceTool::Move | FaceTool::Cut)
+            })
+            .collect();
         for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {
             let place = Rect::from_min_size(
                 within.left_top() + egui::vec2(8.0, TOOLS_TOP + row as f32 * 30.0),

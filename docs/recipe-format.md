@@ -201,6 +201,8 @@ Each change is a table with one of these, and the fields it takes:
 | `move` | `move` (a face name, or a list), `by` (`[x, y, z]` metres, not all 0) | Moves the faces; the faces round them stretch to follow. No new faces. |
 | `turn` | `turn` (a face name, or a list), `by` (`[x, y, z]` degrees, not all 0) | Turns the faces about their middle (the middle of them all, for several): around x, then y, then z. Faces round them may bend: a bent four-sided face is drawn as two triangles, folded the way that bulges out, and keeps its name. |
 | `scale` | `scale` (a face name, or a list), `by` (one number above 0, or `[x, y, z]`; not 1) | Makes the faces bigger or smaller about their middle. |
+| `move` of an edge | `move` (an edge: `"top+front"`, the faces that meet there, in any order; or a list), `by` (`[x, y, z]`) | Moves the edge; the faces on both sides follow. |
+| `cut` | `cut` (a side: `top`, `bottom`, `left`, `right`, `front` or `back`), `at` (0 to just under 1), `name` (optional) | Cuts all the way round with a flat cut facing that side, `at` of the way from the box's middle to that side (a share of the size, so it stays near the side when the box is resized). Every face it crosses becomes two; nothing moves. |
 
 Amounts are metres, in the part's own directions, before its `scale`,
 `mirror`, `rotate` and `move`. Resizing the box keeps them: a frame
@@ -214,6 +216,14 @@ size or amount changes it:
 | `pull` | Keeps its name: it is the end of what was pulled. | One wall along each edge, `<face>_side_<side>`, where the side is the edge's side of the face (`top_side_front`). With `name = "leg"`: `leg_front`, `leg_left`... `<face>_side`, or the `name`, stands for all the walls. |
 | `inset` | Its name now stands for the ring left round the new face. | The face in the middle: `<face>_inset`, or the `name`. The ring's pieces: `<middle>_rim_<side>` (`window_rim_top`). |
 | `move`, `turn`, `scale` | Keeps its name. | None. |
+| `cut` | Keeps its name on the piece towards the middle. | The slice towards the side: `<face>_<side>` (`top_right`), or `<face>_<name>`. |
+
+**Edges** are named by the two faces that meet there, joined with `+`
+(`top+front`), and corners by three or more (`top+front+left`); the
+order doesn't matter. A name for several faces works there too:
+`backrest_front+top` is every edge where one of the `backrest_front`
+walls meets the top. `duck-mold inspect --faces` lists each face's
+neighbours, which are the edges it has.
 
 The side words (`top`, `left`, `front`...) are passed down from the
 box's faces to the faces the changes make, not measured, so a turned

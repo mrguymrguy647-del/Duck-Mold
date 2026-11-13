@@ -194,6 +194,16 @@ recipe calls it (`top`, `front`...). Shift+click adds a face.
 | Scale | S | Three boxes, and one in the middle | Makes the faces bigger or smaller one way, or all ways: a box with its top scaled down is a frustum. |
 | Inset | I | A knob on the middle of an edge | Dragged in, makes a smaller face inside each face: a frame round it, in steps of 1 cm. The new face in the middle is selected, ready to pull. |
 
+- **Edges.** Press **E** (or click **Edge**): a click picks an edge, by
+  the faces that meet there (`top+front`), and Move's arrows move it;
+  the faces on both sides follow.
+- **Cut** (K, in Face and Edge mode) shows a ring all the way round the
+  box where you point, across the edge under the pointer. Click, and
+  every face the ring crosses becomes two: more faces to pull and
+  move. The place is a share of the way from the middle to the side,
+  in tenths (hold Ctrl for any place), so it stays near that side when
+  the box is resized. The slices are named by the side:
+  `top_right`.
 - What you do is a list of **changes** under the box in the recipe
   (`changes = [ { inset = "front", by = 0.6 }, ... ]`), and the panel
   lists them: change a number to change that step, or click **x** to
@@ -212,8 +222,8 @@ recipe calls it (`top`, `front`...). Shift+click adds a face.
 
 Dragging the same face again with Move, Turn or Scale adds to the line
 already there instead of writing another. In the file these are
-`pull`, `inset`, `move-face`, `turn-face`, `scale-face`, `set-change`
-and `remove-change` edits; `duck-mold inspect <recipe> --faces` lists
+`pull`, `inset`, `move-face`, `turn-face`, `scale-face`, `move-edge`,
+`cut`, `set-change` and `remove-change` edits; `duck-mold inspect <recipe> --faces` lists
 every face's name.
 
 ![A wall in Face mode: the glass of its framed window selected, with the Changes list on the right](docs/studio-shaping.png)
@@ -317,7 +327,8 @@ keys, About). Every line shows its key.
 |---|---|
 | G, R, S, T, P | The Move, Rotate, Scale, Size and Paint tools |
 | Tab | Shape the selected box: Face mode. Tab again: back to parts |
-| T, G, R, S, I (shaping) | The Pull, Move, Turn, Scale and Inset tools |
+| E | The selected box's edges: click one to move it. E again: back to parts |
+| T, G, R, S, I, K (shaping) | The Pull, Move, Turn, Scale, Inset and Cut tools (Edge mode: G and K) |
 | Ctrl held while dragging | No snapping |
 | Delete or Backspace | Remove what is selected |
 | Ctrl+D | Duplicate it. A copy of a free part stands beside it; a copy of a joined part is on the same socket |

@@ -2326,3 +2326,49 @@ fn in_face_mode_g_r_s_take_the_face_tools_and_the_panel_shows_three_numbers() {
     screen.get_by_label("1. move top");
     assert!(text_of(&recipe).contains("{ move = \"top\", by = [0, 0.2, 0] }"));
 }
+
+#[test]
+fn e_shows_the_edges_k_takes_the_cut_and_a_click_cuts_round_the_box() {
+    use duck_mold_view::studio::{FaceTool, Mode};
+    use egui::Key;
+    let (recipe, mut screen) = yard("screens_edges");
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    screen.key_press(Key::E);
+    screen.run_steps(2);
+    let mode = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().mode();
+    assert_eq!(mode(&screen), Mode::Edge);
+    screen.get_by_label("Shaping: Edge mode");
+    // Edge mode's tools: Move and Cut only.
+    assert_eq!(screen.query_all_by_label("Pull").count(), 0);
+    screen.get_by_label("Cut");
+    // A click on the top's front edge picks it.
+    let edge = screen
+        .state()
+        .studio()
+        .unwrap()
+        .edge_point("top+front")
+        .unwrap();
+    let edge = picture_on_screen(&screen, edge);
+    click_at(&mut screen, edge);
+    assert_eq!(
+        screen.state().studio().unwrap().selected_faces(),
+        ["top+front"]
+    );
+    screen.get_by_label("top+front");
+    screen.get_by_label("0.50 m long");
+    // K: the Cut tool; a click on the edge cuts round the box there.
+    screen.key_press(Key::K);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().face_tool, FaceTool::Cut);
+    click_at(&mut screen, edge);
+    let text = text_of(&recipe);
+    assert!(text.contains("{ cut = "), "{text}");
+    screen.get_by_label_contains("Cut \"crate\" towards");
+    // The Changes list shows where it is.
+    screen.get_by_label_contains("1. cut ");
+    // E again: back to parts.
+    screen.key_press(Key::E);
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+}

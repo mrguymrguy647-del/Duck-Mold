@@ -2679,6 +2679,17 @@ fn every_kind_of_edit_has_a_name() {
             faces: Vec::new(),
             by: [1.0; 3],
         },
+        Edit::MoveEdge {
+            part: String::new(),
+            edges: Vec::new(),
+            by: [0.0; 3],
+        },
+        Edit::Cut {
+            part: String::new(),
+            toward: String::new(),
+            at: 0.0,
+            name: None,
+        },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
     assert_eq!(names, Edit::COMMANDS);

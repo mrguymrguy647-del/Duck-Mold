@@ -182,7 +182,7 @@ fn mistakes_in_a_change_say_what_and_where() {
             "changes = [{ by = 1 }]",
             Code::MissingField,
             "parts[0].changes[0]",
-            "a change needs one of \"pull\", \"inset\", \"move\", \"turn\" or \"scale\" to say what it does, like { pull = \"top\", by = 0.5 }",
+            "a change needs one of \"pull\", \"inset\", \"move\", \"turn\", \"scale\" or \"cut\" to say what it does, like { pull = \"top\", by = 0.5 }",
         ),
         (
             "changes = [{ pull = \"top\", inset = \"top\", by = 1 }]",
@@ -555,7 +555,12 @@ fn whole(shaped: &Shaped) -> Result<(), String> {
 
 #[test]
 fn every_list_of_changes_gives_a_whole_shape_or_names_the_change_that_broke_it() {
-    let mut dice = Dice(0x9E37_79B9_7F4A_7C15);
+    // The same lists every run; DUCK_MOLD_SEED=<number> tries others.
+    let seed = std::env::var("DUCK_MOLD_SEED")
+        .ok()
+        .and_then(|seed| seed.parse::<u64>().ok())
+        .map_or(0x9E37_79B9_7F4A_7C15, |seed| seed | 1);
+    let mut dice = Dice(seed);
     let (mut made, mut refused) = (0, 0);
     for _ in 0..2000 {
         let size = [
@@ -577,8 +582,32 @@ fn every_list_of_changes_gives_a_whole_shape_or_names_the_change_that_broke_it()
                 faces.push(names[dice.below(names.len())].clone());
             }
             let small = size[0].min(size[1]).min(size[2]);
-            let kind = dice.below(5);
-            let change = if kind == 2 {
+            let kind = dice.below(7);
+            let change = if kind == 5 {
+                let sides = [
+                    Side::Top,
+                    Side::Bottom,
+                    Side::Left,
+                    Side::Right,
+                    Side::Front,
+                    Side::Back,
+                ];
+                Change::Cut {
+                    toward: sides[dice.below(6)],
+                    at: dice.between(0.0, 0.95),
+                    name: None,
+                }
+            } else if kind == 6 {
+                // An edge of the faces there are, if two of them meet.
+                let edges = shaped.edges();
+                let edge = edges[dice.below(edges.len())];
+                let mut by = [0.0; 3];
+                by[dice.below(3)] = dice.between(-small, small) / 2.0;
+                Change::Move {
+                    faces: vec![shaped.edge_name(&edge)],
+                    by,
+                }
+            } else if kind == 2 {
                 let mut by = [0.0; 3];
                 by[dice.below(3)] = dice.between(-small, small);
                 Change::Move { faces, by }
@@ -1277,4 +1306,284 @@ fn a_move_right_after_a_move_of_the_same_faces_adds_to_it() {
         },
     );
     assert!(set.text.contains("{ turn = \"top\", by = [0, 45, 0] }"));
+}
+
+// ---- Phase 4, step 4: edges and cuts ----------------------------------------------
+
+fn cut(toward: Side, at: f64) -> Change {
+    Change::Cut {
+        toward,
+        at,
+        name: None,
+    }
+}
+
+use duck_mold_core::recipe::Side;
+
+#[test]
+fn a_cut_splits_every_face_it_crosses_and_names_the_slices_by_side() {
+    let shaped = shape_box([1.0; 3], [1.0; 2], &[cut(Side::Right, 0.5)], None).unwrap();
+    assert_eq!(
+        own_names(&shaped),
+        [
+            "top",
+            "bottom",
+            "left",
+            "right",
+            "front",
+            "back",
+            "top_right",
+            "bottom_right",
+            "front_right",
+            "back_right"
+        ]
+    );
+    // Nothing moved.
+    assert!((shaped.volume() - 1.0).abs() < 1e-12);
+    whole(&shaped).unwrap();
+    // The top's piece towards the middle is 0.75 wide; the slice 0.25.
+    let top = shaped.faces_named("top")[0];
+    let slice = shaped.faces_named("top_right")[0];
+    assert!((shaped.extent(top)[0] - 0.75).abs() < 1e-12);
+    assert!((shaped.extent(slice)[0] - 0.25).abs() < 1e-12);
+    // The new edges know their sides: the top's along the cut is its
+    // right; the slice's is its left.
+    assert!(shaped.faces[top].sides.contains(&Side::Right));
+    assert_eq!(
+        shaped
+            .neighbours(top)
+            .iter()
+            .filter(|&&f| shaped.faces[f].name == "top_right")
+            .count(),
+        1
+    );
+    // A second cut that crosses the top again: the slice's name is taken,
+    // so it gets a number.
+    let again = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[cut(Side::Right, 0.8), cut(Side::Right, 0.4)],
+        None,
+    )
+    .unwrap();
+    assert_eq!(again.faces_named("top_right_2").len(), 1);
+    whole(&again).unwrap();
+    // A named cut.
+    let named = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[Change::Cut {
+            toward: Side::Front,
+            at: 0.9,
+            name: Some("rim".into()),
+        }],
+        None,
+    )
+    .unwrap();
+    assert_eq!(named.faces_named("top_rim").len(), 1);
+}
+
+#[test]
+fn the_designs_chair_is_made_from_one_box() {
+    let chair = r#"changes = [
+  { cut = "left", at = 0.8 },
+  { cut = "right", at = 0.8 },
+  { cut = "front", at = 0.8 },
+  { cut = "back", at = 0.8 },
+  { pull = "bottom_left_front", by = 0.42, name = "leg_lf" },
+  { pull = "bottom_right_front", by = 0.42, name = "leg_rf" },
+  { pull = "bottom_left_back", by = 0.42, name = "leg_lb" },
+  { pull = "bottom_right_back", by = 0.42, name = "leg_rb" },
+  { pull = ["top_left_back", "top_back", "top_right_back"], by = 0.5, name = "backrest" },
+]"#;
+    let text = format!(
+        "{PALETTE}[[parts]]\nname = \"chair\"\nshape = \"box\"\nsize = [0.5, 0.06, 0.5]\ncolor = \"wood\"\n{chair}\n"
+    );
+    let model = built(&text);
+    let part = first_part(&model);
+    let shaped = part.shaped.as_ref().unwrap();
+    whole(shaped).unwrap();
+    // Four legs of four walls, the backrest's walls round the outside
+    // of its three faces (3 + 1 + 3 + 1 = 8).
+    for leg in ["leg_lf", "leg_rf", "leg_lb", "leg_rb"] {
+        assert_eq!(shaped.faces_named(leg).len(), 4, "{leg}");
+    }
+    assert_eq!(shaped.faces_named("backrest").len(), 8);
+    assert_eq!(shaped.faces_named("backrest_front").len(), 3);
+    let bounds = part.bounds.unwrap();
+    assert!((bounds.size().y - 0.98).abs() < 1e-9);
+    // Resized wider, every name is still there.
+    let wide = text.replace("size = [0.5, 0.06, 0.5]", "size = [0.8, 0.05, 0.6]");
+    let wide = built(&wide);
+    assert_eq!(
+        first_part(&wide).shaped.as_ref().unwrap().names(),
+        shaped.names()
+    );
+}
+
+#[test]
+fn an_edge_is_moved_by_the_faces_that_meet_there() {
+    let ramp = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[moved(&["top+front"], [0.0, -0.5, 0.0])],
+        None,
+    )
+    .unwrap();
+    whole(&ramp).unwrap();
+    // Half the front's height gone along its top edge: 1 - 0.25.
+    assert!((ramp.volume() - 0.75).abs() < 1e-12);
+    // The other way round names the same edge.
+    let same = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[moved(&["front+top"], [0.0, -0.5, 0.0])],
+        None,
+    )
+    .unwrap();
+    assert_eq!(ramp.corners, same.corners);
+    // Faces that don't meet, or a turn of an edge.
+    let mistake = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[moved(&["top+bottom"], [0.0, 0.1, 0.0])],
+        Some("crate"),
+    )
+    .unwrap_err();
+    assert_eq!(
+        mistake.message,
+        "there is no edge \"top+bottom\" on \"crate\": \"top\" and \"bottom\" don't meet"
+    );
+    let mistake = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[Change::Turn {
+            faces: vec!["top+front".into()],
+            by: [10.0, 0.0, 0.0],
+        }],
+        None,
+    )
+    .unwrap_err();
+    assert_eq!(
+        mistake.message,
+        "only a move can be made to an edge or a corner, not a turn"
+    );
+    // Edges are listed with names made of their faces.
+    let names: Vec<String> = ramp
+        .edges()
+        .iter()
+        .map(|edge| ramp.edge_name(edge))
+        .collect();
+    assert_eq!(names.len(), 12);
+    assert!(names.contains(&"top+front".to_owned()), "{names:?}");
+    assert!(names.contains(&"front+left".to_owned()), "{names:?}");
+}
+
+#[test]
+fn cuts_are_read_and_checked() {
+    let cases: [(&str, Code, &str, &str); 3] = [
+        (
+            "changes = [{ cut = \"back\", at = 1.2 }]",
+            Code::OutOfRange,
+            "parts[0].changes[0].at",
+            "the cut towards \"back\" at 1.2 is outside the part: \"at\" goes from 0 (the middle) to just under 1 (the side)",
+        ),
+        (
+            "changes = [{ cut = \"rght\", at = 0.5 }]",
+            Code::TypeMismatch,
+            "parts[0].changes[0].cut",
+            "a cut faces one of the box's sides: \"top\", \"bottom\", \"left\", \"right\", \"front\" or \"back\", not \"rght\"",
+        ),
+        (
+            "changes = [{ cut = \"right\" }]",
+            Code::MissingField,
+            "parts[0].changes[0]",
+            "a cut needs \"at\": how far from the middle (0) to the side (just under 1), like { cut = \"right\", at = 0.8 }",
+        ),
+    ];
+    for (lines, code, path, message) in cases {
+        let error = one_error(&wall(lines));
+        assert_eq!(
+            (error.code, error.path.as_str(), error.message.as_str()),
+            (code, path, message),
+            "{lines}"
+        );
+    }
+    let error = one_error(&wall("changes = [{ cut = \"rght\", at = 0.5 }]"));
+    assert_eq!(error.suggestion.as_deref(), Some("right"));
+}
+
+#[test]
+fn edges_and_cuts_are_written_by_their_edits() {
+    let start = wall("");
+    let cut_edit = done(
+        &start,
+        Syntax::Toml,
+        &Edit::Cut {
+            part: "wall".into(),
+            toward: "right".into(),
+            at: 0.8,
+            name: None,
+        },
+    );
+    assert_eq!(cut_edit.summary, "cut \"wall\" towards \"right\" at 0.8");
+    assert!(
+        cut_edit
+            .text
+            .contains("changes = [\n  { cut = \"right\", at = 0.8 },\n]")
+    );
+    let edge = Edit::MoveEdge {
+        part: "wall".into(),
+        edges: vec!["top+front".into()],
+        by: [0.0, -0.1, 0.0],
+    };
+    let once = done(&cut_edit.text, Syntax::Toml, &edge);
+    assert_eq!(
+        once.summary,
+        "moved the edge \"top+front\" of \"wall\" by [0, -0.1, 0]"
+    );
+    let twice = done(&once.text, Syntax::Toml, &edge);
+    assert!(
+        twice
+            .text
+            .contains("  { move = \"top+front\", by = [0, -0.2, 0] },\n")
+    );
+    // A cut is moved with set-change --at.
+    let moved_cut = done(
+        &twice.text,
+        Syntax::Toml,
+        &Edit::SetChange {
+            part: "wall".into(),
+            number: 1,
+            by: None,
+            by_xyz: None,
+            at: Some(0.6),
+        },
+    );
+    assert!(moved_cut.text.contains("{ cut = \"right\", at = 0.6 }"));
+    // Wrong words are refused before anything is written.
+    for bad in [
+        Edit::Cut {
+            part: "wall".into(),
+            toward: "up".into(),
+            at: 0.5,
+            name: None,
+        },
+        Edit::Cut {
+            part: "wall".into(),
+            toward: "right".into(),
+            at: 1.0,
+            name: None,
+        },
+        Edit::MoveEdge {
+            part: "wall".into(),
+            edges: vec!["top".into()],
+            by: [0.0, 0.1, 0.0],
+        },
+    ] {
+        assert!(
+            apply(&start, Syntax::Toml, Path::new("t.toml"), "t.toml", &bad).is_err(),
+            "{bad:?}"
+        );
+    }
 }

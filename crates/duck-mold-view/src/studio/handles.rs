@@ -292,7 +292,7 @@ impl Studio {
 
     /// What the bottom of the viewport says about snapping.
     pub fn snap_text(&self) -> String {
-        if self.mode == Mode::Face {
+        if self.mode != Mode::Part {
             return match self.face_tool {
                 FaceTool::Pull | FaceTool::Move => {
                     format!("Snap {} m  (Ctrl: off)", short(self.snap_step()))
@@ -300,6 +300,7 @@ impl Studio {
                 FaceTool::Inset => format!("Snap {} m  (Ctrl: off)", short(INSET_STEP)),
                 FaceTool::Turn => format!("Snap {}°  (Ctrl: off)", short(TURN_STEP)),
                 FaceTool::Scale => format!("Snap x {}  (Ctrl: off)", short(SCALE_STEP)),
+                FaceTool::Cut => "Cuts in tenths  (Ctrl: free)".to_owned(),
             };
         }
         format!(
@@ -322,7 +323,7 @@ impl Studio {
         if self.look_only {
             return None;
         }
-        if self.mode == Mode::Face {
+        if self.mode != Mode::Part {
             return self.face_gizmo();
         }
         let path = self.selected.as_deref()?;
@@ -473,7 +474,13 @@ impl Studio {
         let centre = part.place.apply(middle) + offset;
         // The Inset knob: on the middle of the first face's edge that is
         // nearest the pointer (so it is where the hand is).
-        let first = *shaped.faces_named(&self.faces[0]).first()?;
+        // (In Edge mode there is no face: the knob, never shown, is any
+        // face's.)
+        let first = shaped
+            .faces_named(&self.faces[0])
+            .first()
+            .copied()
+            .unwrap_or(0);
         let corners: Vec<Vec3> = shaped.faces[first]
             .corners
             .iter()
@@ -670,6 +677,8 @@ impl Studio {
                         color: MIDDLE,
                     });
                 }
+                // The Cut tool has a ring, but no handle: a click cuts.
+                FaceTool::Cut => {}
             }
             return handles;
         }
@@ -1527,6 +1536,15 @@ impl Studio {
                 let label = format!("{} {} m", axis_names[which], short(moved));
                 if moved == 0.0 {
                     (Vec::new(), label)
+                } else if self.mode == Mode::Edge {
+                    (
+                        vec![Edit::MoveEdge {
+                            part,
+                            edges: faces,
+                            by,
+                        }],
+                        label,
+                    )
                 } else {
                     (vec![Edit::MoveFace { part, faces, by }], label)
                 }

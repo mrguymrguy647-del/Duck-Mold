@@ -354,6 +354,30 @@ pub enum Edit {
         /// Degrees around x, y and z.
         by: [f64; 3],
     },
+    /// Moves edges of a box (`top+front`: where those faces meet) by x,
+    /// y and z metres: a `move` in its `changes`. Right after a move of
+    /// the same edges, it adds to that one.
+    MoveEdge {
+        /// The part.
+        part: String,
+        /// The edges, by name: `top+front`.
+        edges: Vec<String>,
+        /// How far along x, y and z.
+        by: [f64; 3],
+    },
+    /// Cuts all the way round a box with a flat cut facing a side, `at`
+    /// of the way from the middle to that side: a `cut` in its
+    /// `changes`.
+    Cut {
+        /// The part.
+        part: String,
+        /// The side the cut faces: `right`.
+        toward: String,
+        /// From the middle (0) to the side (just under 1).
+        at: f64,
+        /// What the slices are called: `<face>_<name>`.
+        name: Option<String>,
+    },
     /// Makes faces of a box bigger or smaller about their middle: a
     /// `scale`. Right after a scale of the same faces, it multiplies
     /// that one.
@@ -390,7 +414,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 22] = [
+    pub const COMMANDS: [&'static str; 24] = [
         "add",
         "remove",
         "rename",
@@ -413,6 +437,8 @@ impl Edit {
         "move-face",
         "turn-face",
         "scale-face",
+        "move-edge",
+        "cut",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -440,6 +466,8 @@ impl Edit {
             Edit::MoveFace { .. } => "move-face",
             Edit::TurnFace { .. } => "turn-face",
             Edit::ScaleFace { .. } => "scale-face",
+            Edit::MoveEdge { .. } => "move-edge",
+            Edit::Cut { .. } => "cut",
         }
     }
 }
@@ -2090,6 +2118,85 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 touched: Some(found),
             })
         }
+        Edit::MoveEdge { part, edges, by } => {
+            joined_val(edges, "edge")?;
+            let (found, definition, joined) =
+                add_or_join(doc, part, "move", edges, *by, Together::Add)?;
+            let what = if edges.len() == 1 {
+                "the edge"
+            } else {
+                "the edges"
+            };
+            let mut summary = format!(
+                "moved {what} {} of \"{part}\" by {}",
+                crate::shaping::quoted(edges),
+                amount_words(*by, false)
+            );
+            match joined {
+                None => {}
+                Some(Some(all)) => summary.push_str(&format!(
+                    " (moved by {} in all, in one change)",
+                    amount_words(all, false)
+                )),
+                Some(None) => summary.push_str(": back where it was, so the change is gone"),
+            }
+            if let Some(definition) = definition {
+                summary.push_str(&format!(" (in the definition \"{definition}\")"));
+            }
+            Ok(Outcome {
+                summary,
+                touched: Some(found),
+            })
+        }
+        Edit::Cut {
+            part,
+            toward,
+            at,
+            name,
+        } => {
+            let sides = ["top", "bottom", "left", "right", "front", "back"];
+            if !sides.contains(&toward.as_str()) {
+                return Err(problem(
+                    Code::TypeMismatch,
+                    format!("a cut faces one of the box's sides, not \"{toward}\""),
+                )
+                .got(toward.as_str())
+                .one_of(toward, sides));
+            }
+            if !(0.0..1.0).contains(at) {
+                return Err(problem(
+                    Code::OutOfRange,
+                    format!(
+                        "the cut towards \"{toward}\" at {} is outside the part: \"at\" goes from 0 (the middle) to just under 1 (the side)",
+                        doc::number_text(*at)
+                    ),
+                )
+                .got(*at));
+            }
+            let mut change = vec![
+                ("cut".to_owned(), text(toward)),
+                ("at".to_owned(), Val::Num(tidy_number(*at, 4))),
+            ];
+            if let Some(name) = name {
+                check_name(name)?;
+                change.push(("name".to_owned(), text(name)));
+            }
+            let (found, definition) = add_change(doc, part, change)?;
+            let mut summary = format!(
+                "cut \"{part}\" towards \"{toward}\" at {}",
+                doc::number_text(*at)
+            );
+            if let Some(name) = name {
+                summary.push_str(&format!(", naming the slices \"{name}\""));
+            }
+            if let Some(definition) = definition {
+                summary.push_str(&format!(" (in the definition \"{definition}\")"));
+            }
+            Ok(Outcome {
+                summary,
+                touched: Some(found),
+            })
+        }
         Edit::SetSocket { socket, on, shift } => {
             let (part, name) = split_socket(socket)?;
             if let Some(on) = on {
@@ -2209,7 +2316,16 @@ fn add_or_join(
     by: [f64; 3],
     together: Together,
 ) -> Result<(Found, Option<String>, Option<Option<[f64; 3]>>), Stop> {
-    let faces_written = faces_val(faces)?;
+    let faces_written = if faces.iter().any(|name| name.contains('+')) {
+        let what = if faces[0].matches('+').count() == 1 {
+            "edge"
+        } else {
+            "corner"
+        };
+        joined_val(faces, what)?
+    } else {
+        faces_val(faces)?
+    };
     let found = find(doc, part)?;
     let (table, definition) = making(doc, &found);
     let list = with(&table, key("changes"));
@@ -2360,6 +2476,36 @@ fn change_words(doc: &Doc, change: &[Step]) -> String {
         return format!("{} {faces}", entry.key);
     }
     "the change".to_owned()
+}
+
+/// Edges or corners, as a change writes them: `top+front`, or a list.
+fn joined_val(names: &[String], what: &str) -> Result<Val, Stop> {
+    if names.is_empty() {
+        return Err(problem(Code::MissingField, format!("no {what} was named")));
+    }
+    for name in names {
+        let pieces: Vec<&str> = name.split('+').collect();
+        let wanted = if what == "edge" { 2 } else { 3 };
+        if pieces.len() < wanted || pieces.iter().any(|piece| check_name(piece).is_err()) {
+            let example = if what == "edge" {
+                "top+front"
+            } else {
+                "top+front+left"
+            };
+            return Err(problem(
+                Code::TypeMismatch,
+                format!(
+                    "\"{name}\" isn't {}: write the names of the faces that meet there, joined with \"+\", like \"{example}\"",
+                    if what == "edge" { "an edge" } else { "a corner" }
+                ),
+            )
+            .got(name.as_str()));
+        }
+    }
+    Ok(match names {
+        [one] => text(one),
+        many => Val::List(many.iter().map(|name| text(name)).collect()),
+    })
 }
 
 /// The faces a change names, as it is written: one name, or a list.
@@ -2532,6 +2678,8 @@ pub struct ChangeFact {
     pub by: Option<f64>,
     /// Its `by`, when it is three: a move, a turn, a scale each way.
     pub by_xyz: Option<[f64; 3]>,
+    /// Its `at`: where a cut is.
+    pub at: Option<f64>,
     /// The name it gives what it makes, if it has one.
     pub name: Option<String>,
 }
@@ -2714,6 +2862,7 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
                     faces,
                     by: number(item, "by"),
                     by_xyz: three(item, "by"),
+                    at: number(item, "at"),
                     name: text_of(item, "name").map(str::to_owned),
                 })
             })
@@ -2796,7 +2945,9 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::RemoveChange { part, .. }
         | Edit::MoveFace { part, .. }
         | Edit::TurnFace { part, .. }
-        | Edit::ScaleFace { part, .. } => part,
+        | Edit::ScaleFace { part, .. }
+        | Edit::MoveEdge { part, .. }
+        | Edit::Cut { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }
         | Edit::RemoveSocket { socket } => socket.rsplit_once('.').map_or("", |(part, _)| part),

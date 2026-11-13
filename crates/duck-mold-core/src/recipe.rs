@@ -632,7 +632,9 @@ pub(crate) const PART_FIELDS: [&str; 27] = [
 ];
 
 /// The fields a change can have.
-const CHANGE_FIELDS: [&str; 7] = ["pull", "inset", "move", "turn", "scale", "by", "name"];
+const CHANGE_FIELDS: [&str; 9] = [
+    "pull", "inset", "move", "turn", "scale", "cut", "by", "at", "name",
+];
 
 /// The most degrees a turn can be, either way.
 const TURN_RANGE: (f64, f64) = (-36_000.0, 36_000.0);
@@ -1457,12 +1459,13 @@ impl Decoder<'_> {
             [] => {
                 // What else it says is fine: only the action is missing.
                 fields.take("by");
+                fields.take("at");
                 fields.take("name");
                 self.error(
                     Code::MissingField,
                     path,
                     fields.pos,
-                    "a change needs one of \"pull\", \"inset\", \"move\", \"turn\" or \"scale\" to say what it does, like { pull = \"top\", by = 0.5 }",
+                    "a change needs one of \"pull\", \"inset\", \"move\", \"turn\", \"scale\" or \"cut\" to say what it does, like { pull = \"top\", by = 0.5 }",
                 );
                 self.finish(fields, &CHANGE_FIELDS);
                 return None;
@@ -1482,12 +1485,16 @@ impl Decoder<'_> {
                     );
                 }
                 fields.take("by");
+                fields.take("at");
                 fields.take("name");
                 self.finish(fields, &CHANGE_FIELDS);
                 return None;
             }
         };
         let word = action.key.as_str();
+        if word == "cut" {
+            return self.cut(action, fields, path);
+        }
         let faces = self.face_list(&action.node, &fields.sub(word), word);
         let by_path = fields.sub("by");
         let by_entry = fields.take("by");
@@ -1554,6 +1561,65 @@ impl Decoder<'_> {
                 Some(Change::Scale { faces, by })
             }
         }
+    }
+
+    /// A cut: `{ cut = "right", at = 0.8 }`.
+    fn cut(&mut self, action: &Entry, mut fields: Fields<'_>, path: &str) -> Option<Change> {
+        let side_path = fields.sub("cut");
+        let toward = match self.text(&action.node, &side_path, "right") {
+            Some(word) => match Side::from_name(&word).filter(|side| *side != Side::Center) {
+                Some(side) => Some(side),
+                None => {
+                    let message = format!(
+                        "a cut faces one of the box's sides: \"top\", \"bottom\", \"left\", \"right\", \"front\" or \"back\", not \"{word}\""
+                    );
+                    let issue = Issue::error(Code::TypeMismatch, side_path, message)
+                        .in_file(self.file)
+                        .at(action.node.pos)
+                        .got(word.as_str())
+                        .one_of(&word, ["top", "bottom", "left", "right", "front", "back"]);
+                    self.issues.push(issue);
+                    None
+                }
+            },
+            None => None,
+        };
+        let at_path = fields.sub("at");
+        let at = match fields.take("at") {
+            Some(entry) => match self.number(&entry.node, &at_path, "0.8") {
+                Some(at) if (0.0..1.0).contains(&at) => Some(at),
+                Some(at) => {
+                    let side = toward.map_or("the side", Side::name);
+                    let message = format!(
+                        "the cut towards \"{side}\" at {} is outside the part: \"at\" goes from 0 (the middle) to just under 1 (the side)",
+                        plain(at)
+                    );
+                    let issue = self.error(Code::OutOfRange, &at_path, entry.node.pos, message);
+                    issue.got = Some(at.into());
+                    issue.allowed = Some(crate::issue::Allowed::Range { min: 0.0, max: 1.0 });
+                    None
+                }
+                None => None,
+            },
+            None => {
+                self.error(
+                    Code::MissingField,
+                    path,
+                    fields.pos,
+                    "a cut needs \"at\": how far from the middle (0) to the side (just under 1), like { cut = \"right\", at = 0.8 }",
+                );
+                None
+            }
+        };
+        let name = fields
+            .take("name")
+            .and_then(|entry| self.name(&entry.node, &fields.sub("name")));
+        self.finish(fields, &CHANGE_FIELDS);
+        Some(Change::Cut {
+            toward: toward?,
+            at: at?,
+            name,
+        })
     }
 
     /// A move, turn or scale that changes nothing is a mistake: it is
@@ -1631,7 +1697,19 @@ impl Decoder<'_> {
                 good = false;
                 continue;
             };
-            if text.contains('+') {
+            if text.contains('+') && word == "move" {
+                // An edge or a corner: faces' names joined with `+`.
+                if text.split('+').all(is_name) {
+                    faces.push(text);
+                } else {
+                    let message = format!(
+                        "\"{text}\" isn't an edge or a corner: write the names of the faces that meet there, joined with \"+\", like \"top+front\""
+                    );
+                    self.error(Code::TypeMismatch, &item_path, item.pos, message)
+                        .got = Some(text.into());
+                    good = false;
+                }
+            } else if text.contains('+') {
                 let what = if text.matches('+').count() == 1 {
                     "an edge"
                 } else {

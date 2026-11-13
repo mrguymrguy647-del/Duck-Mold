@@ -3606,3 +3606,77 @@ fn a_face_is_moved_turned_and_scaled_and_drags_of_one_kind_make_one_line() {
     // Every name is as it was, and the top still selected.
     assert_eq!(studio.selected_faces(), ["top"]);
 }
+
+// ---- Phase 4, step 4: edges and the cut ---------------------------------------------
+
+#[test]
+fn an_edge_is_picked_by_name_and_moved_with_its_arrows() {
+    let (recipe, mut studio) = boxes("edge_move");
+    studio.edge_mode().unwrap();
+    assert_eq!(studio.mode(), Mode::Edge);
+    assert_eq!(studio.face_tool, FaceTool::Move);
+    let edge = studio.edge_point("top+front").unwrap();
+    assert_eq!(studio.edge_at(VIEW, edge).as_deref(), Some("top+front"));
+    studio.click_face(VIEW, edge, false);
+    assert_eq!(studio.selected_faces(), ["top+front"]);
+    check_picture("studio-edge-mode", &studio.picture(VIEW.0, VIEW.1));
+    assert_eq!(
+        studio.grips(),
+        [Grip::Arrow(0), Grip::Arrow(1), Grip::Arrow(2)]
+    );
+    // Down 0.2: a ramp at the front.
+    pull(
+        &mut studio,
+        Grip::Arrow(1),
+        |from| from - vec3(0.0, 0.2, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("y -0.2 m"));
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Moved the edge \"top+front\" of \"crate\" by [0, -0.2, 0]"
+    );
+    assert!(file(&recipe).contains("  { move = \"top+front\", by = [0, -0.2, 0] },\n"));
+    assert_eq!(studio.selected_faces(), ["top+front"]);
+    // E again: back to parts.
+    studio.toggle_edge_mode().unwrap();
+    assert_eq!(studio.mode(), Mode::Part);
+}
+
+#[test]
+fn the_cut_ring_follows_the_pointer_and_a_click_cuts_there() {
+    let (recipe, mut studio) = boxes("edge_cut");
+    studio.edge_mode().unwrap();
+    studio.face_tool = FaceTool::Cut;
+    assert!(studio.grips().is_empty(), "the Cut tool has no handle");
+    // On the top's front edge, three quarters of the way to the right:
+    // a cut facing right, at 0.5 of the way from the middle.
+    let (left, right) = {
+        let part = studio.part("crate").unwrap();
+        let bounds = part.bounds.unwrap();
+        let offset = studio.offset();
+        (
+            vec3(bounds.min.x, bounds.max.y, bounds.max.z) + offset,
+            vec3(bounds.max.x, bounds.max.y, bounds.max.z) + offset,
+        )
+    };
+    let point = at_screen(&studio, left + (right - left) * 0.75);
+    studio.hover(VIEW, Some(point));
+    let aim = studio.cut_aim(point, false).unwrap();
+    assert_eq!((aim.toward.name(), aim.at), ("right", 0.5));
+    // All the way round: four faces cross the cut.
+    assert_eq!(aim.ring.len(), 4);
+    assert_eq!(studio.cut_label().as_deref(), Some("cut right 0.5"));
+    check_picture("studio-cut-ring", &studio.picture(VIEW.0, VIEW.1));
+    let said = studio.cut_at(VIEW, point, false).unwrap();
+    assert_eq!(said, "Cut \"crate\" towards \"right\" at 0.5");
+    assert!(file(&recipe).contains("  { cut = \"right\", at = 0.5 },\n"));
+    // The new faces are there to pick.
+    let shaped = studio.part("crate").unwrap().shaped.clone().unwrap();
+    assert!(shaped.names().contains(&"top_right".to_owned()));
+    // Off the box, nothing is cut.
+    assert!(studio.cut_at(VIEW, (3.0, 3.0), false).is_err());
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), BOXES);
+}

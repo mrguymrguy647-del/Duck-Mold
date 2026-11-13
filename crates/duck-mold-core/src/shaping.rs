@@ -79,11 +79,23 @@ pub enum Change {
         /// How much, each way: 1 is as they are.
         by: [f64; 3],
     },
+    /// Cuts all the way round the part with a flat cut facing `toward`,
+    /// `at` of the way from the middle to that side of the box. Every
+    /// face it crosses becomes two; nothing moves.
+    Cut {
+        /// The side the cut faces.
+        toward: Side,
+        /// How far from the middle (0) to the side (just under 1).
+        at: f64,
+        /// What the slices towards the side are called:
+        /// `<face>_<name>`. Without one: `<face>_<side>`.
+        name: Option<String>,
+    },
 }
 
 impl Change {
     /// Every word a recipe can write for a change.
-    pub const WORDS: [&'static str; 5] = ["pull", "inset", "move", "turn", "scale"];
+    pub const WORDS: [&'static str; 6] = ["pull", "inset", "move", "turn", "scale", "cut"];
 
     /// The word a recipe writes for it: `pull`, `inset`...
     pub fn word(&self) -> &'static str {
@@ -93,6 +105,7 @@ impl Change {
             Change::Move { .. } => "move",
             Change::Turn { .. } => "turn",
             Change::Scale { .. } => "scale",
+            Change::Cut { .. } => "cut",
         }
     }
 
@@ -104,6 +117,7 @@ impl Change {
             | Change::Move { faces, .. }
             | Change::Turn { faces, .. }
             | Change::Scale { faces, .. } => faces,
+            Change::Cut { .. } => &[],
         }
     }
 
@@ -117,7 +131,17 @@ impl Change {
             Change::Inset { faces, by, .. } => {
                 format!("insetting {} by {}", quoted(faces), number(*by))
             }
-            Change::Move { faces, by } => format!("moving {} by {}", quoted(faces), three(by)),
+            Change::Move { faces, by } => {
+                let what = match faces.as_slice() {
+                    [one] if one.matches('+').count() == 1 => "the edge ",
+                    [one] if one.contains('+') => "the corner ",
+                    _ => "",
+                };
+                format!("moving {what}{} by {}", quoted(faces), three(by))
+            }
+            Change::Cut { toward, at, .. } => {
+                format!("cutting towards \"{}\" at {}", toward.name(), number(*at))
+            }
             Change::Turn { faces, by } => {
                 format!("turning {} by {}", quoted(faces), three(by))
             }
@@ -135,6 +159,15 @@ impl Change {
 fn three(values: &[f64; 3]) -> String {
     let [x, y, z] = values.map(number);
     format!("[{x}, {y}, {z}]")
+}
+
+/// `a and b`, `a, b and c`, for words already quoted.
+fn quoted_words(words: &[String]) -> String {
+    match words.split_last() {
+        None => String::new(),
+        Some((last, [])) => last.clone(),
+        Some((last, rest)) => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 /// `"a"`, `"a" and "b"`, `"a", "b" and "c"`.
@@ -232,6 +265,16 @@ impl Face {
     }
 }
 
+/// An edge of a shaped box: its two corners, and the faces on each
+/// side.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Edge {
+    /// Its two corners, as places in [`Shaped::corners`].
+    pub corners: [usize; 2],
+    /// The faces on its two sides.
+    pub faces: [usize; 2],
+}
+
 /// The faces of a shaped box, ready to be a part: flat faces as one
 /// polygon each, bent ones cut into triangles.
 #[derive(Debug, Clone, PartialEq)]
@@ -253,10 +296,10 @@ pub fn shape_box(
     part: Option<&str>,
 ) -> Result<Shaped, Mistake> {
     let mut shaped = Shaped::boxed(size, taper);
-    let scale = size[0].max(size[1]).max(size[2]);
+    let half = Vec3::from(size) * 0.5;
     for (at, change) in changes.iter().enumerate() {
         shaped
-            .change(change, part, scale)
+            .change(change, part, half)
             .map_err(|fault| fault.at(at))?;
     }
     Ok(shaped)
@@ -608,12 +651,39 @@ impl Shaped {
 
     // ---- changes ---------------------------------------------------------------
 
-    fn change(&mut self, change: &Change, part: Option<&str>, scale: f64) -> Result<(), Fault> {
-        let faces = self.find(change.faces(), part)?;
+    fn change(&mut self, change: &Change, part: Option<&str>, half: Vec3) -> Result<(), Fault> {
+        let scale = half.x.max(half.y).max(half.z) * 2.0;
+        let names = change.faces();
+        let has_edge = names.iter().any(|name| name.contains('+'));
+        if has_edge && !matches!(change, Change::Move { .. }) {
+            return Err(Fault::new(
+                Code::TypeMismatch,
+                format!(
+                    "only a move can be made to an edge or a corner, not a {}",
+                    change.word()
+                ),
+            ));
+        }
+        let faces = if has_edge {
+            Vec::new()
+        } else {
+            self.find(names, part)?
+        };
         let taken: BTreeSet<String> = self.names().into_iter().collect();
         let touched = match change {
             Change::Pull { by, name, .. } => self.pull(&faces, *by, name.as_deref(), &taken)?,
             Change::Inset { by, name, .. } => self.inset(&faces, *by, name.as_deref(), &taken)?,
+            Change::Move { faces: names, by } if has_edge => {
+                let mut corners = BTreeSet::new();
+                for name in names {
+                    corners.extend(self.corners_named(name, part)?);
+                }
+                let by = Vec3::from(*by);
+                self.reshape_corners(&corners, Vec3::ZERO, |point, _| point + by)
+            }
+            Change::Cut { toward, at, name } => {
+                self.cut(*toward, *at, name.as_deref(), half, &taken)?
+            }
             Change::Move { by, .. } => {
                 let by = Vec3::from(*by);
                 self.reshape(&faces, |point, _| point + by)
@@ -629,6 +699,136 @@ impl Shaped {
         };
         self.tidy();
         self.check(&touched, &change.doing(), scale)
+    }
+
+    /// The corners an edge (`top+front`) or a corner (`top+front+left`)
+    /// name stands for: where faces with all those names meet. A face's
+    /// own name gives all its corners.
+    pub fn corners_named_or_none(&self, name: &str) -> Vec<usize> {
+        self.corners_named(name, None).unwrap_or_default()
+    }
+
+    fn corners_named(&self, name: &str, part: Option<&str>) -> Result<Vec<usize>, Fault> {
+        let parts: Vec<&str> = name.split('+').collect();
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for one in &parts {
+            let these = self.faces_named(one);
+            if these.is_empty() {
+                let on = part.map_or("this part".to_owned(), |part| format!("\"{part}\""));
+                return Err(Fault {
+                    code: Code::UnknownFace,
+                    message: format!("there is no face \"{one}\" on {on}"),
+                    unknown: Some(((*one).to_owned(), self.names())),
+                });
+            }
+            groups.push(these);
+        }
+        let corners_of = |faces: &[usize]| -> BTreeSet<usize> {
+            faces
+                .iter()
+                .flat_map(|&face| self.faces[face].corners.iter().copied())
+                .collect()
+        };
+        let found: BTreeSet<usize> = match groups.as_slice() {
+            [one] => corners_of(one),
+            [a, b] => {
+                // Both ends of every edge where a face of `a` meets one
+                // of `b`.
+                let edges = self.edge_faces();
+                let mut found = BTreeSet::new();
+                for &face in a {
+                    let corners = &self.faces[face].corners;
+                    for at in 0..corners.len() {
+                        let (from, to) = (corners[at], corners[(at + 1) % corners.len()]);
+                        if edges
+                            .get(&(to, from))
+                            .is_some_and(|other| b.contains(other))
+                        {
+                            found.insert(from);
+                            found.insert(to);
+                        }
+                    }
+                }
+                found
+            }
+            many => {
+                let mut found = corners_of(&many[0]);
+                for faces in &many[1..] {
+                    let these = corners_of(faces);
+                    found.retain(|corner| these.contains(corner));
+                }
+                found
+            }
+        };
+        if found.is_empty() {
+            let what = if parts.len() == 2 { "edge" } else { "corner" };
+            let faces = parts
+                .iter()
+                .map(|one| format!("\"{one}\""))
+                .collect::<Vec<_>>();
+            let on = part.map_or("this part".to_owned(), |part| format!("\"{part}\""));
+            return Err(Fault::new(
+                Code::UnknownFace,
+                format!(
+                    "there is no {what} \"{name}\" on {on}: {} don't meet",
+                    quoted_words(&faces)
+                ),
+            ));
+        }
+        Ok(found.into_iter().collect())
+    }
+
+    /// Every edge, once: its two corners, and the faces on each side.
+    pub fn edges(&self) -> Vec<Edge> {
+        let edges = self.edge_faces();
+        let mut out = Vec::new();
+        for (at, face) in self.faces.iter().enumerate() {
+            let corners = &face.corners;
+            for step in 0..corners.len() {
+                let (from, to) = (corners[step], corners[(step + 1) % corners.len()]);
+                if let Some(&other) = edges.get(&(to, from))
+                    && (from < to || other == at)
+                {
+                    out.push(Edge {
+                        corners: [from, to],
+                        faces: [at, other],
+                    });
+                }
+            }
+        }
+        out
+    }
+
+    /// An edge's name: the names of the faces on its two sides, joined
+    /// with `+`, the upright one first, then front or back, then left or
+    /// right (as `top+front+left` is written).
+    pub fn edge_name(&self, edge: &Edge) -> String {
+        self.joined_name(&edge.faces)
+    }
+
+    /// A corner's name: the names of the faces that meet there.
+    pub fn corner_name(&self, corner: usize) -> String {
+        let faces: Vec<usize> = (0..self.faces.len())
+            .filter(|&face| self.faces[face].corners.contains(&corner))
+            .collect();
+        self.joined_name(&faces)
+    }
+
+    fn joined_name(&self, faces: &[usize]) -> String {
+        let rank = |face: usize| match self.faces[face].facing {
+            Side::Top | Side::Bottom => 0,
+            Side::Front | Side::Back => 1,
+            _ => 2,
+        };
+        let mut sorted: Vec<usize> = faces.to_vec();
+        sorted.sort_by_key(|&face| (rank(face), face));
+        let mut names: Vec<&str> = Vec::new();
+        for face in sorted {
+            if !names.contains(&self.faces[face].name.as_str()) {
+                names.push(&self.faces[face].name);
+            }
+        }
+        names.join("+")
     }
 
     /// The faces the names stand for, each once, in order.
@@ -1005,7 +1205,17 @@ impl Shaped {
             .iter()
             .flat_map(|&face| self.faces[face].corners.iter().copied())
             .collect();
-        for &corner in &corners {
+        self.reshape_corners(&corners, middle, to)
+    }
+
+    /// Moves `corners` to where `to` says; gives the faces that have one.
+    fn reshape_corners(
+        &mut self,
+        corners: &BTreeSet<usize>,
+        middle: Vec3,
+        to: impl Fn(Vec3, Vec3) -> Vec3,
+    ) -> Vec<usize> {
+        for &corner in corners {
             self.corners[corner] = to(self.corners[corner], middle);
         }
         (0..self.faces.len())
@@ -1016,6 +1226,158 @@ impl Shaped {
                     .any(|corner| corners.contains(corner))
             })
             .collect()
+    }
+
+    /// Cuts all the way round: every face that crosses the flat cut
+    /// facing `toward`, `at` of the way from the middle to that side of
+    /// the box (whose half size is `half`), becomes two.
+    fn cut(
+        &mut self,
+        toward: Side,
+        at: f64,
+        given: Option<&str>,
+        half: Vec3,
+        taken: &BTreeSet<String>,
+    ) -> Result<Vec<usize>, Fault> {
+        let way = Vec3::from(toward.offset());
+        let reach = way.dot(half).abs();
+        let place = at * reach;
+        let near = 1e-9 * (half.x.max(half.y).max(half.z) * 2.0).max(1e-9);
+        // How far each corner is past the cut, towards the side.
+        let past = |point: Vec3| {
+            let along = way.dot(point) - place;
+            if along.abs() <= near { 0.0 } else { along }
+        };
+        let side_word = toward.name();
+        // The new corners, one for each edge the cut crosses, shared by
+        // the two faces of that edge.
+        let mut made: HashMap<(usize, usize), usize> = HashMap::new();
+        let mut pieces: Vec<(usize, Option<Face>, Option<Face>)> = Vec::new();
+        let count = self.faces.len();
+        for face in 0..count {
+            let corners = self.faces[face].corners.clone();
+            let sides = self.faces[face].sides.clone();
+            let n = corners.len();
+            let d: Vec<f64> = corners.iter().map(|&c| past(self.corners[c])).collect();
+            if !(d.iter().any(|&x| x > 0.0) && d.iter().any(|&x| x < 0.0)) {
+                continue;
+            }
+            let crossings = (0..n).filter(|&i| d[i] * d[(i + 1) % n] < 0.0).count()
+                + (0..n).filter(|&i| d[i] == 0.0).count();
+            if crossings > 2 {
+                return Err(Fault::new(
+                    Code::BadShape,
+                    format!(
+                        "cutting towards \"{side_word}\" at {} crosses the face \"{}\" more than once: cut elsewhere",
+                        number(at),
+                        self.faces[face].name
+                    ),
+                ));
+            }
+            // Walk round the face: each corner goes to its side (both,
+            // on the cut); where an edge crosses, the new corner goes to
+            // both, and the new edge between them lies along the cut.
+            let mut middle: (Vec<usize>, Vec<Side>) = (Vec::new(), Vec::new());
+            let mut slice: (Vec<usize>, Vec<Side>) = (Vec::new(), Vec::new());
+            for i in 0..n {
+                let j = (i + 1) % n;
+                let (a, b) = (corners[i], corners[j]);
+                if d[i] <= 0.0 {
+                    middle.0.push(a);
+                    middle.1.push(sides[i]);
+                }
+                if d[i] >= 0.0 {
+                    slice.0.push(a);
+                    slice.1.push(sides[i]);
+                }
+                if d[i] * d[j] < 0.0 {
+                    let key = (a.min(b), a.max(b));
+                    let new = match made.get(&key) {
+                        Some(&new) => new,
+                        None => {
+                            let (pa, pb) = (self.corners[a], self.corners[b]);
+                            let share = d[i] / (d[i] - d[j]);
+                            self.corners.push(pa + (pb - pa) * share);
+                            made.insert(key, self.corners.len() - 1);
+                            self.corners.len() - 1
+                        }
+                    };
+                    middle.0.push(new);
+                    middle.1.push(sides[i]);
+                    slice.0.push(new);
+                    slice.1.push(sides[i]);
+                }
+            }
+            // The edge along the cut is the one that leaves the cut: for
+            // the middle piece the side faces the cut's side; for the
+            // slice, the other way.
+            let fix =
+                |piece: &mut (Vec<usize>, Vec<Side>), d_of: &dyn Fn(usize) -> f64, word: Side| {
+                    let m = piece.0.len();
+                    for k in 0..m {
+                        let (a, b) = (piece.0[k], piece.0[(k + 1) % m]);
+                        if d_of(a) == 0.0 && d_of(b) == 0.0 {
+                            piece.1[k] = word;
+                        }
+                    }
+                };
+            let points = self.corners.clone();
+            let d_of = |corner: usize| past(points[corner]);
+            fix(&mut middle, &d_of, toward);
+            fix(&mut slice, &d_of, toward.opposite());
+            let old = &self.faces[face];
+            let keep = Face {
+                corners: middle.0,
+                sides: middle.1,
+                facing: old.facing,
+                name: old.name.clone(),
+                also: old.also.clone(),
+            };
+            let cut_off = Face {
+                corners: slice.0,
+                sides: slice.1,
+                facing: old.facing,
+                name: String::new(),
+                also: old.also.clone(),
+            };
+            pieces.push((face, Some(keep), Some(cut_off)));
+        }
+        // The slices' names: `<face>_<side>`, or `<face>_<name>`; a
+        // number added if an earlier change made that name already.
+        let word = given.unwrap_or(side_word);
+        let mut chosen: HashMap<String, String> = HashMap::new();
+        let mut touched = Vec::new();
+        for (face, keep, cut_off) in pieces {
+            let old_name = self.faces[face].name.clone();
+            let name = match chosen.get(&old_name) {
+                Some(name) => name.clone(),
+                None => {
+                    let base = format!("{old_name}_{word}");
+                    let count = if given.is_some() {
+                        1
+                    } else {
+                        Shaped::untaken(taken, |suffix| vec![format!("{base}{suffix}")])
+                    };
+                    let name = if count == 1 {
+                        base
+                    } else {
+                        format!("{base}_{count}")
+                    };
+                    chosen.insert(old_name.clone(), name.clone());
+                    name
+                }
+            };
+            if let Some(keep) = keep {
+                self.faces[face] = keep;
+                touched.push(face);
+            }
+            if let Some(mut cut_off) = cut_off {
+                cut_off.name = name;
+                self.faces.push(cut_off);
+                touched.push(self.faces.len() - 1);
+            }
+        }
+        Ok(touched)
     }
 
     /// Drops the corners no face uses any more.
@@ -1086,6 +1448,33 @@ impl Shaped {
                     format!("{doing} squeezes the face \"{}\" flat", face.name),
                 ));
             }
+        }
+
+        // No two corners in one place: the shape would touch itself
+        // there, closed by its numbers but not as it stands.
+        let cell = near * 4.0;
+        let mut seen: HashMap<(i64, i64, i64), Vec<usize>> = HashMap::new();
+        for (at, corner) in self.corners.iter().enumerate() {
+            let key = |value: f64| (value / cell).floor() as i64;
+            let home = (key(corner.x), key(corner.y), key(corner.z));
+            for dx in -1..=1 {
+                for dy in -1..=1 {
+                    for dz in -1..=1 {
+                        let next = (home.0 + dx, home.1 + dy, home.2 + dz);
+                        if let Some(others) = seen.get(&next)
+                            && others
+                                .iter()
+                                .any(|&other| (self.corners[other] - *corner).length() <= near)
+                        {
+                            return Err(Fault::new(
+                                Code::BadShape,
+                                format!("{doing} makes the shape touch itself at a corner"),
+                            ));
+                        }
+                    }
+                }
+            }
+            seen.entry(home).or_default().push(at);
         }
 
         // Room inside: a shape turned inside out holds less than nothing.

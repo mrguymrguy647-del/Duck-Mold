@@ -86,7 +86,7 @@ impl Draft {
         self.change_by = facts
             .changes
             .iter()
-            .map(|change| change.by.unwrap_or(0.0))
+            .map(|change| change.by.or(change.at).unwrap_or(0.0))
             .collect();
         self.change_xyz = facts
             .changes
@@ -99,9 +99,41 @@ impl Draft {
 /// In Face mode: the faces selected, each with the way it faces and how
 /// big it is.
 fn faces_section(ui: &mut egui::Ui, studio: &Studio) {
-    let Some((_, shaped)) = studio.shaped_selected() else {
+    let Some((part, shaped)) = studio.shaped_selected() else {
         return;
     };
+    if studio.mode() == Mode::Edge {
+        ui.label(RichText::new("Shaping: Edge mode").strong())
+            .on_hover_text("E, or Part above the tools, goes back to parts");
+        let edges = studio.selected_faces();
+        if edges.is_empty() {
+            ui.label(RichText::new("Click an edge of the box to select it.").weak());
+        }
+        for name in edges {
+            // How long it is, all its pieces together.
+            let corners: Vec<usize> = shaped.corners_named_or_none(name);
+            let long: f64 = shaped
+                .edges()
+                .iter()
+                .filter(|edge| shaped.edge_name(edge) == *name)
+                .map(|edge| {
+                    let [a, b] = edge
+                        .corners
+                        .map(|corner| part.place.apply(shaped.corners[corner]));
+                    (b - a).length()
+                })
+                .sum();
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(name).monospace());
+                ui.label(format!("{long:.2} m long"));
+                if corners.len() > 2 {
+                    ui.label(RichText::new("several edges").weak().small());
+                }
+            });
+        }
+        ui.add_space(6.0);
+        return;
+    }
     ui.label(RichText::new("Shaping: Face mode").strong())
         .on_hover_text("Tab, or Part above the tools, goes back to parts");
     let faces = studio.selected_faces();
@@ -190,6 +222,27 @@ fn changes_section(
                         by: None,
                         by_xyz: Some(draft.change_xyz[at]),
                         at: None,
+                    });
+                }
+            } else if change.at.is_some() {
+                // A cut: where it is, from the middle to the side.
+                let field = ui
+                    .add(
+                        DragValue::new(&mut draft.change_by[at])
+                            .speed(0.01)
+                            .range(0.0..=0.999)
+                            .max_decimals(3),
+                    )
+                    .on_hover_text(
+                        "Where the cut is: from 0 (the middle) to just under 1 (the side)",
+                    );
+                if settled(&field) && Some(draft.change_by[at]) != change.at {
+                    edits.push(Edit::SetChange {
+                        part: path.to_owned(),
+                        number,
+                        by: None,
+                        by_xyz: None,
+                        at: Some(draft.change_by[at]),
                     });
                 }
             } else if change.by.is_some() {
@@ -505,7 +558,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     }
 
     definition_notice(ui, &facts);
-    if studio.mode() == Mode::Face {
+    if studio.mode() != Mode::Part {
         faces_section(ui, studio);
     }
 

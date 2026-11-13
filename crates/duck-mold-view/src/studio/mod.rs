@@ -11,6 +11,7 @@
 //! after which it reads and builds the file again. When another program
 //! saves the file, it does the same.
 
+mod edges;
 mod group;
 pub mod handles;
 pub mod history;
@@ -20,6 +21,7 @@ mod shape;
 mod sockets;
 pub mod viewport;
 
+pub use edges::CutAim;
 pub use shape::{FaceTool, Mode};
 pub use sockets::Clicked;
 
@@ -459,7 +461,7 @@ impl Studio {
             Some(_) => false,
         };
         // Another part in Face mode: its faces, if it can be shaped.
-        if self.mode == Mode::Face && self.selected != before {
+        if self.mode != Mode::Part && self.selected != before {
             self.faces.clear();
             if self.selected.is_none() {
                 self.mode = Mode::Part;
@@ -798,7 +800,7 @@ impl Studio {
 
     /// Draws the viewport, `width` x `height` pixels.
     pub fn picture(&self, width: usize, height: usize) -> Picture {
-        let shaping = self.mode == Mode::Face;
+        let shaping = self.mode != Mode::Part;
         // In Face mode there are no sockets to show: the faces are.
         let mut markers = if shaping { Vec::new() } else { self.markers() };
         // What the pointer is on is drawn bigger: a marker, or the point

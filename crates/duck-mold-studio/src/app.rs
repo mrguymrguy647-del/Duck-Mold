@@ -448,6 +448,16 @@ impl StudioApp {
                     (egui::Key::R, FaceTool::Turn),
                     (egui::Key::S, FaceTool::Scale),
                     (egui::Key::I, FaceTool::Inset),
+                    (egui::Key::K, FaceTool::Cut),
+                ] {
+                    if key(pressed) {
+                        studio.face_tool = tool;
+                    }
+                }
+            } else if studio.mode() == Mode::Edge {
+                for (pressed, tool) in [
+                    (egui::Key::G, FaceTool::Move),
+                    (egui::Key::K, FaceTool::Cut),
                 ] {
                     if key(pressed) {
                         studio.face_tool = tool;
@@ -469,6 +479,9 @@ impl StudioApp {
             // Tab: shape the selected box, or back to parts.
             if std::mem::take(&mut self.tab) {
                 asked = Some(Action::Shape);
+            }
+            if key(egui::Key::E) {
+                asked = Some(Action::EdgeMode);
             }
             if let Some(action) = actions::keys(ui) {
                 asked = Some(action);
@@ -558,7 +571,7 @@ impl StudioApp {
                         self.draft.rename();
                     }
                 }
-                Action::Remove if studio.mode() == Mode::Face => {
+                Action::Remove if studio.mode() != Mode::Part => {
                     studio.say_why(
                         "Faces can't be removed: a shape must stay closed. To take a change back, Undo, or remove it from the Changes list",
                     );
@@ -573,6 +586,10 @@ impl StudioApp {
                     let _ = studio.toggle_face_mode();
                 }
                 Action::FaceTool(tool) => studio.face_tool = tool,
+                Action::EdgeMode => {
+                    // What it did, or why not, is in the status line.
+                    let _ = studio.toggle_edge_mode();
+                }
                 Action::Unjoin => {
                     let _ = studio.unjoin_selected();
                 }
