@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use duck_mold_core::edit::{
-    Applied, Changes, Edit, Made, Sizes, apply, definitions, describe, edit_file, shared, spot,
-    swap_in, unused_name,
+    Applied, Changes, Edit, Free, Made, Sizes, apply, definitions, describe, edit_file, shared,
+    spot, swap_in, unused_name,
 };
 use duck_mold_core::issue::Code;
 use duck_mold_core::math::vec3;
@@ -164,7 +164,7 @@ fn add_hat() -> Edit {
     Edit::Add {
         name: "hat".into(),
         made: Made::Shape("cone".into()),
-        to: "pole.top".into(),
+        to: Some("pole.top".into()),
         attach: None,
         sizes: Sizes {
             radius: Some(0.2),
@@ -173,6 +173,7 @@ fn add_hat() -> Edit {
         },
         color: Some("glow".into()),
         twist: None,
+        free: Free::default(),
     }
 }
 
@@ -780,11 +781,12 @@ fn a_part_inside_a_definition_is_edited_there_and_the_others_are_named() {
     let edit = Edit::Add {
         name: "ring".into(),
         made: Made::Shape("cylinder".into()),
-        to: "left_bulb/cap.bottom".into(),
+        to: Some("left_bulb/cap.bottom".into()),
         attach: None,
         sizes: Sizes::default(),
         color: None,
         twist: None,
+        free: Free::default(),
     };
     let applied = done(LAMP, Syntax::Toml, &edit);
     assert!(applied.text.contains("to = \"glass.bottom\"\n\n[[define.bulb.parts]]\nname = \"ring\"\nshape = \"cylinder\"\nattach = \"top\"\nto = \"cap.bottom\"\n\n# The stand."));
@@ -1169,6 +1171,203 @@ fn a_free_part_is_moved_turned_and_scaled() {
     let applied = done(&json, Syntax::Json, &edit);
     assert!(
         applied.text.contains("\"move\": [0.5, 1, -0.25]"),
+        "{}",
+        applied.text
+    );
+}
+
+/// A box to add with no socket: 0.2 wide, 0.4 tall.
+fn add_free(name: &str, free: Free) -> Edit {
+    Edit::Add {
+        name: name.into(),
+        made: Made::Shape("box".into()),
+        to: None,
+        attach: None,
+        sizes: Sizes {
+            size: Some([0.2, 0.4, 0.2]),
+            ..Sizes::default()
+        },
+        color: Some("steel".into()),
+        twist: None,
+        free,
+    }
+}
+
+#[test]
+fn a_part_added_without_a_socket_stands_free_on_the_ground() {
+    let before = done(LAMP, Syntax::Toml, &add_colour_x()).model.unwrap();
+    // The lamp's base is 0.05 thick round the recipe's zero, so the
+    // ground is at -0.025, and the middle of a box 0.4 tall is 0.2 above.
+    let applied = done(LAMP, Syntax::Toml, &add_free("crate", Free::default()));
+    assert!(
+        applied.text.ends_with(
+            "to = \"pole.right\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.2, 0.4, 0.2]\ncolor = \"steel\"\nmove = [0, 0.175, 0]\n"
+        ),
+        "{}",
+        applied.text
+    );
+    assert!(applied.text.starts_with(LAMP));
+    assert_eq!(applied.summary, "added \"crate\" (box), standing free");
+    let model = applied.model.unwrap();
+    let new = part(&model, "crate");
+    assert_eq!(new.attached_to, None);
+    // It stands on the same ground as the lamp, and the lamp hasn't moved.
+    let (low, ground) = (new.bounds.unwrap().min.y, model.bounds().unwrap().min.y);
+    assert!((low - ground).abs() < 1e-9, "{low} {ground}");
+    for name in ["base", "pole", "left_bulb", "right_bulb"] {
+        assert_eq!(
+            part(&model, name).bounds,
+            part(&before, name).bounds,
+            "{name}"
+        );
+    }
+
+    // Somewhere else on the ground: its middle is over the place.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &add_free(
+            "crate",
+            Free {
+                stand: Some([1.0, -0.5]),
+                ..Free::default()
+            },
+        ),
+    );
+    assert!(
+        applied.text.contains("move = [1, 0.175, -0.5]\n"),
+        "{}",
+        applied.text
+    );
+
+    // Turned on its side and twice as big, it still stands on the ground.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &add_free(
+            "crate",
+            Free {
+                rotate: Some([0.0, 0.0, 90.0]),
+                scale: Some([2.0; 3]),
+                ..Free::default()
+            },
+        ),
+    );
+    assert!(
+        applied
+            .text
+            .ends_with("rotate = [0, 0, 90]\nmove = [0, 0.175, 0]\nscale = 2\n"),
+        "{}",
+        applied.text
+    );
+    let model = applied.model.unwrap();
+    let low = part(&model, "crate").bounds.unwrap().min.y;
+    assert!((low - model.bounds().unwrap().min.y).abs() < 1e-9, "{low}");
+
+    // An exact place is written as it is given.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &add_free(
+            "crate",
+            Free {
+                move_to: Some([0.5, 2.0, 0.0]),
+                ..Free::default()
+            },
+        ),
+    );
+    assert!(
+        applied.text.ends_with("move = [0.5, 2, 0]\n"),
+        "{}",
+        applied.text
+    );
+
+    // The same in JSON.
+    let applied = done(
+        &to_json(LAMP),
+        Syntax::Json,
+        &add_free("crate", Free::default()),
+    );
+    assert!(
+        applied.text.contains("\"move\": [0, 0.175, 0]"),
+        "{}",
+        applied.text
+    );
+    assert!(applied.model.is_some());
+}
+
+#[test]
+fn the_first_part_of_an_empty_recipe_makes_its_own_ground() {
+    let empty = "version = 0\nname = \"empty\"\n\n[palette]\nsteel = \"#8A939B\"\n";
+    let applied = done(empty, Syntax::Toml, &add_free("crate", Free::default()));
+    assert!(
+        applied.text.ends_with(
+            "\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.2, 0.4, 0.2]\ncolor = \"steel\"\nmove = [0, 0, 0]\n"
+        ),
+        "{}",
+        applied.text
+    );
+    assert_eq!(applied.model.unwrap().parts.len(), 1);
+    // The same in JSON, where the list is started on one line.
+    let applied = done(
+        &to_json(empty),
+        Syntax::Json,
+        &add_free("crate", Free::default()),
+    );
+    assert!(
+        applied.text.contains("\"parts\": [{ \"name\": \"crate\", "),
+        "{}",
+        applied.text
+    );
+    assert_eq!(applied.model.unwrap().parts.len(), 1);
+}
+
+#[test]
+fn a_free_part_and_a_join_dont_mix() {
+    // A join's words on a part that stands free.
+    let mut edit = add_free("crate", Free::default());
+    if let Edit::Add { attach, .. } = &mut edit {
+        *attach = Some("top".into());
+    }
+    let report = refused(LAMP, &edit).report();
+    assert_eq!(report.errors[0].code, Code::Conflict);
+    assert!(
+        report.errors[0].message.contains("--to"),
+        "{}",
+        report.errors[0].message
+    );
+    // A place on a part that is joined.
+    let mut edit = add_free(
+        "crate",
+        Free {
+            stand: Some([1.0, 0.0]),
+            ..Free::default()
+        },
+    );
+    if let Edit::Add { to, .. } = &mut edit {
+        *to = Some("pole.top".into());
+    }
+    let report = refused(LAMP, &edit).report();
+    assert_eq!(report.errors[0].code, Code::Conflict);
+    // A name the model's list already has.
+    let report = refused(LAMP, &add_free("pole", Free::default())).report();
+    assert_eq!(report.errors[0].code, Code::DuplicateName);
+    // A joined part can be given a scale, though.
+    let mut edit = add_free(
+        "crate",
+        Free {
+            scale: Some([1.0, 2.0, 1.0]),
+            ..Free::default()
+        },
+    );
+    if let Edit::Add { to, .. } = &mut edit {
+        *to = Some("pole.top".into());
+    }
+    let applied = done(LAMP, Syntax::Toml, &edit);
+    assert!(
+        applied
+            .text
+            .ends_with("attach = \"bottom\"\nto = \"pole.top\"\nscale = [1, 2, 1]\n"),
         "{}",
         applied.text
     );
@@ -1639,7 +1838,7 @@ fn edits_leave_the_rest_of_every_example_untouched() {
                 &Edit::Add {
                     name: "edit_test_part".into(),
                     made: Made::Shape("box".into()),
-                    to: format!("{target}.top"),
+                    to: Some(format!("{target}.top")),
                     attach: None,
                     sizes: Sizes {
                         size: Some([0.1, 0.1, 0.1]),
@@ -1647,6 +1846,7 @@ fn edits_leave_the_rest_of_every_example_untouched() {
                     },
                     color: Some("edit_test".into()),
                     twist: Some(10.0),
+                    free: Free::default(),
                 },
             );
             let mut after = added.text.lines();

@@ -105,18 +105,34 @@ pub struct Changes {
     pub scale: Option<[f64; 3]>,
 }
 
+/// Where a new part that is joined to nothing goes.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Free {
+    /// Its middle: `move = [x, y, z]`. Without it, the part is stood on
+    /// the ground.
+    pub move_to: Option<[f64; 3]>,
+    /// Where on the ground it is stood, when `move_to` isn't given: x
+    /// and z, in the recipe's own measurements. Without it: at zero.
+    pub stand: Option<[f64; 2]>,
+    /// How it is turned: `rotate = [x, y, z]`.
+    pub rotate: Option<[f64; 3]>,
+    /// How much bigger it is each way: `scale`.
+    pub scale: Option<[f64; 3]>,
+}
+
 /// One change to a recipe. A part is named as `inspect` prints it:
 /// `head`, `left_arm/hand`, or `#2` for a part with no name.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Edit {
-    /// Adds a part, joined to a socket.
+    /// Adds a part: joined to a socket, or free.
     Add {
         /// The new part's name.
         name: String,
         /// What it is made of.
         made: Made,
-        /// The socket it joins: `head.top`.
-        to: String,
+        /// The socket it joins: `head.top`. Without one the part is
+        /// free: it is added to the model's own list, where `free` says.
+        to: Option<String>,
         /// Its own socket to join by. Without one: the side opposite the
         /// socket it joins (`bottom` on a `top`), otherwise `bottom`.
         attach: Option<String>,
@@ -126,6 +142,8 @@ pub enum Edit {
         color: Option<String>,
         /// Degrees to twist it around the join.
         twist: Option<f64>,
+        /// Where a part that joins nothing goes.
+        free: Free,
     },
     /// Removes a part.
     Remove {
@@ -654,18 +672,9 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             sizes,
             color,
             twist,
+            free,
         } => {
             check_name(name)?;
-            let (target, _) = split_socket(to)?;
-            let found = find(doc, target)?;
-            let (target_name, socket) = sibling(doc, &found.list, to)?;
-            if names_in(doc, &found.list).contains(name) {
-                return Err(problem(
-                    Code::DuplicateName,
-                    format!("there is already a part called \"{name}\" there: choose another name"),
-                )
-                .got(name.as_str()));
-            }
             let (field, what) = match made {
                 Made::Shape(shape) => ("shape", shape),
                 Made::Use(defined) => ("use", defined),
@@ -685,6 +694,68 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             if let Some(color) = color {
                 fields.push(("color".to_owned(), text(color)));
             }
+            let taken = |list: &[Step]| {
+                if names_in(doc, list).contains(name) {
+                    Err(problem(
+                        Code::DuplicateName,
+                        format!(
+                            "there is already a part called \"{name}\" there: choose another name"
+                        ),
+                    )
+                    .got(name.as_str()))
+                } else {
+                    Ok(())
+                }
+            };
+            let scale_field = |scale: [f64; 3]| {
+                let scale = scale.map(|number| tidy_number(number, 4));
+                if scale[0] == scale[1] && scale[1] == scale[2] {
+                    Val::Num(scale[0])
+                } else {
+                    Val::three(scale)
+                }
+            };
+            let Some(to) = to else {
+                // A free part: in the model's own list, placed by `move`.
+                if attach.is_some() || twist.is_some() {
+                    return Err(problem(
+                        Code::Conflict,
+                        "--attach and --twist belong to a join: give --to as well, or leave them out for a part that stands free",
+                    ));
+                }
+                let list: TreePath = vec![key("parts")];
+                taken(&list)?;
+                if let Some(turn) = free.rotate.filter(|turn| *turn != [0.0; 3]) {
+                    fields.push((
+                        "rotate".to_owned(),
+                        Val::three(turn.map(|number| tidy_number(number, 2))),
+                    ));
+                }
+                if let Some(at) = free.move_to {
+                    fields.push((
+                        "move".to_owned(),
+                        Val::three(at.map(|number| tidy_number(number, 4))),
+                    ));
+                }
+                if let Some(scale) = free.scale.filter(|scale| *scale != [1.0; 3]) {
+                    fields.push(("scale".to_owned(), scale_field(scale)));
+                }
+                doc.append_item(&list, &fields).map_err(cant)?;
+                return Ok(Outcome {
+                    summary: format!("added \"{name}\" ({what}), standing free"),
+                    touched: None,
+                });
+            };
+            if *free != Free::default() && free.scale.is_none() {
+                return Err(problem(
+                    Code::Conflict,
+                    "--move, --stand and --rotate are for a part that stands free: a part joined with --to goes where its socket is",
+                ));
+            }
+            let (target, _) = split_socket(to)?;
+            let found = find(doc, target)?;
+            let (target_name, socket) = sibling(doc, &found.list, to)?;
+            taken(&found.list)?;
             let attach = attach
                 .as_deref()
                 .or(opposite(socket))
@@ -694,6 +765,9 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             fields.push(("to".to_owned(), text(&format!("{target_name}.{socket}"))));
             if let Some(twist) = twist.filter(|twist| *twist != 0.0) {
                 fields.push(("twist".to_owned(), Val::Num(twist)));
+            }
+            if let Some(scale) = free.scale.filter(|scale| *scale != [1.0; 3]) {
+                fields.push(("scale".to_owned(), scale_field(scale)));
             }
             doc.append_item(&found.list, &fields).map_err(cant)?;
             Ok(Outcome {
@@ -1589,7 +1663,10 @@ pub fn apply(
 /// The part an edit is about, by path (nothing for a palette edit).
 fn part_of(edit: &Edit) -> &str {
     match edit {
-        Edit::Add { to, .. } => to.rsplit_once('.').map_or("", |(part, _)| part),
+        Edit::Add { to, .. } => to
+            .as_deref()
+            .and_then(|to| to.rsplit_once('.'))
+            .map_or("", |(part, _)| part),
         Edit::Remove { part, .. }
         | Edit::Rename { part, .. }
         | Edit::Join { part, .. }
@@ -1600,6 +1677,42 @@ fn part_of(edit: &Edit) -> &str {
         Edit::SetSocket { socket, .. } => socket.rsplit_once('.').map_or("", |(part, _)| part),
         Edit::AddColor { .. } | Edit::SetColor { .. } => "",
     }
+}
+
+/// Gives the new free part `name` the `move` that stands it on the
+/// ground with its middle over `at` (x and z, in the recipe's own
+/// measurements). `built` is the recipe with the part in it at zero;
+/// `before` is the model without it, whose ground is the ground. If the
+/// recipe doesn't build, the part stays at zero.
+fn stand_on_ground(
+    doc: &mut Doc,
+    name: &str,
+    at: [f64; 2],
+    built: Option<&Model>,
+    before: Option<&Model>,
+) -> Result<(), Stop> {
+    let Some(built) = built else {
+        return Ok(());
+    };
+    let Some(bounds) = built
+        .parts
+        .iter()
+        .find(|part| part.name == name)
+        .and_then(|part| part.bounds)
+    else {
+        return Ok(());
+    };
+    // The box round the part, in the recipe's own measurements.
+    let (low, middle) = (bounds.min - built.zero, bounds.center() - built.zero);
+    // The ground is where the model stood before the part came. (A
+    // first part makes its own ground.)
+    let ground = before
+        .and_then(|model| model.bounds().map(|all| all.min.y - model.zero.y))
+        .unwrap_or(low.y);
+    let to =
+        [at[0] - middle.x, ground - low.y, at[1] - middle.z].map(|number| tidy_number(number, 4));
+    let found = find(doc, name)?;
+    set(doc, &found.path(), "move", Val::three(to))
 }
 
 /// [`apply`] for several edits, made one after the other on the same
@@ -1625,6 +1738,26 @@ pub fn apply_many(
         let outcome = run(&mut doc, edit, old_model.as_ref())
             .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
         said.push(outcome.summary);
+        // A new part that stands free, with no place given, is stood on
+        // the ground.
+        if let Edit::Add {
+            name,
+            to: None,
+            free,
+            ..
+        } = edit
+            && free.move_to.is_none()
+        {
+            let built = build(&format!("{mark}{}", doc.text), syntax, path, display).0;
+            stand_on_ground(
+                &mut doc,
+                name,
+                free.stand.unwrap_or([0.0; 2]),
+                built.as_ref(),
+                old_model.as_ref(),
+            )
+            .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
+        }
         if shared.is_none() {
             shared = outcome
                 .touched

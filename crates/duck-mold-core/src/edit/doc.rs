@@ -593,14 +593,46 @@ impl Doc {
 
     /// Adds a table to the end of a list of tables. Gives its place.
     pub fn append_item(&mut self, list: &[Step], fields: &[(String, Val)]) -> Result<usize, Cant> {
+        let newline = self.newline();
         let Some(items) = self.items(list) else {
-            return cant(format!("there is no list {} in the recipe", show(list)));
+            // The recipe's own list can be started: a recipe with no
+            // parts yet gets its first.
+            let [Step::Key(name)] = list else {
+                return cant(format!("there is no list {} in the recipe", show(list)));
+            };
+            if self.entry(&[], name).is_some() {
+                return cant(format!("{} in the recipe is not a list", show(list)));
+            }
+            match self.syntax {
+                Syntax::Toml => {
+                    let at = self.text.len();
+                    let mut block = self.gap_before(at);
+                    block.push_str(&format!("[[{}]]{newline}", Self::header_name(list)));
+                    for (name, value) in fields {
+                        block.push_str(&field_text(name, value, Syntax::Toml));
+                        block.push_str(newline);
+                    }
+                    self.splice(at..at, &block)?;
+                }
+                Syntax::Json => {
+                    let first = Val::List(vec![Val::Table(fields.to_vec())]);
+                    self.set_field(&[], name, &first, &[])?;
+                }
+            }
+            return Ok(0);
         };
         let count = items.len();
         let Some(last) = items.last() else {
-            return cant(format!("the list {} is empty", show(list)));
+            if self.syntax == Syntax::Json {
+                self.set_value(list, &Val::List(vec![Val::Table(fields.to_vec())]))?;
+                return Ok(0);
+            }
+            return cant(format!(
+                "the list {} is written on one line; to add to it, write its items under [[{}]] headers",
+                show(list),
+                Self::header_name(list)
+            ));
         };
-        let newline = self.newline();
         match self.form(list) {
             Form::Header => {
                 let headers = self.headers();

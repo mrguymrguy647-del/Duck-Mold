@@ -453,6 +453,145 @@ fn edit_changes_the_recipe_and_prints_the_report() {
 }
 
 #[test]
+fn add_without_a_socket_stands_the_part_on_the_ground() {
+    let folder = folder("cli_edit_free");
+    // The trunk is 1.2 tall round the recipe's zero, so the ground is at
+    // -0.6, and the middle of a rock 0.2 tall is 0.1 above it.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "rock",
+            "--shape",
+            "box",
+            "--size",
+            "0.4,0.2,0.4",
+            "--color",
+            "bark",
+            "--stand",
+            "1,-0.5",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("edited tree.toml: added \"rock\" (box), standing free\n"),
+        "{}",
+        stdout(&output)
+    );
+    let rock = "\n[[parts]]\nname = \"rock\"\nshape = \"box\"\nsize = [0.4, 0.2, 0.4]\ncolor = \"bark\"\nmove = [1, -0.5, -0.5]\n";
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        format!("{TREE}{rock}")
+    );
+
+    // An exact place, a turn and a size, as JSON.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "cloud",
+            "--shape",
+            "sphere",
+            "--radius",
+            "0.3",
+            "--color",
+            "leaf",
+            "--move",
+            "-1,3,0",
+            "--rotate",
+            "0,45,0",
+            "--scale",
+            "2,1,1",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "add");
+    assert_eq!(
+        report["edit"]["summary"],
+        "added \"cloud\" (sphere), standing free"
+    );
+    assert!(
+        std::fs::read_to_string(folder.join("tree.toml"))
+            .unwrap()
+            .ends_with(
+                "color = \"leaf\"\nrotate = [0, 45, 0]\nmove = [-1, 3, 0]\nscale = [2, 1, 1]\n"
+            )
+    );
+
+    // A join's words with no join, and a place with a join: exit code 2.
+    let before = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "x",
+            "--shape",
+            "box",
+            "--attach",
+            "top",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--attach and --twist belong to a join"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "x",
+            "--shape",
+            "box",
+            "--to",
+            "trunk.top",
+            "--stand",
+            "1,1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("goes where its socket is"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "x",
+            "--shape",
+            "box",
+            "--stand",
+            "1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--stand needs two numbers"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
 fn an_edit_that_cant_be_made_says_why_and_writes_nothing() {
     let folder = folder("cli_edit_refused");
     // No such part: exit code 2, one line, with the likely fix.

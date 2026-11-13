@@ -356,41 +356,7 @@ fn add_list(
         .resizable(false)
         .open(&mut open)
         .show(ui.ctx(), |ui| {
-            for shape in Shape::NAMES {
-                // "Box", "Cylinder"...
-                let mut label = shape.to_owned();
-                if let Some(first) = label.get_mut(0..1) {
-                    first.make_ascii_uppercase();
-                }
-                if ui.button(label).clicked() {
-                    chosen = Some(Made::Shape(shape.to_owned()));
-                }
-            }
-            let defined = studio.definitions();
-            if !defined.is_empty() {
-                ui.separator();
-                ui.label(RichText::new("Defined in this recipe").weak().small());
-                for name in defined {
-                    if ui.button(&name).clicked() {
-                        chosen = Some(Made::Use(name));
-                    }
-                }
-            }
-            let library = studio.library().to_vec();
-            if !library.is_empty() {
-                ui.separator();
-                ui.label(RichText::new("From the library").weak().small());
-                egui::ScrollArea::vertical()
-                    .max_height(180.0)
-                    .show(ui, |ui| {
-                        for item in &library {
-                            if crate::library::item_button(ui, studio, thumbs, item, 32.0).clicked()
-                            {
-                                chosen = Some(Made::File(item.written.clone()));
-                            }
-                        }
-                    });
-            }
+            chosen = choices(ui, studio, thumbs);
         });
     if let Some(made) = chosen {
         // What it did, or why not, is in the status line.
@@ -399,4 +365,45 @@ fn add_list(
     } else if !open {
         view.adding = None;
     }
+}
+
+/// The things a new part can be made of, as buttons: the shapes, the
+/// parts this recipe defines, and the library. Gives the one clicked.
+pub fn choices(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) -> Option<Made> {
+    let mut chosen = None;
+    for shape in Shape::NAMES {
+        // "Box", "Cylinder"...
+        let mut label = shape.to_owned();
+        if let Some(first) = label.get_mut(0..1) {
+            first.make_ascii_uppercase();
+        }
+        if ui.button(label).clicked() {
+            chosen = Some(Made::Shape(shape.to_owned()));
+        }
+    }
+    let defined = studio.definitions();
+    if !defined.is_empty() {
+        ui.separator();
+        ui.label(RichText::new("Defined in this recipe").weak().small());
+        for name in defined {
+            if ui.button(&name).clicked() {
+                chosen = Some(Made::Use(name));
+            }
+        }
+    }
+    let library = studio.library().to_vec();
+    if !library.is_empty() {
+        ui.separator();
+        ui.label(RichText::new("From the library").weak().small());
+        egui::ScrollArea::vertical()
+            .max_height(180.0)
+            .show(ui, |ui| {
+                for item in &library {
+                    if crate::library::item_button(ui, studio, thumbs, item, 32.0).clicked() {
+                        chosen = Some(Made::File(item.written.clone()));
+                    }
+                }
+            });
+    }
+    chosen
 }

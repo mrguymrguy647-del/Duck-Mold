@@ -202,6 +202,8 @@ fn preview_only_looks() {
     screen.get_by_label("looking only");
     screen.get_by_label("Parts");
     assert!(screen.state().studio().unwrap().look_only());
+    // Nothing can be added there.
+    assert!(screen.query_by_label("Add").is_none());
 
     // A model file is only looked at too, however it was opened.
     let model = examples().join("../tests/golden/robot.glb");
@@ -980,4 +982,92 @@ fn recipes_opened_lately_are_on_the_start_page() {
         screen.state_mut().start_new(&recipe);
     }
     assert_eq!(std::fs::read_to_string(&list).unwrap().lines().count(), 8);
+}
+
+#[test]
+fn the_add_menu_stands_a_new_part_on_the_ground_ready_to_move() {
+    use duck_mold_core::math::vec3;
+    use duck_mold_view::studio::handles::{Grip, Tool};
+    let (recipe, mut screen) = boxes("screens_add_menu");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    screen.state_mut().studio_mut().unwrap().tool = Tool::Size;
+
+    // The menu lists the shapes.
+    screen.get_by_label("Add").click();
+    screen.run_steps(3);
+    screen.get_by_label("A new part, on the ground");
+    for shape in ["Box", "Sphere", "Cone", "Wedge"] {
+        screen.get_by_role_and_label(egui::accesskit::Role::Button, shape);
+    }
+    screen
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Cylinder")
+        .click();
+    screen.run_steps(3);
+    // The menu has closed.
+    assert!(screen.query_by_label("A new part, on the ground").is_none());
+
+    // A cylinder, joined to nothing, in the selected crate's colour.
+    let now = std::fs::read_to_string(&recipe).unwrap();
+    let new = now.strip_prefix(before.as_str()).unwrap();
+    assert!(
+        new.starts_with(
+            "\n[[parts]]\nname = \"cylinder\"\nshape = \"cylinder\"\nradius = 0.175\nheight = 0.35\ncolor = \"red\"\nmove = ["
+        ),
+        "{new}"
+    );
+    {
+        let studio = screen.state().studio().unwrap();
+        assert_eq!(
+            studio.status(),
+            "Added \"cylinder\" (cylinder), standing free"
+        );
+        // It is selected, with the Move tool in hand, standing on the
+        // ground clear of the other two.
+        assert_eq!(studio.selected(), Some("cylinder"));
+        assert_eq!(studio.tool, Tool::Move);
+        let model = studio.model().unwrap();
+        let it = studio.part("cylinder").unwrap().bounds.unwrap();
+        assert!((it.min.y - model.bounds().unwrap().min.y).abs() < 1e-9);
+        for other in ["floor", "crate"] {
+            let gap = studio.part(other).unwrap().bounds.unwrap().gap_to(&it);
+            assert!(gap > 0.05, "{other}: {gap}");
+        }
+    }
+    // The panel shows where it stands.
+    assert!(screen.get_all_by_label("Position").count() >= 1);
+
+    // And it moves: its red arrow, dragged 0.3 m along x.
+    let x_of = |text: &str| -> f64 {
+        let line = text
+            .lines()
+            .rev()
+            .find(|line| line.starts_with("move = "))
+            .unwrap();
+        line["move = [".len()..]
+            .split(',')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap()
+    };
+    let from = screen
+        .state()
+        .studio()
+        .unwrap()
+        .grip_at(Grip::Arrow(0))
+        .unwrap();
+    let (start, end) = (
+        point_on_screen(&screen, from),
+        point_on_screen(&screen, from + vec3(0.3, 0.0, 0.0)),
+    );
+    drag(&mut screen, start, end);
+    let moved = std::fs::read_to_string(&recipe).unwrap();
+    assert!((x_of(&moved) - x_of(&now) - 0.3).abs() < 1e-6, "{moved}");
+
+    // Adding was one step: two undos give the file back.
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), before);
 }

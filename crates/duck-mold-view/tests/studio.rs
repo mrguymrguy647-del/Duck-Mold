@@ -5,7 +5,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use duck_mold_core::edit::{Changes, Edit, Made, Sizes};
+use duck_mold_core::edit::{Changes, Edit, Free, Made, Sizes};
 use duck_mold_core::math::{Mat3, Vec3, vec3};
 use duck_mold_view::render::BACKGROUND;
 use duck_mold_view::studio::handles::{Grip, Tool};
@@ -543,7 +543,7 @@ fn the_selection_follows_the_part_through_an_edit() {
         .apply(&Edit::Add {
             name: "hat".into(),
             made: Made::Shape("cone".into()),
-            to: "head.top".into(),
+            to: Some("head.top".into()),
             attach: None,
             sizes: Sizes {
                 radius: Some(0.1),
@@ -552,6 +552,7 @@ fn the_selection_follows_the_part_through_an_edit() {
             },
             color: Some("red".into()),
             twist: None,
+            free: Free::default(),
         })
         .unwrap();
     assert_eq!(studio.selected(), Some("hat"));
@@ -2200,4 +2201,127 @@ fn the_size_tool_is_for_shapes_and_changes_a_definition_for_all_its_parts() {
     let on_top = studio.grip_point(Grip::Knob(2)).unwrap();
     studio.hover(VIEW, Some(on_top));
     check_picture("studio-handles-size", &studio.picture(VIEW.0, VIEW.1));
+}
+
+// ---- adding a part that is joined to nothing --------------------------------
+
+#[test]
+fn a_part_is_added_on_clear_ground_towards_the_eye() {
+    let (recipe, mut studio) = boxes("add_free");
+    let said = studio.add_free(&Made::Shape("sphere".into())).unwrap();
+    assert_eq!(said, "Added \"sphere\" (sphere), standing free");
+    // Half the model's smallest side across, in the selected part's
+    // colour, on the ground the floor lies on, clear of the floor on the
+    // side the eye is on.
+    let now = file(&recipe);
+    let (gone, new) = changed(BOXES, &now);
+    assert!(gone.is_empty(), "{gone:?}");
+    assert_eq!(
+        new,
+        [
+            "",
+            "[[parts]]",
+            "name = \"sphere\"",
+            "shape = \"sphere\"",
+            "radius = 0.175",
+            "color = \"red\"",
+            "move = [0.7, 0.075, 1.3]",
+        ]
+    );
+    // It is selected, with the arrows on it, and it can be moved.
+    assert_eq!(studio.selected(), Some("sphere"));
+    assert_eq!(studio.tool, Tool::Move);
+    assert_eq!(
+        studio.grips(),
+        [Grip::Arrow(0), Grip::Arrow(1), Grip::Arrow(2)]
+    );
+    let model = studio.model().unwrap();
+    let ball = studio.part("sphere").unwrap().bounds.unwrap();
+    assert!((ball.min.y - model.bounds().unwrap().min.y).abs() < 1e-9);
+    assert_eq!(studio.part("sphere").unwrap().attached_to, None);
+    // Nothing else moved in the picture: the floor is where it was.
+    let floor = studio.part("floor").unwrap().bounds.unwrap();
+    assert!((floor.min + studio.offset() - vec3(-1.0, 0.0, -1.0)).length() < 1e-9);
+
+    // The next one doesn't land on the first.
+    studio.add_free(&Made::Shape("sphere".into())).unwrap();
+    assert_eq!(studio.selected(), Some("sphere_2"));
+    let (first, second) = (
+        studio.part("sphere").unwrap().bounds.unwrap(),
+        studio.part("sphere_2").unwrap().bounds.unwrap(),
+    );
+    assert!(first.gap_to(&second) > 0.05, "{first:?} {second:?}");
+
+    // Each was one step.
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), now);
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), BOXES);
+}
+
+#[test]
+fn a_new_free_part_takes_the_first_colour_when_nothing_is_selected() {
+    let (recipe, mut studio) = boxes("add_free_colour");
+    studio.select(None);
+    studio.add_free(&Made::Shape("box".into())).unwrap();
+    let now = file(&recipe);
+    assert!(
+        now.ends_with(
+            "name = \"box\"\nshape = \"box\"\nsize = [0.35, 0.35, 0.35]\ncolor = \"stone\"\nmove = [0.7, 0.075, 1.3]\n"
+        ),
+        "{now}"
+    );
+}
+
+#[test]
+fn where_the_view_looks_is_where_a_free_part_goes() {
+    let (recipe, mut studio) = boxes("add_free_view");
+    // Looking at empty ground three metres to the right.
+    studio.orbit.target = vec3(3.04, 0.0, -2.0);
+    studio.add_free(&Made::Shape("box".into())).unwrap();
+    let now = file(&recipe);
+    assert!(now.ends_with("move = [3, 0.075, -2]\n"), "{now}");
+}
+
+#[test]
+fn a_part_from_the_library_or_a_definition_stands_free_too() {
+    let recipe = robot_with_library("add_free_library");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    let before = file(&recipe);
+    studio
+        .add_free(&Made::File("parts/crate.glb".into()))
+        .unwrap();
+    assert_eq!(studio.selected(), Some("crate"));
+    let model = studio.model().unwrap();
+    let new = studio.part("crate").unwrap();
+    assert_eq!(new.attached_to, None);
+    assert!((new.bounds.unwrap().min.y - model.bounds().unwrap().min.y).abs() < 1e-9);
+    // It is clear of every other part.
+    for other in &model.parts {
+        if other.name != "crate" {
+            let gap = other.bounds.unwrap().gap_to(&new.bounds.unwrap());
+            assert!(gap > 0.05, "{}: {gap}", other.name);
+        }
+    }
+    let now = file(&recipe);
+    let (gone, new) = changed(&before, &now);
+    assert!(gone.is_empty(), "{gone:?}");
+    assert_eq!(
+        new[1..4],
+        [
+            "[[parts]]",
+            "name = \"crate\"",
+            "file = \"parts/crate.glb\""
+        ]
+    );
+
+    // A part the recipe defines.
+    studio.add_free(&Made::Use("arm".into())).unwrap();
+    assert_eq!(studio.selected(), Some("arm"));
+    assert!(file(&recipe).contains("name = \"arm\"\nuse = \"arm\"\nmove = ["));
+
+    // A window that only looks adds nothing.
+    let mut looking = Studio::open(&recipe, true);
+    assert!(looking.add_free(&Made::Shape("box".into())).is_err());
 }

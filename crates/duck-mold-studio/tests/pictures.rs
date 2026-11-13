@@ -150,6 +150,17 @@ fn the_screens_look_as_they_did() {
         screen.key_press(egui::Key::T);
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "handles-size"));
+
+        // The Add menu, open; then the part it adds, standing on the
+        // ground beside the floor with the arrows on it.
+        screen.get_by_label("Add").click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "add-menu"));
+        screen
+            .get_by_role_and_label(egui::accesskit::Role::Button, "Cone")
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "add-free"));
     }
 
     // A recipe saved with a mistake: the problems, and the last good

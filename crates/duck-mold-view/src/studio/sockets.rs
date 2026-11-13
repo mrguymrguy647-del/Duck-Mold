@@ -11,13 +11,14 @@
 //!
 //! All of it becomes `add`, `join`, `add-socket` and `set-socket` edits.
 
-use duck_mold_core::edit::{self, Edit, Made, Sizes, Spot};
+use duck_mold_core::edit::{self, Edit, Free, Made, Sizes, Spot};
 use duck_mold_core::math::Vec3;
 use duck_mold_core::model::Part;
+use duck_mold_core::source::Syntax;
 
-use super::Studio;
-use super::handles::Grip;
+use super::handles::{Grip, Tool};
 use super::viewport::{self, MARKER_REACH, Marker};
+use super::{Studio, part_in};
 
 /// What a click in the viewport did, or found.
 #[derive(Debug, Clone, PartialEq)]
@@ -58,6 +59,56 @@ fn around(path: &str) -> Option<&str> {
 
 fn own_name(path: &str) -> &str {
     path.rsplit('/').next().unwrap_or(path)
+}
+
+/// What a new part made of `made` is called, before a number makes the
+/// name its own.
+fn base_name(made: &Made) -> String {
+    match made {
+        Made::Shape(shape) => shape.clone(),
+        Made::Use(defined) => defined.clone(),
+        Made::File(file) => std::path::Path::new(file).file_stem().map_or_else(
+            || "part".to_owned(),
+            |stem| stem.to_string_lossy().into_owned(),
+        ),
+    }
+}
+
+/// `base` with only what a name can have: letters, digits, `_` and `-`.
+fn clean_name(base: &str) -> String {
+    let base: String = base
+        .chars()
+        .map(|letter| {
+            if letter.is_ascii_alphanumeric() || letter == '_' || letter == '-' {
+                letter
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    if base.is_empty() {
+        "part".to_owned()
+    } else {
+        base
+    }
+}
+
+/// The sizes of a new shape about `across` big each way, to two figures.
+fn sizes_for(shape: &str, across: f64) -> Sizes {
+    let across = across.max(0.01);
+    let unit = 10f64.powf(across.log10().floor() - 1.0);
+    let across = ((across / unit).round() * unit * 1e6).round() / 1e6;
+    let radius = ((across / 2.0) * 1e6).round() / 1e6;
+    let mut sizes = Sizes::default();
+    match shape {
+        "box" | "wedge" => sizes.size = Some([across; 3]),
+        "sphere" => sizes.radius = Some(radius),
+        _ => {
+            sizes.radius = Some(radius);
+            sizes.height = Some(across);
+        }
+    }
+    sizes
 }
 
 impl Studio {
@@ -242,31 +293,12 @@ impl Studio {
             .iter()
             .map(|part| part.name.clone())
             .collect();
-        // Only letters, digits, `_` and `-` can be in a name.
-        let base: String = base
-            .chars()
-            .map(|letter| {
-                if letter.is_ascii_alphanumeric() || letter == '_' || letter == '-' {
-                    letter
-                } else {
-                    '_'
-                }
-            })
-            .collect();
-        edit::unused_name(if base.is_empty() { "part" } else { &base }, &taken)
+        edit::unused_name(&clean_name(base), &taken)
     }
 
     /// The edit that adds a part made of `made` to a socket. A new shape
     /// is about half as big as the part it goes on, and has its colour.
     fn adding(&self, part: &str, socket: &str, made: &Made) -> Edit {
-        let base = match made {
-            Made::Shape(shape) => shape.clone(),
-            Made::Use(defined) => defined.clone(),
-            Made::File(file) => std::path::Path::new(file).file_stem().map_or_else(
-                || "part".to_owned(),
-                |stem| stem.to_string_lossy().into_owned(),
-            ),
-        };
         let mut sizes = Sizes::default();
         let mut color = None;
         if let Made::Shape(shape) = made {
@@ -277,33 +309,121 @@ impl Studio {
                     let size = bounds.size();
                     size.x.min(size.y).min(size.z)
                 });
-            // Half the part's smallest side, to two figures.
-            let across = (across * 0.5).max(0.01);
-            let unit = 10f64.powf(across.log10().floor() - 1.0);
-            let across = ((across / unit).round() * unit * 1e6).round() / 1e6;
-            let radius = ((across / 2.0) * 1e6).round() / 1e6;
-            match shape.as_str() {
-                "box" | "wedge" => sizes.size = Some([across; 3]),
-                "sphere" => sizes.radius = Some(radius),
-                _ => {
-                    sizes.radius = Some(radius);
-                    sizes.height = Some(across);
-                }
-            }
-            let syntax = duck_mold_core::source::Syntax::from_path(&self.path);
-            color = syntax
-                .and_then(|syntax| edit::describe(&self.text, syntax, self.model(), part))
-                .and_then(|facts| facts.color);
+            sizes = sizes_for(shape, across * 0.5);
+            color = self.colour_of(part);
         }
         Edit::Add {
-            name: self.new_part_name(part, &base),
+            name: self.new_part_name(part, &base_name(made)),
             made: made.clone(),
-            to: format!("{part}.{socket}"),
+            to: Some(format!("{part}.{socket}")),
             attach: None,
             sizes,
             color,
             twist: None,
+            free: Free::default(),
         }
+    }
+
+    /// The colour the recipe gives a part, if it gives one.
+    fn colour_of(&self, part: &str) -> Option<String> {
+        let syntax = Syntax::from_path(&self.path)?;
+        edit::describe(&self.text, syntax, self.model(), part)?.color
+    }
+
+    /// Adds a part made of `made` that is joined to nothing: an `add`
+    /// edit with no socket. It stands on the ground in the middle of
+    /// what the view looks at, or, where something stands there already,
+    /// as far towards the eye as it takes to be clear of it. A new shape
+    /// is about half as big as the model's smallest side. The new part
+    /// is selected, with the Move tool in hand.
+    pub fn add_free(&mut self, made: &Made) -> Result<String, String> {
+        let taken: Vec<String> = self.model().map_or_else(Vec::new, |model| {
+            model.parts.iter().map(|part| part.name.clone()).collect()
+        });
+        let name = edit::unused_name(&clean_name(&base_name(made)), &taken);
+        let mut sizes = Sizes::default();
+        let mut color = None;
+        if let Made::Shape(shape) = made {
+            let across = self
+                .model()
+                .and_then(|model| model.bounds())
+                .map_or(1.0, |bounds| {
+                    let size = bounds.size();
+                    size.x.min(size.y).min(size.z)
+                });
+            sizes = sizes_for(shape, across * 0.5);
+            color = self
+                .selected
+                .clone()
+                .and_then(|part| self.colour_of(&part))
+                .or_else(|| self.palette().first().map(|(name, _)| name.clone()));
+        }
+        let add = |at: [f64; 2]| Edit::Add {
+            name: name.clone(),
+            made: made.clone(),
+            to: None,
+            attach: None,
+            sizes: sizes.clone(),
+            color: color.clone(),
+            twist: None,
+            free: Free {
+                stand: Some(at),
+                ..Free::default()
+            },
+        };
+        // Sideways, the picture's measurements are the recipe's own.
+        let step = self.snap_step();
+        let snapped = |x: f64, z: f64| {
+            [x, z].map(|number| ((number / step).round() * step * 1e6).round() / 1e6)
+        };
+        let middle = self.orbit.target;
+        let mut at = snapped(middle.x, middle.z);
+        // How much room it takes is known once it is built: try it, and
+        // look.
+        let tried = Syntax::from_path(&self.path).and_then(|syntax| {
+            edit::apply_many(&self.text, syntax, &self.path, &self.shown_as, &[add(at)]).ok()
+        });
+        let room = tried
+            .and_then(|tried| tried.model)
+            .and_then(|model| part_in(&model.parts, &name).and_then(|part| part.bounds))
+            .map(|bounds| bounds.half());
+        if let (Some(room), Some(model)) = (room, self.model()) {
+            let offset = self.offset();
+            let others: Vec<_> = model.parts.iter().filter_map(|part| part.bounds).collect();
+            let clear = |at: [f64; 2]| {
+                others.iter().all(|other| {
+                    let (low, high) = (other.min + offset, other.max + offset);
+                    low.y >= room.y * 2.0
+                        || at[0] + room.x + step <= low.x + 1e-9
+                        || at[0] - room.x - step >= high.x - 1e-9
+                        || at[1] + room.z + step <= low.z + 1e-9
+                        || at[1] - room.z - step >= high.z - 1e-9
+                })
+            };
+            // Towards the eye, along the ground.
+            let eye = self.orbit.eye() - middle;
+            let flat = (eye.x * eye.x + eye.z * eye.z).sqrt();
+            let towards = if flat > 1e-6 {
+                [eye.x / flat, eye.z / flat]
+            } else {
+                [0.0, 1.0]
+            };
+            if let Some(free) = (0..2000)
+                .map(|nearer| {
+                    let nearer = f64::from(nearer) * step;
+                    snapped(
+                        middle.x + towards[0] * nearer,
+                        middle.z + towards[1] * nearer,
+                    )
+                })
+                .find(|at| clear(*at))
+            {
+                at = free;
+            }
+        }
+        let said = self.apply(&add(at))?;
+        self.tool = Tool::Move;
+        Ok(said)
     }
 
     /// A name for a new socket on `part`: `spot`, `spot_2`...

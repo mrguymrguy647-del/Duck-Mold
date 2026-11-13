@@ -176,6 +176,23 @@ impl StudioApp {
                         let _ = studio.redo();
                     }
                     ui.separator();
+                    // A new part that is joined to nothing: it stands on
+                    // the ground where the view looks, ready to be moved.
+                    let thumbs = &mut self.thumbs;
+                    ui.menu_button("Add", |ui| {
+                        ui.label(RichText::new("A new part, on the ground").weak().small());
+                        if let Some(made) = view::choices(ui, studio, thumbs) {
+                            // What it did, or why not, is in the status
+                            // line.
+                            let _ = studio.add_free(&made);
+                            ui.close();
+                        }
+                    })
+                    .response
+                    .on_hover_text(
+                        "Add a part that stands on the ground, joined to nothing. (To add one joined to another part, click a dot on that part.)",
+                    );
+                    ui.separator();
                 }
                 if ui
                     .button("Frame")

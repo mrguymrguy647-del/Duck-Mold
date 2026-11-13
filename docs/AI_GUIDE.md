@@ -493,6 +493,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | Command | What it does |
 |---|---|
 | `duck-mold edit <recipe> add <name> --to <part.socket>` | Adds a part joined to a socket. Made of `--shape box` (or `cylinder`, `sphere`, `cone`, `wedge`), `--use <defined part>` or `--file <recipe or mesh>`. Also takes `--attach <own socket>`, `--size x,y,z`, `--radius`, `--height`, `--segments`, `--color`, `--twist`. |
+| `duck-mold edit <recipe> add <name>` (no `--to`) | Adds a part joined to nothing, in the model's own list. It is stood on the ground: at the recipe's zero, or at `--stand x,z`. Or give its middle exactly with `--move x,y,z`. Also takes `--rotate x,y,z` and `--scale n` (or `x,y,z`), and what it is made of, its sizes and `--color` as above. Move it later with `set <name> --move`. |
 | `duck-mold edit <recipe> remove <part>` | Removes a part. Refused, with their names, if other parts hang from it; `--with-attached` removes those too. |
 | `duck-mold edit <recipe> rename <part> <new-name>` | Renames a part, and every `to`, `from` and `origin` that names it. |
 | `duck-mold edit <recipe> join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes its own socket. A part placed with `move` loses it. |

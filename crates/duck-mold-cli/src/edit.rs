@@ -3,20 +3,24 @@
 //! `Edit` values from clicks, so whatever it can do, this can.
 
 use clap::{Args, Subcommand};
-use duck_mold_core::edit::{Changes, Edit, Made, Sizes};
+use duck_mold_core::edit::{Changes, Edit, Free, Made, Sizes};
 
 /// One change to a recipe.
 #[derive(Subcommand)]
 pub enum Change {
-    /// Add a part, joined to a socket.
+    /// Add a part: joined to a socket (--to), or standing free.
     ///
     /// Say what it is made of with one of --shape, --use and --file.
+    /// Without --to the part is joined to nothing: it is stood on the
+    /// ground, at the recipe's zero or where --stand says, unless --move
+    /// says exactly where its middle goes.
     Add {
         /// The new part's name.
         name: String,
-        /// The socket it joins, like head.top.
+        /// The socket it joins, like head.top. Without it the part
+        /// stands free.
         #[arg(long, value_name = "PART.SOCKET")]
-        to: String,
+        to: Option<String>,
         /// One of the five shapes: box, cylinder, sphere, cone, wedge.
         #[arg(long, group = "made")]
         shape: Option<String>,
@@ -39,6 +43,20 @@ pub enum Change {
         /// Degrees to twist it around the join.
         #[arg(long, allow_negative_numbers = true)]
         twist: Option<f64>,
+        /// For a free part: where its middle goes, x,y,z in metres.
+        #[arg(long = "move", value_name = "X,Y,Z", allow_hyphen_values = true)]
+        move_to: Option<String>,
+        /// For a free part with no --move: where on the ground it is
+        /// stood, x,z in metres.
+        #[arg(long, value_name = "X,Z", allow_hyphen_values = true)]
+        stand: Option<String>,
+        /// For a free part: how it is turned, degrees around x, then y,
+        /// then z.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        rotate: Option<String>,
+        /// How much bigger it is: one number, or x,y,z.
+        #[arg(long, value_name = "N or X,Y,Z")]
+        scale: Option<String>,
     },
     /// Remove a part.
     ///
@@ -224,6 +242,10 @@ impl Change {
                 sizes,
                 color,
                 twist,
+                move_to,
+                stand,
+                rotate,
+                scale,
             } => Edit::Add {
                 name: name.clone(),
                 made: match (shape, uses, file) {
@@ -242,6 +264,35 @@ impl Change {
                 sizes: sizes.sizes()?,
                 color: color.clone(),
                 twist: *twist,
+                free: Free {
+                    move_to: move_to
+                        .as_deref()
+                        .map(|written| three("--move", written))
+                        .transpose()?,
+                    stand: stand
+                        .as_deref()
+                        .map(|written| {
+                            let numbers: Vec<f64> = written
+                                .split(',')
+                                .filter_map(|number| number.trim().parse().ok())
+                                .collect();
+                            <[f64; 2]>::try_from(numbers).map_err(|_| {
+                                format!("--stand needs two numbers, like 1,-0.5, not \"{written}\"")
+                            })
+                        })
+                        .transpose()?,
+                    rotate: rotate
+                        .as_deref()
+                        .map(|written| three("--rotate", written))
+                        .transpose()?,
+                    scale: scale
+                        .as_deref()
+                        .map(|written| match written.trim().parse::<f64>() {
+                            Ok(all) => Ok([all; 3]),
+                            Err(_) => three("--scale", written),
+                        })
+                        .transpose()?,
+                },
             },
             Change::Remove {
                 part,

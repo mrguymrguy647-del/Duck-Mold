@@ -164,13 +164,19 @@ part:
 
 ![A crate with the Move tool's arrows on it](docs/studio-handles.png)
 
-**Adding parts.** The selected part's sockets show as small round
-dots.
+**Adding parts.** There are two ways.
 
-- Click a dot and pick what to add there: one of the five shapes, or a
+- **Add**, in the top bar, lists the shapes, the parts the recipe
+  defines and the library. Pick one and it stands on the ground in the
+  middle of what you are looking at, or just in front of whatever
+  already stands there, joined to nothing. It is selected, with the
+  Move arrows on it, so you can drag it straight away.
+- The selected part's sockets show as small round dots. Click a dot
+  and pick what to add there: one of the five shapes, or a
   part the recipe defines. The new part is about half the size of the
   one it sits on, has its colour, and is selected, ready to change.
-- Drag the selected part onto a dot of another part to join it there.
+- To join a part that is already there, drag it onto a dot of another
+  part.
   The dots of the parts it could join light up while you drag. A joined
   part dropped on another part's surface goes to that point: the Studio
   declares a socket there (`on` a side, with a `shift`), or, if the

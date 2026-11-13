@@ -583,10 +583,14 @@ impl Studio {
                     Some(format!("{}/{inside}", beside(part, new_name)))
                 }
             }
-            Edit::Add { name, to, .. } => {
-                let (target, _) = to.rsplit_once('.')?;
-                Some(beside(target, name))
-            }
+            Edit::Add { name, to, .. } => match to {
+                Some(to) => {
+                    let (target, _) = to.rsplit_once('.')?;
+                    Some(beside(target, name))
+                }
+                // A free part is in the model's own list.
+                None => Some(name.clone()),
+            },
             _ => None,
         }
     }

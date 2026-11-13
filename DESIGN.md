@@ -1730,6 +1730,31 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 3):* the Add menu, and `add` with no `--to`.
+
+- **Where the new part goes.** "In front of the camera" is the ground
+  under the point the view looks at, snapped to the step. Usually the
+  model is standing right there, so the Studio first builds the part
+  to see how much room it takes, and then walks from that point
+  towards the eye, a step at a time, until the part's box is one step
+  clear of every other part's. So it lands just in front of the model
+  as you see it, never inside it or behind it.
+- **Its size and colour.** A new shape is half the model's smallest
+  side across, to two figures (the same rule as a part added on a dot,
+  which is half the part it sits on). It has the selected part's
+  colour, or the palette's first.
+- **The ground it stands on** is the ground the model stood on before:
+  the underside of its lowest part. The edit works this out, not the
+  Studio, so an agent's `add` with no `--to` stands on the ground too
+  (`--stand x,z` says where; `--move x,y,z` gives the middle exactly).
+- **A recipe with no parts** can be added to: the first part starts
+  the list.
+- **A free part that touches nothing gets the usual warning** ("it
+  floats 0.125 from ..."), as any part that touches nothing always has.
+  It goes when the part is moved against another, or joined.
+- The Add menu shares its list with the one a dot opens. Shift+A comes
+  with the other keys, in step 5.
+
 *As built (step 2):* the Size tool, as designed. One thing to know: a
 box that is joined is held by its join, so pulling a face changes its
 size about its middle and the join then puts it back on its socket;
