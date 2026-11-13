@@ -21,6 +21,7 @@
 use std::path::Path;
 
 use duck_mold_studio::StudioApp;
+use eframe::egui;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::{Harness, SnapshotOptions};
 
@@ -123,6 +124,29 @@ fn the_screens_look_as_they_did() {
         click_at(&mut screen, at);
         screen.run_steps(2);
         wrong.extend(check(&mut screen, "library"));
+    }
+
+    // The handles: a free part with the Move tool's arrows, then the
+    // Rotate tool's rings.
+    {
+        let recipe = folder("pictures_handles").join("boxes.toml");
+        std::fs::write(
+            &recipe,
+            "version = 0\nname = \"boxes\"\n\n[palette]\nstone = \"#C0C0C0\"\nred = \"#D0453A\"\n\n[[parts]]\nname = \"floor\"\nshape = \"box\"\nsize = [2, 0.2, 2]\ncolor = \"stone\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.5, 0.5, 0.5]\ncolor = \"red\"\nmove = [0.5, 0.35, 0]\n",
+        )
+        .unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("crate"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "handles-move"));
+        screen.key_press(egui::Key::R);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "handles-rotate"));
     }
 
     // A recipe saved with a mistake: the problems, and the last good

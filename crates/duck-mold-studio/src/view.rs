@@ -3,17 +3,20 @@
 //! - Drag turns the view; right-drag (or middle-drag, or Shift and drag)
 //!   slides it; the wheel zooms.
 //! - A click selects the part under the pointer.
-//! - With a part selected, its sockets show as markers. A click on one,
-//!   or on the part's surface, opens a short list of what to add there.
-//! - Dragging the selected part moves it: dropped on a socket of another
-//!   part it joins there, dropped on a part's surface it slides there.
+//! - With a part selected, its sockets show as dots, and the handles of
+//!   the tool in hand: arrows, rings or boxes. A click on a dot opens a
+//!   short list of what to add there.
+//! - A drag that starts on a handle, or on the selected part, moves,
+//!   turns or sizes the part. While it lasts the picture shows what the
+//!   recipe would build; the file is written when the mouse is let go.
 //!
 //! The picture is drawn by Duck Forge's CPU renderer
 //! ([`Studio::picture`]) and shown as one image.
 
 use crate::library::Thumbs;
-use duck_mold_core::edit::{Made, Spot};
+use duck_mold_core::edit::Made;
 use duck_mold_core::recipe::Shape;
+use duck_mold_view::studio::handles::Tool;
 use duck_mold_view::studio::viewport::Orbit;
 use duck_mold_view::studio::{Clicked, Studio};
 use eframe::egui::{
@@ -37,6 +40,7 @@ struct Drawn {
     orbit: Orbit,
     grid: bool,
     selected: Option<String>,
+    tool: Tool,
     size: [usize; 2],
     /// Where the pointer is, when that changes what is drawn (a part is
     /// selected, so markers show).
@@ -48,7 +52,6 @@ struct Drawn {
 #[derive(Clone, PartialEq)]
 enum Place {
     Socket { part: String, socket: String },
-    Surface { part: String, spot: Spot },
 }
 
 /// The "add a part here" list, while it is open.
@@ -131,14 +134,14 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
         .or_else(|| response.interact_pointer_pos());
     studio.hover(size, pointer.map(in_picture));
 
-    // A drag that starts on the selected part moves the part. Any other
-    // drag turns or slides the view.
-    let shift = ui.input(|input| input.modifiers.shift);
+    // A drag that starts on a handle, or on the selected part, moves the
+    // part. Any other drag turns or slides the view.
+    let (shift, free) = ui.input(|input| (input.modifiers.shift, input.modifiers.command));
     if response.drag_started_by(PointerButton::Primary)
         && !shift
         && let Some(pressed) = ui.input(|input| input.pointer.press_origin())
     {
-        view.moving = studio.drag_start(size, in_picture(pressed));
+        view.moving = studio.grab(size, in_picture(pressed)).is_some();
         if view.moving {
             view.adding = None;
         }
@@ -146,12 +149,15 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
     if view.moving {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            studio.drag_cancel();
+            studio.cancel_drag();
             view.moving = false;
         } else if response.drag_stopped() {
             // What it did, or why not, is in the status line.
-            let _ = studio.drag_end();
+            let _ = studio.release();
             view.moving = false;
+        } else if let Some(pointer) = pointer {
+            // Ctrl held: nothing snaps.
+            studio.drag(size, in_picture(pointer), free);
         }
     } else {
         let moved = response.drag_delta();
@@ -174,10 +180,6 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
                 place: Place::Socket { part, socket },
                 at: pointer,
             }),
-            Clicked::Surface { part, spot } => Some(Adding {
-                place: Place::Surface { part, spot },
-                at: pointer,
-            }),
             Clicked::Selected(_) | Clicked::Nothing => None,
         };
     }
@@ -194,6 +196,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
         orbit: studio.orbit,
         grid: studio.grid,
         selected: studio.selected().map(str::to_owned),
+        tool: studio.tool,
         size: [size.0, size.1],
         pointer: pointer
             .filter(|_| shows_markers)
@@ -201,7 +204,8 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
             .map(|(x, y)| (x.round() as i32, y.round() as i32)),
         dragging: studio.dragging().is_some(),
     };
-    if view.drawn.as_ref() != Some(&now) || view.texture.is_none() {
+    // While a handle is held the picture changes with every move.
+    if view.drawn.as_ref() != Some(&now) || view.texture.is_none() || view.moving {
         let picture = studio.picture(size.0, size.1);
         let image = ColorImage::new(
             now.size,
@@ -234,23 +238,88 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
         );
     }
 
-    // What the mouse does here, in a line at the bottom.
+    // What the mouse does here, in a line at the bottom, and how moves
+    // snap.
+    let handles = shows_markers && studio.facts().is_some();
     let hint = if view.moving {
-        "Drop it on a socket to join it there, or on a part to put it at that point. Escape lets go."
-    } else if shows_markers && studio.facts().is_some() {
-        "Click a socket, or the part itself, to add a part there. Drag the part to move it."
+        "Let go to make the change. Escape lets go without changing anything."
+    } else if handles {
+        "Drag an arrow, a ring or a box, or the part itself. Click a dot to add a part there."
     } else {
         "Drag to turn, right-drag to slide, roll the wheel to zoom. Click a part to select it."
     };
-    ui.painter_at(rect).text(
+    let quiet = Color32::from_white_alpha(150);
+    let painter = ui.painter_at(rect);
+    painter.text(
         rect.left_bottom() + egui::vec2(8.0, -6.0),
         egui::Align2::LEFT_BOTTOM,
         hint,
         egui::FontId::proportional(12.0),
-        Color32::from_white_alpha(150),
+        quiet,
     );
+    if handles {
+        painter.text(
+            rect.right_bottom() + egui::vec2(-8.0, -6.0),
+            egui::Align2::RIGHT_BOTTOM,
+            studio.snap_text(),
+            egui::FontId::proportional(12.0),
+            quiet,
+        );
+    }
+    // What the drag has done so far, beside the pointer.
+    if let (Some(label), Some(pointer)) = (studio.drag_label(), pointer) {
+        let at = pointer + egui::vec2(16.0, -18.0);
+        let text = painter.layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::proportional(13.0),
+            Color32::WHITE,
+        );
+        let back = Rect::from_min_size(at, text.size()).expand(4.0);
+        painter.rect_filled(back, 4.0, Color32::from_black_alpha(200));
+        painter.galley(at, text, Color32::WHITE);
+    }
 
+    tool_strip(ui, studio, rect);
     add_list(ui, studio, view, thumbs, rect);
+}
+
+/// The tools, down the left edge of the viewport: one is in hand.
+fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
+    if studio.look_only() {
+        return;
+    }
+    let tools = [
+        (Tool::Move, "Move", "G", "Arrows: drag one to move the part"),
+        (
+            Tool::Rotate,
+            "Rotate",
+            "R",
+            "Rings: drag one to turn the part",
+        ),
+        (
+            Tool::Scale,
+            "Scale",
+            "S",
+            "Boxes: drag one to make the part bigger or smaller",
+        ),
+    ];
+    for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {
+        let place = Rect::from_min_size(
+            within.left_top() + egui::vec2(8.0, 8.0 + row as f32 * 30.0),
+            egui::vec2(76.0, 24.0),
+        );
+        // A dark plate behind it, so it reads over the picture.
+        ui.painter_at(within)
+            .rect_filled(place, 4.0, Color32::from_black_alpha(150));
+        let button = egui::Button::selectable(studio.tool == tool, name);
+        if ui
+            .put(place, button)
+            .on_hover_text(format!("{tip} ({key})"))
+            .clicked()
+        {
+            studio.tool = tool;
+        }
+    }
 }
 
 /// The short list that opens where a part is to be added: the five
@@ -265,10 +334,8 @@ fn add_list(
     let Some(adding) = &view.adding else {
         return;
     };
-    let title = match &adding.place {
-        Place::Socket { part, socket } => format!("Add a part on {part}.{socket}"),
-        Place::Surface { part, spot } => format!("Add a part on the {} of {part}", spot.on),
-    };
+    let Place::Socket { part, socket } = &adding.place;
+    let title = format!("Add a part on {part}.{socket}");
     let mut chosen: Option<Made> = None;
     let mut open = true;
     // Kept inside the viewport, beside the click.
@@ -321,10 +388,7 @@ fn add_list(
         });
     if let Some(made) = chosen {
         // What it did, or why not, is in the status line.
-        let _ = match &adding.place {
-            Place::Socket { part, socket } => studio.add_to_socket(part, socket, &made),
-            Place::Surface { part, spot } => studio.add_to_surface(part, spot, &made),
-        };
+        let _ = studio.add_to_socket(part, socket, &made);
         view.adding = None;
     } else if !open {
         view.adding = None;

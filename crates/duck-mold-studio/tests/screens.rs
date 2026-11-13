@@ -490,25 +490,6 @@ fn when_only_looking_the_panel_changes_nothing() {
 
 // ---- sockets -------------------------------------------------------------------
 
-/// Presses on one point, moves to another in a few steps, and lets go.
-fn drag(screen: &mut Harness<'static, StudioApp>, from: egui::Pos2, to: egui::Pos2) {
-    screen.hover_at(from);
-    screen.step();
-    screen.drag_at(from);
-    screen.step();
-    for part in 1..=4 {
-        screen.hover_at(from + (to - from) * (part as f32 / 4.0));
-        screen.step();
-    }
-    screen.event(egui::Event::PointerButton {
-        pos: to,
-        button: egui::PointerButton::Primary,
-        pressed: false,
-        modifiers: egui::Modifiers::NONE,
-    });
-    screen.run_steps(3);
-}
-
 #[test]
 fn a_click_on_a_socket_offers_what_to_add_there() {
     let (recipe, mut screen) = robot_with("screens_socket", "head");
@@ -557,43 +538,6 @@ fn a_click_on_a_socket_offers_what_to_add_there() {
 }
 
 #[test]
-fn a_click_on_the_selected_parts_surface_adds_a_part_at_that_point() {
-    let (recipe, mut screen) = robot_with("screens_surface", "body");
-    // A point of the body's front, beside the red panel.
-    let (rect, [width, height]) = screen.state().viewport().unwrap();
-    let at = {
-        let studio = screen.state().studio().unwrap();
-        let body = studio.part("body").unwrap().bounds.unwrap();
-        let point = body.center()
-            + duck_mold_core::math::vec3(body.half().x * 0.75, body.half().y * -0.6, body.half().z);
-        let (x, y) = studio.orbit.on_screen(point, width, height).unwrap();
-        rect.min
-            + egui::vec2(
-                x as f32 * rect.width() / width as f32,
-                y as f32 * rect.height() / height as f32,
-            )
-    };
-    click_at(&mut screen, at);
-    screen.get_by_label("Add a part on the front of body");
-    screen.get_by_label("Cone").click();
-    screen.run_steps(3);
-    assert_eq!(selected(&screen).as_deref(), Some("cone"));
-    let studio = screen.state().studio().unwrap();
-    assert_eq!(
-        studio.part("cone").unwrap().attached_to.as_deref(),
-        Some("body.spot")
-    );
-    let lines = new_lines(&recipe);
-    assert!(
-        lines
-            .iter()
-            .any(|line| line.starts_with("spot = { on = \"front\", shift = [0.75, -0.6")),
-        "{lines:?}"
-    );
-    assert!(studio.problems().is_empty(), "{:?}", studio.problems());
-}
-
-#[test]
 fn dragging_the_selected_part_moves_it_and_dragging_elsewhere_turns_the_view() {
     let (recipe, mut screen) = robot_with("screens_drag", "antenna_tip");
     let before = screen.state().studio().unwrap().orbit;
@@ -631,6 +575,182 @@ fn dragging_the_selected_part_moves_it_and_dragging_elsewhere_turns_the_view() {
     drag(&mut screen, from, from + egui::vec2(50.0, 0.0));
     assert!(new_lines(&recipe).is_empty());
     assert_ne!(screen.state().studio().unwrap().orbit.round, before.round);
+}
+
+// ---- handles -------------------------------------------------------------------
+
+/// A floor with a crate standing free on it, open, with the crate
+/// selected.
+fn boxes(test: &str) -> (PathBuf, Harness<'static, StudioApp>) {
+    let recipe = folder(test).join("boxes.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\nname = \"boxes\"\n\n[palette]\nstone = \"#C0C0C0\"\nred = \"#D0453A\"\n\n[[parts]]\nname = \"floor\"\nshape = \"box\"\nsize = [2, 0.2, 2]\ncolor = \"stone\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.5, 0.5, 0.5]\ncolor = \"red\"\nmove = [0.5, 0.35, 0]\n",
+    )
+    .unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("crate"));
+    screen.run_steps(2);
+    (recipe, screen)
+}
+
+fn move_line(recipe: &Path) -> String {
+    let text = std::fs::read_to_string(recipe).unwrap();
+    text.lines()
+        .find(|line| line.starts_with("move = "))
+        .unwrap()
+        .to_owned()
+}
+
+#[test]
+fn the_cube_can_be_dragged_by_its_arrows_and_by_itself() {
+    use duck_mold_core::math::vec3;
+    use duck_mold_view::studio::handles::{Grip, Tool};
+    let (recipe, mut screen) = boxes("screens_handles_move");
+    // The Studio opens with the Move tool in hand.
+    assert_eq!(screen.state().studio().unwrap().tool, Tool::Move);
+    screen.get_by_label("Move");
+    assert_eq!(
+        screen.state().studio().unwrap().snap_text(),
+        "Snap 0.1 m, 15°  (Ctrl: off)"
+    );
+
+    // The red arrow, dragged 0.3 m along x.
+    let from = screen
+        .state()
+        .studio()
+        .unwrap()
+        .grip_at(Grip::Arrow(0))
+        .unwrap();
+    let (start, end) = (
+        point_on_screen(&screen, from),
+        point_on_screen(&screen, from + vec3(0.3, 0.0, 0.0)),
+    );
+    drag(&mut screen, start, end);
+    assert_eq!(move_line(&recipe), "move = [0.8, 0.35, 0]");
+    let studio = screen.state().studio().unwrap();
+    assert_eq!(studio.status(), "Set \"crate\": move [0.8, 0.35, 0]");
+    assert_eq!(studio.selected(), Some("crate"));
+    // It was one write, and is one step to undo.
+    assert_eq!(
+        studio.can_undo(),
+        Some("Set \"crate\": move [0.8, 0.35, 0]")
+    );
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    assert_eq!(move_line(&recipe), "move = [0.5, 0.35, 0]");
+    assert_eq!(screen.state().studio().unwrap().can_undo(), None);
+
+    // The crate itself, dragged across the floor.
+    let hold = {
+        let studio = screen.state().studio().unwrap();
+        let top = studio.part("crate").unwrap().bounds.unwrap();
+        vec3(top.center().x + 0.15, top.max.y, top.center().z + 0.15) + studio.offset()
+    };
+    let (start, end) = (
+        point_on_screen(&screen, hold),
+        point_on_screen(&screen, hold + vec3(-0.6, 0.0, 0.4)),
+    );
+    drag(&mut screen, start, end);
+    assert_eq!(move_line(&recipe), "move = [-0.1, 0.35, 0.4]");
+
+    // A drag on empty space still turns the view, and moves nothing.
+    let before = screen.state().studio().unwrap().orbit;
+    let (rect, _) = screen.state().viewport().unwrap();
+    let empty = rect.right_top() + egui::vec2(-60.0, 60.0);
+    drag(&mut screen, empty, empty + egui::vec2(-50.0, 0.0));
+    assert_ne!(screen.state().studio().unwrap().orbit.round, before.round);
+    assert_eq!(move_line(&recipe), "move = [-0.1, 0.35, 0.4]");
+}
+
+#[test]
+fn the_tools_are_buttons_and_keys() {
+    use duck_mold_core::math::{Mat3, vec3};
+    use duck_mold_view::studio::handles::{Grip, Tool};
+    let (recipe, mut screen) = boxes("screens_handles_tools");
+    let tool = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().tool;
+
+    screen.get_by_label("Rotate").click();
+    screen.run_steps(2);
+    assert_eq!(tool(&screen), Tool::Rotate);
+    screen.key_press(egui::Key::S);
+    screen.run_steps(2);
+    assert_eq!(tool(&screen), Tool::Scale);
+    screen.key_press(egui::Key::G);
+    screen.run_steps(2);
+    assert_eq!(tool(&screen), Tool::Move);
+    screen.key_press(egui::Key::R);
+    screen.run_steps(2);
+    assert_eq!(tool(&screen), Tool::Rotate);
+
+    // The green ring, turned a little over 45 degrees: it snaps to 45.
+    let (from, middle) = {
+        let studio = screen.state().studio().unwrap();
+        (
+            studio.grip_at(Grip::Ring(1)).unwrap(),
+            studio.part("crate").unwrap().place.shift + studio.offset(),
+        )
+    };
+    let to = middle + Mat3::around_y(48.0) * (from - middle);
+    let (start, end) = (point_on_screen(&screen, from), point_on_screen(&screen, to));
+    drag(&mut screen, start, end);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("rotate = [0, 45, 0]"), "{text}");
+
+    // The scale tool's red box, pulled out to twice as far.
+    screen
+        .get_by_role_and_label(egui::accesskit::Role::Button, "Scale")
+        .click();
+    screen.run_steps(2);
+    let (from, middle) = {
+        let studio = screen.state().studio().unwrap();
+        (
+            studio.grip_at(Grip::Box(1)).unwrap(),
+            studio.part("crate").unwrap().bounds.unwrap().center() + studio.offset(),
+        )
+    };
+    let to = middle + (from - middle) * 2.0;
+    let (start, end) = (point_on_screen(&screen, from), point_on_screen(&screen, to));
+    drag(&mut screen, start, end);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("scale = [1, 2, 1]"), "{text}");
+    let _ = vec3(0.0, 0.0, 0.0);
+
+    // When only looking there are no tools.
+    let mut looking = harness(StudioApp::with_file(&recipe, true), false);
+    looking.run_steps(2);
+    assert!(looking.query_by_label("Rotate").is_none());
+}
+
+#[test]
+fn the_panel_has_position_rotation_and_scale_and_unjoin() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = boxes("screens_handles_panel");
+    for label in ["Position", "Rotation", "Scale"] {
+        assert!(screen.query_all_by_label(label).count() >= 1, "{label}");
+    }
+    // A joined part has no position of its own, and can be unjoined.
+    let (robot, mut joined) = robot_with("screens_handles_unjoin", "head");
+    assert!(joined.query_by_label("Position").is_none());
+    assert!(joined.query_all_by_label("Scale").count() >= 1);
+    joined.get_by_label("Unjoin").click();
+    joined.run_steps(3);
+    let lines = new_lines(&robot);
+    assert!(
+        lines.iter().any(|line| line.starts_with("move = [")),
+        "{lines:?}"
+    );
+    assert!(joined.query_all_by_label("Position").count() >= 1);
+    assert!(joined.query_by_label("Unjoin").is_none());
+    let studio = joined.state().studio().unwrap();
+    assert_eq!(studio.part("head").unwrap().attached_to, None);
+    assert!(studio.problems().is_empty(), "{:?}", studio.problems());
+    let _ = (Role::Button, &recipe, &mut screen);
 }
 
 // ---- undo and redo -------------------------------------------------------------

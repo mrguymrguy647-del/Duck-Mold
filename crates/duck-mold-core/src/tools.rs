@@ -216,6 +216,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         attached_to: None,
         mirrored: false,
         place: Transform::IDENTITY,
+        local: Transform::IDENTITY,
         sockets: Vec::new(),
         bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
         faces: 0..faces.len(),
@@ -227,6 +228,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         faces,
         parts: vec![part],
         sockets: Vec::new(),
+        zero: Vec3::ZERO,
     }
 }
 

@@ -108,6 +108,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
         faces,
         parts,
         sockets: body.all_sockets(&Transform::IDENTITY),
+        zero: body.zero,
     })
 }
 
@@ -155,6 +156,9 @@ struct Body {
     /// the model is and where the ground is; on the surface, a table's
     /// `bottom` would be up under its top, between its legs.
     whole: bool,
+    /// For a whole recipe: where its own zero ended up when it was
+    /// shifted to put its zero point at zero.
+    zero: Vec3,
 }
 
 /// A part placed in the list it belongs to.
@@ -183,6 +187,7 @@ impl Body {
             bounds: None,
             broken: true,
             whole: false,
+            zero: Vec3::ZERO,
         }
     }
 
@@ -206,6 +211,7 @@ impl Body {
             bounds: None,
             broken: false,
             whole: false,
+            zero: Vec3::ZERO,
         };
         body.measure();
         body
@@ -229,6 +235,7 @@ impl Body {
             bounds: None,
             broken,
             whole: false,
+            zero: Vec3::ZERO,
         };
         body.measure();
         body
@@ -519,6 +526,7 @@ impl Assembler<'_> {
         };
         if let Some(origin) = origin {
             body.shift(-origin.at);
+            body.zero = -origin.at;
         }
         body
     }
@@ -1365,6 +1373,7 @@ fn emit(
                 attached_to: node.attached_to.clone(),
                 mirrored: place.is_mirrored(),
                 place,
+                local: node.place,
                 sockets: node.body.all_sockets(&place),
                 bounds: Bounds::around(
                     faces[own.clone()]

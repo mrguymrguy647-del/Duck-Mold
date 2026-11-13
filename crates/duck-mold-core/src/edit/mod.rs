@@ -28,6 +28,7 @@ use crate::assemble::assemble;
 use crate::inspect::{Inspection, inspect};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
+use crate::math::Mat3;
 use crate::model::{Model, Part};
 use crate::recipe::{PART_FIELDS, Shape, Side, rgb_of};
 use crate::source::{Node, Syntax, Value};
@@ -95,6 +96,13 @@ pub struct Changes {
     pub face_colors: Vec<(String, String)>,
     /// Degrees to twist it around its join.
     pub twist: Option<f64>,
+    /// Where a free part's middle goes: `move = [x, y, z]`.
+    pub move_to: Option<[f64; 3]>,
+    /// How a free part is turned: `rotate = [x, y, z]`, in degrees.
+    pub rotate: Option<[f64; 3]>,
+    /// How much bigger the part is each way: `scale`. Written as one
+    /// number when the three are alike.
+    pub scale: Option<[f64; 3]>,
 }
 
 /// One change to a recipe. A part is named as `inspect` prints it:
@@ -189,6 +197,11 @@ pub enum Edit {
         /// How far it is slid across the side, -1 to 1 each way.
         shift: [f64; 3],
     },
+    /// Makes a joined part free, exactly where it stands.
+    Unjoin {
+        /// The part.
+        part: String,
+    },
     /// Moves a socket that was declared on a side of a part.
     SetSocket {
         /// The socket: `body.badge`.
@@ -204,7 +217,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 10] = [
+    pub const COMMANDS: [&'static str; 11] = [
         "add",
         "remove",
         "rename",
@@ -215,6 +228,7 @@ impl Edit {
         "set-color",
         "add-socket",
         "set-socket",
+        "unjoin",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -230,6 +244,7 @@ impl Edit {
             Edit::SetColor { .. } => "set-color",
             Edit::AddSocket { .. } => "add-socket",
             Edit::SetSocket { .. } => "set-socket",
+            Edit::Unjoin { .. } => "unjoin",
         }
     }
 }
@@ -578,7 +593,58 @@ struct Outcome {
     touched: Option<Found>,
 }
 
-fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
+/// A number as a recipe should hold it: to a tenth of a millimetre (or
+/// of a degree's hundredth), and never `-0`.
+fn tidy_number(value: f64, decimals: i32) -> f64 {
+    let unit = 10f64.powi(decimals);
+    (value * unit).round() / unit + 0.0
+}
+
+/// The flip and stretch a part's own `mirror` and `scale` ask for.
+fn stretch_of(node: &Node) -> Mat3 {
+    let Value::Table(entries) = &node.value else {
+        return Mat3::IDENTITY;
+    };
+    let number = |node: &Node| match node.value {
+        Value::Int(whole) => Some(whole as f64),
+        Value::Float(number) => Some(number),
+        _ => None,
+    };
+    let mut scale = [1.0; 3];
+    if let Some(entry) = entries.iter().find(|entry| entry.key == "scale") {
+        match &entry.node.value {
+            Value::Array(items) if items.len() == 3 => {
+                for (at, item) in items.iter().enumerate() {
+                    scale[at] = number(item).unwrap_or(1.0);
+                }
+            }
+            _ => scale = [number(&entry.node).unwrap_or(1.0); 3],
+        }
+    }
+    match text_of(node, "mirror") {
+        Some("x") => scale[0] = -scale[0],
+        Some("y") => scale[1] = -scale[1],
+        Some("z") => scale[2] = -scale[2],
+        _ => {}
+    }
+    Mat3::stretch(scale.into())
+}
+
+/// The part of the built model with this path.
+fn part_in<'a>(model: &'a Model, path: &str) -> Option<&'a Part> {
+    fn find<'a>(parts: &'a [Part], path: &str) -> Option<&'a Part> {
+        parts.iter().find_map(|part| {
+            if part.path == path {
+                Some(part)
+            } else {
+                find(&part.parts, path)
+            }
+        })
+    }
+    find(&model.parts, path)
+}
+
+fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Stop> {
     match edit {
         Edit::Add {
             name,
@@ -781,6 +847,9 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 color,
                 face_colors,
                 twist,
+                move_to,
+                rotate,
+                scale,
             } = changes;
             let found = find(doc, part)?;
             // Twist is the part's own. What it is made of is written in
@@ -860,10 +929,48 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 set(doc, &own, "twist", Val::Num(*twist))?;
                 said.push(format!("twist {}", doc::number_text(*twist)));
             }
+            // Where a free part is. A joined part is where its socket is.
+            let joined = doc.text_at(&own, "to").map(str::to_owned);
+            if let Some(to) = move_to {
+                if let Some(joined) = &joined {
+                    return Err(problem(
+                        Code::Conflict,
+                        format!(
+                            "\"{part}\" is joined to {joined}, so it goes where that socket is. Slide the socket with set-socket, or make the part free first with unjoin"
+                        ),
+                    ));
+                }
+                let value = Val::three(to.map(|number| tidy_number(number, 4)));
+                said.push(format!("move {}", value.write(doc.syntax)));
+                set(doc, &own, "move", value)?;
+            }
+            if let Some(turn) = rotate {
+                if let Some(joined) = &joined {
+                    return Err(problem(
+                        Code::Conflict,
+                        format!(
+                            "\"{part}\" is joined to {joined}, so it faces the way that socket does. Turn it around its join with --twist, or make it free first with unjoin"
+                        ),
+                    ));
+                }
+                let value = Val::three(turn.map(|number| tidy_number(number, 2)));
+                said.push(format!("rotate {}", value.write(doc.syntax)));
+                set(doc, &own, "rotate", value)?;
+            }
+            if let Some(scale) = scale {
+                let scale = scale.map(|number| tidy_number(number, 4));
+                let value = if scale[0] == scale[1] && scale[1] == scale[2] {
+                    Val::Num(scale[0])
+                } else {
+                    Val::three(scale)
+                };
+                said.push(format!("scale {}", value.write(doc.syntax)));
+                set(doc, &own, "scale", value)?;
+            }
             if said.is_empty() {
                 return Err(problem(
                     Code::MissingField,
-                    "nothing to set: give at least one of --shape, --size, --radius, --height, --segments, --color, --face-color, --twist",
+                    "nothing to set: give at least one of --shape, --size, --radius, --height, --segments, --color, --face-color, --twist, --move, --rotate, --scale",
                 ));
             }
             // Changing what a definition is made of changes every part
@@ -879,6 +986,60 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
             Ok(Outcome {
                 summary: format!("set \"{part}\": {}", said.join(", ")),
                 touched: Some(touched),
+            })
+        }
+        Edit::Unjoin { part } => {
+            let found = find(doc, part)?;
+            let own = found.path();
+            let Some(joined) = doc.text_at(&own, "to").map(str::to_owned) else {
+                return Err(problem(
+                    Code::Conflict,
+                    format!("\"{part}\" isn't joined to anything: it is free already"),
+                ));
+            };
+            let Some((model, placed)) =
+                model.and_then(|model| Some((model, part_in(model, part)?)))
+            else {
+                return Err(problem(
+                    Code::Unsupported,
+                    format!(
+                        "the recipe has mistakes, so where \"{part}\" stands isn't known: fix them first"
+                    ),
+                ));
+            };
+            // Where it is in its own list. The model's list is shifted to
+            // put the model's zero point at zero; a recipe measures from
+            // its own zero.
+            let mut at = placed.local.shift;
+            if !part.contains('/') {
+                at = at - model.zero;
+            }
+            // Its turn, without the flip and stretch it has of its own:
+            // those stay in `mirror` and `scale`.
+            let stretch = stretch_of(doc.node(&own).expect("the part was found"));
+            let Some(unstretch) = stretch.inverse() else {
+                return Err(problem(
+                    Code::Unsupported,
+                    format!("\"{part}\" is scaled to nothing, so it can't be placed"),
+                ));
+            };
+            let turn = (placed.local.turn * unstretch).to_rotate();
+            for field in ["attach", "to", "twist"] {
+                doc.remove_field(&own, field).map_err(cant)?;
+            }
+            let turn = turn.map(|degrees| tidy_number(degrees, 2));
+            if turn != [0.0; 3] {
+                set(doc, &own, "rotate", Val::three(turn))?;
+            }
+            set(
+                doc,
+                &own,
+                "move",
+                Val::three(at.to_array().map(|number| tidy_number(number, 4))),
+            )?;
+            Ok(Outcome {
+                summary: format!("unjoined \"{part}\" from {joined}: it is free, where it stood"),
+                touched: Some(found),
             })
         }
         Edit::Duplicate {
@@ -1262,6 +1423,15 @@ pub struct Facts {
     pub attach: Option<String>,
     /// Degrees it is twisted around its join.
     pub twist: f64,
+    /// Where a free part's middle is: its `move`, measured from the
+    /// recipe's own zero. (For a joined part: zero, and not used.)
+    pub position: [f64; 3],
+    /// How a free part is turned: its `rotate`, in degrees.
+    pub rotation: [f64; 3],
+    /// How much bigger it is each way: its `scale`, as three numbers.
+    pub scale: [f64; 3],
+    /// The direction it is flipped across, if it is: `x`, `y` or `z`.
+    pub mirror: Option<String>,
     /// Set when the part is inside a definition: every edit to it
     /// changes the other parts named here too.
     pub inside: Option<Shared>,
@@ -1361,6 +1531,12 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
         to: text_of(own, "to").map(str::to_owned),
         attach: text_of(own, "attach").map(str::to_owned),
         twist: number(own, "twist").unwrap_or(0.0),
+        position: three(own, "move").unwrap_or([0.0; 3]),
+        rotation: three(own, "rotate").unwrap_or([0.0; 3]),
+        scale: three(own, "scale")
+            .or_else(|| number(own, "scale").map(|all| [all; 3]))
+            .unwrap_or([1.0; 3]),
+        mirror: text_of(own, "mirror").map(str::to_owned),
         inside,
         uses,
     })
@@ -1407,6 +1583,34 @@ pub fn apply(
     display: &str,
     edit: &Edit,
 ) -> Result<Applied, Failure> {
+    apply_many(text, syntax, path, display, std::slice::from_ref(edit))
+}
+
+/// The part an edit is about, by path (nothing for a palette edit).
+fn part_of(edit: &Edit) -> &str {
+    match edit {
+        Edit::Add { to, .. } => to.rsplit_once('.').map_or("", |(part, _)| part),
+        Edit::Remove { part, .. }
+        | Edit::Rename { part, .. }
+        | Edit::Join { part, .. }
+        | Edit::Set { part, .. }
+        | Edit::Duplicate { part, .. }
+        | Edit::Unjoin { part }
+        | Edit::AddSocket { part, .. } => part,
+        Edit::SetSocket { socket, .. } => socket.rsplit_once('.').map_or("", |(part, _)| part),
+        Edit::AddColor { .. } | Edit::SetColor { .. } => "",
+    }
+}
+
+/// [`apply`] for several edits, made one after the other on the same
+/// text and checked once, together: the Studio's "one step".
+pub fn apply_many(
+    text: &str,
+    syntax: Syntax,
+    path: &Path,
+    display: &str,
+    edits: &[Edit],
+) -> Result<Applied, Failure> {
     // The invisible mark some Windows editors put first stays first.
     let (mark, body) = match text.strip_prefix('\u{feff}') {
         Some(body) => ("\u{feff}", body),
@@ -1415,8 +1619,19 @@ pub fn apply(
     let (old_model, old_issues) = build(text, syntax, path, display);
     let mut doc = Doc::parse(body, syntax)
         .map_err(|_| Failure::Invalid(Report::from_issues(old_issues.clone())))?;
-    let outcome =
-        run(&mut doc, edit).map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
+    let mut said = Vec::new();
+    let mut shared = None;
+    for edit in edits {
+        let outcome = run(&mut doc, edit, old_model.as_ref())
+            .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
+        said.push(outcome.summary);
+        if shared.is_none() {
+            shared = outcome
+                .touched
+                .as_ref()
+                .and_then(|found| share(found, old_model.as_ref(), part_of(edit)));
+        }
+    }
     let new_text = format!("{mark}{}", doc.text);
     let (model, issues) = build(&new_text, syntax, path, display);
     let before = Report::from_issues(old_issues).errors.len();
@@ -1424,25 +1639,10 @@ pub fn apply(
     if report.errors.len() > before {
         return Err(Failure::Invalid(report));
     }
-    let part = match edit {
-        Edit::Add { to, .. } => to.rsplit_once('.').map_or("", |(part, _)| part),
-        Edit::Remove { part, .. }
-        | Edit::Rename { part, .. }
-        | Edit::Join { part, .. }
-        | Edit::Set { part, .. }
-        | Edit::Duplicate { part, .. }
-        | Edit::AddSocket { part, .. } => part,
-        Edit::SetSocket { socket, .. } => socket.rsplit_once('.').map_or("", |(part, _)| part),
-        Edit::AddColor { .. } | Edit::SetColor { .. } => "",
-    };
-    let shared = outcome
-        .touched
-        .as_ref()
-        .and_then(|found| share(found, old_model.as_ref(), part));
     Ok(Applied {
         lines: changed_lines(text, &new_text),
         text: new_text,
-        summary: outcome.summary,
+        summary: said.join(", then "),
         shared,
         model,
         issues,
@@ -1565,6 +1765,12 @@ pub fn swap_in(path: &Path, expected: Option<&str>, text: &str) -> Result<bool, 
 /// there now, so both changes are kept. With `dry_run`, nothing is
 /// written.
 pub fn edit_file(path: &Path, edit: &Edit, dry_run: bool) -> Result<Edited, Failure> {
+    edit_file_many(path, std::slice::from_ref(edit), dry_run)
+}
+
+/// [`edit_file`] for several edits made together: worked out one after
+/// the other, checked once, and written once.
+pub fn edit_file_many(path: &Path, edits: &[Edit], dry_run: bool) -> Result<Edited, Failure> {
     let display = display_path(path);
     let Some(syntax) = Syntax::from_path(path) else {
         return Err(Failure::Usage(boxed(problem(
@@ -1577,7 +1783,7 @@ pub fn edit_file(path: &Path, edit: &Edit, dry_run: bool) -> Result<Edited, Fail
         tries += 1;
         let before =
             std::fs::read_to_string(path).map_err(|error| io_problem(path, "read", &error))?;
-        let applied = apply(&before, syntax, path, &display, edit)?;
+        let applied = apply_many(&before, syntax, path, &display, edits)?;
         let changed = applied.text != before;
         let written = if dry_run || !changed {
             false
@@ -1606,7 +1812,7 @@ pub fn edit_file(path: &Path, edit: &Edit, dry_run: bool) -> Result<Edited, Fail
             inspection,
             errors: report.errors,
             edit: EditInfo {
-                command: edit.command(),
+                command: edits.first().map_or("", Edit::command),
                 summary: applied.summary,
                 file: display,
                 written,

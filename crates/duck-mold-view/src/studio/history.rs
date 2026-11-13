@@ -113,11 +113,9 @@ impl Studio {
         };
         // Written only if the file still holds what this step left
         // there. If it doesn't, someone saved it this very moment.
-        let places = self.places();
         match edit::swap_in(&self.path, Some(from), to) {
             Ok(true) => {
                 self.reload();
-                self.keep_still(&places);
                 let said = if back {
                     format!("Undid: {}", step.title)
                 } else {

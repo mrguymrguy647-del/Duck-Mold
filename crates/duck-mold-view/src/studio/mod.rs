@@ -11,6 +11,7 @@
 //! after which it reads and builds the file again. When another program
 //! saves the file, it does the same.
 
+pub mod handles;
 pub mod history;
 pub mod library;
 mod sockets;
@@ -25,7 +26,7 @@ use duck_mold_core::edit::{self, Edit, Facts};
 use duck_mold_core::inspect::{Inspection, PartReport, inspect};
 use duck_mold_core::issue::Issue;
 use duck_mold_core::load::display_path;
-use duck_mold_core::math::Vec3;
+use duck_mold_core::math::{Bounds, Vec3};
 use duck_mold_core::model::{Model, Part};
 use duck_mold_core::source::Syntax;
 use duck_mold_core::tools::{self, Failure};
@@ -113,6 +114,13 @@ pub struct Studio {
     undo: Vec<history::Step>,
     redo: Vec<history::Step>,
     library: library::Library,
+    /// Which tool is in hand: what the handles on the selected part are.
+    pub tool: handles::Tool,
+    /// A handle being dragged, with the edit it would make.
+    grab: Option<handles::Grab>,
+    /// What the recipe would build with that edit: shown while the drag
+    /// lasts. Nothing is written until the handle is let go.
+    preview: Option<Model>,
 }
 
 impl Studio {
@@ -141,6 +149,9 @@ impl Studio {
             undo: Vec::new(),
             redo: Vec::new(),
             library: library::Library::default(),
+            tool: handles::Tool::Move,
+            grab: None,
+            preview: None,
         };
         studio.reload();
         studio.read_library();
@@ -404,7 +415,7 @@ impl Studio {
     pub fn click(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<&str> {
         let hit = self
             .model()
-            .and_then(|model| viewport::pick(model, &self.orbit, size, at, None));
+            .and_then(|model| viewport::pick(model, &self.orbit, self.offset(), size, at, None));
         let Some(hit) = hit else {
             self.selected = None;
             return None;
@@ -464,9 +475,9 @@ impl Studio {
         self.apply_all(std::slice::from_ref(change))
     }
 
-    /// Makes several changes, one after the other, as one step to undo.
-    /// It stops at the first that can't be made (the ones before it
-    /// stay).
+    /// Makes several changes together: worked out one after the other,
+    /// checked once, written once, and one step to undo. If one of them
+    /// can't be made, none is.
     pub fn apply_all(&mut self, changes: &[Edit]) -> Result<String, String> {
         if self.look_only {
             let why = "This window is only for looking: nothing was changed".to_owned();
@@ -478,45 +489,19 @@ impl Studio {
         // first.
         self.check_files();
         let before = self.text.clone();
-        let mut said: Vec<String> = Vec::new();
-        let mut failed = None;
-        for change in changes {
-            match self.apply_one(change) {
-                Ok(done) => said.extend(done),
-                Err(why) => {
-                    failed = Some(why);
-                    break;
-                }
-            }
-        }
-        // Capital first, as the other things the Studio says.
-        let summary = capital(&said.join(", then "));
-        if self.text != before {
-            self.edited(before, &summary);
-        }
-        match failed {
-            Some(why) => {
-                self.say(why.clone());
-                Err(why)
-            }
-            None => {
-                self.say(summary.clone());
-                Ok(summary)
-            }
-        }
-    }
-
-    /// One edit: written, built, the selection moved. Gives what it did
-    /// in words (nothing, if the file was already that way).
-    fn apply_one(&mut self, change: &Edit) -> Result<Option<String>, String> {
         let parts_before: Vec<String> = self.outline().into_iter().map(|row| row.path).collect();
-        let places_before = self.places();
-        match edit::edit_file(&self.path, change, false) {
+        match edit::edit_file_many(&self.path, changes, false) {
             Ok(edited) => {
-                let mut follow = self.selection_after(change);
+                // The selection follows the last change that moves it.
+                let mut follow = changes
+                    .iter()
+                    .rev()
+                    .find_map(|change| self.selection_after(change));
                 self.reload();
-                self.keep_still(&places_before);
-                if matches!(change, Edit::Duplicate { .. }) {
+                if changes
+                    .iter()
+                    .any(|change| matches!(change, Edit::Duplicate { .. }))
+                {
                     // The copy is the part that wasn't there before.
                     follow = self
                         .outline()
@@ -534,57 +519,48 @@ impl Studio {
                         edited.edit.also_changes.join(", ")
                     ));
                 }
-                Ok(Some(said))
+                // Capital first, as the other things the Studio says.
+                let said = capital(&said);
+                if self.text != before {
+                    self.edited(before, &said);
+                }
+                self.say(said.clone());
+                Ok(said)
             }
-            Err(failure) => Err(format!("Not changed: {}", first_error(&failure))),
+            Err(failure) => {
+                let why = format!("Not changed: {}", first_error(&failure));
+                self.say(why.clone());
+                Err(why)
+            }
         }
     }
 
-    /// Where every part is, by path.
-    fn places(&self) -> Vec<(String, Vec3)> {
-        fn gather(parts: &[Part], into: &mut Vec<(String, Vec3)>) {
-            for part in parts {
-                into.push((part.path.clone(), part.place.shift));
-                gather(&part.parts, into);
-            }
-        }
-        let mut places = Vec::new();
-        if let Some(model) = self.model() {
-            gather(&model.parts, &mut places);
-        }
-        places
+    /// How far the picture shows the model moved sideways. A model's zero
+    /// point is the middle of its underside, so adding a part on one
+    /// side moves every other part the other way. The picture takes that
+    /// back: the grid's lines are the recipe's own measurements, and a
+    /// part with `move = [1, 0, 2]` stands over line 1 and line 2. Up and
+    /// down nothing is taken back: the ground is under the lowest part.
+    pub fn offset(&self) -> Vec3 {
+        let zero = self
+            .preview
+            .as_ref()
+            .or(self.model())
+            .map_or(Vec3::ZERO, |model| model.zero);
+        duck_mold_core::math::vec3(-zero.x, 0.0, -zero.z)
     }
 
-    /// Keeps the picture still through an edit. A model's zero point is
-    /// the middle of its footprint, so a part added on one side moves
-    /// every other part the other way by half as much. The camera goes
-    /// with them, so the model doesn't jump: only what was edited moves.
-    fn keep_still(&mut self, before: &[(String, Vec3)]) {
-        let after = self.places();
-        // How far each part that is still there has moved, to the
-        // nearest thousandth of a millimetre.
-        let mut moves: Vec<(Vec3, usize)> = Vec::new();
-        let mut still_there = 0;
-        for (path, was) in before {
-            let Some((_, is)) = after.iter().find(|(other, _)| other == path) else {
-                continue;
-            };
-            still_there += 1;
-            let moved = (*is - *was).tidied();
-            match moves
-                .iter_mut()
-                .find(|(known, _)| (*known - moved).length() < 1e-6)
-            {
-                Some((_, count)) => *count += 1,
-                None => moves.push((moved, 1)),
-            }
-        }
-        // What most of them did is what the zero point did.
-        if let Some((moved, count)) = moves.into_iter().max_by_key(|(_, count)| *count)
-            && count * 2 > still_there
-        {
-            self.orbit.target = self.orbit.target + moved;
-        }
+    /// Where a point of the model is in the viewport, in pixels of the
+    /// picture the pointer was last measured in.
+    pub fn on_screen(&self, point: Vec3) -> Option<(f64, f64)> {
+        self.orbit
+            .on_screen(point + self.offset(), self.view.0, self.view.1)
+    }
+
+    /// The model as the viewport shows it: what a drag would build, while
+    /// a handle is held, and otherwise what the file builds.
+    pub fn shown_model(&self) -> Option<&Model> {
+        self.preview.as_ref().or(self.model())
     }
 
     /// The part to select once an edit is made, where that isn't the one
@@ -625,7 +601,11 @@ impl Studio {
             .and_then(|part| part.bounds)
             .or_else(|| self.model().and_then(Model::bounds));
         if let Some(bounds) = bounds {
-            self.orbit.frame(bounds);
+            let offset = self.offset();
+            self.orbit.frame(Bounds {
+                min: bounds.min + offset,
+                max: bounds.max + offset,
+            });
         }
     }
 
@@ -655,13 +635,24 @@ impl Studio {
             }
             None => None,
         };
+        let model = self.shown_model();
+        // The selected part as it is in what is shown.
+        let selected: Vec<&Part> = self
+            .selected
+            .as_deref()
+            .and_then(|path| part_in(&model?.parts, path))
+            .into_iter()
+            .collect();
+        let marks = self.marks(width, height);
         viewport::draw(
             &Look {
-                model: self.model(),
+                model,
                 orbit: &self.orbit,
-                selected: self.selected.as_deref().and_then(|path| self.part(path)),
+                offset: self.offset(),
+                selected: &selected,
                 markers: &markers,
                 hot,
+                marks: &marks,
                 grid: self.grid,
             },
             width,
@@ -704,6 +695,17 @@ impl Studio {
         });
         done
     }
+}
+
+/// The part with this path among `parts` and the parts inside them.
+pub(super) fn part_in<'a>(parts: &'a [Part], path: &str) -> Option<&'a Part> {
+    parts.iter().find_map(|part| {
+        if part.path == path {
+            Some(part)
+        } else {
+            part_in(&part.parts, path)
+        }
+    })
 }
 
 /// The first mistake of a failure, as one line.

@@ -28,6 +28,12 @@ pub struct Model {
     /// The sockets of the model as a whole: the seven built-in ones and
     /// any the recipe declares at its top.
     pub sockets: Vec<Socket>,
+    /// Where the recipe's own zero is in the model. A recipe measures
+    /// `move` from its own zero; the model is then shifted so that its
+    /// zero point (`origin`) is at zero. Take this away from a point of
+    /// the model to get the recipe's measurement. Zero for a model read
+    /// from a file.
+    pub zero: Vec3,
 }
 
 /// One flat face of the finished model.
@@ -86,6 +92,11 @@ pub struct Part {
     /// How to get from the part's own space to the model's. Kept for
     /// later phases (a rig turns a part around its join).
     pub place: Transform,
+    /// How to get from the part's own space to the space of the list it
+    /// is in: where the recipe's `move`, `rotate` and `scale`, or its
+    /// join, put it there. For a part of the model's own list, the list
+    /// is the model, so the model's `zero` is in it.
+    pub local: Transform,
     /// Its sockets, where they finally are.
     pub sockets: Vec<Socket>,
     /// Which of [`Model::faces`] are its own, the faces of the parts

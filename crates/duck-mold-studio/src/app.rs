@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 
 use duck_mold_core::tools;
 use duck_mold_view::studio::Studio;
+use duck_mold_view::studio::handles::Tool;
 use eframe::egui::{self, Rect, RichText, Sense};
 
 use crate::recent::Recent;
@@ -260,6 +261,16 @@ impl StudioApp {
             }
             if redo {
                 let _ = studio.redo();
+            }
+            // The tools' keys, as in other 3D programs.
+            for (key, tool) in [
+                (egui::Key::G, Tool::Move),
+                (egui::Key::R, Tool::Rotate),
+                (egui::Key::S, Tool::Scale),
+            ] {
+                if ui.input(|input| input.modifiers.is_none() && input.key_pressed(key)) {
+                    studio.tool = tool;
+                }
             }
         }
 

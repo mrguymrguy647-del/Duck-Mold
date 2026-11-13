@@ -288,6 +288,34 @@ impl Mat3 {
         Mat3::around_z(degrees[2]) * Mat3::around_y(degrees[1]) * Mat3::around_x(degrees[0])
     }
 
+    /// The other way round from [`Mat3::from_rotate`]: the `rotate = [x,
+    /// y, z]` that gives this turn, in degrees, each from -180 to 180.
+    /// The matrix must be a plain turn (no stretch, no flip). When the
+    /// turn around y is a quarter turn, x and z can't be told apart, and
+    /// all of it is given to x.
+    pub fn to_rotate(&self) -> [f64; 3] {
+        let m = self.rows;
+        let sin_y = (-m[2][0]).clamp(-1.0, 1.0);
+        let y = sin_y.asin().to_degrees();
+        if sin_y.abs() > 0.999_999 {
+            let x = m[1][2].atan2(m[1][1]).to_degrees();
+            return [x, y, 0.0];
+        }
+        let x = (-m[2][1]).atan2(m[2][2]).to_degrees();
+        let z = m[1][0].atan2(m[0][0]).to_degrees();
+        [x, y, z]
+    }
+
+    /// One of its three columns: where it sends the direction x (0), y
+    /// (1) or z (2).
+    pub fn column(&self, which: usize) -> Vec3 {
+        vec3(
+            self.rows[0][which],
+            self.rows[1][which],
+            self.rows[2][which],
+        )
+    }
+
     /// A turn around any direction (`axis` must be 1 long). Seen from
     /// where `axis` points to, looking back, a positive angle is
     /// clockwise in Duck Forge's view. Around "up" it is the same turn
@@ -627,6 +655,48 @@ mod tests {
             assert_eq!(sin_cos_degrees(180.0 - degrees), (sin, -cos));
             assert_eq!(sin_cos_degrees(90.0 - degrees), (cos, sin));
         }
+    }
+
+    #[test]
+    fn a_turn_goes_back_to_its_rotate_numbers() {
+        // Every mix of turns, a quarter turn around y among them (where x
+        // and z can't be told apart): the numbers that come back give
+        // the same turn.
+        let angles = [
+            -170.0, -90.0, -45.0, -15.0, 0.0, 15.0, 30.0, 90.0, 135.0, 180.0,
+        ];
+        for x in angles {
+            for y in angles {
+                for z in angles {
+                    let turn = Mat3::from_rotate([x, y, z]);
+                    let back = Mat3::from_rotate(turn.to_rotate());
+                    for row in 0..3 {
+                        for column in 0..3 {
+                            let off = (turn.rows[row][column] - back.rows[row][column]).abs();
+                            assert!(
+                                off < 1e-9,
+                                "[{x}, {y}, {z}] came back as {:?}",
+                                turn.to_rotate()
+                            );
+                        }
+                    }
+                }
+            }
+        }
+        // A turn around one direction comes back as itself.
+        let back = Mat3::from_rotate([0.0, 45.0, 0.0]).to_rotate();
+        assert!((back[1] - 45.0).abs() < 1e-9 && back[0].abs() < 1e-9 && back[2].abs() < 1e-9);
+        assert_eq!(Mat3::IDENTITY.to_rotate(), [0.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn a_matrix_is_undone_by_its_inverse() {
+        let m = Mat3::from_rotate([20.0, 40.0, 10.0]) * Mat3::stretch(vec3(1.0, 2.0, -0.5));
+        let point = vec3(0.3, -1.2, 2.5);
+        let back = m.inverse().unwrap() * (m * point);
+        assert!((back - point).length() < 1e-12);
+        assert!(Mat3::stretch(vec3(1.0, 0.0, 1.0)).inverse().is_none());
+        assert_eq!(m.column(1), m * vec3(0.0, 1.0, 0.0));
     }
 
     #[test]

@@ -135,23 +135,49 @@ change would reach:
 > Made from the definition "eye". Changing its shape, size or colour
 > also changes: right_eye.
 
-**Adding and moving parts.** The selected part's sockets show as small
-round markers.
+**Moving, turning and sizing a part.** Three tools stand down the left
+edge of the picture, each with a key. They put handles on the selected
+part:
 
-- Click a marker and pick what to add there: one of the five shapes, or
-  a part the recipe defines. The new part is about half the size of the
+| Tool | Key | Handles | Dragging one |
+|---|---|---|---|
+| Move | G | Three arrows: red, green, blue | Moves the part left-right, up-down or front-back. Dragging the part itself slides it over the ground. |
+| Rotate | R | Three rings | Turns it, 15 degrees at a time. |
+| Scale | S | Three small boxes, and one in the middle | Stretches it one way, or makes all of it bigger or smaller. |
+
+- That is for a **free** part: one that is joined to nothing (a
+  duplicate, say). A **joined** part slides along the surface it sits
+  on, and has one ring, which twists it around its join. **Unjoin** in
+  the properties panel makes it free, right where it is.
+- Moves go in steps of 10 cm (1 cm when you are zoomed in close). Hold
+  **Ctrl** to move freely.
+- While you drag, the part moves under the pointer and a label shows
+  the number. The recipe is written once, when you let go, so one drag
+  is one step to undo. Escape lets go without changing anything.
+- The same numbers are in the properties panel (Position, Rotation,
+  Scale), to type.
+- The ground is always under the lowest part, because a game stands a
+  model on its underside. So lifting the lowest part leaves it on the
+  ground and brings the others down, and lifting the only part shows
+  nothing. The Studio says so when it happens.
+
+![A crate with the Move tool's arrows on it](docs/studio-handles.png)
+
+**Adding parts.** The selected part's sockets show as small round
+dots.
+
+- Click a dot and pick what to add there: one of the five shapes, or a
+  part the recipe defines. The new part is about half the size of the
   one it sits on, has its colour, and is selected, ready to change.
-- Click anywhere else on the selected part to add a part *at that
-  point*: the Studio declares a socket there (`on` a side, with a
-  `shift`) and joins the new part to it.
-- Drag the selected part to move it. The sockets of the parts it could
-  join light up; drop it on one to join it there. Drop it on a part's
-  surface and it goes to that point. A part that already has a socket
-  of its own on that part slides: its socket is moved, and no new one is
-  made.
+- Drag the selected part onto a dot of another part to join it there.
+  The dots of the parts it could join light up while you drag. A joined
+  part dropped on another part's surface goes to that point: the Studio
+  declares a socket there (`on` a side, with a `shift`), or, if the
+  part already has a socket of its own on that part, moves it.
 
-Each of these is an `add`, `join`, `add-socket` or `set-socket` edit in
-the recipe file, the same ones `duck-mold edit` makes.
+Each of these is a `set`, `add`, `join`, `unjoin`, `add-socket` or
+`set-socket` edit in the recipe file, the same ones `duck-mold edit`
+makes.
 
 **The parts library.** Under the parts list is the library: every
 recipe and model file (`.obj`, `.gltf`, `.glb`) in the folder `parts`

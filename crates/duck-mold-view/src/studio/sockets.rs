@@ -16,6 +16,7 @@ use duck_mold_core::math::Vec3;
 use duck_mold_core::model::Part;
 
 use super::Studio;
+use super::handles::Grip;
 use super::viewport::{self, MARKER_REACH, Marker};
 
 /// What a click in the viewport did, or found.
@@ -32,14 +33,6 @@ pub enum Clicked {
         part: String,
         /// The socket's name.
         socket: String,
-    },
-    /// It was on the selected part's surface: a socket can be made
-    /// there, and a part added to it.
-    Surface {
-        /// The part, by path.
-        part: String,
-        /// Where on it.
-        spot: Spot,
     },
 }
 
@@ -81,7 +74,7 @@ impl Studio {
     }
 
     /// The parts in the same list as `path`.
-    fn list_of(&self, path: &str) -> &[Part] {
+    pub(super) fn list_of(&self, path: &str) -> &[Part] {
         match around(path) {
             Some(around) => self.part(around).map(|part| part.parts.as_slice()),
             None => self.model().map(|model| model.parts.as_slice()),
@@ -157,9 +150,11 @@ impl Studio {
         let near = markers
             .iter()
             .enumerate()
-            .filter(|(_, marker)| marker.facing.dot(eye - marker.at) >= 0.0)
+            .filter(|(_, marker)| marker.facing.dot(eye - (marker.at + self.offset())) >= 0.0)
             .filter_map(|(at, marker)| {
-                let (mx, my) = self.orbit.on_screen(marker.at, width, height)?;
+                let (mx, my) = self
+                    .orbit
+                    .on_screen(marker.at + self.offset(), width, height)?;
                 let away = ((mx - x).powi(2) + (my - y).powi(2)).sqrt();
                 (away <= MARKER_REACH).then_some((away, at))
             })
@@ -171,34 +166,25 @@ impl Studio {
             return None;
         }
         let model = self.model()?;
-        let selected = self.selected.as_deref()?;
-        let target = match &self.dragging {
-            Some(dragged) => {
-                // Through the dragged part, to what is behind it.
-                let skip = self.part(dragged)?.faces.clone();
-                let hit = viewport::pick(model, &self.orbit, self.view, (x, y), Some(&skip))?;
-                let onto = self
-                    .could_join(dragged)
-                    .into_iter()
-                    .find(|part| part.faces.contains(&hit.face))?;
-                (onto, hit)
-            }
-            None => {
-                let hit = viewport::pick(model, &self.orbit, self.view, (x, y), None)?;
-                let part = self.part(selected)?;
-                // The selected part itself, when no part inside it would
-                // be selected by the click instead.
-                let innermost = !part
-                    .parts
-                    .iter()
-                    .any(|inner| inner.faces.contains(&hit.face));
-                if !part.faces.contains(&hit.face) || !innermost || self.facts().is_none() {
-                    return None;
-                }
-                (part, hit)
-            }
-        };
-        let (part, hit) = target;
+        self.selected.as_deref()?;
+        // Only while a part is dragged can a surface be aimed at. (A
+        // click on the part itself is the start of a drag now; "add a
+        // part here" is in the right-click menu.)
+        let dragged = self.dragging.as_ref()?;
+        // Through the dragged part, to what is behind it.
+        let skip = self.part(dragged)?.faces.clone();
+        let hit = viewport::pick(
+            model,
+            &self.orbit,
+            self.offset(),
+            self.view,
+            (x, y),
+            Some(&skip),
+        )?;
+        let part = self
+            .could_join(dragged)
+            .into_iter()
+            .find(|part| part.faces.contains(&hit.face))?;
         let spot = edit::spot(model, part, hit.point, hit.normal)?;
         Some(Aim::Surface {
             part: part.path.clone(),
@@ -209,9 +195,9 @@ impl Studio {
     }
 
     /// A click in the viewport at (`x`, `y`) of a picture `size`. On a
-    /// socket of the selected part, or on its surface, it finds a place
-    /// to add a part, and selects nothing new. Anywhere else it selects,
-    /// as [`Studio::click`] does.
+    /// socket of the selected part it finds a place to add a part, and
+    /// selects nothing new. Anywhere else it selects, as
+    /// [`Studio::click`] does.
     pub fn point_at(&mut self, size: (usize, usize), at: (f64, f64)) -> Clicked {
         self.hover(size, Some(at));
         let markers = self.markers();
@@ -220,12 +206,33 @@ impl Studio {
                 part: markers[index].part.clone(),
                 socket: markers[index].socket.clone(),
             },
-            Some(Aim::Surface { part, spot, .. }) => Clicked::Surface { part, spot },
-            None => match self.click(size, at) {
+            _ => match self.click(size, at) {
                 Some(path) => Clicked::Selected(path.to_owned()),
                 None => Clicked::Nothing,
             },
         }
+    }
+
+    /// The point of a part's surface under the pointer, written the way a
+    /// socket is declared: for "add a part here". The part is the
+    /// selected one if the pointer is on it, and otherwise the whole
+    /// part the pointer is on.
+    pub fn spot_at(&self, size: (usize, usize), at: (f64, f64)) -> Option<(String, Spot)> {
+        let model = self.model()?;
+        let hit = viewport::pick(model, &self.orbit, self.offset(), size, at, None)?;
+        let part = self
+            .selected
+            .as_deref()
+            .and_then(|path| self.part(path))
+            .filter(|part| part.faces.contains(&hit.face))
+            .or_else(|| {
+                model
+                    .parts
+                    .iter()
+                    .find(|part| part.faces.contains(&hit.face))
+            })?;
+        let spot = edit::spot(model, part, hit.point, hit.normal)?;
+        Some((part.path.clone(), spot))
     }
 
     /// A name for a new part next to `beside`: `base`, or `base_2`...
@@ -300,7 +307,7 @@ impl Studio {
     }
 
     /// A name for a new socket on `part`: `spot`, `spot_2`...
-    fn new_socket_name(&self, part: &str) -> String {
+    pub(super) fn new_socket_name(&self, part: &str) -> String {
         let taken: Vec<String> = self
             .part(part)
             .map(|part| {
@@ -347,108 +354,40 @@ impl Studio {
         ])
     }
 
-    /// Starts dragging the selected part, if the pointer is on it and it
-    /// can be moved. True if a drag began.
+    /// Starts dragging the selected part itself, if the pointer is on it
+    /// and it can be moved. True if a drag began. ([`Studio::grab`] also
+    /// takes hold of handles; this is the part only.)
     pub fn drag_start(&mut self, size: (usize, usize), at: (f64, f64)) -> bool {
-        self.hover(size, Some(at));
-        if self.look_only || self.facts().is_none() {
-            return false;
+        match self.grab(size, at) {
+            Some(Grip::Body) => true,
+            _ => {
+                self.cancel_drag();
+                false
+            }
         }
-        let Some(selected) = self.selected.clone() else {
-            return false;
-        };
-        if own_name(&selected).starts_with('#') {
-            return false;
-        }
-        let on_it = self.model().is_some_and(|model| {
-            viewport::pick(model, &self.orbit, size, at, None).is_some_and(|hit| {
-                self.part(&selected)
-                    .is_some_and(|part| part.faces.contains(&hit.face))
-            })
-        });
-        if on_it {
-            self.dragging = Some(selected);
-        }
-        on_it
     }
 
     /// Lets go of a drag without moving anything.
     pub fn drag_cancel(&mut self) {
-        self.dragging = None;
+        self.cancel_drag();
     }
 
     /// Drops the dragged part where the pointer is.
     /// - On a socket: a `join` edit.
-    /// - On a part's surface: the part slides there. If it sits on a
-    ///   socket of its own on that part, that socket is moved
+    /// - A joined part on a part's surface: it slides there. If it sits
+    ///   on a socket of its own on that part, that socket is moved
     ///   (`set-socket`); otherwise a socket is made there (`add-socket`)
     ///   and the part joined to it (`join`).
-    /// - On nothing: nothing changes.
+    /// - A free part anywhere else: it has moved across the ground
+    ///   (`set --move`).
+    /// - A joined part on nothing: nothing changes.
     ///
     /// `None` if nothing was being dragged.
     pub fn drag_end(&mut self) -> Option<Result<String, String>> {
-        let dragged = self.dragging.clone()?;
-        let markers = self.markers();
-        let aim = self.aim(&markers);
-        self.dragging = None;
-        Some(match aim {
-            Some(Aim::Marker(index)) => {
-                let marker = &markers[index];
-                self.apply(&Edit::Join {
-                    part: dragged,
-                    to: format!("{}.{}", marker.part, marker.socket),
-                    attach: None,
-                })
-            }
-            Some(Aim::Surface { part, spot, .. }) => self.slide(&dragged, &part, &spot),
-            None => {
-                let why = "Not moved: drop it on a socket, or on another part".to_owned();
-                self.say(why.clone());
-                Err(why)
-            }
-        })
-    }
-
-    /// Puts `dragged` at a point of `onto`'s surface.
-    fn slide(&mut self, dragged: &str, onto: &str, spot: &Spot) -> Result<String, String> {
-        // The socket it sits on now, if that is on the same part and
-        // nothing else sits on it: then that socket is what moves.
-        let joined = self.part(dragged).and_then(|part| part.attached_to.clone());
-        let its_own = joined.as_deref().and_then(|to| {
-            let (target, socket) = to.rsplit_once('.')?;
-            let alone = self
-                .list_of(dragged)
-                .iter()
-                .filter(|part| part.attached_to.as_deref() == Some(to))
-                .count()
-                == 1;
-            (target == own_name(onto) && alone).then(|| socket.to_owned())
-        });
-        if let Some(socket) = its_own {
-            let moved = self.apply(&Edit::SetSocket {
-                socket: format!("{onto}.{socket}"),
-                on: Some(spot.on.clone()),
-                shift: Some(spot.shift),
-            });
-            // A built-in socket (`top`) can't be moved: make a new one.
-            if moved.is_ok() {
-                return moved;
-            }
+        if let Some(at) = self.pointer {
+            self.drag(self.view, at, false);
         }
-        let socket = self.new_socket_name(onto);
-        self.apply_all(&[
-            Edit::AddSocket {
-                part: onto.to_owned(),
-                name: socket.clone(),
-                on: spot.on.clone(),
-                shift: spot.shift,
-            },
-            Edit::Join {
-                part: dragged.to_owned(),
-                to: format!("{onto}.{socket}"),
-                attach: None,
-            },
-        ])
+        self.release()
     }
 
     /// What can be added to a socket beside the five shapes: the parts

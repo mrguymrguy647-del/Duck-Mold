@@ -31,6 +31,9 @@ pub struct Draft {
     height: f64,
     segments: u32,
     twist: f64,
+    position: [f64; 3],
+    rotation: [f64; 3],
+    scale: [f64; 3],
     /// The "new colour" form, when it is open.
     new_color: Option<NewColor>,
     /// A palette colour being changed with the colour picker.
@@ -50,6 +53,9 @@ impl Draft {
         self.height = facts.sizes.height.unwrap_or(1.0);
         self.segments = facts.sizes.segments.unwrap_or(16);
         self.twist = facts.twist;
+        self.position = facts.position;
+        self.rotation = facts.rotation;
+        self.scale = facts.scale;
         self.recolor = None;
         self.confirm_remove = None;
     }
@@ -321,6 +327,88 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     ui.end_row();
                 }
 
+                // ---- where a free part is, and how it is turned
+                if facts.to.is_none() {
+                    let label = ui
+                        .label("Position")
+                        .on_hover_text("Where its middle is: x, y, z in metres");
+                    ui.horizontal(|ui| {
+                        let mut done = false;
+                        for (at, axis) in ["x", "y", "z"].into_iter().enumerate() {
+                            let field = ui
+                                .add(
+                                    DragValue::new(&mut draft.position[at])
+                                        .speed(0.01)
+                                        .range(-10_000.0..=10_000.0)
+                                        .max_decimals(3),
+                                )
+                                .labelled_by(label.id)
+                                .on_hover_text(axis);
+                            done |= settled(&field);
+                        }
+                        if done && draft.position != facts.position {
+                            edits.push(set(Changes {
+                                move_to: Some(draft.position),
+                                ..Changes::default()
+                            }));
+                        }
+                    });
+                    ui.end_row();
+
+                    let label = ui
+                        .label("Rotation")
+                        .on_hover_text("Degrees around x, then y, then z");
+                    ui.horizontal(|ui| {
+                        let mut done = false;
+                        for (at, axis) in ["x", "y", "z"].into_iter().enumerate() {
+                            let field = ui
+                                .add(
+                                    DragValue::new(&mut draft.rotation[at])
+                                        .speed(1.0)
+                                        .range(-36_000.0..=36_000.0)
+                                        .max_decimals(1)
+                                        .suffix("°"),
+                                )
+                                .labelled_by(label.id)
+                                .on_hover_text(axis);
+                            done |= settled(&field);
+                        }
+                        if done && draft.rotation != facts.rotation {
+                            edits.push(set(Changes {
+                                rotate: Some(draft.rotation),
+                                ..Changes::default()
+                            }));
+                        }
+                    });
+                    ui.end_row();
+                }
+                // ---- how much bigger it is, joined or not
+                let label = ui
+                    .label("Scale")
+                    .on_hover_text("How many times bigger it is, each way: 1 is as it was made");
+                ui.horizontal(|ui| {
+                    let mut done = false;
+                    for (at, axis) in ["x", "y", "z"].into_iter().enumerate() {
+                        let field = ui
+                            .add(
+                                DragValue::new(&mut draft.scale[at])
+                                    .speed(0.01)
+                                    .range(0.001..=1000.0)
+                                    .max_decimals(3),
+                            )
+                            .labelled_by(label.id)
+                            .on_hover_text(axis);
+                        done |= settled(&field);
+                    }
+                    if done && draft.scale != facts.scale {
+                        edits.push(set(Changes {
+                            scale: Some(draft.scale),
+                            ..Changes::default()
+                        }));
+                    }
+                });
+                ui.end_row();
+
                 // ---- colour
                 let colour_label = ui.label("Colour");
                 ui.horizontal(|ui| {
@@ -567,6 +655,14 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     to: None,
                     mirror: true,
                 });
+            }
+            if facts.to.is_some()
+                && ui
+                    .button("Unjoin")
+                    .on_hover_text("Make it free, right where it is, so it can be moved anywhere")
+                    .clicked()
+            {
+                edits.push(Edit::Unjoin { part: path.clone() });
             }
             if ui.button("Remove").clicked() {
                 match hanging(studio, &path) {

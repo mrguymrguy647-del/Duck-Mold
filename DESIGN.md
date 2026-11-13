@@ -1730,6 +1730,35 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 1):*
+
+- **Moves snap in steps from where the part was**, not onto the grid's
+  lines. Shapes are placed by their middle, so a crate half a metre
+  wide standing on a floor has its middle at 0.35 m; snapping it onto
+  the lines would lift it off the floor every time it was touched. In
+  steps of 0.1 m it stays on the floor. Scales do snap to whole
+  tenths, and turns to whole steps of 15 degrees from where they were.
+- **Lifting the lowest part** leaves it on the ground and brings the
+  others down, and the status line says so. Only a model with one part
+  shows nothing at all, and the status line says that instead.
+- **A ring turns the part around the list's own x, y or z**, and the
+  recipe's `rotate` is worked out afresh as the three numbers that give
+  the same turn (to a hundredth of a degree). After a second turn
+  around another direction the numbers can all change; the part is
+  where the rings put it.
+- **Rotate turns a free part about the point `move` places**, the
+  shape's own middle, so only `rotate` changes. Move and Scale stand at
+  the middle of the part's box.
+- **`unjoin` was needed sooner than the right-click menu**, so it is a
+  button in the properties panel already.
+- A click on the selected part no longer opens the "add here" list
+  (decision 3). Until the right-click menu of step 5, a part is added
+  at a point of a surface from the command line only.
+- The library gained what this needed: a matrix's inverse and its turn
+  back to `rotate` numbers, each part's place in its own list, the
+  model's zero in the recipe's measurements, and `apply_many`, which
+  works out several edits as one and is what the preview uses.
+
 ### Why the cube couldn't be moved
 
 A new model is one box. Duplicate it, and the copy is a *free* part: it

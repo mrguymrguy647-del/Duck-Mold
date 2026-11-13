@@ -89,6 +89,23 @@ pub enum Change {
         /// Degrees to twist it around its join.
         #[arg(long, allow_negative_numbers = true)]
         twist: Option<f64>,
+        /// Where a free part's middle goes: x,y,z, in metres. (A joined
+        /// part goes where its socket is.)
+        #[arg(long = "move", value_name = "X,Y,Z", allow_hyphen_values = true)]
+        move_to: Option<String>,
+        /// How a free part is turned: degrees around x, then y, then z.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        rotate: Option<String>,
+        /// How much bigger the part is: one number, or x,y,z to stretch
+        /// it.
+        #[arg(long, value_name = "N or X,Y,Z")]
+        scale: Option<String>,
+    },
+    /// Make a joined part free, exactly where it stands: its join becomes
+    /// a `move` and a `rotate`.
+    Unjoin {
+        /// The part.
+        part: String,
     },
     /// Copy a part, comments and all, straight after it.
     Duplicate {
@@ -249,6 +266,9 @@ impl Change {
                 color,
                 face_colors,
                 twist,
+                move_to,
+                rotate,
+                scale,
             } => Edit::Set {
                 part: part.clone(),
                 changes: Changes {
@@ -267,8 +287,24 @@ impl Change {
                     })
                     .collect::<Result<_, _>>()?,
                 twist: *twist,
+                move_to: move_to
+                    .as_deref()
+                    .map(|written| three("--move", written))
+                    .transpose()?,
+                rotate: rotate
+                    .as_deref()
+                    .map(|written| three("--rotate", written))
+                    .transpose()?,
+                scale: scale
+                    .as_deref()
+                    .map(|written| match written.trim().parse::<f64>() {
+                        Ok(all) => Ok([all; 3]),
+                        Err(_) => three("--scale", written),
+                    })
+                    .transpose()?,
                 },
             },
+            Change::Unjoin { part } => Edit::Unjoin { part: part.clone() },
             Change::Duplicate {
                 part,
                 name,

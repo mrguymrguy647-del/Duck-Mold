@@ -1092,6 +1092,228 @@ fn the_recipes_definitions_and_free_names_are_listed() {
     assert_eq!(unused_name("box", &taken), "box_3");
 }
 
+// ---- Phase 3, step 1: free parts ---------------------------------------------
+
+fn robot() -> String {
+    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/robot.toml"))
+        .unwrap()
+}
+
+/// Every corner of two models, compared.
+fn same_shape(a: &Model, b: &Model) -> bool {
+    a.faces.len() == b.faces.len()
+        && a.faces.iter().zip(&b.faces).all(|(a, b)| {
+            a.corners.len() == b.corners.len()
+                && a.corners
+                    .iter()
+                    .zip(&b.corners)
+                    .all(|(a, b)| (*a - *b).length() < 1e-3)
+        })
+}
+
+#[test]
+fn a_free_part_is_moved_turned_and_scaled() {
+    // The pole stands free on the base: give it a place of its own first.
+    let free = LAMP.replace("attach = \"bottom\"\nto = \"base.pole\"\ntwist = 15\n", "");
+    let edit = set_with(
+        "pole",
+        Changes {
+            move_to: Some([0.5, 1.0, -0.25]),
+            rotate: Some([0.0, 45.0, 0.0]),
+            scale: Some([2.0, 2.0, 2.0]),
+            ..Changes::default()
+        },
+    );
+    let applied = done(&free, Syntax::Toml, &edit);
+    let (gone, new) = changed(&free, &applied.text);
+    assert!(gone.is_empty(), "{gone:?}");
+    // In the order a recipe usually has them; one number for a scale
+    // that is the same each way.
+    assert_eq!(
+        new,
+        ["rotate = [0, 45, 0]", "move = [0.5, 1, -0.25]", "scale = 2"]
+    );
+    assert_eq!(
+        applied.summary,
+        "set \"pole\": move [0.5, 1, -0.25], rotate [0, 45, 0], scale 2"
+    );
+    // Changing them again changes the numbers where they stand.
+    let again = done(
+        &applied.text,
+        Syntax::Toml,
+        &set_with(
+            "pole",
+            Changes {
+                move_to: Some([0.5, 1.0, 0.75]),
+                scale: Some([1.0, 2.0, 1.0]),
+                ..Changes::default()
+            },
+        ),
+    );
+    assert_eq!(
+        changed(&applied.text, &again.text),
+        (
+            vec!["move = [0.5, 1, -0.25]", "scale = 2"],
+            vec!["move = [0.5, 1, 0.75]", "scale = [1, 2, 1]"]
+        )
+    );
+    // The part is where the recipe says, measured from the recipe's own
+    // zero, wherever the model's zero point is.
+    let model = again.model.unwrap();
+    let pole = part(&model, "pole");
+    let at = pole.local.shift - model.zero;
+    assert!((at - vec3(0.5, 1.0, 0.75)).length() < 1e-9, "{at:?}");
+
+    // The same in JSON.
+    let json = to_json(&free);
+    let applied = done(&json, Syntax::Json, &edit);
+    assert!(
+        applied.text.contains("\"move\": [0.5, 1, -0.25]"),
+        "{}",
+        applied.text
+    );
+}
+
+#[test]
+fn a_joined_part_isnt_moved_or_turned_but_says_how() {
+    let failure = refused(
+        LAMP,
+        &set_with(
+            "pole",
+            Changes {
+                move_to: Some([1.0, 0.0, 0.0]),
+                ..Changes::default()
+            },
+        ),
+    );
+    assert_eq!(failure.exit_code(), 2);
+    assert_eq!(
+        failure.report().errors[0].message,
+        "\"pole\" is joined to base.pole, so it goes where that socket is. Slide the socket with set-socket, or make the part free first with unjoin"
+    );
+    let failure = refused(
+        LAMP,
+        &set_with(
+            "pole",
+            Changes {
+                rotate: Some([0.0, 90.0, 0.0]),
+                ..Changes::default()
+            },
+        ),
+    );
+    assert!(failure.report().errors[0].message.contains("with --twist"));
+    // Scale is the part's own, joined or not.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &set_with(
+            "pole",
+            Changes {
+                scale: Some([1.0, 0.5, 1.0]),
+                ..Changes::default()
+            },
+        ),
+    );
+    assert!(
+        applied.text.contains("twist = 15\nscale = [1, 0.5, 1]\n"),
+        "{}",
+        applied.text
+    );
+}
+
+#[test]
+fn unjoin_leaves_the_part_exactly_where_it_stood() {
+    let recipe = robot();
+    let before = done(&recipe, Syntax::Toml, &add_colour_x()).model.unwrap();
+    // A plain part, a twisted one, a part made of parts, a mirrored one,
+    // and a part inside a definition.
+    for name in [
+        "head",
+        "panel",
+        "antenna_tip",
+        "left_arm",
+        "right_arm",
+        "left_leg/foot",
+    ] {
+        let applied = done(&recipe, Syntax::Toml, &Edit::Unjoin { part: name.into() });
+        let after = applied.model.unwrap();
+        assert!(
+            same_shape(&before, &after),
+            "{name} moved when it was unjoined"
+        );
+        let free = part(&after, name);
+        assert_eq!(free.attached_to, None, "{name}");
+        // Only that part's lines changed: its join became a place. (A
+        // line that is in both lists only moved past the new ones.)
+        let (gone, new) = changed(&recipe, &applied.text);
+        for line in gone.iter().filter(|line| !new.contains(line)) {
+            assert!(
+                line.starts_with("attach = ") || line.starts_with("to = "),
+                "{name}: lost {line}"
+            );
+        }
+        let added: Vec<&&str> = new.iter().filter(|line| !gone.contains(line)).collect();
+        assert!(
+            added.iter().any(|line| line.starts_with("move = [")),
+            "{name}: {added:?}"
+        );
+        for line in added {
+            assert!(
+                line.starts_with("move = [") || line.starts_with("rotate = ["),
+                "{name}: gained {line}"
+            );
+        }
+    }
+    // What hung from the head still hangs from it.
+    let applied = done(
+        &recipe,
+        Syntax::Toml,
+        &Edit::Unjoin {
+            part: "head".into(),
+        },
+    );
+    assert!(applied.text.contains("to = \"head.antenna\""));
+    assert_eq!(
+        applied.summary,
+        "unjoined \"head\" from body.neck: it is free, where it stood"
+    );
+
+    // A twisted part keeps its turn, as `rotate`.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &Edit::Unjoin {
+            part: "pole".into(),
+        },
+    );
+    let (gone, new) = changed(LAMP, &applied.text);
+    assert_eq!(
+        gone,
+        ["attach = \"bottom\"", "to = \"base.pole\"", "twist = 15"]
+    );
+    assert_eq!(new[0], "rotate = [0, 15, 0]");
+    assert!(new[1].starts_with("move = [0, 0.525, 0]"), "{new:?}");
+
+    // A part that is free already says so.
+    let failure = refused(
+        &recipe,
+        &Edit::Unjoin {
+            part: "body".into(),
+        },
+    );
+    assert_eq!(
+        failure.report().errors[0].message,
+        "\"body\" isn't joined to anything: it is free already"
+    );
+}
+
+fn add_colour_x() -> Edit {
+    Edit::AddColor {
+        name: "x".into(),
+        hex: "#000000".into(),
+    }
+}
+
 #[test]
 fn a_part_inside_another_file_is_refused_with_where_to_go() {
     let recipe = "version = 0\n[[parts]]\nname = \"wheel\"\nfile = \"wheel.toml\"\n";
@@ -1609,6 +1831,9 @@ fn every_kind_of_edit_has_a_name() {
             socket: String::new(),
             on: None,
             shift: None,
+        },
+        Edit::Unjoin {
+            part: String::new(),
         },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();

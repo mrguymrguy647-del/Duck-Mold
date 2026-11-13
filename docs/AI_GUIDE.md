@@ -497,6 +497,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> rename <part> <new-name>` | Renames a part, and every `to`, `from` and `origin` that names it. |
 | `duck-mold edit <recipe> join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes its own socket. A part placed with `move` loses it. |
 | `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--height`, `--segments`, `--color`, `--face-color top=plank` (repeatable), `--twist`. Several at once are one edit. A new shape drops the sizes and face colours it doesn't have. |
+| `duck-mold edit <recipe> set <part> --move x,y,z` | Puts a **free** part (one that isn't joined) there: its middle, in metres, measured from the recipe's own zero. Also `--rotate x,y,z` (degrees around x, then y, then z) and `--scale n` or `--scale x,y,z`. A joined part refuses `--move` and `--rotate`, and says what to do instead; `--scale` works on any part. |
+| `duck-mold edit <recipe> unjoin <part>` | Makes a joined part free, exactly where it stands: its `attach`, `to` and `twist` become a `move` and a `rotate`. The model doesn't change; the part can then be moved anywhere. |
 | `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. |
 | `duck-mold edit <recipe> duplicate <part> --mirror` | A mirror image: a right arm from a left arm. The copy gets `mirror = "x"`, its twist is reversed, and `left` and `right` are swapped in its name and in the socket it joins (`body.left_arm` becomes `body.right_arm`), unless `--name` and `--to` say otherwise. |
 | `duck-mold edit <recipe> add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
@@ -533,9 +535,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   is lost.
 - When `--attach` isn't given, a new part joins by the side opposite the
   socket (`bottom` on a `top`), otherwise by its `bottom`.
-- Not edits: `move`, `rotate`, `scale`, `mirror` (except through
-  `duplicate --mirror`), sockets written with `at` or `from`, and
-  `define`. Type those in the recipe.
+- Not edits: `mirror` (except through `duplicate --mirror`), sockets
+  written with `at` or `from`, and `define`. Type those in the recipe.
 
 ## 11. Mistakes to avoid
 
