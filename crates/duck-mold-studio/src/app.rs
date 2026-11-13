@@ -49,6 +49,9 @@ pub struct StudioApp {
     /// Set when Tab was pressed while nothing was being typed: taken
     /// before egui could move the focus with it.
     tab: bool,
+    /// The part a definition is being made from, and the name being
+    /// typed for it, while the window that asks is open.
+    defining: Option<(String, String)>,
 }
 
 /// The folder a person's own models go in: `Duck Mold` in their
@@ -96,6 +99,7 @@ impl StudioApp {
             gallery: gallery::Gallery::default(),
             models_folder: own_models_folder(),
             tab: false,
+            defining: None,
             tour: None,
             add_button: None,
         }
@@ -600,6 +604,22 @@ impl StudioApp {
                 Action::CornerMode => {
                     let _ = studio.toggle_corner_mode();
                 }
+                Action::MakeDefinition => {
+                    if let Some(part) = studio.selected().map(str::to_owned) {
+                        let own = part.rsplit('/').next().unwrap_or(&part).to_owned();
+                        let name = duck_mold_core::edit::unused_name(
+                            own.trim_start_matches('#'),
+                            &studio.definitions(),
+                        );
+                        self.defining = Some((part, name));
+                    }
+                }
+                Action::SaveToLibrary => {
+                    if let Some(part) = studio.selected().map(str::to_owned) {
+                        // What it did, or why not, is in the status line.
+                        let _ = studio.save_to_library(&part);
+                    }
+                }
                 Action::Unjoin => {
                     let _ = studio.unjoin_selected();
                 }
@@ -670,6 +690,7 @@ impl StudioApp {
             }
         }
         self.help_window(ui);
+        self.definition_window(ui);
         if open_another && let Some(path) = pick_file() {
             self.open(path, false);
         }
@@ -689,6 +710,58 @@ impl StudioApp {
     }
 
     /// The list of keys, or what the program is: Help's two windows.
+    /// The window that asks for a definition's name.
+    fn definition_window(&mut self, ui: &mut egui::Ui) {
+        let Some((part, name)) = &mut self.defining else {
+            return;
+        };
+        let mut open = true;
+        let mut make = false;
+        let mut cancel = false;
+        egui::Window::new("Make a definition")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                ui.label(format!(
+                    "What \"{part}\" is made of becomes a definition the recipe can use again: Add > Defined in this recipe."
+                ));
+                ui.horizontal(|ui| {
+                    let label = ui.label("Called");
+                    let field = ui
+                        .add(egui::TextEdit::singleline(name).desired_width(140.0))
+                        .labelled_by(label.id);
+                    if field.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                        make = true;
+                    }
+                });
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(!name.is_empty(), theme::primary_button("Make"))
+                        .clicked()
+                    {
+                        make = true;
+                    }
+                    if ui.button("Cancel").clicked() {
+                        cancel = true;
+                    }
+                });
+            });
+        if cancel {
+            open = false;
+        }
+        if make && let Some(studio) = &mut self.studio {
+            let (part, name) = (part.clone(), name.clone());
+            // What it did, or why not, is in the status line.
+            let _ = studio.apply(&duck_mold_core::edit::Edit::Define { part, name });
+            open = false;
+        }
+        if !open {
+            self.defining = None;
+        }
+    }
+
     fn help_window(&mut self, ui: &mut egui::Ui) {
         let Some(showing) = self.showing else {
             return;

@@ -2695,6 +2695,10 @@ fn every_kind_of_edit_has_a_name() {
             corners: Vec::new(),
             by: [0.0; 3],
         },
+        Edit::Define {
+            part: String::new(),
+            name: String::new(),
+        },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
     assert_eq!(names, Edit::COMMANDS);

@@ -522,6 +522,61 @@ pub fn new_file(path: &Path) -> Result<Inspection, Failure> {
     inspect_file(path)
 }
 
+/// `duck-mold save-part`: writes a part of a recipe alone, as a recipe
+/// of its own (for the library), to `output`, which must end in `.toml`
+/// and must not be there yet. The recipe doesn't change.
+pub fn save_part(recipe: &Path, part: &str, output: &Path) -> Result<Inspection, Failure> {
+    let text = std::fs::read_to_string(recipe).map_err(|error| {
+        let reason = match error.kind() {
+            std::io::ErrorKind::NotFound => "there is no such file",
+            _ => "it didn't work",
+        };
+        Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!("can't read \"{}\": {reason}", display_path(recipe)),
+        )))
+    })?;
+    let Some(syntax) = crate::source::Syntax::from_path(recipe) else {
+        return Err(Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!(
+                "\"{}\" isn't a recipe: its name must end in .toml or .json",
+                display_path(recipe)
+            ),
+        ))));
+    };
+    if output.exists() {
+        return Err(Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!(
+                "\"{}\" is already there: save-part never writes over a file",
+                display_path(output)
+            ),
+        ))));
+    }
+    let saved = crate::edit::part_recipe(&text, syntax, recipe, part)?;
+    if let Some(folder) = output
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(folder).map_err(|error| {
+            Failure::Usage(Box::new(Issue::error(
+                Code::Io,
+                "",
+                format!(
+                    "can't make the folder \"{}\": {error}",
+                    display_path(folder)
+                ),
+            )))
+        })?;
+    }
+    new_recipe(output, &saved)?;
+    inspect_file(output)
+}
+
 /// Writes a new recipe's text to `path`, which must end in `.toml` and
 /// must not be there yet.
 fn new_recipe(path: &Path, text: &str) -> Result<(), Failure> {

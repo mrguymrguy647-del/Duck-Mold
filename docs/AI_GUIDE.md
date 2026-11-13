@@ -609,6 +609,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> turn-face <part> <faces> --by x,y,z` | Adds a turn of faces (degrees around x, y, z, about their middle). Adds to a turn of the same faces right before it. |
 | `duck-mold edit <recipe> scale-face <part> <faces> --by n` | Adds a scale of faces (one number, or `x,y,z`). Multiplies a scale of the same faces right before it. |
 | `duck-mold edit <recipe> move-edge <part> <a+b> --by x,y,z` | Adds a move of an edge (where faces `a` and `b` meet; several with commas). Adds to a move of the same edges right before it. |
+| `duck-mold edit <recipe> define <part> <name>` | Makes a definition from a part of the model's own list: its shape and sizes (or file), changes, colours and own sockets move to `[define.<name>]`, and the part becomes `use = "<name>"` where it stands. Add more with `add <new> --use <name>`; shaping one shapes them all. |
 | `duck-mold edit <recipe> move-corner <part> <a+b+c> --by x,y,z` | Adds a move of a corner (where faces `a`, `b` and `c` meet; several with commas). Adds to a move of the same corners right before it. A rock: cut a box through the middle three ways (`cut` right, top and front, `--at 0`), then move its corners in and out. |
 | `duck-mold edit <recipe> cut <part> --toward <side> --at <share>` | Adds a cut all the way round, facing a side, `--at` of the way from the middle (0) to that side (just under 1). `--name` names the slices. `set-change --at` moves it. |
 | `duck-mold edit <recipe> remove-change <part> <number>` | Takes one change away (`--all`: every one, and the part is a plain box again). Refused if a later change or a colour names a face only that change made: the mistakes it would cause are listed. |
@@ -630,6 +631,11 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   `use = "arm"`) is changed in the definition, so every part using it
   changes. The report says so: `"definition": "arm", "also_changes":
   ["right_arm/hand"]`.
+- **`duck-mold save-part <recipe> <part> <file>`** (not an `edit`: the
+  recipe doesn't change) writes the part alone as a recipe of its own,
+  with the palette colours it uses and none of where it stands: put it
+  in the `parts` folder next to a recipe and it is in the Studio's
+  library. It never writes over a file.
 - **A part made from a defined part** (`left_eye`, which is `use =
   "eye"`): `set --shape`, `--size`, `--radius`, `--height`,
   `--segments`, `--color` and `--face-color` change the definition,

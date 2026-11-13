@@ -365,6 +365,16 @@ pub enum Edit {
         /// How far along x, y and z.
         by: [f64; 3],
     },
+    /// Makes a definition from a part: what it is made of (its shape and
+    /// sizes, changes, colours and own sockets) moves to
+    /// `[define.<name>]`, and the part becomes `use = "<name>"` where it
+    /// stands.
+    Define {
+        /// The part.
+        part: String,
+        /// The definition's name.
+        name: String,
+    },
     /// Moves corners of a box (`top+front+left`: where those faces
     /// meet) by x, y and z metres: a `move` in its `changes`. Right after
     /// a move of the same corners, it adds to that one.
@@ -425,7 +435,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 25] = [
+    pub const COMMANDS: [&'static str; 26] = [
         "add",
         "remove",
         "rename",
@@ -451,6 +461,7 @@ impl Edit {
         "move-edge",
         "cut",
         "move-corner",
+        "define",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -481,6 +492,7 @@ impl Edit {
             Edit::MoveEdge { .. } => "move-edge",
             Edit::Cut { .. } => "cut",
             Edit::MoveCorner { .. } => "move-corner",
+            Edit::Define { .. } => "define",
         }
     }
 }
@@ -2217,6 +2229,77 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 touched: Some(found),
             })
         }
+        Edit::Define { part, name } => {
+            check_name(name)?;
+            let found = find(doc, part)?;
+            if found.list != [key("parts")] || found.definition.is_some() {
+                return Err(problem(
+                    Code::Unsupported,
+                    format!(
+                        "only a part of the model's own list can be made a definition in this version: \"{part}\" is inside another part"
+                    ),
+                ));
+            }
+            let table = found.path();
+            let own = doc
+                .node(&table)
+                .ok_or_else(|| problem(Code::UnknownPart, "no such part"))?;
+            if let Some(used) = text_of(own, "use") {
+                return Err(problem(
+                    Code::Conflict,
+                    format!("\"{part}\" is made from the definition \"{used}\" already"),
+                ));
+            }
+            if has_field(own, "parts") {
+                return Err(problem(
+                    Code::Unsupported,
+                    format!(
+                        "\"{part}\" is made of parts of its own: only a part made from a shape or a file can be made a definition in this version"
+                    ),
+                ));
+            }
+            if doc.node(&[key("define"), key(name)]).is_some() {
+                return Err(problem(
+                    Code::DuplicateName,
+                    format!("there is a definition \"{name}\" already: choose another name"),
+                )
+                .got(name.as_str()));
+            }
+            let fields = made_of(doc, &table);
+            for (field, _) in fields.iter().rev() {
+                doc.remove_field(&table, field).map_err(cant)?;
+            }
+            set(doc, &table, "use", text(name))?;
+            match doc.syntax {
+                Syntax::Toml => {
+                    let header = format!("define.{name}");
+                    doc.add_block_before(&table, &header, &fields)
+                        .map_err(cant)?;
+                }
+                Syntax::Json => {
+                    let definition = Val::Table(fields);
+                    if doc.entries(&[key("define")]).is_some() {
+                        doc.set_field(&[key("define")], name, &definition, &[])
+                            .map_err(cant)?;
+                    } else {
+                        doc.set_field(
+                            &[],
+                            "define",
+                            &Val::Table(vec![(name.clone(), definition)]),
+                            &crate::recipe::TOP_FIELDS,
+                        )
+                        .map_err(cant)?;
+                    }
+                }
+            }
+            let found = find(doc, part)?;
+            Ok(Outcome {
+                summary: format!(
+                    "made \"{part}\" a definition, \"{name}\": it is in [define.{name}], and \"{part}\" uses it"
+                ),
+                touched: Some(found),
+            })
+        }
         Edit::SetSocket { socket, on, shift } => {
             let (part, name) = split_socket(socket)?;
             if let Some(on) = on {
@@ -2310,6 +2393,56 @@ fn add_change(
         None => found,
     };
     Ok((found, definition))
+}
+
+/// What a part is made of, as fields to copy: its shape and sizes (or
+/// its file), colours, changes and own sockets, as they are written.
+const MADE_OF: [&str; 17] = [
+    "shape",
+    "file",
+    "size",
+    "radius",
+    "tube",
+    "wall",
+    "height",
+    "segments",
+    "steps",
+    "bevel",
+    "bevel_steps",
+    "taper",
+    "color",
+    "changes",
+    "colors",
+    "sockets",
+    "note",
+];
+
+/// A value of the tree, to write again.
+fn val_of(node: &Node) -> Option<Val> {
+    Some(match &node.value {
+        Value::Str(text) => Val::Str(text.clone()),
+        Value::Int(whole) => Val::Num(*whole as f64),
+        Value::Float(number) => Val::Num(*number),
+        Value::Array(items) => Val::List(items.iter().filter_map(val_of).collect()),
+        Value::Table(entries) => Val::Table(
+            entries
+                .iter()
+                .filter_map(|entry| Some((entry.key.clone(), val_of(&entry.node)?)))
+                .collect(),
+        ),
+        _ => return None,
+    })
+}
+
+/// The fields of `table` that say what a part is made of, as written.
+fn made_of(doc: &Doc, table: &[Step]) -> Vec<(String, Val)> {
+    MADE_OF
+        .iter()
+        .filter_map(|field| {
+            doc.entry(table, field)?;
+            Some(((*field).to_owned(), doc.raw(&with(table, key(field)))?))
+        })
+        .collect()
 }
 
 /// How a move, a turn or a scale of the same faces right after another
@@ -2970,6 +3103,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::ScaleFace { part, .. }
         | Edit::MoveEdge { part, .. }
         | Edit::MoveCorner { part, .. }
+        | Edit::Define { part, .. }
         | Edit::Cut { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }
@@ -3082,6 +3216,97 @@ pub fn apply_many(
         model,
         issues,
     })
+}
+
+/// A part alone, as a recipe of its own: what it is made of (from its
+/// definition, if it uses one), with the palette colours it uses, and
+/// none of where it stands. What `duck-mold save-part` writes. `path`
+/// is the recipe's file; the text is always TOML.
+pub fn part_recipe(text: &str, syntax: Syntax, path: &Path, part: &str) -> Result<String, Failure> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let display = display_path(path);
+    let usage = |stop: Stop| Failure::Usage(Box::new(stop.0.in_file(display.as_str())));
+    let (model, issues) = build(text, syntax, path, &display);
+    let Some(model) = model else {
+        return Err(Failure::Invalid(Report::from_issues(issues)));
+    };
+    let doc = Doc::parse(text, syntax)
+        .map_err(|_| Failure::Invalid(Report::from_issues(issues.clone())))?;
+    let found = find(&doc, part).map_err(usage)?;
+    let (table, _) = making(&doc, &found);
+    let fields: Vec<(String, Val)> = match syntax {
+        Syntax::Toml => made_of(&doc, &table),
+        // JSON's tables aren't TOML's: written again from what they say.
+        Syntax::Json => MADE_OF
+            .iter()
+            .filter_map(|field| {
+                let node = &doc.entry(&table, field)?.node;
+                Some(((*field).to_owned(), val_of(node)?))
+            })
+            .collect(),
+    };
+    if fields.iter().any(|(field, _)| field == "file") {
+        return Err(usage(problem(
+            Code::Unsupported,
+            format!("\"{part}\" comes from a file already: copy that file to the library instead"),
+        )));
+    }
+    if fields.iter().all(|(field, _)| field != "shape") {
+        return Err(usage(problem(
+            Code::Unsupported,
+            format!(
+                "\"{part}\" is made of parts of its own: only a part made from a shape can be saved alone in this version"
+            ),
+        )));
+    }
+    let name = found.name.clone().unwrap_or_else(|| "part".to_owned());
+    // The colours it uses, as the model has them.
+    let mut used: Vec<String> = Vec::new();
+    let mut note = |color: &str| {
+        if !used.iter().any(|known| known == color) {
+            used.push(color.to_owned());
+        }
+    };
+    let made = doc.node(&table);
+    if let Some(color) = made.and_then(|node| text_of(node, "color")) {
+        note(color);
+    }
+    if let Some(Value::Table(faces)) = made
+        .and_then(|node| match &node.value {
+            Value::Table(entries) => entries.iter().find(|entry| entry.key == "colors"),
+            _ => None,
+        })
+        .map(|entry| &entry.node.value)
+    {
+        for face in faces {
+            if let Value::Str(color) = &face.node.value {
+                note(color);
+            }
+        }
+    }
+    let mut out = format!(
+        "# Saved by `duck-mold save-part` from {}.\nversion = 0\nname = {}\n",
+        display,
+        Val::Str(name.clone()).write(Syntax::Toml)
+    );
+    let palette: Vec<String> = used
+        .iter()
+        .filter_map(|color| {
+            let known = model.palette.iter().find(|known| known.name == *color)?;
+            Some(format!("{} = \"{}\"", color, crate::recipe::hex(known.rgb)))
+        })
+        .collect();
+    if !palette.is_empty() {
+        out.push_str(&format!("\n[palette]\n{}\n", palette.join("\n")));
+    }
+    out.push_str(&format!(
+        "\n[[parts]]\nname = {}\n",
+        Val::Str(name).write(Syntax::Toml)
+    ));
+    for (field, value) in &fields {
+        out.push_str(&format!("{field} = {}\n", value.write(Syntax::Toml)));
+    }
+    Ok(out.replace("\r\n", "\n"))
 }
 
 /// The first and last line of `new` that aren't in `old`, by taking away

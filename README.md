@@ -222,6 +222,12 @@ recipe calls it (`top`, `front`...). Shift+click adds a face.
   their names (`colors = { glass = "sky" }`), and in Part mode a click
   on one makes a socket on it (`on = "glass"`), so a part can be added
   there; the socket moves with the face.
+- **Using it again.** Right-click the part: **Make a definition...**
+  moves what it is made of (shape, size, changes, colours, sockets) to
+  `[define.<name>]` and the part uses it, so Add > Defined in this
+  recipe makes more, and shaping one shapes them all. **Save to the
+  library** writes it alone to `parts/<name>.toml`, with the colours it
+  uses, and it shows in the library at once.
 - Faces can't be deleted (a shape must stay closed): Undo, or the
   Changes list, takes a change back.
 - Escape lets go of the faces, then leaves Face mode. Tab goes back to
@@ -399,6 +405,7 @@ only: nothing can be changed there.
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
+| `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`): a copy of that example, with the files it uses. Never writes over a file. |
 | `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
 | `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |

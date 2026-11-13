@@ -3761,3 +3761,34 @@ fn a_part_is_added_on_a_new_face_and_the_new_face_is_painted() {
         file(&recipe)
     );
 }
+
+// ---- Phase 4, step 7: using a shaped part again ---------------------------------------
+
+#[test]
+fn a_part_is_saved_to_the_library_and_shows_there() {
+    let (recipe, mut studio) = boxes("save_to_library");
+    studio
+        .apply(&Edit::Pull {
+            part: "crate".into(),
+            faces: vec!["top".into()],
+            by: 0.2,
+            name: Some("lid".into()),
+        })
+        .unwrap();
+    let said = studio.save_to_library("crate").unwrap();
+    assert_eq!(said, "Saved \"crate\" to the library: parts/crate.toml");
+    let saved = recipe.parent().unwrap().join("parts/crate.toml");
+    let text = std::fs::read_to_string(&saved).unwrap();
+    assert!(text.contains("changes = [\n  { pull = \"top\", by = 0.2, name = \"lid\" },\n]"));
+    assert!(
+        !text.contains("move"),
+        "where it stood stays behind:\n{text}"
+    );
+    assert_eq!(studio.library().len(), 1);
+    assert!(studio.library()[0].picture.is_some());
+    // Again: a second file, with a number.
+    let said = studio.save_to_library("crate").unwrap();
+    assert!(said.ends_with("parts/crate_2.toml"), "{said}");
+    // The recipe itself didn't change.
+    assert!(file(&recipe).contains("{ pull = \"top\", by = 0.2, name = \"lid\" }"));
+}

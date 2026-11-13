@@ -1810,3 +1810,108 @@ fn a_new_face_is_painted_by_its_name() {
         vec![("plaster".to_owned(), 18), ("sky".to_owned(), 2)]
     );
 }
+
+// ---- Phase 4, step 7: using a shaped part again --------------------------------------------
+
+#[test]
+fn a_part_becomes_a_definition_and_the_model_is_the_same() {
+    let text = format!(
+        "{PALETTE}# The wall.\n[[parts]]\nname = \"wall\"\nshape = \"box\"\nsize = [3, 2.4, 0.2]\ncolor = \"plaster\"\n{WINDOW}\nmove = [0, 1.2, 0]\n\n[parts.sockets]\nlamp = {{ on = \"glass\" }}\n"
+    );
+    let before = built(&text);
+    let made = done(
+        &text,
+        Syntax::Toml,
+        &Edit::Define {
+            part: "wall".into(),
+            name: "window_wall".into(),
+        },
+    );
+    assert_eq!(
+        made.summary,
+        "made \"wall\" a definition, \"window_wall\": it is in [define.window_wall], and \"wall\" uses it"
+    );
+    // The definition holds what it is made of; the part, where it is.
+    assert!(made.text.contains("[define.window_wall]\nshape = \"box\"\nsize = [3, 2.4, 0.2]\ncolor = \"plaster\"\nchanges = [\n"));
+    assert!(
+        made.text
+            .contains("sockets = { lamp = { on = \"glass\" } }\n")
+    );
+    assert!(made.text.contains(
+        "\n\n# The wall.\n[[parts]]\nname = \"wall\"\nuse = \"window_wall\"\nmove = [0, 1.2, 0]\n"
+    ));
+    let after = made.model.unwrap();
+    assert_eq!(after.faces, before.faces);
+    assert_eq!(
+        first_part(&after).kind.label(),
+        "window_wall (box, 3 changes)"
+    );
+    // A part made from a definition already is refused.
+    let failure = apply(
+        &made.text,
+        Syntax::Toml,
+        Path::new("t.toml"),
+        "t.toml",
+        &Edit::Define {
+            part: "wall".into(),
+            name: "x".into(),
+        },
+    )
+    .unwrap_err();
+    let message = &failure.report().errors[0].message;
+    assert!(
+        message.contains("is made from the definition \"window_wall\" already"),
+        "{message}"
+    );
+}
+
+#[test]
+fn a_json_part_becomes_a_definition_too() {
+    let text = r##"{
+  "version": 0,
+  "palette": { "wood": "#8B5A2B" },
+  "parts": [
+    {
+      "name": "crate",
+      "shape": "box",
+      "color": "wood",
+      "changes": [{ "pull": "top", "by": 0.25 }]
+    }
+  ]
+}
+"##;
+    let made = done(
+        text,
+        Syntax::Json,
+        &Edit::Define {
+            part: "crate".into(),
+            name: "tall_crate".into(),
+        },
+    );
+    assert!(made.text.contains("\"define\": { \"tall_crate\": { \"shape\": \"box\", \"color\": \"wood\", \"changes\": [{ \"pull\": \"top\", \"by\": 0.25 }] } }"), "{}", made.text);
+    assert!(made.text.contains("\"use\": \"tall_crate\""));
+    assert_eq!(made.model.unwrap().triangle_count(), 20);
+}
+
+#[test]
+fn a_part_is_saved_alone_with_the_colours_it_uses() {
+    use duck_mold_core::edit::part_recipe;
+    let text = wall(WINDOW).replace(
+        "color = \"plaster\"\n",
+        "color = \"plaster\"\nmove = [2, 1.2, 0]\n",
+    );
+    let saved = part_recipe(&text, Syntax::Toml, Path::new("house.toml"), "wall").unwrap();
+    assert_eq!(
+        saved,
+        format!(
+            "# Saved by `duck-mold save-part` from house.toml.\nversion = 0\nname = \"wall\"\n\n[palette]\nplaster = \"#E8E0D0\"\nwood = \"#8B5A2B\"\nsky = \"#9FD3F0\"\n\n[[parts]]\nname = \"wall\"\nshape = \"box\"\nsize = [3, 2.4, 0.2]\ncolor = \"plaster\"\n{WINDOW}\n"
+        )
+    );
+    // It builds, the same shape, standing on the ground.
+    let model = built(&saved);
+    assert_eq!(model.triangle_count(), 36);
+    // Only the colours it uses come with it.
+    let plain = part_recipe(&wall(""), Syntax::Toml, Path::new("house.toml"), "wall").unwrap();
+    assert!(plain.contains("[palette]\nplaster = \"#E8E0D0\"\n\n"));
+    assert!(!plain.contains("wood"));
+}

@@ -2403,3 +2403,36 @@ fn c_shows_the_corners_and_a_click_picks_one() {
     screen.run_steps(2);
     assert_eq!(screen.state().studio().unwrap().mode(), Mode::Part);
 }
+
+#[test]
+fn the_part_menu_makes_a_definition_and_saves_to_the_library() {
+    let (recipe, mut screen) = yard("screens_define");
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    screen
+        .query_all_by_label_contains("Make a definition")
+        .next()
+        .expect("the menu has Make a definition")
+        .click();
+    screen.run_steps(3);
+    screen.get_by_label("Make a definition");
+    // The name it offers is the part's; Make makes it.
+    screen.get_by_label("Make").click();
+    screen.run_steps(3);
+    let text = text_of(&recipe);
+    assert!(text.contains("[define.crate]\nshape = \"box\""), "{text}");
+    assert!(text.contains("name = \"crate\"\nuse = \"crate\""), "{text}");
+    assert_eq!(screen.query_all_by_label("Make a definition").count(), 0);
+
+    // Save to the library: a file in parts/, and a row in the library.
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    screen
+        .query_all_by_label_contains("Save to the library")
+        .next()
+        .expect("the menu has Save to the library")
+        .click();
+    screen.run_steps(3);
+    assert!(recipe.parent().unwrap().join("parts/crate.toml").exists());
+    screen.get_by_label_contains("Saved \"crate\" to the library");
+}

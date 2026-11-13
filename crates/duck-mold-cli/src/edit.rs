@@ -283,6 +283,16 @@ pub enum Change {
         #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
         by: String,
     },
+    /// Make a definition from a part: what it is made of (its shape and
+    /// sizes, changes, colours and own sockets) moves to [define.<name>],
+    /// and the part uses it where it stands. Add more of it with
+    /// `add <name> --use <name>`.
+    Define {
+        /// The part: one of the model's own list.
+        part: String,
+        /// The definition's name.
+        name: String,
+    },
     /// Move corners of a box (where three faces or more meet:
     /// top+front+left) by x,y,z metres, in its own directions.
     ///
@@ -686,6 +696,10 @@ impl Change {
                 part: part.clone(),
                 edges: face_list(edges),
                 by: three("--by", by)?,
+            },
+            Change::Define { part, name } => Edit::Define {
+                part: part.clone(),
+                name: name.clone(),
             },
             Change::MoveCorner { part, corners, by } => Edit::MoveCorner {
                 part: part.clone(),

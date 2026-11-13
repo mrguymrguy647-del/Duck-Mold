@@ -86,6 +86,10 @@ pub enum Action {
     /// The selected box's corners: Corner mode, or back to Part mode
     /// (C).
     CornerMode,
+    /// Ask for a name, and make a definition from the selected part.
+    MakeDefinition,
+    /// Write the selected part alone to the library's folder.
+    SaveToLibrary,
 }
 
 /// Every key and what it does, for Help's list and the README's.
@@ -336,6 +340,12 @@ pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) ->
     }
     if line(ui, edits && one.is_some(), "Corners", "C") {
         chosen = Some(Action::CornerMode);
+    }
+    if line(ui, edits && one.is_some(), "Make a definition...", "") {
+        chosen = Some(Action::MakeDefinition);
+    }
+    if line(ui, edits && one.is_some(), "Save to the library", "") {
+        chosen = Some(Action::SaveToLibrary);
     }
     if line(ui, edits, "Duplicate", "Ctrl+D") {
         chosen = Some(Action::Duplicate);

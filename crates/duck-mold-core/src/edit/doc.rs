@@ -71,6 +71,8 @@ pub enum Val {
     /// A list written one item to a line, where the file allows it:
     /// `changes = [` and an item on each line under it.
     Lines(Vec<Val>),
+    /// A value copied from the file just as it is written there.
+    Raw(String),
 }
 
 impl Val {
@@ -96,6 +98,7 @@ impl Val {
                     .collect();
                 format!("{{ {} }}", fields.join(", "))
             }
+            Val::Raw(text) => text.clone(),
             Val::Lines(items) if items.is_empty() => "[]".to_owned(),
             // With `\n` for line endings and no indent: see `spread`.
             Val::Lines(items) => {
@@ -259,6 +262,53 @@ impl Doc {
             Value::Array(items) => Some(items),
             _ => None,
         }
+    }
+
+    /// A value as it is written in the file, to copy elsewhere. A table
+    /// under a header of its own (`[parts.sockets]`) comes back on one
+    /// line: `{ a = ..., b = ... }`.
+    pub fn raw(&self, path: &[Step]) -> Option<Val> {
+        let node = self.node(path)?;
+        if self.form(path) == Form::Header {
+            let fields: Vec<(String, Val)> = match &node.value {
+                Value::Table(entries) => entries
+                    .iter()
+                    .filter_map(|entry| {
+                        Some((entry.key.clone(), self.raw(&with(path, key(&entry.key)))?))
+                    })
+                    .collect(),
+                _ => return None,
+            };
+            return Some(Val::Table(fields));
+        }
+        Some(Val::Raw(self.text[node.span.clone()].to_owned()))
+    }
+
+    /// Adds a block `[name]` (a TOML header, `define.chair`) with these
+    /// fields, just above the block at `before` and the comments over
+    /// it.
+    pub fn add_block_before(
+        &mut self,
+        before: &[Step],
+        name: &str,
+        fields: &[(String, Val)],
+    ) -> Done {
+        if self.syntax != Syntax::Toml || self.form(before) != Form::Header {
+            return cant(format!(
+                "{} isn't written under a header of its own",
+                show(before)
+            ));
+        }
+        let newline = self.newline();
+        let start = self.node(before).expect("checked above").span.start;
+        let at = self.lead(start);
+        let mut block = format!("[{name}]{newline}");
+        for (field, value) in fields {
+            block.push_str(&field_text(field, value, Syntax::Toml));
+            block.push_str(newline);
+        }
+        block.push_str(newline);
+        self.splice(at..at, &block)
     }
 
     /// The line ending the file uses.
@@ -573,6 +623,33 @@ impl Doc {
                     "{} is written with dotted names, which can't be changed here",
                     show(table)
                 ));
+            }
+            Form::Root | Form::Header if self.form(&with(table, key(name))) == Form::Header => {
+                // A table under a header of its own (`[parts.sockets]`):
+                // the whole block goes, with its comments and the blank
+                // line above it.
+                let path = with(table, key(name));
+                let headers = self.headers();
+                let header = self.node(&path).expect("it is there").span.start;
+                let mut start = self.lead(header);
+                let above = &self.text[..start];
+                if above.ends_with("\r\n\r\n") {
+                    start -= 2;
+                } else if above.ends_with("\n\n") {
+                    start -= 1;
+                }
+                // Up to its last line: the blank line after it stays.
+                let mut end = self.block_end(&path, &headers);
+                while end > start {
+                    if self.text[..end].ends_with("\r\n\r\n") {
+                        end -= 2;
+                    } else if self.text[..end].ends_with("\n\n") {
+                        end -= 1;
+                    } else {
+                        break;
+                    }
+                }
+                start..end
             }
             Form::Root | Form::Header => {
                 let mut start = self.line_start(entry.key_span.start);
