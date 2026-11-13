@@ -1711,7 +1711,8 @@ These were the five questions; all were answered yes.
 
 ## 19. Phase 3: a real 3D tool
 
-**Status: proposed. Waiting for approval. No code is written yet.**
+**Status: approved**, with all eight decisions at the end as
+recommended.
 
 Phase 2's Studio could add a part at a socket and change its numbers. A
 person who opened it found that it "looks like a very simple and weak
@@ -2192,7 +2193,8 @@ from a part, changing the order of parts, sockets written with `at` or
 
 ### The decisions
 
-Eight places where I chose. Each has what I recommend; say no to any.
+Eight places where a choice was made. All eight were approved as
+recommended.
 
 1. **Hiding a part is like turning the camera: it isn't saved in the
    recipe.** A hidden part is still in the model and still exported.
