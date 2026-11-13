@@ -11,7 +11,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::math::{Bounds, Mat3, Transform, Vec3};
-use crate::recipe::{Loc, PaletteColor};
+use crate::recipe::{Limits, Loc, PaletteColor};
 use crate::shaping::Shaped;
 
 /// A finished model.
@@ -116,6 +116,9 @@ pub struct Part {
     /// the list it is written in lie in the model. No turn at all for a
     /// part of the model's own list.
     pub axes: Mat3,
+    /// How far it may turn about its pivot when the model is posed: the
+    /// recipe's `limits`.
+    pub limits: Limits,
     /// Its sockets, where they finally are.
     pub sockets: Vec<Socket>,
     /// Those of its sockets that a part inside it carries: a socket

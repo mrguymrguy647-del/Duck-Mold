@@ -19,7 +19,7 @@ use serde::Serialize;
 use crate::issue::{Code, Issue, in_file_order};
 use crate::math::{Bounds, Vec3, tidy, vec3};
 use crate::model::{Model, Part};
-use crate::recipe::hex;
+use crate::recipe::{Limits, Turns, hex};
 use crate::shaping::{Shaped, facing_word};
 
 /// How close two surfaces must be to count as touching, and how deep one
@@ -79,6 +79,10 @@ pub struct Inspection {
     /// ([`face_report`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub shaped: Vec<ShapedReport>,
+    /// The tree the model moves by, every part with what it turns about
+    /// and hangs from: only with `--joins` ([`join_report`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub joins: Vec<JoinReport>,
     /// Things that look like mistakes.
     pub warnings: Vec<Issue>,
     /// Always empty: a model that has errors is never inspected.
@@ -142,6 +146,78 @@ pub fn socket_report(model: &Model) -> Vec<SocketReport> {
             facing: socket.facing.to_array(),
         })
         .collect()
+}
+
+/// One part in the tree the model moves by, for `inspect --joins`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct JoinReport {
+    /// The part, by path: `left_arm/elbow`.
+    pub part: String,
+    /// The part it hangs from: turning that one carries this one along.
+    /// `None`: it hangs from the model itself.
+    pub parent: Option<String>,
+    /// The socket it is joined to, as the recipe wrote it. `None`: it
+    /// isn't joined, and turns about its own middle.
+    pub joined_to: Option<String>,
+    /// The point it turns about, in the model.
+    pub pivot: [f64; 3],
+    /// How far it may turn: `"free"`, `"fixed"`, or the directions it
+    /// turns around, each with two angles or `"free"`.
+    pub limits: serde_json::Value,
+    /// The same in a few words: `x -30..40, y -80..80`.
+    #[serde(skip)]
+    pub limits_words: String,
+    /// How deep it is in the tree: 0 hangs from the model.
+    #[serde(skip)]
+    pub depth: usize,
+}
+
+/// `limits` as data: `"free"`, `"fixed"`, or `{ "x": [-30, 40], "z":
+/// "free" }` with the directions that turn.
+pub fn limits_json(limits: Limits) -> serde_json::Value {
+    match limits {
+        Limits::Free => "free".into(),
+        Limits::Fixed => "fixed".into(),
+        Limits::Turns(turns) => serde_json::Value::Object(
+            Limits::AXES
+                .iter()
+                .zip(turns)
+                .filter_map(|(axis, turns)| {
+                    let value = match turns {
+                        Turns::No => return None,
+                        Turns::Any => "free".into(),
+                        Turns::Between(low, high) => serde_json::json!([low, high]),
+                    };
+                    Some(((*axis).to_owned(), value))
+                })
+                .collect(),
+        ),
+    }
+}
+
+/// The tree a model moves by: every part, under the part it hangs from,
+/// in the recipe's order.
+pub fn join_report(model: &Model) -> Vec<JoinReport> {
+    let all = model.all_parts();
+    fn under(all: &[&Part], parent: Option<&str>, depth: usize, into: &mut Vec<JoinReport>) {
+        for part in all.iter().filter(|part| part.parent.as_deref() == parent) {
+            into.push(JoinReport {
+                part: part.path.clone(),
+                parent: part.parent.clone(),
+                joined_to: part.attached_to.clone(),
+                pivot: part.pivot.to_array(),
+                limits: limits_json(part.limits),
+                limits_words: part.limits.describe(),
+                depth,
+            });
+            // (A tree can't go round: a ring of joins is a mistake, and a
+            // model with mistakes is never inspected.)
+            under(all, Some(&part.path), depth + 1, into);
+        }
+    }
+    let mut joins = Vec::new();
+    under(&all, None, 0, &mut joins);
+    joins
 }
 
 /// The faces of one shaped part, for `inspect --faces`.
@@ -302,6 +378,13 @@ pub struct PartReport {
     /// True if it was flipped by `mirror`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub mirrored: bool,
+    /// How far it may turn when the model is posed, if the recipe gives
+    /// it `limits`: `"fixed"`, or the directions it turns around.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<serde_json::Value>,
+    /// The same in a few words.
+    #[serde(skip)]
+    pub limits_words: String,
     /// The parts inside it.
     pub parts: Vec<PartReport>,
 }
@@ -462,6 +545,7 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
         overlapping,
         sockets: Vec::new(),
         shaped: Vec::new(),
+        joins: Vec::new(),
         warnings,
         errors: Vec::new(),
     }
@@ -505,6 +589,8 @@ fn part_report(model: &Model, part: &Part) -> PartReport {
             .collect(),
         attached_to: part.attached_to.clone(),
         mirrored: part.mirrored,
+        limits: (part.limits != Limits::Free).then(|| limits_json(part.limits)),
+        limits_words: part.limits.describe(),
         parts: part
             .parts
             .iter()
@@ -643,6 +729,12 @@ impl Inspection {
                 if part.mirrored != inside_mirrored {
                     notes.push("mirrored".to_owned());
                 }
+                if part.limits.is_some() {
+                    notes.push(match part.limits_words.as_str() {
+                        words @ ("fixed" | "doesn't turn") => words.to_owned(),
+                        words => format!("turns {words}"),
+                    });
+                }
                 rows.push([
                     format!("{}{own_name}", "  ".repeat(depth)),
                     label,
@@ -744,6 +836,39 @@ impl Inspection {
                 })
                 .collect();
             list("sockets", rows);
+        }
+        if !self.joins.is_empty() {
+            out.push_str(&format!(
+                "  {:<12} {}: what each part turns about, and how far\n",
+                "joins",
+                self.joins.len()
+            ));
+            let rows: Vec<[String; 3]> = self
+                .joins
+                .iter()
+                .map(|join| {
+                    [
+                        format!("{}{}", "  ".repeat(join.depth), join.part),
+                        match &join.joined_to {
+                            Some(socket) => format!("on {socket}"),
+                            None => "turns about its middle".to_owned(),
+                        },
+                        join.limits_words.clone(),
+                    ]
+                })
+                .collect();
+            let width = |column: usize| {
+                rows.iter()
+                    .map(|row| row[column].chars().count())
+                    .max()
+                    .unwrap_or(0)
+            };
+            let (names, pivots) = (width(0), width(1));
+            for [name, pivot, limits] in &rows {
+                out.push_str(&format!(
+                    "    {name:<names$}   {pivot:<pivots$}   {limits}\n"
+                ));
+            }
         }
         for shaped in &self.shaped {
             out.push_str(&format!(

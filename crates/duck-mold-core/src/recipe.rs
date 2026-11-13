@@ -156,6 +156,124 @@ pub struct PartDef {
     /// Changes made to its shape once it is built: pulls, insets...
     /// Only a box has them.
     pub changes: Vec<ChangeDef>,
+    /// How far it may turn when the model is posed.
+    pub limits: Limits,
+}
+
+/// How far a part may turn about its join when the model is posed: its
+/// `limits`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Limits {
+    /// No `limits`: it may turn any way, any amount, and move.
+    #[default]
+    Free,
+    /// `limits = "fixed"`: it neither turns nor moves.
+    Fixed,
+    /// A table: around x, y and z, how far it may turn. A direction the
+    /// table doesn't name doesn't turn.
+    Turns([Turns; 3]),
+}
+
+/// How far a part may turn around one direction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Turns {
+    /// Not at all.
+    No,
+    /// Any amount, round and round: `"free"`.
+    Any,
+    /// Between two angles, in degrees: the first 0 or less, the second 0
+    /// or more.
+    Between(f64, f64),
+}
+
+impl Turns {
+    /// How far past what is allowed an angle is: 0 if it is allowed.
+    pub fn past(self, degrees: f64) -> f64 {
+        match self {
+            Turns::Any => 0.0,
+            Turns::No => degrees.abs(),
+            Turns::Between(low, high) => (low - degrees).max(degrees - high).max(0.0),
+        }
+    }
+
+    /// The nearest allowed angle to this one.
+    pub fn kept(self, degrees: f64) -> f64 {
+        match self {
+            Turns::Any => degrees,
+            Turns::No => 0.0,
+            Turns::Between(low, high) => degrees.clamp(low, high),
+        }
+    }
+
+    /// The same, seen in a mirror across x: for a turn around y or z,
+    /// which then goes the other way.
+    fn flipped(self) -> Turns {
+        match self {
+            Turns::Between(low, high) => Turns::Between(-high + 0.0, -low + 0.0),
+            other => other,
+        }
+    }
+}
+
+impl Limits {
+    /// The words for x, y and z.
+    pub const AXES: [&'static str; 3] = ["x", "y", "z"];
+
+    /// How far the part may turn around x, y and z.
+    pub fn turns(self) -> [Turns; 3] {
+        match self {
+            Limits::Free => [Turns::Any; 3],
+            Limits::Fixed => [Turns::No; 3],
+            Limits::Turns(turns) => turns,
+        }
+    }
+
+    /// Whether a pose may move the part.
+    pub fn may_move(self) -> bool {
+        self != Limits::Fixed
+    }
+
+    /// The limits of the part's mirror image, left to right: turns
+    /// around y and z go the other way.
+    pub fn mirrored(self) -> Limits {
+        match self {
+            Limits::Turns([x, y, z]) => Limits::Turns([x, y.flipped(), z.flipped()]),
+            other => other,
+        }
+    }
+
+    /// In a few words: `free`, `fixed`, `x -30..40, y -80..80`, `doesn't
+    /// turn`.
+    pub fn describe(self) -> String {
+        match self {
+            Limits::Free => "free".to_owned(),
+            Limits::Fixed => "fixed".to_owned(),
+            Limits::Turns(turns) => {
+                let named: Vec<String> = Limits::AXES
+                    .iter()
+                    .zip(turns)
+                    .filter_map(|(axis, turns)| match turns {
+                        Turns::No => None,
+                        Turns::Any => Some(format!("{axis} free")),
+                        Turns::Between(low, high) => {
+                            Some(format!("{axis} {}..{}", short(low), short(high)))
+                        }
+                    })
+                    .collect();
+                if named.is_empty() {
+                    "doesn't turn".to_owned()
+                } else {
+                    named.join(", ")
+                }
+            }
+        }
+    }
+}
+
+/// A number without a needless `.0`, and never `-0`.
+fn short(number: f64) -> String {
+    let number = (number * 1000.0).round() / 1000.0 + 0.0;
+    format!("{number}")
 }
 
 /// One change to a shaped part's shape, and where it was written.
@@ -615,7 +733,7 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-pub(crate) const PART_FIELDS: [&str; 27] = [
+pub(crate) const PART_FIELDS: [&str; 28] = [
     "name",
     "shape",
     "use",
@@ -641,6 +759,7 @@ pub(crate) const PART_FIELDS: [&str; 27] = [
     "move",
     "scale",
     "mirror",
+    "limits",
     "sockets",
     "note",
 ];
@@ -1215,6 +1334,7 @@ impl Decoder<'_> {
             sockets: Vec::new(),
             trim: Trim::default(),
             changes: Vec::new(),
+            limits: Limits::Free,
         };
         let Some(mut fields) = self.table(node, path, "a part: a table of fields") else {
             return part;
@@ -1394,6 +1514,15 @@ impl Decoder<'_> {
                         None
                     }
                 };
+            }
+        }
+
+        if let Some(entry) = fields.take("limits") {
+            let limits_path = fields.sub("limits");
+            if place == Place::Defined {
+                self.defined_has_no(&limits_path, entry, "limits");
+            } else if let Some(limits) = self.limits(&entry.node, &limits_path) {
+                part.limits = limits;
             }
         }
 
@@ -1767,6 +1896,85 @@ impl Decoder<'_> {
             "a defined part has no place or size of its own: put \"{field}\" on the part that uses it"
         );
         self.error(Code::Conflict, path, entry.key_pos, message);
+    }
+
+    /// Reads `limits`: `"fixed"`, or a table of the directions the part
+    /// may turn around, each with two angles or `"free"`.
+    fn limits(&mut self, node: &Node, path: &str) -> Option<Limits> {
+        const EXAMPLE: &str =
+            "\"fixed\" (it never moves), or the directions it may turn, like { x = [-30, 40] }";
+        let table = match &node.value {
+            Value::Str(word) if word == "fixed" => return Some(Limits::Fixed),
+            Value::Str(word) => {
+                let message = format!("\"limits\" is {EXAMPLE}, not \"{word}\"");
+                let issue = Issue::error(Code::TypeMismatch, path, message)
+                    .in_file(self.file)
+                    .at(node.pos)
+                    .got(word.as_str())
+                    .one_of(word, ["fixed"]);
+                self.issues.push(issue);
+                return None;
+            }
+            _ => self.table(node, path, EXAMPLE)?,
+        };
+        let mut turns = [Turns::No; 3];
+        let mut good = true;
+        for entry in table.entries {
+            let axis_path = join(path, &entry.key);
+            let Some(axis) = Limits::AXES.iter().position(|axis| *axis == entry.key) else {
+                let message = format!(
+                    "a part turns around \"x\" (a nod), \"y\" (a turn) or \"z\" (a tilt), not \"{}\"",
+                    entry.key
+                );
+                let issue = Issue::error(Code::UnknownField, axis_path, message)
+                    .in_file(self.file)
+                    .at(entry.key_pos)
+                    .got(entry.key.as_str())
+                    .one_of(&entry.key.to_lowercase(), Limits::AXES);
+                self.issues.push(issue);
+                good = false;
+                continue;
+            };
+            let how = "two angles in degrees, like [-30, 40], or \"free\" for any amount";
+            turns[axis] = match &entry.node.value {
+                Value::Str(word) if word == "free" => Turns::Any,
+                Value::Array(items) if items.len() == 2 => {
+                    let low = self.ranged(&items[0], &axis_path, TURN_RANGE, "-30");
+                    let high = self.ranged(&items[1], &axis_path, TURN_RANGE, "40");
+                    match low.zip(high) {
+                        Some((low, high)) if low <= 0.0 && high >= 0.0 => Turns::Between(low, high),
+                        Some((low, high)) => {
+                            let message = format!(
+                                "the part stands at 0 when the model is at rest, so its limits must have 0 between them: the first 0 or less and the second 0 or more, not [{}, {}]",
+                                short(low),
+                                short(high)
+                            );
+                            self.error(Code::OutOfRange, &axis_path, entry.node.pos, message);
+                            good = false;
+                            continue;
+                        }
+                        None => {
+                            good = false;
+                            continue;
+                        }
+                    }
+                }
+                Value::Array(items) => {
+                    let message = format!("a limit is {how}, not a list of {}", items.len());
+                    self.error(Code::TypeMismatch, &axis_path, entry.node.pos, message);
+                    good = false;
+                    continue;
+                }
+                other => {
+                    let message = format!("a limit is {how}, not {}", other.describe());
+                    self.error(Code::TypeMismatch, &axis_path, entry.node.pos, message)
+                        .got = Some(other.to_got());
+                    good = false;
+                    continue;
+                }
+            };
+        }
+        good.then_some(Limits::Turns(turns))
     }
 
     /// Reads the one field that says where a part's shape comes from.

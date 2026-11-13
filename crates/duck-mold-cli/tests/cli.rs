@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -1317,7 +1317,7 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 26, "the guide's tables list 26 fields");
+    assert_eq!(checked, 27, "the guide's tables list 27 fields");
 }
 
 #[test]
@@ -1388,4 +1388,113 @@ fn a_box_is_shaped_from_the_command_line_and_its_faces_listed() {
     // Without --faces, no list.
     let report = json(&run(&folder, &["inspect", "wall.toml", "--json"]));
     assert!(report.get("shaped").is_none());
+}
+
+// ---- Phase 5: models that move ---------------------------------------------------------
+
+#[test]
+fn limits_are_set_and_the_joins_listed_from_the_command_line() {
+    let folder = folder("cli_limits");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+
+    // The leaves sway a little on the trunk, and turn right round.
+    let output = edit(&["set-limits", "leaves", "--x", "-10,10", "--y", "free"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output)
+            .starts_with("edited tree.toml: set the limits of \"leaves\": x -10..10, y free\n"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(
+        text().contains("limits = { x = [-10, 10], y = \"free\" }"),
+        "{}",
+        text()
+    );
+    // The report says so beside the part.
+    assert!(
+        stdout(&output).contains("on trunk.top, turns x -10..10, y free"),
+        "{}",
+        stdout(&output)
+    );
+
+    // The tree of joins: what each part turns about, and how far.
+    let output = run(&folder, &["inspect", "tree.toml", "--joins"]);
+    let listing = stdout(&output);
+    assert!(
+        listing.contains("  joins        2: what each part turns about, and how far\n"),
+        "{listing}"
+    );
+    assert!(
+        listing.contains("    trunk      turns about its middle   free\n"),
+        "{listing}"
+    );
+    assert!(
+        listing.contains("      leaves   on trunk.top             x -10..10, y free\n"),
+        "{listing}"
+    );
+    let report = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--joins", "--json"],
+    ));
+    assert_eq!(
+        report["joins"][1],
+        serde_json::json!({
+            "part": "leaves",
+            "parent": "trunk",
+            "joined_to": "trunk.top",
+            "pivot": [0.0, 1.2, 0.0],
+            "limits": { "x": [-10.0, 10.0], "y": "free" }
+        })
+    );
+    assert_eq!(report["joins"][0]["parent"], serde_json::Value::Null);
+    assert_eq!(report["joins"][0]["limits"], "free");
+    // In the report's own tree of parts, only a part with limits says so.
+    assert_eq!(
+        report["parts"][1]["limits"],
+        serde_json::json!({ "x": [-10.0, 10.0], "y": "free" })
+    );
+    assert!(report["parts"][0].get("limits").is_none());
+    // Without --joins the list isn't there.
+    let report = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    assert!(report.get("joins").is_none());
+
+    // One direction locked again, then fixed, then free.
+    let output = edit(&["set-limits", "leaves", "--y", "none", "--dry-run"]);
+    assert!(
+        stdout(&output).contains("x -10..10\n"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(text().contains("y = \"free\""), "a dry run writes nothing");
+    let output = edit(&["set-limits", "leaves", "--fixed", "--json"]);
+    assert_eq!(json(&output)["edit"]["command"], "set-limits");
+    assert!(text().contains("limits = \"fixed\""), "{}", text());
+    let output = edit(&["set-limits", "leaves", "--none"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(text(), TREE);
+
+    // Mistakes say what to write.
+    let output = edit(&["set-limits", "leaves", "--x", "ten"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains(
+            "--x needs two angles in degrees, like -30,40, or free, or none, not \"ten\""
+        ),
+        "{}",
+        stderr(&output)
+    );
+    let output = edit(&["set-limits", "leaves", "--x", "5,40"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("must have 0 between them"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(text(), TREE);
 }

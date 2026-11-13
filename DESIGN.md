@@ -3274,6 +3274,14 @@ degrees over.) In the Studio a drag simply stops at the limit.
 Limits are about turning. A pose may also move a part (below); that has
 no limits in this phase, except that a `"fixed"` part can't.
 
+*As built (step 2):* as above. Two things the design didn't say:
+`limits = {}` names no direction, so the part doesn't turn but may still
+be moved (a drawer); and the plain `inspect` report says a part's
+limits beside it in the list of parts ("on body.neck, turns x -30..40,
+y -80..80"), only for parts that have them, so no example's report
+changes. `set-limits` takes `--x`, `--y` and `--z`, each two angles,
+`free` or `none`; a direction not given stays as it is.
+
 ### Poses
 
 ```toml

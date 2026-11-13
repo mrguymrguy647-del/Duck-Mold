@@ -63,6 +63,11 @@ enum Command {
         /// faces next to it. These are the names changes and colours use.
         #[arg(long)]
         faces: bool,
+        /// Also list the tree the model moves by: every part, the join
+        /// it turns about, the part it hangs from, and how far it may
+        /// turn (its "limits").
+        #[arg(long)]
+        joins: bool,
     },
     /// Build a recipe and write the model as a .glb file.
     ///
@@ -191,7 +196,15 @@ fn main() -> ExitCode {
             json,
             sockets,
             faces,
-        } => match tools::inspect_file_listing(&file, sockets, faces) {
+            joins,
+        } => match tools::inspect_file_listing(
+            &file,
+            &tools::Also {
+                sockets,
+                faces,
+                joins,
+            },
+        ) {
             Ok(inspection) => {
                 if json {
                     say_json(&inspection);

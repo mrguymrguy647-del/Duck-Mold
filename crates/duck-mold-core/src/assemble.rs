@@ -26,7 +26,7 @@ use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
 use crate::recipe::{
-    Axis, Define, Loc, PaletteColor, PartDef, Placement, Recipe, Shape, Side, SocketDef,
+    Axis, Define, Limits, Loc, PaletteColor, PartDef, Placement, Recipe, Shape, Side, SocketDef,
     SocketKind, SocketRef, Source, hex, rgb_of,
 };
 use crate::shapes::{self, Landing, Polygon};
@@ -180,6 +180,8 @@ struct Node {
     attached_to: Option<String>,
     /// From the part's own space to the space of its list.
     place: Transform,
+    /// How far it may turn when the model is posed.
+    limits: Limits,
     body: Body,
 }
 
@@ -1269,6 +1271,7 @@ impl Assembler<'_> {
                     turn: mirror_and_scale(&parts[at]),
                     shift: Vec3::ZERO,
                 }),
+                limits: parts[at].limits,
                 body,
             })
             .collect()
@@ -1583,6 +1586,7 @@ fn emit(
                 pivot: pivot.tidied(),
                 parent,
                 axes: outer.turn,
+                limits: node.limits,
                 sockets: node.body.all_sockets(&place),
                 carried,
                 bounds: Bounds::around(

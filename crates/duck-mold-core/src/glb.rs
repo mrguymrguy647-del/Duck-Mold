@@ -1048,6 +1048,7 @@ fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Fa
             .map_or(Vec3::ZERO, |bounds| bounds.center().tidied()),
             parent: name.rsplit_once('/').map(|(outer, _)| outer.to_owned()),
             axes: Mat3::IDENTITY,
+            limits: crate::recipe::Limits::Free,
             carried: Vec::new(),
             sockets: Vec::new(),
             bounds: Bounds::around(

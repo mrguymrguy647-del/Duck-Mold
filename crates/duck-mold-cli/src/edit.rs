@@ -3,7 +3,8 @@
 //! `Edit` values from clicks, so whatever it can do, this can.
 
 use clap::{Args, Subcommand};
-use duck_mold_core::edit::{Changes, Edit, Free, Made, Sizes};
+use duck_mold_core::edit::{Changes, Edit, Free, LimitsTo, Made, Sizes};
+use duck_mold_core::recipe::Turns;
 
 /// One change to a recipe. (Each variant's name is the command's, so
 /// `set-change` is `SetChange`.)
@@ -287,6 +288,34 @@ pub enum Change {
         #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
         by: String,
     },
+    /// Say how far a part may turn about its join when the model is
+    /// posed: its "limits". Each of --x (a nod), --y (a turn) and --z (a
+    /// tilt) takes two angles in degrees like -30,40, or free (any
+    /// amount: a wheel), or none (it doesn't turn that way).
+    ///
+    /// A part with no limits turns freely every way. Once it has limits,
+    /// only the directions they name turn. `duck-mold inspect --joins`
+    /// lists every part's.
+    SetLimits {
+        /// The part.
+        part: String,
+        /// Around x, left to right: a nod. Positive swings a hanging arm
+        /// forward.
+        #[arg(long, value_name = "LOW,HIGH", allow_hyphen_values = true)]
+        x: Option<String>,
+        /// Around y, up: a turn. Positive turns to the part's right.
+        #[arg(long, value_name = "LOW,HIGH", allow_hyphen_values = true)]
+        y: Option<String>,
+        /// Around z, forward: a tilt. Positive leans the top to its left.
+        #[arg(long, value_name = "LOW,HIGH", allow_hyphen_values = true)]
+        z: Option<String>,
+        /// It never turns or moves in a pose: a badge, a window.
+        #[arg(long, conflicts_with_all = ["x", "y", "z", "none"])]
+        fixed: bool,
+        /// Take its limits away: it turns freely again.
+        #[arg(long, conflicts_with_all = ["x", "y", "z"])]
+        none: bool,
+    },
     /// Make a definition from a part: what it is made of (its shape and
     /// sizes, changes, colours and own sockets) moves to [define.<name>],
     /// and the part uses it where it stands. Add more of it with
@@ -425,6 +454,26 @@ pub struct SizeOptions {
     /// its bottom: one number, or x,z. 1 makes the sides straight again.
     #[arg(long, value_name = "N or X,Z")]
     taper: Option<String>,
+}
+
+/// How far a part may turn around one direction: `-30,40`, `free` or
+/// `none`.
+fn turns(option: &str, written: &str) -> Result<Turns, String> {
+    match written.trim() {
+        "free" => Ok(Turns::Any),
+        "none" => Ok(Turns::No),
+        angles => {
+            let wrong = || {
+                format!(
+                    "{option} needs two angles in degrees, like -30,40, or free, or none, not \"{written}\""
+                )
+            };
+            let (low, high) = angles.split_once(',').ok_or_else(wrong)?;
+            let low: f64 = low.trim().parse().map_err(|_| wrong())?;
+            let high: f64 = high.trim().parse().map_err(|_| wrong())?;
+            Ok(Turns::Between(low, high))
+        }
+    }
 }
 
 /// `1,2,0.5` as three numbers.
@@ -704,6 +753,27 @@ impl Change {
             Change::Define { part, name } => Edit::Define {
                 part: part.clone(),
                 name: name.clone(),
+            },
+            Change::SetLimits {
+                part,
+                x,
+                y,
+                z,
+                fixed,
+                none,
+            } => Edit::SetLimits {
+                part: part.clone(),
+                limits: if *fixed {
+                    LimitsTo::Fixed
+                } else if *none {
+                    LimitsTo::None
+                } else {
+                    LimitsTo::Turns([
+                        x.as_deref().map(|x| turns("--x", x)).transpose()?,
+                        y.as_deref().map(|y| turns("--y", y)).transpose()?,
+                        z.as_deref().map(|z| turns("--z", z)).transpose()?,
+                    ])
+                },
             },
             Change::MoveCorner { part, corners, by } => Edit::MoveCorner {
                 part: part.clone(),

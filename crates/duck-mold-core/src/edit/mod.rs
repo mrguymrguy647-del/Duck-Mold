@@ -16,8 +16,10 @@
 //! reads the file, changes its text, checks it and writes it back.
 
 pub mod doc;
+mod motion;
 mod spot;
 
+pub use motion::LimitsTo;
 pub use spot::{Spot, spot};
 
 use std::path::Path;
@@ -30,7 +32,7 @@ use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
 use crate::math::{Bounds, Mat3, Vec3};
 use crate::model::{Model, Part};
-use crate::recipe::{PART_FIELDS, Shape, Side, rgb_of};
+use crate::recipe::{Limits, PART_FIELDS, Shape, Side, rgb_of};
 use crate::source::{Node, Syntax, Value};
 use crate::tools::Failure;
 use doc::{Doc, Step, TreePath, Val, key, with};
@@ -434,13 +436,21 @@ pub enum Edit {
         /// What the face in the middle is called.
         name: Option<String>,
     },
+    /// Says how far a part may turn about its join when the model is
+    /// posed: its `limits`.
+    SetLimits {
+        /// The part.
+        part: String,
+        /// What its limits become.
+        limits: LimitsTo,
+    },
 }
 
 impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 26] = [
+    pub const COMMANDS: [&'static str; 27] = [
         "add",
         "remove",
         "rename",
@@ -467,6 +477,7 @@ impl Edit {
         "cut",
         "move-corner",
         "define",
+        "set-limits",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -498,6 +509,7 @@ impl Edit {
             Edit::Cut { .. } => "cut",
             Edit::MoveCorner { .. } => "move-corner",
             Edit::Define { .. } => "define",
+            Edit::SetLimits { .. } => "set-limits",
         }
     }
 }
@@ -1032,6 +1044,7 @@ fn part_in<'a>(model: &'a Model, path: &str) -> Option<&'a Part> {
 
 fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Stop> {
     match edit {
+        Edit::SetLimits { part, limits } => motion::set_limits(doc, part, *limits),
         Edit::Add {
             name,
             made,
@@ -1709,6 +1722,13 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                             ),
                         ));
                     }
+                }
+                // And so do its limits: a turn around y or z goes the
+                // other way.
+                if let limits @ Limits::Turns(_) = motion::limits_at(doc, &copy)
+                    && let Some(value) = motion::limits_val(limits.mirrored())
+                {
+                    set(doc, &copy, "limits", value)?;
                 }
                 // A twist seen in a mirror turns the other way.
                 let twist = doc
@@ -2830,6 +2850,8 @@ pub struct Facts {
     /// it (parts joined to it, its own join, a socket that passes it
     /// on).
     pub sockets: Vec<(String, usize)>,
+    /// How far it may turn when the model is posed: its `limits`.
+    pub limits: Limits,
     /// Which way each of `sockets` faces, as one of [`FACINGS`]: `None`
     /// for one written with `at` or `from`, or with three numbers.
     pub socket_facings: Vec<Option<String>>,
@@ -3028,6 +3050,7 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
                 (socket, uses)
             })
             .collect(),
+        limits: motion::limits_at(&doc, &found.path()),
         socket_facings: declared_sockets(&doc, &found)
             .iter()
             .map(|socket| facing_word(&doc, &found, socket))
@@ -3146,6 +3169,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::MoveEdge { part, .. }
         | Edit::MoveCorner { part, .. }
         | Edit::Define { part, .. }
+        | Edit::SetLimits { part, .. }
         | Edit::Cut { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }

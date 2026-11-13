@@ -204,11 +204,13 @@ Its other fields:
 | `move` | Free part only: `[x, y, z]`, where its middle goes. |
 | `scale` | One number or `[x, y, z]`, above zero. |
 | `mirror` | `"x"`, `"y"` or `"z"`: flips the part, its sockets too. `mirror = "x"` makes a right arm from a left arm. |
+| `limits` | How far the part may turn when the model is posed: `{ x = [-30, 40], y = [-80, 80] }`, or `"fixed"`. Without it, the part turns freely (section 11). |
 | `sockets` | The part's own named sockets (section 6). |
 | `note` | For people. Ignored. |
 
 A part in `define` has no `name`, `attach`, `to`, `twist`, `move`,
-`rotate`, `scale` or `mirror`: those go on the part that uses it.
+`rotate`, `scale`, `mirror` or `limits`: those go on the part that uses
+it. (The parts inside a definition can have them.)
 
 The shapes. All are centred on their own middle.
 
@@ -608,6 +610,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
+| `duck-mold edit <recipe> set-limits <part> --x <low,high> --y ... --z ...` | Says how far a part may turn when the model is posed (section 11). Each of `--x`, `--y`, `--z` takes two angles (`-30,40`), `free` (any amount) or `none` (not that way); directions not given stay as they are. `--fixed`: it never turns or moves. `--none`: no limits again. |
 | `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
 | `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
 | `duck-mold edit <recipe> set-change <part> <number> --by <amount>` | Changes the amount of one change, counted from 1 as they are written: one number, or `x,y,z` for a move, a turn or a scale. Later changes, and every name, stay. |
@@ -669,7 +672,70 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 - Not edits: `mirror` (except through `duplicate --mirror`), sockets
   written with `at` or `from`, and `define`. Type those in the recipe.
 
-## 11. Mistakes to avoid
+## 11. Models that move
+
+A model moves by its joins. There are no bones to place: **every part
+turns about its pivot** (the socket it is joined to, or its own middle
+if it isn't joined), and turning a part carries everything that hangs
+from it. A part made of parts turns as a whole (`left_arm`), and the
+parts inside it turn too (`left_arm/elbow`). Parts turn rigidly; nothing
+bends.
+
+`duck-mold inspect <recipe> --joins` prints the tree: every part, what
+it turns about, what it hangs from, and how far it may turn.
+
+```text
+  joins        23: what each part turns about, and how far
+    body                        turns about its middle   free
+      panel                     on body.chest            fixed
+      head                      on body.neck             x -30..40, y -80..80
+        antenna                 on head.antenna          free
+      left_arm                  on body.left_arm         free
+        left_arm/upper          turns about its middle   free
+          left_arm/elbow        on upper.bottom          x 0..140
+```
+
+With `--json` each entry of `joins` has `part`, `parent` (the part it
+hangs from; `null` for the model itself), `joined_to`, `pivot` and
+`limits`.
+
+**A turn is `[x, y, z]` degrees**, around x, then y, then z, like
+`rotate`:
+
+| | Around | On a character facing forward |
+|---|---|---|
+| x | left to right | A nod. Positive swings a hanging arm or leg forward, and tips a head back. |
+| y | up | A turn. Positive turns a head to its right. A door swings around y. |
+| z | forward | A tilt. Positive leans the top to its left; it lifts the right arm out sideways (the left arm lifts with a negative z). |
+
+The x, y and z are those of the list the part is written in, as it
+stands at rest: the model's own for a part of the model; a definition's
+own for a part inside it, wherever that definition is used. So a
+mirrored arm bends as a mirror image with the same numbers.
+
+**`limits`** says how far a part may turn. It is written on the part,
+with its join:
+
+```toml
+limits = { x = [-30, 40], y = [-80, 80] }   # a neck: nods and turns, doesn't tilt
+limits = { x = [0, 140] }                   # an elbow or a knee: one way only
+limits = { y = [0, 110] }                   # a door on its hinge
+limits = { x = "free" }                     # a wheel: round and round
+limits = "fixed"                            # never moves: a badge, a window
+```
+
+- No `limits`: the part turns any way, any amount.
+- With `limits`: only the directions named turn, each between its two
+  angles (the first 0 or less, the second 0 or more) or `"free"`.
+- `"fixed"`: it neither turns nor moves in any pose. `limits = {}`: it
+  doesn't turn, but a pose may still move it (a drawer).
+- Limits on a part inside a definition go wherever the definition is
+  used. `duplicate --mirror` mirrors a part's limits.
+
+Poses and animations are written in the recipe too; they come with the
+next steps of this phase.
+
+## 12. Mistakes to avoid
 
 - **Typing positions when a socket would do.** A part placed with
   `move` floats or overlaps as soon as a size changes. Attach it.
@@ -692,7 +758,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   assembly a plain `color`.
 - **Negative `scale`.** Use `mirror`.
 
-## 12. What it can't do yet
+## 13. What it can't do yet
 
 Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
@@ -701,7 +767,7 @@ bones, animation, colliders or LODs (`bones`, `colliders` and `lods` are
 reserved names). There is a window, Duck Mold Studio, but it is for
 people: everything it does, you do with `edit`.
 
-## 13. Files for reference
+## 14. Files for reference
 
 - `examples/`: crate, table, tree, house, robot, desk, snowman, duck.
   Read `robot.toml` for nested parts, `snowman.toml` and `duck.toml` for

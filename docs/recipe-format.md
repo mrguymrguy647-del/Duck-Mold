@@ -99,13 +99,14 @@ Each entry of `parts`, and each entry of `define`, is a part.
 | `move` | three numbers | `[0, 0, 0]` | Without `attach` only: where the part's middle goes. -10000 to 10000. |
 | `scale` | number, or three | `1` | How much bigger: one number, or `[x, y, z]`. 0.001 to 1000. |
 | `mirror` | text | none | `"x"`, `"y"` or `"z"`: flips the part across that direction, its sockets and face names with it. |
+| `limits` | `"fixed"`, or a table | none: turns freely | How far the part may turn about its join when the model is posed. See "Limits" below. |
 | `sockets` | table of sockets | none | The part's own named sockets. |
 | `note` | anything | none | For people. Ignored. |
 | `bones`, `colliders`, `lods` | | | Reserved. |
 
 A part under `define` has no place of its own, so it can't have `name`,
-`attach`, `to`, `twist`, `rotate`, `move`, `scale` or `mirror`. Those go
-on the part that uses it.
+`attach`, `to`, `twist`, `rotate`, `move`, `scale`, `mirror` or
+`limits`. Those go on the part that uses it.
 
 **Order.** A part is mirrored, then scaled, then either turned and moved
 (`rotate`, `move`) or joined (`attach`, `to`, `twist`).
@@ -367,6 +368,30 @@ other.
 
 The parts of one list form a tree. A part attached to itself, or parts
 attached in a ring, are errors.
+
+## Limits
+
+A model moves by its joins: every part turns about its pivot (the
+socket it is joined to, or its own middle if it isn't joined), and what
+hangs from it goes with it. `limits` says how far a part may turn.
+
+| Written | Means |
+|---|---|
+| nothing | The part turns any way, any amount, and may be moved. |
+| `limits = { x = [-30, 40], y = [-80, 80] }` | It turns around x between -30 and 40 degrees and around y between -80 and 80. A direction not named (here z) doesn't turn. |
+| `limits = { x = "free" }` | It turns around x any amount: a wheel. |
+| `limits = {}` | It doesn't turn. A pose may still move it: a drawer. |
+| `limits = "fixed"` | It neither turns nor moves. |
+
+- The directions are `x` (a nod: around left-to-right), `y` (a turn:
+  around up) and `z` (a tilt: around forward), in the directions of the
+  list the part is written in: the model's for a part of the model, a
+  definition's own for a part inside it.
+- Two angles are in degrees, -36000 to 36000, the first 0 or less and
+  the second 0 or more: the part stands at 0 when the model is at rest.
+- A pose that turns a part past its limits is a warning, not an error.
+- `duck-mold inspect --joins` lists every part's pivot, parent and
+  limits; `duck-mold edit <recipe> set-limits` writes them.
 
 ## Files as parts
 

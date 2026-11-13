@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
 use crate::gltf::{is_duck_mold_glb, read_gltf};
-use crate::inspect::{Inspection, MaterialUse, face_report, inspect, socket_report};
+use crate::inspect::{Inspection, MaterialUse, face_report, inspect, join_report, socket_report};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
@@ -221,6 +221,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         pivot: Vec3::ZERO,
         parent: None,
         axes: crate::math::Mat3::IDENTITY,
+        limits: crate::recipe::Limits::Free,
         carried: Vec::new(),
         sockets: Vec::new(),
         bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
@@ -273,27 +274,44 @@ pub fn inspect_file(path: &Path) -> Result<Inspection, Failure> {
 /// `duck-mold inspect --sockets`: [`inspect_file`], with every named
 /// socket listed too.
 pub fn inspect_file_with_sockets(path: &Path) -> Result<Inspection, Failure> {
-    inspect_file_listing(path, true, false)
+    inspect_file_listing(
+        path,
+        &Also {
+            sockets: true,
+            ..Also::default()
+        },
+    )
 }
 
 /// `duck-mold inspect --sockets --faces`: [`inspect_file`], with every
 /// named socket listed if `sockets`, and every face of every shaped part
 /// if `faces`.
-pub fn inspect_file_listing(
-    path: &Path,
-    sockets: bool,
-    faces: bool,
-) -> Result<Inspection, Failure> {
+pub fn inspect_file_listing(path: &Path, also: &Also) -> Result<Inspection, Failure> {
     let built = build(path)?;
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
     inspection.materials = built.materials;
-    if sockets {
+    if also.sockets {
         inspection.sockets = socket_report(&built.model);
     }
-    if faces {
+    if also.faces {
         inspection.shaped = face_report(&built.model);
     }
+    if also.joins {
+        inspection.joins = join_report(&built.model);
+    }
     Ok(inspection)
+}
+
+/// What `inspect` lists besides its report, when asked.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Also {
+    /// Every named socket and where it is: `--sockets`.
+    pub sockets: bool,
+    /// The faces of every shaped part: `--faces`.
+    pub faces: bool,
+    /// The tree the model moves by: what every part turns about, and how
+    /// far: `--joins`.
+    pub joins: bool,
 }
 
 /// What `duck-mold export` did: the report on the model, and the file it
