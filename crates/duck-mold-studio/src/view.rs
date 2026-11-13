@@ -371,22 +371,30 @@ pub fn show(
     };
     let quiet = Color32::from_white_alpha(150);
     let painter = ui.painter_at(rect);
-    painter.text(
-        rect.left_bottom() + egui::vec2(8.0, -6.0),
-        egui::Align2::LEFT_BOTTOM,
-        hint,
-        egui::FontId::proportional(12.0),
-        quiet,
-    );
+    // The snap on the right; the hint on the left, wrapped onto a second
+    // line rather than running into it on a narrow viewport.
+    let mut room = rect.width() - 16.0;
     if handles {
-        painter.text(
+        let snap = painter.text(
             rect.right_bottom() + egui::vec2(-8.0, -6.0),
             egui::Align2::RIGHT_BOTTOM,
             studio.snap_text(),
             egui::FontId::proportional(12.0),
             quiet,
         );
+        room -= snap.width() + 16.0;
     }
+    let hint = painter.layout(
+        hint.to_owned(),
+        egui::FontId::proportional(12.0),
+        quiet,
+        room.max(120.0),
+    );
+    painter.galley(
+        rect.left_bottom() + egui::vec2(8.0, -6.0 - hint.size().y),
+        hint,
+        quiet,
+    );
     // Where the Cut tool would cut, beside the pointer.
     if let (Some(label), Some(pointer)) = (studio.cut_label(), pointer) {
         let at = pointer + egui::vec2(16.0, -18.0);

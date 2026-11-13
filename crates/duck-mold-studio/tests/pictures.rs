@@ -466,6 +466,60 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "shape-edge"));
     }
 
+    // Corner mode on the rock: its corners as dots, one picked, with the
+    // arrows that move it and its name in the panel.
+    {
+        let recipe = copy_of("rock.toml", "pictures_corner");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("rock"));
+            studio.corner_mode().unwrap();
+            studio.look_from(duck_mold_view::studio::viewport::Viewpoint::ThreeQuarter);
+        }
+        screen.run_steps(2);
+        let corner = screen
+            .state()
+            .studio()
+            .unwrap()
+            .corner_point("top_right_front+front_right_top+right_top_front")
+            .unwrap();
+        let corner = picture_on_screen(&screen, corner);
+        click_at(&mut screen, corner);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "shape-corner"));
+    }
+
+    // The Cut tool on the chair, in Face mode: the ring where the cut
+    // would go, across the face under the pointer, and its label.
+    {
+        let recipe = copy_of("chair.toml", "pictures_cut");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("chair"));
+            studio.face_mode().unwrap();
+            studio.look_from(duck_mold_view::studio::viewport::Viewpoint::ThreeQuarter);
+        }
+        screen.run_steps(2);
+        screen.key_press(egui::Key::K);
+        screen.run_steps(2);
+        // Along the top of the seat's front, between its middle and the
+        // slice towards the right.
+        let studio = screen.state().studio().unwrap();
+        let (middle, right) = (
+            studio.edge_point("top_front+front").unwrap(),
+            studio.edge_point("top_right_front+front_right").unwrap(),
+        );
+        let between = ((middle.0 + right.0) / 2.0, (middle.1 + right.1) / 2.0);
+        let point = picture_on_screen(&screen, between);
+        screen.hover_at(point);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "shape-cut"));
+    }
+
     assert!(
         wrong.is_empty(),
         "{} of the screens changed:\n{}\nIf the change is meant, store the new pictures with: UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures",

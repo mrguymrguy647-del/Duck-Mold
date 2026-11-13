@@ -111,8 +111,11 @@ fn faces_section(ui: &mut egui::Ui, studio: &Studio) {
         }
         for name in corners {
             let points = shaped.corners_named_or_none(name);
+            // The name on a line of its own, cut short if it is long (it
+            // is whole in its tip), so the panel keeps its width.
+            ui.add(egui::Label::new(RichText::new(name).monospace()).truncate())
+                .on_hover_text(name);
             ui.horizontal(|ui| {
-                ui.label(RichText::new(name).monospace());
                 if let [one] = points.as_slice() {
                     let at = shaped.corners[*one];
                     ui.label(format!("at {:.2}, {:.2}, {:.2}", at.x, at.y, at.z))
@@ -152,8 +155,9 @@ fn faces_section(ui: &mut egui::Ui, studio: &Studio) {
                     (b - a).length()
                 })
                 .sum();
+            ui.add(egui::Label::new(RichText::new(name).monospace()).truncate())
+                .on_hover_text(name);
             ui.horizontal(|ui| {
-                ui.label(RichText::new(name).monospace());
                 ui.label(format!("{long:.2} m long"));
                 if corners.len() > 2 {
                     ui.label(RichText::new("several edges").weak().small());
@@ -218,12 +222,29 @@ fn changes_section(
     );
     for (at, change) in facts.changes.iter().enumerate() {
         let number = at + 1;
+        let mut words = format!("{number}. {} {}", change.word, change.faces.join(", "));
+        if let Some(name) = &change.name {
+            words.push_str(&format!(" ({name})"));
+        }
+        // A long name (a corner's, say) is cut short, whole in its tip,
+        // so the panel keeps its width. A change with three amounts has
+        // them on a line of their own.
+        let three = change.by_xyz.is_some();
+        if three {
+            ui.add(egui::Label::new(&words).truncate())
+                .on_hover_text(&words);
+        }
         ui.horizontal(|ui| {
-            let mut words = format!("{number}. {} {}", change.word, change.faces.join(", "));
-            if let Some(name) = &change.name {
-                words.push_str(&format!(" ({name})"));
+            if three {
+                ui.add_space(14.0);
+            } else {
+                let width = (ui.available_width() - 100.0).max(80.0);
+                ui.scope(|ui| {
+                    ui.set_max_width(width);
+                    ui.add(egui::Label::new(&words).truncate())
+                        .on_hover_text(&words);
+                });
             }
-            ui.label(words);
             let settled = |field: &egui::Response| field.drag_stopped() || field.lost_focus();
             if change.by_xyz.is_some() {
                 // A move, a turn or a scale: x, y and z.
