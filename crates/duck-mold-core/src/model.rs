@@ -11,6 +11,7 @@ use std::ops::Range;
 use std::sync::Arc;
 
 use crate::math::{Bounds, Mat3, Transform, Vec3};
+use crate::motion::Pose;
 use crate::recipe::{Limits, Loc, PaletteColor};
 use crate::shaping::Shaped;
 
@@ -34,6 +35,9 @@ pub struct Model {
     /// with `from`, by name, and the path of the part it is on. It moves
     /// with that part when the model is posed.
     pub carried: Vec<(String, String)>,
+    /// The model's poses, as the recipe wrote them. `rest`, the model
+    /// as it is built, is always there and isn't in this list.
+    pub poses: Vec<Pose>,
     /// Where the recipe's own zero is in the model. A recipe measures
     /// `move` from its own zero; the model is then shifted so that its
     /// zero point (`origin`) is at zero. Take this away from a point of
@@ -306,6 +310,18 @@ impl Model {
                 )
             }
         }
+    }
+
+    /// The pose with this name. `rest` is a pose with nothing in it.
+    pub fn pose(&self, name: &str) -> Option<Pose> {
+        if name == crate::recipe::REST {
+            return Some(Pose {
+                name: name.to_owned(),
+                loc: Loc::default(),
+                joints: Vec::new(),
+            });
+        }
+        self.poses.iter().find(|pose| pose.name == name).cloned()
     }
 
     /// Every part that has faces of its own (not an assembly), in order,

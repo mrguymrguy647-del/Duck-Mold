@@ -967,6 +967,7 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         parts,
         sockets,
         carried: Vec::new(),
+        poses: Vec::new(),
         zero: Vec3::ZERO,
     })
 }

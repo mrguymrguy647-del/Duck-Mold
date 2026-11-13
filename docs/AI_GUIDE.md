@@ -179,6 +179,7 @@ The top of the file:
 | `parts` | Required. The model's parts, at least one. |
 | `sockets` | Extra sockets on the whole model. |
 | `origin` | The model's zero point: a socket, like `"bottom"` (the default), `"center"` or `"trunk.bottom"`. |
+| `poses` | The model's poses, by name: which parts are turned, and how far (section 11). |
 
 A part (an entry of `parts`, or of `define`) gets its shape from
 **exactly one** of:
@@ -509,6 +510,7 @@ Warnings (the model is still built; exit code 0):
 | `no_color` | A part has faces with no colour: they are plain grey. Give it a `color`. |
 | `unused` | A palette colour or a defined part that nothing uses, or a `color` that changes nothing because every face inside already has one. |
 | `floating` | A part touches nothing. |
+| `limit_broken` | A pose turns a part past its `limits`, or moves a part that is `"fixed"`. The model still builds. |
 | `hidden` | A part is entirely inside another. |
 | `off_ground` | The model's lowest point isn't at y = 0. |
 | `skipped` | Something in a mesh file was passed over. |
@@ -611,6 +613,11 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
 | `duck-mold edit <recipe> set-limits <part> --x <low,high> --y ... --z ...` | Says how far a part may turn when the model is posed (section 11). Each of `--x`, `--y`, `--z` takes two angles (`-30,40`), `free` (any amount) or `none` (not that way); directions not given stay as they are. `--fixed`: it never turns or moves. `--none`: no limits again. |
+| `duck-mold edit <recipe> set-pose <pose> <part> --turn x,y,z` | Turns a part in a pose, in degrees about its pivot (section 11); `--move x,y,z` slides it, in metres. Makes the pose if it isn't there. `--rest` puts the part back at rest in that pose. |
+| `duck-mold edit <recipe> add-pose <name>` | A new pose with every part at rest; `--from <pose>` makes it a copy of another. |
+| `duck-mold edit <recipe> rename-pose <pose> <new name>` | Renames a pose where it stands. |
+| `duck-mold edit <recipe> remove-pose <pose>` | Removes a pose. |
+| `duck-mold edit <recipe> mirror-pose <pose> --as <name>` | The mirror image of a pose, left to right: `left` and `right` swap in the parts' names, turns around y and z go the other way (inside a mirrored part they keep their numbers), a move to one side goes to the other. `--as` an existing pose replaces it; without `--as` the pose itself is mirrored. Make `step_left`, then `mirror-pose step_left --as step_right`. |
 | `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
 | `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
 | `duck-mold edit <recipe> set-change <part> <number> --by <amount>` | Changes the amount of one change, counted from 1 as they are written: one number, or `x,y,z` for a move, a turn or a scale. Later changes, and every name, stay. |
@@ -732,8 +739,67 @@ limits = "fixed"                            # never moves: a badge, a window
 - Limits on a part inside a definition go wherever the definition is
   used. `duplicate --mirror` mirrors a part's limits.
 
-Poses and animations are written in the recipe too; they come with the
-next steps of this phase.
+### Poses
+
+A pose is the model with some parts turned or moved. It is written at
+the top of the recipe, by name, with a line for every part that isn't
+at rest:
+
+```toml
+[poses.wave]
+left_arm = [0, 0, -150]            # its turn: degrees around x, then y, then z
+"left_arm/elbow" = [0, 0, -30]     # a part inside a part: its path, in quotes
+head = [0, -15, 0]
+
+[poses.crouch]
+body = { move = [0, -0.15, 0] }    # moved, in metres; everything on it goes too
+left_leg = { turn = [40, 0, 0] }   # the long way of writing a turn
+```
+
+- A part the pose doesn't name is at rest. `rest` is always a pose: the
+  model as it is built. It can't be written or changed.
+- A turn is about the part's pivot; what hangs from the part goes with
+  it. So a walk turns `left_leg` and `right_leg`, not the feet.
+- `move` is from where the part stands at rest, in the same directions
+  as the turn. Move the root part (the robot's `body`) to move the
+  whole model: a crouch, a jump.
+- There is no reaching (IK): a foot isn't put somewhere, the hip and
+  knee are turned. Keep feet on the ground by moving the body until
+  they touch: `inspect --pose` says how far the lowest point is from
+  the ground.
+- A pose that names a part that isn't there is an error with the
+  closest name. A pose that turns a part past its `limits` is a warning
+  (`limit_broken`): the model still builds and exports.
+
+**Check a pose** with `duck-mold inspect <recipe> --pose <name>`: the
+usual report, measured on the model as the pose puts it, plus `moves`
+(the parts the pose turns) and `limits` (what it breaks). A part that
+floats or overlaps in the pose and doesn't at rest is marked "(not so
+at rest)". In `--json` that is `pose`: `name`, `moves`,
+`limits_broken`, `new_overlapping`, `new_floating`. With `--sockets`
+the sockets are listed where the pose puts them.
+
+**Look at a pose** with `duck-mold render <recipe> --pose <name>`: the
+four views, written as `<recipe>.<pose>.png`.
+
+**Make both sides alike**: pose one side, then `mirror-pose`.
+
+```bash
+duck-mold edit robot.toml set-pose step_left left_leg --turn 30,0,0
+duck-mold edit robot.toml set-pose step_left right_leg --turn -30,0,0
+duck-mold edit robot.toml set-pose step_left left_arm --turn -25,0,0
+duck-mold edit robot.toml set-pose step_left right_arm --turn 25,0,0
+duck-mold edit robot.toml mirror-pose step_left --as step_right
+duck-mold inspect robot.toml --pose step_left --json
+duck-mold render robot.toml --pose step_left
+```
+
+Renaming a part with `rename` renames its lines in every pose (and the
+lines of the parts inside it); removing a part removes them, and the
+summary says how many.
+
+Animations are written in the recipe too; they come with the next step
+of this phase.
 
 ## 12. Mistakes to avoid
 

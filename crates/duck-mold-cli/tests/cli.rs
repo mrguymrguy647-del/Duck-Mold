@@ -1317,7 +1317,7 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 27, "the guide's tables list 27 fields");
+    assert_eq!(checked, 28, "the guide's tables list 28 fields");
 }
 
 #[test]
@@ -1497,4 +1497,154 @@ fn limits_are_set_and_the_joins_listed_from_the_command_line() {
         stderr(&output)
     );
     assert_eq!(text(), TREE);
+}
+
+#[test]
+fn poses_are_made_checked_and_drawn_from_the_command_line() {
+    let folder = folder("cli_poses");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+
+    // The tree leans in the wind: its leaves tip over on the trunk.
+    let output = edit(&["set-pose", "windy", "leaves", "--turn", "0,0,-20"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with(
+            "edited tree.toml: turned \"leaves\" to [0, 0, -20] in the pose \"windy\", a new pose\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(
+        text(),
+        format!("{TREE}\n[poses.windy]\nleaves = [0, 0, -20]\n")
+    );
+    let output = edit(&["set-pose", "windy", "trunk", "--move", "0.1,0,0", "--json"]);
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "set-pose");
+    assert!(text().ends_with("leaves = [0, 0, -20]\ntrunk = { move = [0.1, 0, 0] }\n"));
+
+    // The report on the model in the pose: bigger across, and it says
+    // what the pose moves.
+    let output = run(&folder, &["inspect", "tree.toml", "--pose", "windy"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(
+        report.starts_with("tree, in the pose \"windy\"  (tree.toml)\n"),
+        "{report}"
+    );
+    assert!(
+        report.contains("  moves        leaves, trunk\n"),
+        "{report}"
+    );
+    assert!(report.contains("  limits       none broken\n"), "{report}");
+    let at_rest = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    let posed = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--pose", "windy", "--json"],
+    ));
+    // The leaves lean over to one side, and the whole tree stands 10 cm
+    // to the side: it reaches further that way, and is lower.
+    assert!(
+        posed["bounds"]["max"][0].as_f64().unwrap()
+            > at_rest["bounds"]["max"][0].as_f64().unwrap() + 0.05
+    );
+    assert!(posed["size"][1].as_f64().unwrap() < at_rest["size"][1].as_f64().unwrap());
+    assert_eq!(posed["pose"]["name"], "windy");
+    assert_eq!(
+        posed["pose"]["moves"],
+        serde_json::json!(["leaves", "trunk"])
+    );
+    assert_eq!(posed["pose"]["limits_broken"], serde_json::json!([]));
+    assert!(at_rest.get("pose").is_none());
+    // `rest` is a pose too: the model as it is built.
+    let rest = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--pose", "rest", "--json"],
+    ));
+    assert_eq!(rest["size"], at_rest["size"]);
+
+    // A limit the pose breaks is said in the report and as a warning.
+    let output = edit(&["set-limits", "leaves", "--z", "-10,10"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stderr(&output)
+            .contains("the pose \"windy\" turns \"leaves\" -20 around z: its limit is -10 to 10"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(&folder, &["inspect", "tree.toml", "--pose", "windy"]);
+    assert!(
+        stdout(&output).contains(
+            "  limits       the pose turns \"leaves\" -20 around z: its limit is -10 to 10\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+
+    // The picture of the pose goes beside the model's own, named after
+    // the pose.
+    let output = run(&folder, &["render", "tree.toml", "--pose", "windy"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("wrote tree.windy.png ("),
+        "{}",
+        stdout(&output)
+    );
+    assert!(folder.join("tree.windy.png").is_file());
+    assert!(!folder.join("tree.png").exists());
+    let plain = run(&folder, &["render", "tree.toml"]);
+    assert_eq!(plain.status.code(), Some(0));
+    assert_ne!(
+        std::fs::read(folder.join("tree.windy.png")).unwrap(),
+        std::fs::read(folder.join("tree.png")).unwrap()
+    );
+
+    // The mirror image, a copy, another name, and gone again.
+    let output = edit(&["mirror-pose", "windy", "--as", "windy_back"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        text().ends_with(
+            "[poses.windy_back]\nleaves = [0, 0, 20]\ntrunk = { move = [-0.1, 0, 0] }\n"
+        ),
+        "{}",
+        text()
+    );
+    for words in [
+        &["add-pose", "calm", "--from", "windy"][..],
+        &["set-pose", "calm", "trunk", "--rest"],
+        &["rename-pose", "calm", "still"],
+        &["remove-pose", "still"],
+        &["remove-pose", "windy_back"],
+        &["remove-pose", "windy"],
+        &["set-limits", "leaves", "--none"],
+    ] {
+        let output = edit(words);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{words:?}: {}",
+            stderr(&output)
+        );
+    }
+    assert_eq!(text(), TREE);
+
+    // A pose that isn't there: which there are.
+    let output = run(&folder, &["inspect", "tree.toml", "--pose", "windy"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("there is no pose \"windy\" in this recipe. It can be: rest."),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(
+        &folder,
+        &["render", "tree.toml", "--pose", "windy", "--json"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output)["errors"][0]["code"], "unknown_pose");
 }

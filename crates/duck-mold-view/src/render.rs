@@ -22,11 +22,12 @@
 
 use std::path::Path;
 
-use duck_mold_core::inspect::{Inspection, inspect};
+use duck_mold_core::inspect::{Inspection, inspect, inspect_pose};
 use duck_mold_core::issue::{Code, Issue};
 use duck_mold_core::load::display_path;
 use duck_mold_core::math::{Vec3, sin_cos_degrees, vec3};
 use duck_mold_core::model::Model;
+use duck_mold_core::motion;
 use duck_mold_core::tools::{self, Failure};
 use duckforge::prelude::{Camera3D, Canvas, Color, Mesh, Rect, Transform, vec2};
 use serde::Serialize;
@@ -355,7 +356,12 @@ pub struct Rendered {
 /// `.obj` or `.glb`) and writes the four views as a PNG. Without
 /// `output`, the picture goes next to the file, with the same name and
 /// the ending `.png`. Nothing is written if the recipe has mistakes.
-pub fn render_file(path: &Path, output: Option<&Path>, size: usize) -> Result<Rendered, Failure> {
+pub fn render_file(
+    path: &Path,
+    output: Option<&Path>,
+    size: usize,
+    pose: Option<&str>,
+) -> Result<Rendered, Failure> {
     if !(SMALLEST_SIZE..=LARGEST_SIZE).contains(&size) {
         return Err(Failure::Usage(Box::new(
             Issue::error(
@@ -374,12 +380,25 @@ pub fn render_file(path: &Path, output: Option<&Path>, size: usize) -> Result<Re
     }
     let built = tools::build(path)?;
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
+    // In a pose, the picture and the report are of the model as the pose
+    // puts it.
+    let model = match pose {
+        None => built.model,
+        Some(name) => {
+            let pose = tools::pose_named(&built.model, name, &built.source)?;
+            let posed = motion::posed(&built.model, &pose.joints);
+            inspection = inspect_pose(&inspection, &built.model, &posed, &pose, &built.source);
+            posed
+        }
+    };
     inspection.materials = built.materials;
-    let sheet = render_sheet(&built.model, &inspection.headline(), size);
+    let sheet = render_sheet(&model, &inspection.headline(), size);
     let png = sheet.to_png();
-    let output = match output {
-        Some(output) => output.to_path_buf(),
-        None => path.with_extension("png"),
+    let output = match (output, pose) {
+        (Some(output), _) => output.to_path_buf(),
+        (None, None) => path.with_extension("png"),
+        // `robot.wave.png`, beside `robot.png`.
+        (None, Some(pose)) => path.with_extension(format!("{pose}.png")),
     };
     tools::write_file(&output, &png)?;
     Ok(Rendered {

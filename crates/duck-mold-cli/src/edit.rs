@@ -316,6 +316,62 @@ pub enum Change {
         #[arg(long, conflicts_with_all = ["x", "y", "z"])]
         none: bool,
     },
+    /// Turn or move a part in a pose. Makes the pose if it isn't there.
+    ///
+    /// A pose is the model with some parts turned about their joins:
+    /// the recipe's [poses.<name>]. --turn is degrees around x (a nod),
+    /// then y (a turn), then z (a tilt), about the part's pivot;
+    /// everything hanging from the part goes with it. --move slides the
+    /// part, in metres. A part inside another is named by its path:
+    /// left_arm/elbow. `duck-mold render <recipe> --pose <name>` draws
+    /// it; `duck-mold inspect <recipe> --pose <name>` checks it.
+    SetPose {
+        /// The pose's name.
+        pose: String,
+        /// The part.
+        part: String,
+        /// How far it is turned, in degrees: x,y,z.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        turn: Option<String>,
+        /// How far it is moved from where it stands at rest: x,y,z.
+        #[arg(long = "move", value_name = "X,Y,Z", allow_hyphen_values = true)]
+        move_by: Option<String>,
+        /// Put the part back at rest in this pose.
+        #[arg(long, conflicts_with_all = ["turn", "move_by"])]
+        rest: bool,
+    },
+    /// Add a pose: with every part at rest, or a copy of another to
+    /// change.
+    AddPose {
+        /// The new pose's name.
+        name: String,
+        /// The pose to copy.
+        #[arg(long, value_name = "POSE")]
+        from: Option<String>,
+    },
+    /// Rename a pose. Everything that names it follows.
+    RenamePose {
+        /// The pose.
+        pose: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Remove a pose.
+    RemovePose {
+        /// The pose.
+        pose: String,
+    },
+    /// Make the mirror image of a pose, left to right: what left_arm
+    /// did, right_arm does, and a part in the middle turns the other
+    /// way. Names with "left" and "right" in them are swapped.
+    MirrorPose {
+        /// The pose.
+        pose: String,
+        /// The name of the mirror image: a new pose, or one to put it in
+        /// place of. Without it, the pose itself is mirrored.
+        #[arg(long = "as", value_name = "NAME")]
+        as_name: Option<String>,
+    },
     /// Make a definition from a part: what it is made of (its shape and
     /// sizes, changes, colours and own sockets) moves to [define.<name>],
     /// and the part uses it where it stands. Add more of it with
@@ -753,6 +809,38 @@ impl Change {
             Change::Define { part, name } => Edit::Define {
                 part: part.clone(),
                 name: name.clone(),
+            },
+            Change::SetPose {
+                pose,
+                part,
+                turn,
+                move_by,
+                rest,
+            } => Edit::SetPose {
+                pose: pose.clone(),
+                part: part.clone(),
+                turn: turn
+                    .as_deref()
+                    .map(|turn| three("--turn", turn))
+                    .transpose()?,
+                move_by: move_by
+                    .as_deref()
+                    .map(|move_by| three("--move", move_by))
+                    .transpose()?,
+                rest: *rest,
+            },
+            Change::AddPose { name, from } => Edit::AddPose {
+                name: name.clone(),
+                from: from.clone(),
+            },
+            Change::RenamePose { pose, new_name } => Edit::RenamePose {
+                pose: pose.clone(),
+                new_name: new_name.clone(),
+            },
+            Change::RemovePose { pose } => Edit::RemovePose { pose: pose.clone() },
+            Change::MirrorPose { pose, as_name } => Edit::MirrorPose {
+                pose: pose.clone(),
+                as_name: as_name.clone(),
             },
             Change::SetLimits {
                 part,

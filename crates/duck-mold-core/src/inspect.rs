@@ -83,6 +83,14 @@ pub struct Inspection {
     /// and hangs from: only with `--joins` ([`join_report`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub joins: Vec<JoinReport>,
+    /// The names of the model's poses, in the recipe's order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub poses: Vec<String>,
+    /// For a report on the model in one of its poses (`--pose`): which
+    /// pose, and what the pose gets wrong that the model at rest
+    /// doesn't.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pose: Option<PoseReport>,
     /// Things that look like mistakes.
     pub warnings: Vec<Issue>,
     /// Always empty: a model that has errors is never inspected.
@@ -146,6 +154,74 @@ pub fn socket_report(model: &Model) -> Vec<SocketReport> {
             facing: socket.facing.to_array(),
         })
         .collect()
+}
+
+/// What `inspect --pose` adds to the report: the report itself is of
+/// the model as it stands in the pose.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PoseReport {
+    /// The pose's name.
+    pub name: String,
+    /// The parts the pose turns or moves.
+    pub moves: Vec<String>,
+    /// What the pose asks of a part that its limits don't allow, each as
+    /// a sentence: `turns "head" 95 around y: its limit is -80 to 80`.
+    pub limits_broken: Vec<String>,
+    /// The pairs of `overlapping` that don't overlap when the model is
+    /// at rest: what the pose pushed into each other.
+    pub new_overlapping: Vec<[String; 2]>,
+    /// The parts of `floating` that don't float when the model is at
+    /// rest.
+    pub new_floating: Vec<String>,
+}
+
+/// The report on a model in one of its poses. `rest` is the report on
+/// the model as it is built; `posed` is the model in the pose.
+pub fn inspect_pose(
+    rest: &Inspection,
+    model: &Model,
+    posed: &Model,
+    pose: &crate::motion::Pose,
+    source: &str,
+) -> Inspection {
+    let mut inspection = inspect(posed, source, Vec::new());
+    // A pose may well leave the ground (a jump): the report's `ground`
+    // says so, and that is no warning.
+    inspection
+        .warnings
+        .retain(|warning| warning.code != Code::OffGround);
+    let was = |a: &str, b: &str| {
+        rest.overlapping
+            .iter()
+            .any(|old| (old.a == a && old.b == b) || (old.a == b && old.b == a))
+    };
+    inspection.pose = Some(PoseReport {
+        name: pose.name.clone(),
+        moves: pose
+            .joints
+            .iter()
+            .filter(|joint| !joint.is_rest())
+            .map(|joint| joint.part.clone())
+            .collect(),
+        limits_broken: crate::motion::limits_broken(model, &pose.joints)
+            .iter()
+            .map(crate::motion::Broken::describe)
+            .collect(),
+        new_overlapping: inspection
+            .overlapping
+            .iter()
+            .filter(|overlap| !was(&overlap.a, &overlap.b))
+            .map(|overlap| [overlap.a.clone(), overlap.b.clone()])
+            .collect(),
+        new_floating: inspection
+            .floating
+            .iter()
+            .filter(|float| !rest.floating.iter().any(|old| old.part == float.part))
+            .map(|float| float.part.clone())
+            .collect(),
+    });
+    inspection.summary = format!("in the pose \"{}\", {}", pose.name, inspection.summary);
+    inspection
 }
 
 /// One part in the tree the model moves by, for `inspect --joins`.
@@ -546,6 +622,8 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
         sockets: Vec::new(),
         shaped: Vec::new(),
         joins: Vec::new(),
+        poses: model.poses.iter().map(|pose| pose.name.clone()).collect(),
+        pose: None,
         warnings,
         errors: Vec::new(),
     }
@@ -612,6 +690,10 @@ fn length(metres: f64) -> String {
     }
 }
 
+/// Said after a part that floats or overlaps in a pose and doesn't when
+/// the model is at rest.
+const NOT_AT_REST: &str = "   (not so at rest)";
+
 /// The start of the summary: `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
 fn headline(name: &str, size: [f64; 3], triangles: usize) -> String {
     let [x, y, z] = size.map(length);
@@ -645,7 +727,14 @@ impl Inspection {
     /// triangle count, as `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
     /// `render` writes it under its pictures.
     pub fn headline(&self) -> String {
-        headline(&self.name, self.size, self.triangles)
+        match &self.pose {
+            Some(pose) => headline(
+                &format!("{}, \"{}\"", self.name, pose.name),
+                self.size,
+                self.triangles,
+            ),
+            None => headline(&self.name, self.size, self.triangles),
+        }
     }
 
     /// The report for people, a few aligned lines.
@@ -789,11 +878,16 @@ impl Inspection {
             self.floating
                 .iter()
                 .map(|float| {
+                    let new = self
+                        .pose
+                        .as_ref()
+                        .is_some_and(|pose| pose.new_floating.contains(&float.part));
                     format!(
-                        "{} floats {} from {}",
+                        "{} floats {} from {}{}",
                         float.part,
                         length(float.gap),
-                        float.nearest
+                        float.nearest,
+                        if new { NOT_AT_REST } else { "" }
                     )
                 })
                 .collect(),
@@ -803,11 +897,17 @@ impl Inspection {
             self.overlapping
                 .iter()
                 .map(|overlap| {
+                    let new = self.pose.as_ref().is_some_and(|pose| {
+                        pose.new_overlapping
+                            .iter()
+                            .any(|[a, b]| *a == overlap.a && *b == overlap.b)
+                    });
+                    let new = if new { NOT_AT_REST } else { "" };
                     if overlap.hidden {
-                        format!("{} is hidden inside {}", overlap.a, overlap.b)
+                        format!("{} is hidden inside {}{new}", overlap.a, overlap.b)
                     } else {
                         format!(
-                            "{} is {} inside {}",
+                            "{} is {} inside {}{new}",
                             overlap.a,
                             length(overlap.depth),
                             overlap.b
@@ -816,6 +916,29 @@ impl Inspection {
                 })
                 .collect(),
         );
+        if !self.poses.is_empty() {
+            list("poses", vec![self.poses.join(", ")]);
+        }
+        if let Some(pose) = &self.pose {
+            list(
+                "moves",
+                if pose.moves.is_empty() {
+                    vec!["nothing: every part is at rest".to_owned()]
+                } else {
+                    vec![pose.moves.join(", ")]
+                },
+            );
+            list("limits", {
+                if pose.limits_broken.is_empty() {
+                    vec!["none broken".to_owned()]
+                } else {
+                    pose.limits_broken
+                        .iter()
+                        .map(|broken| format!("the pose {broken}"))
+                        .collect()
+                }
+            });
+        }
         if !self.sockets.is_empty() {
             let name_width = self
                 .sockets
@@ -911,7 +1034,13 @@ impl Inspection {
                 ));
             }
         }
-        format!("{}  ({})\n{out}", self.name, self.source)
+        match &self.pose {
+            Some(pose) => format!(
+                "{}, in the pose \"{}\"  ({})\n{out}",
+                self.name, pose.name, self.source
+            ),
+            None => format!("{}  ({})\n{out}", self.name, self.source),
+        }
     }
 }
 

@@ -75,7 +75,38 @@ pub struct Recipe {
     /// Where the model's zero point is. `None` means the default: the
     /// middle of the underside.
     pub origin: Option<Origin>,
+    /// The poses: parts turned and moved from where they stand at rest.
+    pub poses: Vec<PoseDef>,
 }
+
+/// A pose, as the recipe writes it: a name, and a line for every part
+/// that isn't at rest.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoseDef {
+    /// Its name.
+    pub name: String,
+    /// Where it was written.
+    pub loc: Loc,
+    /// The parts it turns or moves.
+    pub parts: Vec<PosePart>,
+}
+
+/// One part in a pose.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PosePart {
+    /// The part, by path: `left_arm/elbow`.
+    pub part: String,
+    /// Where it was written.
+    pub loc: Loc,
+    /// Degrees around x, then y, then z, about the part's pivot.
+    pub turn: [f64; 3],
+    /// How far it is moved from where it stands at rest, in metres.
+    pub move_by: [f64; 3],
+}
+
+/// The pose that is always there and can't be written: the model as the
+/// recipe builds it.
+pub const REST: &str = "rest";
 
 /// Where a recipe's colours come from.
 #[derive(Debug, Clone, PartialEq)]
@@ -782,7 +813,7 @@ fn a_shape(name: &str) -> String {
 }
 
 /// The fields at the top of a recipe.
-pub(crate) const TOP_FIELDS: [&str; 9] = [
+pub(crate) const TOP_FIELDS: [&str; 10] = [
     "version",
     "name",
     "description",
@@ -792,6 +823,7 @@ pub(crate) const TOP_FIELDS: [&str; 9] = [
     "parts",
     "sockets",
     "origin",
+    "poses",
 ];
 
 /// Names kept for later phases, and what each is for.
@@ -1092,6 +1124,7 @@ impl Decoder<'_> {
             parts: Vec::new(),
             sockets: Vec::new(),
             origin: None,
+            poses: Vec::new(),
         };
         let Some(mut fields) = self.table(root, "", "a recipe: a table of fields") else {
             return recipe;
@@ -1217,8 +1250,121 @@ impl Decoder<'_> {
             });
         }
 
+        if let Some(entry) = fields.take("poses") {
+            recipe.poses = self.poses(&entry.node, "poses");
+        }
+
         self.finish(fields, &TOP_FIELDS);
         recipe
+    }
+
+    /// Reads `poses`: a table of poses by name, each a table of parts
+    /// with their turn (three numbers), or `{ turn = ..., move = ... }`.
+    fn poses(&mut self, node: &Node, path: &str) -> Vec<PoseDef> {
+        let Some(table) = self.table(node, path, "a table of poses by name, like [poses.wave]")
+        else {
+            return Vec::new();
+        };
+        let mut poses = Vec::new();
+        for pose in table.entries {
+            let pose_path = join(path, &pose.key);
+            if pose.key == REST {
+                self.error(
+                    Code::Reserved,
+                    &pose_path,
+                    pose.key_pos,
+                    "\"rest\" is the model as the recipe builds it, and is always there: it can't be written as a pose. Give this pose another name",
+                );
+                continue;
+            }
+            if !is_name(&pose.key) {
+                let message = format!(
+                    "\"{}\" can't be a name: use letters, digits, \"_\" and \"-\" only",
+                    pose.key
+                );
+                self.error(Code::TypeMismatch, &pose_path, pose.key_pos, message);
+                continue;
+            }
+            let Some(lines) = self.table(
+                &pose.node,
+                &pose_path,
+                "a table of parts and how each is turned, like left_arm = [0, 0, -150]",
+            ) else {
+                continue;
+            };
+            let mut parts = Vec::new();
+            for line in lines.entries {
+                let part_path = join(&pose_path, &line.key);
+                let (turn, move_by) = match &line.node.value {
+                    Value::Table(_) => {
+                        let Some(mut fields) =
+                            self.table(&line.node, &part_path, "{ turn = [0, 30, 0] }")
+                        else {
+                            continue;
+                        };
+                        let turn = fields.take("turn").map(|entry| {
+                            self.three(
+                                &entry.node,
+                                &join(&part_path, "turn"),
+                                TURN_RANGE,
+                                "[0, 30, 0]",
+                            )
+                        });
+                        let move_by = fields.take("move").map(|entry| {
+                            self.three(
+                                &entry.node,
+                                &join(&part_path, "move"),
+                                MOVE_RANGE,
+                                "[0, 0.2, 0]",
+                            )
+                        });
+                        if turn.is_none() && move_by.is_none() {
+                            self.error(
+                                Code::MissingField,
+                                &part_path,
+                                line.node.pos,
+                                "a part in a pose needs \"turn\", \"move\" or both, like { turn = [0, 30, 0] }",
+                            );
+                        }
+                        self.finish(fields, &["turn", "move"]);
+                        match (turn, move_by) {
+                            (Some(None), _) | (_, Some(None)) | (None, None) => continue,
+                            (turn, move_by) => (
+                                turn.flatten().unwrap_or([0.0; 3]),
+                                move_by.flatten().unwrap_or([0.0; 3]),
+                            ),
+                        }
+                    }
+                    Value::Array(_) => {
+                        match self.three(&line.node, &part_path, TURN_RANGE, "[0, 30, 0]") {
+                            Some(turn) => (turn, [0.0; 3]),
+                            None => continue,
+                        }
+                    }
+                    other => {
+                        let message = format!(
+                            "a part in a pose is its turn, three numbers in degrees like [0, 30, 0], or {{ turn = ..., move = ... }}, not {}",
+                            other.describe()
+                        );
+                        self.error(Code::TypeMismatch, &part_path, line.node.pos, message)
+                            .got = Some(other.to_got());
+                        continue;
+                    }
+                };
+                parts.push(PosePart {
+                    part: line.key.clone(),
+                    loc: self.loc(&part_path, line.key_pos),
+                    turn,
+                    move_by,
+                });
+            }
+            poses.push(PoseDef {
+                name: pose.key.clone(),
+                loc: self.loc(&pose_path, pose.key_pos),
+                parts,
+            });
+        }
+        poses
     }
 
     /// A table of `name = "#RRGGBB"`.

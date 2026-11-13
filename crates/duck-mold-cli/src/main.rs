@@ -68,6 +68,11 @@ enum Command {
         /// turn (its "limits").
         #[arg(long)]
         joins: bool,
+        /// Report on the model as it stands in this pose instead of at
+        /// rest: its size, what floats and what overlaps then, and
+        /// whether the pose breaks a part's limits.
+        #[arg(long, value_name = "NAME")]
+        pose: Option<String>,
     },
     /// Build a recipe and write the model as a .glb file.
     ///
@@ -104,6 +109,10 @@ enum Command {
         /// is in the picture.
         #[arg(long)]
         json: bool,
+        /// Draw the model as it stands in this pose instead of at rest.
+        /// The picture is then named after the pose too: robot.wave.png.
+        #[arg(long, value_name = "NAME")]
+        pose: Option<String>,
     },
     /// Open the Studio: the window where a model is built with the mouse.
     ///
@@ -197,12 +206,14 @@ fn main() -> ExitCode {
             sockets,
             faces,
             joins,
+            pose,
         } => match tools::inspect_file_listing(
             &file,
             &tools::Also {
                 sockets,
                 faces,
                 joins,
+                pose,
             },
         ) {
             Ok(inspection) => {
@@ -240,7 +251,8 @@ fn main() -> ExitCode {
             output,
             size,
             json,
-        } => match render::render_file(&file, output.as_deref(), size) {
+            pose,
+        } => match render::render_file(&file, output.as_deref(), size, pose.as_deref()) {
             Ok(rendered) => {
                 if json {
                     say_json(&rendered);

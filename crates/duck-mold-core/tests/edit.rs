@@ -2834,6 +2834,28 @@ fn every_kind_of_edit_has_a_name() {
             part: String::new(),
             limits: duck_mold_core::edit::LimitsTo::Fixed,
         },
+        Edit::SetPose {
+            pose: String::new(),
+            part: String::new(),
+            turn: None,
+            move_by: None,
+            rest: false,
+        },
+        Edit::AddPose {
+            name: String::new(),
+            from: None,
+        },
+        Edit::RenamePose {
+            pose: String::new(),
+            new_name: String::new(),
+        },
+        Edit::RemovePose {
+            pose: String::new(),
+        },
+        Edit::MirrorPose {
+            pose: String::new(),
+            as_name: None,
+        },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
     assert_eq!(names, Edit::COMMANDS);

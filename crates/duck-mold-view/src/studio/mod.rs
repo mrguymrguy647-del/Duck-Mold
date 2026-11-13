@@ -891,7 +891,7 @@ impl Studio {
     /// Writes the four-view picture next to the recipe, as `duck-mold
     /// render` does. Says where it went.
     pub fn render_picture(&mut self) -> Result<String, String> {
-        let done = render::render_file(&self.path, None, render::DEFAULT_SIZE)
+        let done = render::render_file(&self.path, None, render::DEFAULT_SIZE, None)
             .map(|rendered| {
                 self.shorten(&format!(
                     "Wrote {} ({} x {} pixels)",

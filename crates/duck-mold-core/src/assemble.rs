@@ -25,9 +25,10 @@ use crate::issue::{Code, Issue};
 use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
+use crate::motion::{self, Joint, Pose};
 use crate::recipe::{
-    Axis, Define, Limits, Loc, PaletteColor, PartDef, Placement, Recipe, Shape, Side, SocketDef,
-    SocketKind, SocketRef, Source, hex, rgb_of,
+    Axis, Define, Limits, Loc, PaletteColor, PartDef, Placement, PoseDef, Recipe, Shape, Side,
+    SocketDef, SocketKind, SocketRef, Source, hex, rgb_of,
 };
 use crate::shapes::{self, Landing, Polygon};
 use crate::shaping::{self, Shaped};
@@ -104,15 +105,76 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     if assembler.issues.iter().any(Issue::is_error) {
         return None;
     }
-    Some(Model {
+    let mut model = Model {
         name: recipe.name.clone(),
         palette: assembler.palette,
         faces,
         parts,
         sockets: body.all_sockets(&Transform::IDENTITY),
         carried: body.passed.clone(),
+        poses: Vec::new(),
         zero: body.zero,
-    })
+    };
+    model.poses = poses(&model, &recipe.poses, assembler.issues);
+    if assembler.issues.iter().any(Issue::is_error) {
+        return None;
+    }
+    Some(model)
+}
+
+/// The recipe's poses, checked against the model that was built: every
+/// part a pose names must be there (a mistake, with the closest name),
+/// and a pose that turns a part past its limits is a warning.
+fn poses(model: &Model, written: &[PoseDef], issues: &mut Vec<Issue>) -> Vec<Pose> {
+    let paths: Vec<String> = model
+        .all_parts()
+        .iter()
+        .map(|part| part.path.clone())
+        .collect();
+    written
+        .iter()
+        .map(|pose| {
+            let mut joints: Vec<Joint> = Vec::new();
+            for line in &pose.parts {
+                if !paths.contains(&line.part) {
+                    let issue = line
+                        .loc
+                        .error(
+                            Code::UnknownPart,
+                            format!(
+                                "the pose \"{}\" turns \"{}\", but the model has no part with that name. A part inside another is written with its path, like \"left_arm/elbow\"",
+                                pose.name, line.part
+                            ),
+                        )
+                        .got(line.part.as_str())
+                        .one_of(&line.part, paths.iter().map(String::as_str));
+                    issues.push(issue);
+                    continue;
+                }
+                joints.push(Joint {
+                    part: line.part.clone(),
+                    loc: line.loc.clone(),
+                    turn: line.turn,
+                    move_by: line.move_by,
+                });
+            }
+            for broken in motion::limits_broken(model, &joints) {
+                let loc = joints
+                    .iter()
+                    .find(|joint| joint.part == broken.part)
+                    .map_or(&pose.loc, |joint| &joint.loc);
+                issues.push(loc.warning(
+                    Code::LimitBroken,
+                    format!("the pose \"{}\" {}", pose.name, broken.describe()),
+                ));
+            }
+            Pose {
+                name: pose.name.clone(),
+                loc: pose.loc.clone(),
+                joints,
+            }
+        })
+        .collect()
 }
 
 /// Which `define`s a `use` can name: those of the file it is written in.

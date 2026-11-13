@@ -444,13 +444,55 @@ pub enum Edit {
         /// What its limits become.
         limits: LimitsTo,
     },
+    /// Turns or moves a part in a pose, or puts it back at rest there.
+    /// Makes the pose if it isn't there.
+    SetPose {
+        /// The pose.
+        pose: String,
+        /// The part, by path.
+        part: String,
+        /// Degrees around x, then y, then z. `None`: as it is.
+        turn: Option<[f64; 3]>,
+        /// How far it is moved, in metres. `None`: as it is.
+        move_by: Option<[f64; 3]>,
+        /// Puts the part back at rest in the pose: its line goes.
+        rest: bool,
+    },
+    /// Adds a pose: with every part at rest, or as a copy of another.
+    AddPose {
+        /// Its name.
+        name: String,
+        /// The pose to copy.
+        from: Option<String>,
+    },
+    /// Renames a pose, and everything that names it.
+    RenamePose {
+        /// The pose.
+        pose: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Removes a pose.
+    RemovePose {
+        /// The pose.
+        pose: String,
+    },
+    /// Makes the mirror image of a pose, left to right: what the left
+    /// arm did, the right arm does.
+    MirrorPose {
+        /// The pose.
+        pose: String,
+        /// The name of the mirror image. Without one, the pose itself
+        /// is mirrored.
+        as_name: Option<String>,
+    },
 }
 
 impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 27] = [
+    pub const COMMANDS: [&'static str; 32] = [
         "add",
         "remove",
         "rename",
@@ -478,6 +520,11 @@ impl Edit {
         "move-corner",
         "define",
         "set-limits",
+        "set-pose",
+        "add-pose",
+        "rename-pose",
+        "remove-pose",
+        "mirror-pose",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -510,6 +557,11 @@ impl Edit {
             Edit::MoveCorner { .. } => "move-corner",
             Edit::Define { .. } => "define",
             Edit::SetLimits { .. } => "set-limits",
+            Edit::SetPose { .. } => "set-pose",
+            Edit::AddPose { .. } => "add-pose",
+            Edit::RenamePose { .. } => "rename-pose",
+            Edit::RemovePose { .. } => "remove-pose",
+            Edit::MirrorPose { .. } => "mirror-pose",
         }
     }
 }
@@ -1045,6 +1097,19 @@ fn part_in<'a>(model: &'a Model, path: &str) -> Option<&'a Part> {
 fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Stop> {
     match edit {
         Edit::SetLimits { part, limits } => motion::set_limits(doc, part, *limits),
+        Edit::SetPose {
+            pose,
+            part,
+            turn,
+            move_by,
+            rest,
+        } => motion::set_pose(doc, pose, part, *turn, *move_by, *rest),
+        Edit::AddPose { name, from } => motion::add_pose(doc, name, from.as_deref()),
+        Edit::RenamePose { pose, new_name } => motion::rename_pose(doc, pose, new_name),
+        Edit::RemovePose { pose } => motion::remove_pose(doc, pose),
+        Edit::MirrorPose { pose, as_name } => {
+            motion::mirror_pose(doc, pose, as_name.as_deref(), model)
+        }
         Edit::Add {
             name,
             made,
@@ -1201,11 +1266,23 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 ));
             }
             let count = going.len();
+            // What goes, by the paths the poses know it by.
+            let mut gone: Vec<String> = Vec::new();
+            for &at in &going {
+                let sibling = Found {
+                    at,
+                    name: Some(names[at].clone()),
+                    inside: beside(&found.inside, &names[at]),
+                    ..found.clone()
+                };
+                gone.extend(every_use(&sibling, model, &beside(part, &names[at])));
+            }
             going.sort_unstable();
             for at in going.into_iter().rev() {
                 doc.remove_item(&found.list, at).map_err(cant)?;
             }
-            let summary = match count {
+            let forgotten = motion::poses_forget(doc, &gone)?;
+            let mut summary = match count {
                 1 => format!("removed \"{part}\""),
                 2 => format!("removed \"{part}\" and the part that hung from it"),
                 more => format!(
@@ -1213,6 +1290,11 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                     more - 1
                 ),
             };
+            match forgotten {
+                0 => {}
+                1 => summary.push_str(", and its line in a pose"),
+                lines => summary.push_str(&format!(", and {lines} lines of poses")),
+            }
             Ok(Outcome {
                 summary,
                 touched: Some(found),
@@ -1268,6 +1350,8 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                     doc.set_value(&path, &text(&new)).map_err(cant)?;
                 }
             }
+            // The poses name it by its path: they follow.
+            motion::poses_follow_rename(doc, &every_use(&found, model, part), new_name)?;
             Ok(Outcome {
                 summary: format!("renamed \"{part}\" to \"{new_name}\""),
                 touched: Some(found),
@@ -2773,6 +2857,26 @@ pub fn shared(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -> 
     share(&found, model, part)
 }
 
+/// A path with its last name replaced: `left_arm/hand` and `elbow` give
+/// `left_arm/elbow`.
+fn beside(path: &str, name: &str) -> String {
+    match path.rsplit_once('/') {
+        Some((around, _)) => format!("{around}/{name}"),
+        None => name.to_owned(),
+    }
+}
+
+/// Every part of the model that the recipe's part `part` is: itself,
+/// and, for a part inside a definition, the same part in every part
+/// that uses the definition.
+fn every_use(found: &Found, model: Option<&Model>, part: &str) -> Vec<String> {
+    let mut all = vec![part.to_owned()];
+    if let Some(shared) = share(found, model, part) {
+        all.extend(shared.also_changes);
+    }
+    all
+}
+
 fn share(found: &Found, model: Option<&Model>, part: &str) -> Option<Shared> {
     let definition = found.definition.clone()?;
     fn users<'a>(parts: &'a [Part], definition: &str, into: &mut Vec<&'a Part>) {
@@ -3170,6 +3274,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::MoveCorner { part, .. }
         | Edit::Define { part, .. }
         | Edit::SetLimits { part, .. }
+        | Edit::SetPose { part, .. }
         | Edit::Cut { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }
@@ -3177,6 +3282,10 @@ fn part_of(edit: &Edit) -> &str {
         Edit::AddColor { .. }
         | Edit::SetColor { .. }
         | Edit::RemoveColor { .. }
+        | Edit::AddPose { .. }
+        | Edit::RenamePose { .. }
+        | Edit::RemovePose { .. }
+        | Edit::MirrorPose { .. }
         | Edit::TidySockets => "",
     }
 }

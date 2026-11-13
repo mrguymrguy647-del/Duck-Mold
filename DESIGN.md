@@ -3317,6 +3317,23 @@ feet are kept on the ground by hand: sink the body until they touch.
 `inspect --pose` says how far the lowest point is above or below the
 ground, so a person or an agent can get it right.
 
+*As built (step 3):* as above, with these details. A turn's x, y and z
+are those of the list the part is written in, as for limits, so a pose
+of a mirrored arm uses the same numbers as its twin and comes out as
+the mirror image. `mirror-pose` swaps `left` and `right` in the parts'
+names and turns y and z the other way; for a part inside a mirrored
+part the numbers stay as they are, because the mirroring is already in
+the part. A move to one side goes to the other. `set-pose` takes
+`--turn`, `--move` or both, and `--rest` takes the part's line out; a
+pose with no lines left stays, as an empty pose. `add-pose` with no
+`--from` is an empty pose. `remove-pose` has no `--with-keys` until
+there are keys (step 4). A number in a turn may be from -36000 to
+36000: a hundred times round. In `inspect --pose` the `ground` line and
+the sockets of `--sockets` are of the posed model; a pose that leaves
+the ground isn't warned about (a jump). The plain `inspect` report
+lists the names of the poses on one line. `render --pose wave` writes
+`robot.wave.png`.
+
 ### Animations
 
 An animation is a list of **keys**: a pose, and the time it is reached.

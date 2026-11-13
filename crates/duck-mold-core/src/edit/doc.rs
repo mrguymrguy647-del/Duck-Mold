@@ -729,6 +729,119 @@ impl Doc {
         self.splice(at..at, &block)
     }
 
+    // ---- tables kept by name in a group: `[poses.wave]` -------------------------
+
+    /// Adds a table to a group of tables kept by name at the top of the
+    /// recipe: `[poses.wave]`. It goes after the group's last table, or,
+    /// for the first of a group, at the end of the file. In JSON, and
+    /// where the group is written between braces, it is a field of the
+    /// group.
+    pub fn add_named_table(&mut self, group: &str, name: &str, fields: &[(String, Val)]) -> Done {
+        let path = [key(group), key(name)];
+        if self.node(&path).is_some() {
+            return cant(format!("there is already a {name} in {group}"));
+        }
+        let group_path = [key(group)];
+        let between_braces = self.syntax == Syntax::Json
+            || self
+                .node(&group_path)
+                .is_some_and(|node| self.text[node.span.clone()].starts_with('{'));
+        if between_braces {
+            return match self.node(&group_path) {
+                Some(_) => self.set_field(&group_path, name, &Val::Table(fields.to_vec()), &[]),
+                None => self.set_field(
+                    &[],
+                    group,
+                    &Val::Table(vec![(name.to_owned(), Val::Table(fields.to_vec()))]),
+                    &crate::recipe::TOP_FIELDS,
+                ),
+            };
+        }
+        let newline = self.newline();
+        let headers = self.headers();
+        // After the last table of the group, with everything under it.
+        let last = headers
+            .iter()
+            .filter(|(_, other)| other.starts_with(&group_path))
+            .map(|(_, other)| self.block_end(other, &headers))
+            .max();
+        let at = last.unwrap_or(self.text.len());
+        let mut block = self.gap_before(at);
+        block.push_str(&format!("[{}]{newline}", Self::header_name(&path)));
+        for (field, value) in fields {
+            block.push_str(&field_text(field, value, Syntax::Toml));
+            block.push_str(newline);
+        }
+        if at < self.text.len() {
+            block.push_str(newline);
+        }
+        self.splice(at..at, &block)
+    }
+
+    /// Takes a table out of a group of tables kept by name, with its
+    /// comments and the blank line above it. Fine if it isn't there.
+    pub fn remove_named_table(&mut self, group: &str, name: &str) -> Done {
+        let path = [key(group), key(name)];
+        let Some(node) = self.node(&path) else {
+            return Ok(());
+        };
+        let under_header =
+            self.syntax == Syntax::Toml && self.text[node.span.clone()].starts_with('[');
+        if !under_header {
+            self.remove_field(&[key(group)], name)?;
+            // A group left empty goes too, where it is a field.
+            if self.entries(&[key(group)]).is_some_and(<[Entry]>::is_empty) {
+                self.remove_field(&[], group)?;
+            }
+            return Ok(());
+        }
+        let headers = self.headers();
+        let mut start = self.lead(node.span.start);
+        let above = &self.text[..start];
+        if above.ends_with("\r\n\r\n") {
+            start -= 2;
+        } else if above.ends_with("\n\n") {
+            start -= 1;
+        }
+        let mut end = self.block_end(&path, &headers);
+        if end == self.text.len() {
+            // The last thing in the file: nothing follows to keep a
+            // blank line for.
+            return self.splice(start..end, "");
+        }
+        while end > start {
+            if self.text[..end].ends_with("\r\n\r\n") {
+                end -= 2;
+            } else if self.text[..end].ends_with("\n\n") {
+                end -= 1;
+            } else {
+                break;
+            }
+        }
+        self.splice(start..end, "")
+    }
+
+    /// Renames a table of a group of tables kept by name, where it
+    /// stands.
+    pub fn rename_named_table(&mut self, group: &str, name: &str, new: &str) -> Done {
+        let path = [key(group), key(name)];
+        let Some(node) = self.node(&path) else {
+            return cant(format!("there is no {name} in {group}"));
+        };
+        let under_header =
+            self.syntax == Syntax::Toml && self.text[node.span.clone()].starts_with('[');
+        if !under_header {
+            return self.rename_field(&[key(group)], name, new);
+        }
+        // The header's own text, up to its closing bracket.
+        let start = node.span.start;
+        let Some(length) = self.text[start..].find(']') else {
+            return cant("the table's header has no end");
+        };
+        let header = format!("[{}", Self::header_name(&[key(group), key(new)]));
+        self.splice(start..start + length, &header)
+    }
+
     // ---- changing lists --------------------------------------------------------
 
     /// Adds a table to the end of a list of tables. Gives its place.

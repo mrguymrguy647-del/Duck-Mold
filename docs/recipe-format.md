@@ -31,6 +31,7 @@ Rules that hold everywhere:
 | `parts` | list of parts | required | The model's parts. At least one. |
 | `sockets` | table of sockets | none | Extra sockets on the whole model, for `origin` and for when another recipe uses this one as a part. |
 | `origin` | text | `"bottom"` | Where the model's zero point is (below). |
+| `poses` | table of poses | none | The model's poses, by name. See "Poses" below. |
 | `bones`, `colliders`, `lods` | | | Reserved for later phases. Using one is an error that says so. |
 
 ### `palette`
@@ -392,6 +393,43 @@ hangs from it goes with it. `limits` says how far a part may turn.
 - A pose that turns a part past its limits is a warning, not an error.
 - `duck-mold inspect --joins` lists every part's pivot, parent and
   limits; `duck-mold edit <recipe> set-limits` writes them.
+
+## Poses
+
+A pose is the model with some of its parts turned or moved from where
+they stand at rest. Poses are written at the top of the recipe, each
+under its name:
+
+```toml
+[poses.wave]
+left_arm = [0, 0, -150]
+"left_arm/elbow" = [0, 0, -30]
+body = { turn = [0, 10, 0], move = [0, -0.05, 0] }
+```
+
+| | |
+|---|---|
+| The pose's name | Letters, digits, `_` and `-`. Not `rest`: that is the model as it is built, and is always there. |
+| A line's name | A part, by its path from the top of the model: `head`, `left_arm/elbow`. A path with a `/` goes in quotes. A part that isn't there is an error. |
+| A line's value | The part's turn, `[x, y, z]` in degrees; or `{ turn = [x, y, z], move = [x, y, z] }` with one or both. |
+| `turn` | Degrees around x, then y, then z, about the part's pivot: the socket it is joined to, or its own middle if it isn't joined. -36000 to 36000 each (a wheel can be turned many times round). |
+| `move` | Metres from where the part stands at rest, -10000 to 10000 each. |
+
+- The x, y and z are those of the list the part is written in, as for
+  `limits`.
+- Turning or moving a part carries what hangs from it: the parts joined
+  to it and, for a part made of parts, the parts inside it. Parts move
+  rigidly; nothing bends.
+- A part the pose doesn't name is at rest.
+- A turn past the part's `limits`, or a move of a `"fixed"` part, is a
+  warning (`limit_broken`).
+- Only the poses of the recipe being built count. A recipe used as a
+  part in another (`file = "wheel.toml"`) brings its limits, not its
+  poses.
+
+`duck-mold inspect --pose <name>` reports on the model in a pose;
+`duck-mold render --pose <name>` draws it; `duck-mold edit` has
+`set-pose`, `add-pose`, `rename-pose`, `remove-pose` and `mirror-pose`.
 
 ## Files as parts
 

@@ -13,13 +13,16 @@ use serde::Serialize;
 use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
 use crate::gltf::{is_duck_mold_glb, read_gltf};
-use crate::inspect::{Inspection, MaterialUse, face_report, inspect, join_report, socket_report};
+use crate::inspect::{
+    Inspection, MaterialUse, face_report, inspect, inspect_pose, join_report, socket_report,
+};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
 use crate::mesh::{MeshFile, read_obj};
 use crate::model::{Face, Model, Part, PartKind};
-use crate::recipe::{Loc, PaletteColor};
+use crate::motion::{self, Pose};
+use crate::recipe::{Loc, PaletteColor, REST};
 
 /// Why an operation gave nothing.
 #[derive(Debug, Clone, PartialEq)]
@@ -242,6 +245,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         parts: vec![part],
         sockets: Vec::new(),
         carried: Vec::new(),
+        poses: Vec::new(),
         zero: Vec3::ZERO,
     }
 }
@@ -289,17 +293,48 @@ pub fn inspect_file_with_sockets(path: &Path) -> Result<Inspection, Failure> {
 pub fn inspect_file_listing(path: &Path, also: &Also) -> Result<Inspection, Failure> {
     let built = build(path)?;
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
+    // In a pose, everything is measured on the model as the pose puts
+    // it.
+    let model = match &also.pose {
+        None => built.model,
+        Some(name) => {
+            let pose = pose_named(&built.model, name, &built.source)?;
+            let posed = motion::posed(&built.model, &pose.joints);
+            inspection = inspect_pose(&inspection, &built.model, &posed, &pose, &built.source);
+            posed
+        }
+    };
     inspection.materials = built.materials;
     if also.sockets {
-        inspection.sockets = socket_report(&built.model);
+        inspection.sockets = socket_report(&model);
     }
     if also.faces {
-        inspection.shaped = face_report(&built.model);
+        inspection.shaped = face_report(&model);
     }
     if also.joins {
-        inspection.joins = join_report(&built.model);
+        inspection.joins = join_report(&model);
     }
     Ok(inspection)
+}
+
+/// The model's pose with this name, or a sentence saying which poses it
+/// has. `rest` is always one of them.
+pub fn pose_named(model: &Model, name: &str, source: &str) -> Result<Pose, Failure> {
+    model.pose(name).ok_or_else(|| {
+        let names: Vec<&str> = std::iter::once(REST)
+            .chain(model.poses.iter().map(|pose| pose.name.as_str()))
+            .collect();
+        Failure::Usage(Box::new(
+            Issue::error(
+                Code::UnknownPose,
+                "",
+                format!("there is no pose \"{name}\" in this recipe"),
+            )
+            .in_file(source)
+            .got(name)
+            .one_of(name, names),
+        ))
+    })
 }
 
 /// What `inspect` lists besides its report, when asked.
@@ -312,6 +347,8 @@ pub struct Also {
     /// The tree the model moves by: what every part turns about, and how
     /// far: `--joins`.
     pub joins: bool,
+    /// Report on the model as it stands in this pose: `--pose`.
+    pub pose: Option<String>,
 }
 
 /// What `duck-mold export` did: the report on the model, and the file it
