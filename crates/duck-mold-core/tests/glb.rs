@@ -139,6 +139,17 @@ fn open(bytes: &[u8]) -> Glb {
     }
 }
 
+/// Every part's numbers put together again, as the file had them in one
+/// list before Phase 5: the corners in the model (each part's own, added
+/// to where its object is), in the file's directions.
+struct Whole {
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    colors: Vec<[f32; 3]>,
+    /// Counted from the first corner of all.
+    indices: Vec<u32>,
+}
+
 impl Glb {
     /// The numbers of accessor `at`, as decimals.
     fn floats(&self, at: usize) -> Vec<f32> {
@@ -154,10 +165,10 @@ impl Glb {
             .collect()
     }
 
-    fn indices(&self) -> Vec<u32> {
-        let at = self.json["meshes"][0]["primitives"][0]["indices"]
-            .as_u64()
-            .unwrap() as usize;
+    /// The corners of the triangles of one lump, counted from its own
+    /// first corner.
+    fn indices_of(&self, primitive: &serde_json::Value) -> Vec<u32> {
+        let at = primitive["indices"].as_u64().unwrap() as usize;
         let (start, count) = self.span(at, 5125, "SCALAR", 4);
         (0..count)
             .map(|n| u32_at(&self.bin, start + n * 4))
@@ -171,24 +182,113 @@ impl Glb {
         assert_eq!(accessor["componentType"], component);
         assert_eq!(accessor["type"], kind);
         let count = accessor["count"].as_u64().unwrap() as usize;
+        assert!(count > 0, "glTF has no empty lists");
         let view = &self.json["bufferViews"][accessor["bufferView"].as_u64().unwrap() as usize];
         assert_eq!(view["buffer"], 0);
-        let start = view["byteOffset"].as_u64().unwrap() as usize;
+        let within = accessor["byteOffset"].as_u64().unwrap_or(0) as usize;
+        let start = view["byteOffset"].as_u64().unwrap() as usize + within;
         let length = view["byteLength"].as_u64().unwrap() as usize;
         assert_eq!(start % 4, 0, "numbers start on a four-byte boundary");
-        assert_eq!(
-            length,
-            count * size,
-            "the view holds exactly the accessor's numbers"
+        assert_eq!(within % size, 0, "and on a whole entry");
+        assert!(
+            within + count * size <= length,
+            "the view holds the accessor's numbers"
         );
-        assert!(start + length <= self.bin.len());
+        assert!(start + count * size <= self.bin.len());
         (start, count)
     }
 
-    fn attribute(&self, name: &str) -> usize {
-        self.json["meshes"][0]["primitives"][0]["attributes"][name]
-            .as_u64()
-            .unwrap() as usize
+    /// The object each object hangs from.
+    fn parents(&self) -> Vec<Option<usize>> {
+        let nodes = self.json["nodes"].as_array().unwrap();
+        let mut parents = vec![None; nodes.len()];
+        for (at, node) in nodes.iter().enumerate() {
+            for child in node["children"].as_array().into_iter().flatten() {
+                let child = child.as_u64().unwrap() as usize;
+                assert!(parents[child].is_none(), "an object hangs from one other");
+                parents[child] = Some(at);
+            }
+        }
+        parents
+    }
+
+    /// Where an object is in the model, in the file's directions: its
+    /// own shift and those of everything it hangs from.
+    fn place(&self, node: usize) -> [f64; 3] {
+        let parents = self.parents();
+        let mut place = [0.0; 3];
+        let mut at = Some(node);
+        while let Some(node) = at {
+            if let Some(shift) = self.json["nodes"][node]["translation"].as_array() {
+                for axis in 0..3 {
+                    place[axis] += shift[axis].as_f64().unwrap();
+                }
+            }
+            at = parents[node];
+        }
+        place
+    }
+
+    /// The lump of triangles of the part `name`: its object and its
+    /// primitive.
+    fn part(&self, name: &str) -> (usize, &serde_json::Value) {
+        let entry = self.json["extras"]["duck_mold"]["parts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|entry| entry["name"] == name)
+            .unwrap_or_else(|| panic!("no part {name}"));
+        let node = entry["node"].as_u64().unwrap() as usize;
+        let mesh = self.json["nodes"][node]["mesh"].as_u64().unwrap() as usize;
+        (node, &self.json["meshes"][mesh]["primitives"][0])
+    }
+
+    fn attribute(primitive: &serde_json::Value, name: &str) -> usize {
+        primitive["attributes"][name].as_u64().unwrap() as usize
+    }
+
+    fn whole(&self) -> Whole {
+        let mut whole = Whole {
+            positions: Vec::new(),
+            normals: Vec::new(),
+            colors: Vec::new(),
+            indices: Vec::new(),
+        };
+        let parts = self.json["extras"]["duck_mold"]["parts"]
+            .as_array()
+            .unwrap();
+        for entry in parts {
+            let (node, primitive) = self.part(entry["name"].as_str().unwrap());
+            let from = self.place(node);
+            let first = whole.positions.len() as u32;
+            assert_eq!(
+                entry["first_triangle"].as_u64().unwrap() as usize,
+                whole.indices.len() / 3,
+                "the parts are in the order of their triangles"
+            );
+            for own in triples(&self.floats(Glb::attribute(primitive, "POSITION"))) {
+                whole.positions.push([
+                    (from[0] + f64::from(own[0])) as f32,
+                    (from[1] + f64::from(own[1])) as f32,
+                    (from[2] + f64::from(own[2])) as f32,
+                ]);
+            }
+            whole
+                .normals
+                .extend(triples(&self.floats(Glb::attribute(primitive, "NORMAL"))));
+            whole
+                .colors
+                .extend(triples(&self.floats(Glb::attribute(primitive, "COLOR_0"))));
+            let indices = self.indices_of(primitive);
+            assert_eq!(
+                indices.len() / 3,
+                entry["triangles"].as_u64().unwrap() as usize
+            );
+            whole
+                .indices
+                .extend(indices.into_iter().map(|index| first + index));
+        }
+        whole
     }
 }
 
@@ -240,19 +340,49 @@ fn the_file_follows_gltfs_rules() {
 
     assert_eq!(json["asset"]["version"], "2.0");
     assert_eq!(json["asset"]["generator"], "Duck Mold");
-    // One scene, one object, one mesh, one list of triangles.
+    // One scene, with one object in it, the model; under it an object
+    // for every part, each hanging from the part it is joined to. This
+    // robot's six parts are single shapes: each has its own triangles.
     assert_eq!(json["scene"], 0);
     assert_eq!(json["scenes"].as_array().unwrap().len(), 1);
     assert_eq!(json["scenes"][0]["nodes"], serde_json::json!([0]));
-    assert_eq!(json["nodes"].as_array().unwrap().len(), 1);
-    assert_eq!(json["nodes"][0]["name"], "robot");
-    assert_eq!(json["nodes"][0]["mesh"], 0);
-    assert_eq!(json["meshes"].as_array().unwrap().len(), 1);
-    let primitives = json["meshes"][0]["primitives"].as_array().unwrap();
-    assert_eq!(primitives.len(), 1);
-    assert_eq!(primitives[0]["mode"], 4, "triangles");
+    let nodes = json["nodes"].as_array().unwrap();
+    assert_eq!(nodes.len(), 7);
+    assert_eq!(nodes[0]["name"], "robot");
+    assert!(nodes[0].get("mesh").is_none());
+    assert!(nodes[0].get("translation").is_none());
+    // The body isn't joined: it hangs from the model. Everything else
+    // is joined to the body.
+    assert_eq!(nodes[0]["children"], serde_json::json!([1]));
+    assert_eq!(nodes[1]["name"], "body");
+    assert_eq!(nodes[1]["children"], serde_json::json!([2, 3, 4, 5, 6]));
+    let names: Vec<&str> = nodes
+        .iter()
+        .map(|node| node["name"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        names[2..],
+        ["head", "left_arm", "right_arm", "left_leg", "right_leg"]
+    );
+    // Nothing is turned or stretched at rest: an object is only
+    // somewhere.
+    for node in nodes {
+        for absent in ["rotation", "scale", "matrix"] {
+            assert!(node.get(absent).is_none(), "{absent}");
+        }
+    }
+    assert_eq!(json["meshes"].as_array().unwrap().len(), 6);
+    for (at, mesh) in json["meshes"].as_array().unwrap().iter().enumerate() {
+        assert_eq!(nodes[at + 1]["mesh"], at, "each part's object has its mesh");
+        assert_eq!(mesh["name"], nodes[at + 1]["name"]);
+        let primitives = mesh["primitives"].as_array().unwrap();
+        assert_eq!(primitives.len(), 1);
+        assert_eq!(primitives[0]["mode"], 4, "triangles");
+        assert_eq!(primitives[0]["material"], 0);
+        assert!(primitives[0]["attributes"].get("TEXCOORD_0").is_none());
+    }
     // A plain, matt material (glTF's default would be shiny metal).
-    assert_eq!(primitives[0]["material"], 0);
+    assert_eq!(json["materials"].as_array().unwrap().len(), 1);
     let surface = &json["materials"][0]["pbrMetallicRoughness"];
     assert_eq!(surface["metallicFactor"], 0.0);
     assert_eq!(surface["roughnessFactor"], 1.0);
@@ -271,7 +401,6 @@ fn the_file_follows_gltfs_rules() {
     ] {
         assert!(json.get(absent).is_none(), "{absent}");
     }
-    assert!(primitives[0]["attributes"].get("TEXCOORD_0").is_none());
 
     // One buffer, the block of numbers, and four views that fill it.
     assert_eq!(json["buffers"].as_array().unwrap().len(), 1);
@@ -290,30 +419,40 @@ fn the_file_follows_gltfs_rules() {
     assert_eq!(next as usize, glb.bin.len());
     assert_eq!(views[0]["target"], 34962);
     assert_eq!(views[3]["target"], 34963);
+    // The parts share the three lists of corners, so glTF wants to be
+    // told how far apart the entries are; not for the triangles.
+    for view in &views[..3] {
+        assert_eq!(view["byteStride"], 12);
+    }
+    assert!(views[3].get("byteStride").is_none());
 
-    let positions = triples(&glb.floats(glb.attribute("POSITION")));
-    let normals = triples(&glb.floats(glb.attribute("NORMAL")));
-    let colors = triples(&glb.floats(glb.attribute("COLOR_0")));
-    let indices = glb.indices();
+    let Whole {
+        positions,
+        normals,
+        colors,
+        indices,
+    } = glb.whole();
     assert_eq!(positions.len(), model.vertex_count());
     assert_eq!(normals.len(), positions.len());
     assert_eq!(colors.len(), positions.len());
     assert_eq!(indices.len(), model.triangle_count() * 3);
     assert_eq!((positions.len(), indices.len() / 3), (288, 168));
 
-    // glTF insists on the smallest and biggest position, exactly.
-    let accessor = &json["accessors"][glb.attribute("POSITION")];
-    for axis in 0..3 {
-        let smallest = positions
-            .iter()
-            .map(|p| p[axis])
-            .fold(f32::INFINITY, f32::min);
-        let biggest = positions
-            .iter()
-            .map(|p| p[axis])
-            .fold(f32::NEG_INFINITY, f32::max);
-        assert_eq!(accessor["min"][axis].as_f64().unwrap() as f32, smallest);
-        assert_eq!(accessor["max"][axis].as_f64().unwrap() as f32, biggest);
+    // glTF insists on the smallest and biggest position of every list,
+    // exactly.
+    for mesh in json["meshes"].as_array().unwrap() {
+        let at = Glb::attribute(&mesh["primitives"][0], "POSITION");
+        let own = triples(&glb.floats(at));
+        let accessor = &json["accessors"][at];
+        for axis in 0..3 {
+            let smallest = own.iter().map(|p| p[axis]).fold(f32::INFINITY, f32::min);
+            let biggest = own
+                .iter()
+                .map(|p| p[axis])
+                .fold(f32::NEG_INFINITY, f32::max);
+            assert_eq!(accessor["min"][axis].as_f64().unwrap() as f32, smallest);
+            assert_eq!(accessor["max"][axis].as_f64().unwrap() as f32, biggest);
+        }
     }
     // Directions are 1 long; colours are between 0 and 1; every triangle
     // names corners that exist.
@@ -335,9 +474,13 @@ fn triangles_wind_the_way_gltf_wants() {
     // counter-clockwise, which is the side `(b - a) x (c - a)` points
     // to. It must agree with the stored direction of the face.
     let glb = open(&write_glb(&built(ROBOT)));
-    let positions = triples(&glb.floats(glb.attribute("POSITION")));
-    let normals = triples(&glb.floats(glb.attribute("NORMAL")));
-    for triangle in glb.indices().chunks(3) {
+    let Whole {
+        positions,
+        normals,
+        indices,
+        ..
+    } = glb.whole();
+    for triangle in indices.chunks(3) {
         let [a, b, c] = [0, 1, 2].map(|n| positions[triangle[n] as usize]);
         let ab = [b[0] - a[0], b[1] - a[1], b[2] - a[2]];
         let ac = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
@@ -364,7 +507,7 @@ fn right_is_minus_x_in_the_file_and_the_model_still_faces_forward() {
         "version = 0\norigin = \"a.center\"\n[palette]\nred = \"#D0453A\"\n[[parts]]\nname = \"a\"\nshape = \"box\"\ncolor = \"red\"\n[[parts]]\nname = \"b\"\nshape = \"box\"\nsize = [0.2, 0.2, 0.2]\ncolor = \"red\"\nmove = [3, 1, 2]\n",
     );
     let glb = open(&write_glb(&model));
-    let positions = triples(&glb.floats(glb.attribute("POSITION")));
+    let positions = glb.whole().positions;
     // The second box's corners come after the first's 24.
     let span = |axis: usize| {
         let values = positions[24..].iter().map(|p| p[axis]);
@@ -376,8 +519,16 @@ fn right_is_minus_x_in_the_file_and_the_model_still_faces_forward() {
     assert_eq!(span(0), (-3.1, -2.9));
     assert_eq!(span(1), (0.9, 1.1));
     assert_eq!(span(2), (1.9, 2.1));
-    assert_eq!(glb.json["accessors"][0]["min"][0], -3.1);
-    assert_eq!(glb.json["accessors"][0]["max"][0], 0.5);
+    // Its object is at its middle, which it turns about (it isn't
+    // joined), and its corners are measured from there.
+    let (node, primitive) = glb.part("b");
+    assert_eq!(
+        glb.json["nodes"][node]["translation"],
+        serde_json::json!([-3.0, 1.0, 2.0])
+    );
+    let accessor = &glb.json["accessors"][Glb::attribute(primitive, "POSITION")];
+    assert_eq!(accessor["min"][0].as_f64().unwrap() as f32, -0.1);
+    assert_eq!(accessor["max"][0].as_f64().unwrap() as f32, 0.1);
 }
 
 #[test]
@@ -385,7 +536,7 @@ fn the_palette_and_the_parts_are_kept_in_the_file() {
     let model = built(ROBOT);
     let glb = open(&write_glb(&model));
     let extras = &glb.json["extras"]["duck_mold"];
-    assert_eq!(extras["version"], 0);
+    assert_eq!(extras["version"], 1);
     assert_eq!(extras["name"], "robot");
     assert_eq!(
         extras["palette"],
@@ -399,12 +550,12 @@ fn the_palette_and_the_parts_are_kept_in_the_file() {
     assert_eq!(
         extras["parts"],
         serde_json::json!([
-            { "name": "body", "first_triangle": 0, "triangles": 12 },
-            { "name": "head", "first_triangle": 12, "triangles": 12 },
-            { "name": "left_arm", "first_triangle": 24, "triangles": 12 },
-            { "name": "right_arm", "first_triangle": 36, "triangles": 12 },
-            { "name": "left_leg", "first_triangle": 48, "triangles": 60 },
-            { "name": "right_leg", "first_triangle": 108, "triangles": 60 }
+            { "name": "body", "first_triangle": 0, "triangles": 12, "node": 1 },
+            { "name": "head", "first_triangle": 12, "triangles": 12, "node": 2 },
+            { "name": "left_arm", "first_triangle": 24, "triangles": 12, "node": 3 },
+            { "name": "right_arm", "first_triangle": 36, "triangles": 12, "node": 4 },
+            { "name": "left_leg", "first_triangle": 48, "triangles": 60, "node": 5 },
+            { "name": "right_leg", "first_triangle": 108, "triangles": 60, "node": 6 }
         ])
     );
     // This robot's arms and legs are single shapes: no assemblies.
@@ -467,10 +618,10 @@ fn assemblies_are_kept_with_the_triangles_of_every_part_inside_them() {
     assert_eq!(
         extras["parts"],
         serde_json::json!([
-            { "name": "base", "first_triangle": 0, "triangles": 12 },
-            { "name": "column/shaft", "first_triangle": 12, "triangles": 28 },
-            { "name": "column/top/cap", "first_triangle": 40, "triangles": 12 },
-            { "name": "column/top/spire", "first_triangle": 52, "triangles": 6 }
+            { "name": "base", "first_triangle": 0, "triangles": 12, "node": 1 },
+            { "name": "column/shaft", "first_triangle": 12, "triangles": 28, "node": 3 },
+            { "name": "column/top/cap", "first_triangle": 40, "triangles": 12, "node": 5 },
+            { "name": "column/top/spire", "first_triangle": 52, "triangles": 6, "node": 6 }
         ])
     );
     // ...and the parts made of parts, outer first, each owning all the
@@ -478,10 +629,22 @@ fn assemblies_are_kept_with_the_triangles_of_every_part_inside_them() {
     assert_eq!(
         extras["assemblies"],
         serde_json::json!([
-            { "name": "column", "first_triangle": 12, "triangles": 46 },
-            { "name": "column/top", "first_triangle": 40, "triangles": 18 }
+            { "name": "column", "first_triangle": 12, "triangles": 46, "node": 2 },
+            { "name": "column/top", "first_triangle": 40, "triangles": 18, "node": 4 }
         ])
     );
+    // The tree follows the joins: the column stands on the base; its
+    // shaft is inside it; its top is joined to the shaft; the cap is
+    // inside the top, and the spire stands on the cap.
+    let children = |node: usize| glb.json["nodes"][node]["children"].clone();
+    assert_eq!(children(0), serde_json::json!([1]));
+    assert_eq!(children(1), serde_json::json!([2]));
+    assert_eq!(children(2), serde_json::json!([3]));
+    assert_eq!(children(3), serde_json::json!([4]));
+    assert_eq!(children(4), serde_json::json!([5]));
+    assert_eq!(children(5), serde_json::json!([6]));
+    // A part made of parts has no triangles of its own.
+    assert!(glb.json["nodes"][2].get("mesh").is_none());
 
     // The Duck Forge reader gives them too.
     let read = forge::read_duck_mold_glb(&write_glb(&model)).unwrap();
@@ -544,12 +707,97 @@ fn duck_mold_reads_the_tree_of_parts_back() {
     assert_eq!(write_glb(&read), write_glb(&model));
 }
 
+/// A `.glb` as Duck Mold wrote it before Phase 5: one object, one list
+/// of triangles. Kept from Phase 4's stored files.
+fn from_before(name: &str) -> Vec<u8> {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/before-phase5")
+        .join(format!("{name}.glb"));
+    std::fs::read(path).unwrap()
+}
+
+/// The example `name`, built now.
+fn example(name: &str) -> Model {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples")
+        .join(format!("{name}.toml"));
+    duck_mold_core::tools::build(&path).unwrap().model
+}
+
+#[test]
+fn files_from_before_the_tree_still_read_and_give_the_same_model() {
+    for name in ["crate", "house", "robot"] {
+        let old = from_before(name);
+        assert_eq!(open(&old).json["extras"]["duck_mold"]["version"], 0);
+        assert_eq!(open(&old).json["nodes"].as_array().unwrap().len(), 1);
+        let new = write_glb(&example(name));
+
+        // Duck Forge's reader: the same triangles in the same order with
+        // the same colours, the same parts, assemblies and sockets. A
+        // corner is now its part's pivot plus its place in the part,
+        // added up on reading, so it can differ in its last digit.
+        let (before, now) = (
+            forge::read_duck_mold_glb(&old).unwrap(),
+            forge::read_duck_mold_glb(&new).unwrap(),
+        );
+        let near = |a: [f32; 3], b: [f32; 3]| (0..3).all(|axis| (a[axis] - b[axis]).abs() < 1e-6);
+        assert_eq!(before.triangles.len(), now.triangles.len(), "{name}");
+        for (old, new) in before.triangles.iter().zip(&now.triangles) {
+            assert_eq!(old.color, new.color, "{name}");
+            for corner in 0..3 {
+                assert!(
+                    near(
+                        before.vertices[old.corners[corner]],
+                        now.vertices[new.corners[corner]]
+                    ),
+                    "{name}"
+                );
+            }
+        }
+        assert_eq!(before.name, now.name);
+        assert_eq!(before.palette, now.palette);
+        assert_eq!(before.parts, now.parts, "{name}");
+        assert_eq!(before.assemblies, now.assemblies, "{name}");
+        assert_eq!(before.sockets.len(), now.sockets.len());
+        for (old, new) in before.sockets.iter().zip(&now.sockets) {
+            assert_eq!(old.name, new.name);
+            assert!(
+                near(old.at, new.at) && near(old.facing, new.facing),
+                "{}",
+                old.name
+            );
+            // Only a file laid out as a tree says what carries a socket.
+            assert_eq!(old.join, None);
+        }
+        // An old file can be drawn, not posed: it has no joins.
+        assert_eq!(before.joins, Vec::new());
+        assert!(!now.joins.is_empty());
+
+        // Duck Mold's own reader: the same faces and the same tree of
+        // parts.
+        let (before, now) = (
+            read_glb(&old, "old.glb").unwrap(),
+            read_glb(&new, "new.glb").unwrap(),
+        );
+        assert_eq!(before.faces, now.faces, "{name}");
+        assert_eq!(before.palette, now.palette);
+        let paths = |model: &Model| -> Vec<(String, std::ops::Range<usize>)> {
+            model
+                .all_parts()
+                .iter()
+                .map(|part| (part.path.clone(), part.faces.clone()))
+                .collect()
+        };
+        assert_eq!(paths(&before), paths(&now), "{name}");
+        assert_eq!(before.named_sockets(), now.named_sockets(), "{name}");
+    }
+}
+
 #[test]
 fn a_file_from_before_assemblies_still_reads() {
     // Phase 0's files had no "assemblies": both readers take that as none,
     // and Duck Mold lists the parts flat, as it did then.
-    let new = write_glb(&built(TOWER));
-    let old = with_json(&new, |json| {
+    let old = with_json(&from_before("house"), |json| {
         let mut value: serde_json::Value = serde_json::from_str(json).unwrap();
         value["extras"]["duck_mold"]
             .as_object_mut()
@@ -559,12 +807,37 @@ fn a_file_from_before_assemblies_still_reads() {
     });
     let read = forge::read_duck_mold_glb(&old).unwrap();
     assert_eq!(read.assemblies, Vec::new());
-    assert_eq!(read.parts.len(), 4);
+    assert_eq!(read.parts.len(), 8);
     let model = read_glb(&old, "old.glb").unwrap();
     let names: Vec<&str> = model.parts.iter().map(|p| p.path.as_str()).collect();
     assert_eq!(
         names,
-        ["base", "column/shaft", "column/top/cap", "column/top/spire"]
+        [
+            "walls",
+            "roof/front_half",
+            "roof/back_half",
+            "door",
+            "window_left",
+            "window_right",
+            "chimney",
+            "skylight"
+        ]
+    );
+}
+
+#[test]
+fn a_file_from_a_newer_duck_mold_is_refused_with_a_sentence() {
+    let newer = with_json(&write_glb(&built(TOWER)), |json| {
+        assert!(json.contains("\"version\":1,\"name\":\"tower\""));
+        json.replacen("\"version\":1,\"name\"", "\"version\":2,\"name\"", 1)
+    });
+    let error = forge::read_duck_mold_glb(&newer).unwrap_err();
+    assert!(error.contains("newer Duck Mold"), "{error}");
+    let error = read_glb(&newer, "newer.glb").unwrap_err();
+    assert!(
+        error.message.contains("newer Duck Mold"),
+        "{}",
+        error.message
     );
 }
 
@@ -574,7 +847,8 @@ fn a_damaged_file_that_claims_too_much_is_refused_not_a_crash() {
     // multiplied: a damaged one is a refusal, not an overflow (which a
     // debug build turns into a crash).
     let glb = write_glb(&built(TOWER));
-    let count = format!("\"count\":{}", built(TOWER).vertex_count());
+    // (The base is a box: 24 corners, the first list of all.)
+    let count = "\"count\":24".to_owned();
     for huge in ["99999", "4611686018427387904", "18446744073709551615"] {
         let damaged = with_json(&glb, |json| {
             assert!(json.contains(&count), "the first count is the corners'");
@@ -644,10 +918,17 @@ fn the_duck_forge_reader_finds_the_same_model() {
         })
         .collect();
     assert_eq!(found.len(), 168);
-    assert_eq!(found, expected);
+    // (A corner is its part's pivot plus its place in the part, added up
+    // by the reader: the same to a ten-thousandth of a millimetre.)
+    for (found, expected) in found.iter().zip(&expected) {
+        assert_eq!(found.1, expected.1);
+        for (found, expected) in found.0.iter().flatten().zip(expected.0.iter().flatten()) {
+            assert!((found - expected).abs() < 1e-7, "{found} {expected}");
+        }
+    }
 
-    // Corners in the same place are shared: far fewer points than the
-    // file's 288 corners.
+    // A part's corners in the same place are shared: far fewer points
+    // than the file's 288 corners.
     assert!(read.vertices.len() < 150, "{}", read.vertices.len());
 
     let palette: Vec<(&str, [u8; 3])> = read

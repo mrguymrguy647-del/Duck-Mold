@@ -10,7 +10,7 @@
 use std::ops::Range;
 use std::sync::Arc;
 
-use crate::math::{Bounds, Transform, Vec3};
+use crate::math::{Bounds, Mat3, Transform, Vec3};
 use crate::recipe::{Loc, PaletteColor};
 use crate::shaping::Shaped;
 
@@ -30,6 +30,10 @@ pub struct Model {
     /// The sockets of the model as a whole: the seven built-in ones and
     /// any the recipe declares at its top.
     pub sockets: Vec<Socket>,
+    /// The model's own sockets that a part carries: a socket passed on
+    /// with `from`, by name, and the path of the part it is on. It moves
+    /// with that part when the model is posed.
+    pub carried: Vec<(String, String)>,
     /// Where the recipe's own zero is in the model. A recipe measures
     /// `move` from its own zero; the model is then shifted so that its
     /// zero point (`origin`) is at zero. Take this away from a point of
@@ -99,8 +103,24 @@ pub struct Part {
     /// join, put it there. For a part of the model's own list, the list
     /// is the model, so the model's `zero` is in it.
     pub local: Transform,
+    /// The point it turns about when the model is posed, in the model:
+    /// the socket it is joined to or, for a part that isn't joined, its
+    /// own zero point (the middle of a shape).
+    pub pivot: Vec3,
+    /// The part it hangs from in the tree of joins, by path: the part it
+    /// is joined to or, if it isn't joined, the part it is inside.
+    /// `None` for a part of the model's own list that isn't joined: it
+    /// hangs from the model itself.
+    pub parent: Option<String>,
+    /// The directions its turns are measured in: how the x, y and z of
+    /// the list it is written in lie in the model. No turn at all for a
+    /// part of the model's own list.
+    pub axes: Mat3,
     /// Its sockets, where they finally are.
     pub sockets: Vec<Socket>,
+    /// Those of its sockets that a part inside it carries: a socket
+    /// passed on with `from`, by name, and the path of that part.
+    pub carried: Vec<(String, String)>,
     /// Which of [`Model::faces`] are its own, the faces of the parts
     /// inside it included.
     pub faces: Range<usize>,
@@ -229,6 +249,60 @@ impl Model {
         let mut sockets = self.sockets.clone();
         gather(&self.parts, &mut sockets);
         sockets
+    }
+
+    /// Every part, in the order the recipe lists them, a part made of
+    /// parts before the parts inside it.
+    pub fn all_parts(&self) -> Vec<&Part> {
+        fn gather<'a>(parts: &'a [Part], into: &mut Vec<&'a Part>) {
+            for part in parts {
+                into.push(part);
+                gather(&part.parts, into);
+            }
+        }
+        let mut all = Vec::new();
+        gather(&self.parts, &mut all);
+        all
+    }
+
+    /// The part with this path (`left_arm/hand`), however deep it is.
+    pub fn part(&self, path: &str) -> Option<&Part> {
+        fn find<'a>(parts: &'a [Part], path: &str) -> Option<&'a Part> {
+            parts.iter().find_map(|part| {
+                if part.path == path {
+                    Some(part)
+                } else if path.starts_with(&format!("{}/", part.path)) {
+                    find(&part.parts, path)
+                } else {
+                    None
+                }
+            })
+        }
+        find(&self.parts, path)
+    }
+
+    /// The part that carries a named socket ([`Model::named_sockets`])
+    /// when the model is posed, by path: the part the socket is on, or,
+    /// for a socket passed on with `from`, the part inside it that it
+    /// came from. `None` for the model's own sockets that no part
+    /// carries (its `top`, its `bottom`).
+    pub fn socket_carrier(&self, name: &str) -> Option<String> {
+        match name.rsplit_once('.') {
+            None => self
+                .carried
+                .iter()
+                .find(|(socket, _)| socket == name)
+                .map(|(_, part)| part.clone()),
+            Some((path, socket)) => {
+                let part = self.part(path)?;
+                Some(
+                    part.carried
+                        .iter()
+                        .find(|(known, _)| known == socket)
+                        .map_or_else(|| part.path.clone(), |(_, inner)| inner.clone()),
+                )
+            }
+        }
     }
 
     /// Every part that has faces of its own (not an assembly), in order,

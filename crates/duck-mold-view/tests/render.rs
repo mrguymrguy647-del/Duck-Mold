@@ -207,6 +207,7 @@ fn a_model_with_no_faces_gives_empty_views() {
         faces: Vec::new(),
         parts: Vec::new(),
         sockets: Vec::new(),
+        carried: Vec::new(),
         zero: duck_mold_core::math::Vec3::ZERO,
     };
     let sheet = render_sheet(&model, "nothing", 128);

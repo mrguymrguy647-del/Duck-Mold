@@ -896,3 +896,128 @@ fn faces_squashed_flat_are_left_out_with_a_warning() {
     assert_eq!(model.faces.len(), 2);
     assert!(model.faces.iter().all(|face| face.normal().is_some()));
 }
+
+// ---- Phase 5, step 1: the tree of joins ---------------------------------------------
+
+/// The example `name`, built.
+fn example(name: &str) -> Model {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../examples")
+        .join(format!("{name}.toml"));
+    duck_mold_core::tools::build(&path).unwrap().model
+}
+
+#[test]
+fn every_part_knows_what_it_turns_about_and_hangs_from() {
+    let robot = example("robot");
+    let socket = |part_path: &str, name: &str| {
+        part(&robot, part_path)
+            .sockets
+            .iter()
+            .find(|socket| socket.name == name)
+            .unwrap()
+            .at
+    };
+    // A part that isn't joined turns about its own middle, and hangs
+    // from the model.
+    let body = part(&robot, "body");
+    assert_eq!(body.parent, None);
+    assert!((body.pivot - body.bounds.unwrap().center()).length() < 1e-9);
+    // A joined part turns about the socket it is joined to, and hangs
+    // from that part.
+    let head = part(&robot, "head");
+    assert_eq!(head.parent.as_deref(), Some("body"));
+    assert_eq!(head.pivot, socket("body", "neck"));
+    // What is joined to a joined part hangs from it in turn.
+    assert_eq!(part(&robot, "antenna").parent.as_deref(), Some("head"));
+    assert_eq!(
+        part(&robot, "antenna_tip").parent.as_deref(),
+        Some("antenna")
+    );
+    // A part made of parts is joined like any other...
+    let arm = part(&robot, "left_arm");
+    assert_eq!(arm.parent.as_deref(), Some("body"));
+    assert_eq!(arm.pivot, socket("body", "left_arm"));
+    // ...the part inside it that isn't joined hangs from it, and the
+    // others from each other, by path.
+    let upper = part(&robot, "left_arm/upper");
+    assert_eq!(upper.parent.as_deref(), Some("left_arm"));
+    let elbow = part(&robot, "left_arm/elbow");
+    assert_eq!(elbow.parent.as_deref(), Some("left_arm/upper"));
+    assert_eq!(elbow.pivot, socket("left_arm/upper", "bottom"));
+    assert_eq!(
+        part(&robot, "left_arm/hand").parent.as_deref(),
+        Some("left_arm/forearm")
+    );
+
+    // Every part is in the tree once: following what it hangs from ends
+    // at the model, without going round.
+    for name in ["robot", "house", "snowman", "dog", "gate", "desk", "temple"] {
+        let model = example(name);
+        let all = model.all_parts();
+        for part in &all {
+            let mut above = part.parent.clone();
+            let mut steps = 0;
+            while let Some(path) = above {
+                let next = model.part(&path).unwrap_or_else(|| {
+                    panic!("{name}: {} hangs from {path}, which isn't there", part.path)
+                });
+                above = next.parent.clone();
+                steps += 1;
+                assert!(steps <= all.len(), "{name}: {} goes round", part.path);
+            }
+        }
+    }
+}
+
+#[test]
+fn a_parts_turns_are_measured_in_the_directions_of_its_list() {
+    let robot = example("robot");
+    let unturned = duck_mold_core::math::Mat3::IDENTITY;
+    // A part of the model's own list: the model's x, y and z.
+    assert_eq!(part(&robot, "head").axes, unturned);
+    assert_eq!(part(&robot, "right_arm").axes, unturned);
+    // A part inside the left arm: the arm's, which stands as the model
+    // does.
+    let near = |a: Vec3, b: Vec3| (a - b).length() < 1e-9;
+    let left = part(&robot, "left_arm/elbow").axes;
+    assert!(near(left * vec3(1.0, 0.0, 0.0), vec3(1.0, 0.0, 0.0)));
+    // Inside the right arm, a mirror image: its x is the other way, so
+    // the same turn bends it as a mirror image too.
+    let right = part(&robot, "right_arm/elbow").axes;
+    assert!(near(right * vec3(1.0, 0.0, 0.0), vec3(-1.0, 0.0, 0.0)));
+    assert!(near(right * vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0)));
+    assert!(near(right * vec3(0.0, 0.0, 1.0), vec3(0.0, 0.0, 1.0)));
+}
+
+#[test]
+fn a_socket_passed_on_is_carried_by_the_part_it_came_from() {
+    let robot = example("robot");
+    // The arm's `grip` is its hand's `bottom`: when the arm bends, it
+    // goes with the hand.
+    assert_eq!(
+        robot.socket_carrier("left_arm.grip").as_deref(),
+        Some("left_arm/hand")
+    );
+    assert_eq!(
+        robot.socket_carrier("left_arm.shoulder").as_deref(),
+        Some("left_arm/upper")
+    );
+    // A socket of its own is carried by the part itself; the model's own
+    // by nothing.
+    assert_eq!(robot.socket_carrier("head.top").as_deref(), Some("head"));
+    assert_eq!(
+        robot.socket_carrier("left_arm.top").as_deref(),
+        Some("left_arm")
+    );
+    assert_eq!(robot.socket_carrier("top"), None);
+    // Passed on twice: a model's own socket, from a part inside a part.
+    let model = built(
+        "version = 0\n[sockets]\ntip = { from = \"mast.peak\" }\n[[parts]]\nname = \"mast\"\n[parts.sockets]\npeak = { from = \"flag.top\" }\n[[parts.parts]]\nname = \"pole\"\nshape = \"box\"\nsize = [0.1, 2, 0.1]\n[[parts.parts]]\nname = \"flag\"\nshape = \"box\"\nsize = [0.5, 0.3, 0.02]\nattach = \"bottom\"\nto = \"pole.top\"\n",
+    );
+    assert_eq!(model.socket_carrier("tip").as_deref(), Some("mast/flag"));
+    assert_eq!(
+        model.socket_carrier("mast.peak").as_deref(),
+        Some("mast/flag")
+    );
+}

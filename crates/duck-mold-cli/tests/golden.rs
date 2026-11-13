@@ -296,16 +296,14 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
                 .iter()
                 .map(|v| v[axis])
                 .fold(f32::NEG_INFINITY, f32::max);
-            assert_eq!(
-                low,
-                report["bounds"]["min"][axis].as_f64().unwrap() as f32,
-                "{name}"
-            );
-            assert_eq!(
-                high,
-                report["bounds"]["max"][axis].as_f64().unwrap() as f32,
-                "{name}"
-            );
+            // (A corner is its part's pivot plus its place in the part,
+            // added up by the reader. Most come out to the last digit;
+            // all to a thousandth of a millimetre. The ground, above, is
+            // exact.)
+            for (found, field) in [(low, "min"), (high, "max")] {
+                let wanted = report["bounds"][field][axis].as_f64().unwrap() as f32;
+                assert!((found - wanted).abs() < 1e-6, "{name}: {found} {wanted}");
+            }
         }
         // Every named socket, where `inspect --sockets` says it is. The
         // file holds 32-bit numbers, so they agree to about 0.00001.

@@ -110,6 +110,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
         faces,
         parts,
         sockets: body.all_sockets(&Transform::IDENTITY),
+        carried: body.passed.clone(),
         zero: body.zero,
     })
 }
@@ -148,6 +149,9 @@ struct Body {
     /// The sockets it declares. The seven built-in ones are worked out
     /// from `bounds` when asked for.
     sockets: Vec<Socket>,
+    /// Those of `sockets` that were passed on with `from`: the socket's
+    /// name, and the path of the part inside this body that it is on.
+    passed: Vec<(String, String)>,
     /// The box around everything in it.
     bounds: Option<Bounds>,
     /// True if it couldn't be built. The reason is already reported, so
@@ -192,6 +196,7 @@ impl Body {
             colors: Vec::new(),
             nodes: Vec::new(),
             sockets: Vec::new(),
+            passed: Vec::new(),
             bounds: None,
             broken: true,
             whole: false,
@@ -220,6 +225,7 @@ impl Body {
             colors,
             nodes: Vec::new(),
             sockets: Vec::new(),
+            passed: Vec::new(),
             bounds: None,
             broken: false,
             whole: false,
@@ -247,6 +253,7 @@ impl Body {
             colors: Vec::new(),
             nodes,
             sockets: Vec::new(),
+            passed: Vec::new(),
             bounds: None,
             broken,
             whole: false,
@@ -1123,8 +1130,22 @@ impl Assembler<'_> {
                         ));
                         None
                     } else {
-                        self.socket_of(&body.nodes, part, socket, &def.loc)
-                            .map(|socket| (socket.at, socket.facing))
+                        let found = self.socket_of(&body.nodes, part, socket, &def.loc);
+                        if found.is_some() {
+                            // The part that carries it: the one named, or
+                            // the one inside that it was passed on from.
+                            let deeper = body
+                                .nodes
+                                .iter()
+                                .find(|node| node.name == *part)
+                                .and_then(|node| {
+                                    node.body.passed.iter().find(|(name, _)| name == socket)
+                                })
+                                .map(|(_, inner)| format!("{part}/{inner}"));
+                            body.passed
+                                .push((def.name.clone(), deeper.unwrap_or_else(|| part.clone())));
+                        }
+                        found.map(|socket| (socket.at, socket.facing))
                     }
                 }
             };
@@ -1522,6 +1543,34 @@ fn emit(
             }
             let parts = emit(&node.body.nodes, &place, &path, faces, issues);
             let own = first..faces.len();
+            // What it turns about, and what it hangs from: the socket it
+            // is joined to, on a part of its own list; or its own zero,
+            // in the part it is inside.
+            let joined = node.attached_to.as_deref().and_then(|to| {
+                let (target, socket) = to.rsplit_once('.')?;
+                let onto = nodes.iter().find(|other| other.name == target)?;
+                Some((target, outer.apply(onto.socket(socket)?.at)))
+            });
+            let within = |name: &str| {
+                if prefix.is_empty() {
+                    name.to_owned()
+                } else {
+                    format!("{prefix}/{name}")
+                }
+            };
+            let (pivot, parent) = match joined {
+                Some((target, at)) => (at, Some(within(target))),
+                None => (
+                    place.apply(Vec3::ZERO),
+                    (!prefix.is_empty()).then(|| prefix.to_owned()),
+                ),
+            };
+            let carried = node
+                .body
+                .passed
+                .iter()
+                .map(|(socket, inner)| (socket.clone(), format!("{path}/{inner}")))
+                .collect();
             Part {
                 name: node.name.clone(),
                 path,
@@ -1531,7 +1580,11 @@ fn emit(
                 mirrored: place.is_mirrored(),
                 place,
                 local: node.place,
+                pivot: pivot.tidied(),
+                parent,
+                axes: outer.turn,
                 sockets: node.body.all_sockets(&place),
+                carried,
                 bounds: Bounds::around(
                     faces[own.clone()]
                         .iter()

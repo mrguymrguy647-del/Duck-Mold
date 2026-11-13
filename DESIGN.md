@@ -502,7 +502,7 @@ Mold writes a deliberately narrow kind of it:
 
 | | |
 |---|---|
-| Layout | One scene, one object (named after the recipe), one mesh, one list of triangles. Every part is merged into it, as Duck Forge's guide recommends ("one draw instead of dozens"). |
+| Layout | One scene, one object (named after the recipe), one mesh, one list of triangles. Every part is merged into it, as Duck Forge's guide recommends ("one draw instead of dozens"). (From Phase 5 the file is a tree with an object for every part, so that parts can move: section 21. Duck Forge still puts them together and draws one mesh.) |
 | Positions | `POSITION`: three decimal numbers per corner (32-bit). |
 | Normals | `NORMAL`: which way each face points, the same for all corners of a face, so every viewer shades it flat like Duck Forge does. |
 | Colours | `COLOR_0`: three decimal numbers per corner, linear. |
@@ -3516,6 +3516,25 @@ file holds the result. Why this way:
 The file also says, in Duck Mold's own corner of it, each animation's
 name and whether it loops, and each named pose. A 1-second walk of the
 robot adds about 10 KB.
+
+*As built (step 1):* as above, with these details. A part's object is
+named by its path (`left_arm/hand`). The objects are in the recipe's
+order, a part made of parts before the parts inside it; an object's
+children are the parts joined to it and, for a part made of parts, the
+parts inside it that aren't joined. The four lists of numbers
+(positions, directions, colours, triangle corners) are shared: each
+part's lists point into them. The pivots are kept as 32-bit numbers and
+each corner's distance from its pivot is chosen so that the reader's
+sum gives the old number back wherever it can: measured on the eighteen
+examples, about nineteen numbers in twenty are the same to the last
+bit, the ground is at exactly 0 as before, and the rest differ by at
+most a ten-thousandth of a millimetre. Two parts no longer share a
+corner where they touch, so a few models have a handful more points
+(the house 76 where it had 72). The robot's file grows from 50 KB to
+64 KB. A socket passed on with `from` (an arm's `grip`, from its hand)
+is carried by the part it came from. The reader is version 4 after this
+step; animations (step 5) will make it version 5, because Duck Forge's
+first pull request is opened before they exist.
 
 ### Playing them in Duck Forge
 
