@@ -10,6 +10,7 @@
 
 pub mod actions;
 pub mod app;
+pub mod gallery;
 pub mod library;
 pub mod palette;
 pub mod properties;

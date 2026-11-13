@@ -116,18 +116,25 @@ enum Command {
         /// A recipe (.toml or .json), or a mesh (.obj, .gltf or .glb).
         file: PathBuf,
     },
-    /// Start a new recipe: one box, standing on the ground.
+    /// Start a new recipe: one box, standing on the ground. Or, with
+    /// --example, a copy of one of the examples.
     ///
     /// Never writes over a file that is already there.
     New {
         /// The recipe to make. Its name must end in .toml.
         recipe: PathBuf,
+        /// Start from a copy of this example instead of from one box:
+        /// robot, house, snowman, desk, duck, dog, doughnut, mug, temple,
+        /// barn, slide or gate. The files it uses are written beside it.
+        #[arg(long, value_name = "NAME")]
+        example: Option<String>,
         /// Print the report as JSON, for agents.
         #[arg(long)]
         json: bool,
     },
     /// Make one change to a recipe without typing it: add, remove, rename,
-    /// join, set, duplicate, add-color, set-color, add-socket, set-socket.
+    /// join, unjoin, set, duplicate, add-color, set-color, remove-color,
+    /// add-socket, set-socket, rename-socket, remove-socket, tidy-sockets.
     ///
     /// Only what has to change in the file is changed: comments, order
     /// and layout stay. Prints the same report as inspect, for the recipe
@@ -229,7 +236,14 @@ fn main() -> ExitCode {
             Ok(()) => ExitCode::SUCCESS,
             Err(failure) => fail(&failure, false),
         },
-        Command::New { recipe, json } => match tools::new_file(&recipe) {
+        Command::New {
+            recipe,
+            example,
+            json,
+        } => match match &example {
+            Some(example) => tools::new_from_example(&recipe, example),
+            None => tools::new_file(&recipe),
+        } {
             Ok(inspection) => {
                 if json {
                     say_json(&inspection);

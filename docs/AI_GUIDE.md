@@ -83,6 +83,19 @@ it works:
 target/release/duck-mold inspect examples/robot.toml
 ```
 
+To start from something that already works, copy one of the twelve
+examples that are inside the program, and change it:
+
+```bash
+target/release/duck-mold new my_robot.toml --example robot
+```
+
+The examples are `robot`, `house`, `snowman`, `desk`, `duck`, `dog`
+(capsules), `doughnut` (a torus), `mug` (a tube), `temple` (a pyramid
+and stairs), `barn` (a prism), `slide` (stairs) and `gate` (an arch,
+taper and bevel). `new` never writes over a file. Without `--example`
+it starts a recipe with one box in it.
+
 ## 3. A first recipe
 
 ```toml

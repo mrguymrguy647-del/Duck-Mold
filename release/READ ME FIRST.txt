@@ -16,7 +16,9 @@ TO START
 
 
 A FIRST LOOK
-  In the Studio, click "Open a model" and choose examples\robot.toml.
+  The Studio opens on its start page. Click one of the examples (the
+  robot, say): a copy of your own opens, in the folder "Duck Mold" in
+  your Documents, so you can change it as you like.
   - Drag to turn the model, right-drag to slide it, roll the wheel to
     come closer.
   - Click a part to select it. Its properties are on the right: change

@@ -60,11 +60,45 @@ fn robot() -> Harness<'static, StudioApp> {
 fn the_screens_look_as_they_did() {
     let mut wrong: Vec<String> = Vec::new();
 
-    // The start page.
+    // The start page: first with nothing opened yet, then with models
+    // opened lately, one of which no longer builds. (The folder for
+    // copies of the examples is named as on any machine.)
     {
-        let mut screen = harness(StudioApp::new(), true);
+        let mut screen = harness(
+            StudioApp::new().keeping_models_in("Documents/Duck Mold"),
+            true,
+        );
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "start"));
+    }
+    {
+        use duck_mold_studio::recent::Recent;
+        let folder = folder("pictures_start");
+        for name in ["castle", "my_robot", "mistake"] {
+            let from = match name {
+                "castle" => "gate.toml",
+                _ => "robot.toml",
+            };
+            std::fs::copy(examples().join(from), folder.join(format!("{name}.toml"))).unwrap();
+        }
+        std::fs::write(
+            folder.join("mistake.toml"),
+            "version = 0\n[[parts]]\nshape = \"blob\"\n",
+        )
+        .unwrap();
+        let list = folder.join("recent.txt");
+        let mut recent = Recent::kept_in(list.clone());
+        for name in ["mistake", "my_robot", "castle"] {
+            recent.opened(&folder.join(format!("{name}.toml")));
+        }
+        let mut screen = harness(
+            StudioApp::new()
+                .remembering(Recent::kept_in(list))
+                .keeping_models_in("Documents/Duck Mold"),
+            true,
+        );
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "start-recent"));
     }
 
     // A recipe open, with nothing selected.

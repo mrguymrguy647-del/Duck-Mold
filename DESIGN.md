@@ -1730,6 +1730,31 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 9):* the start page, as designed, with these things
+settled in the building:
+
+- **The examples are inside the program** (the recipes' text, and the
+  two model files the desk uses), so the gallery and
+  `duck-mold new <recipe> --example <name>` work wherever the program
+  is, with no `examples` folder beside it.
+- **The examples' pictures are stored files** (192 pixels square, in
+  `assets/examples/`), put inside the program too. A test draws each
+  again from its recipe with `render`'s code and fails if a stored one
+  is no longer what the recipe draws, as the icon's test does. The
+  models opened lately are drawn when the start page is shown; one
+  that no longer builds is a plain tile with a question mark, and
+  still opens, to show what is wrong.
+- **The copies' folder** is `Duck Mold` in the person's Documents
+  (`%USERPROFILE%\Documents` on Windows; `$XDG_DOCUMENTS_DIR` or
+  `~/Documents` elsewhere). It is made the first time an example is
+  opened, and the page says where it is. The desk's copy brings its
+  `parts` folder; a file already there is left as it is.
+- **The duck on the page** is the duck example's picture.
+- **File > Open an example** and **File > Opened lately** offer the
+  same two lists once a model is open, and **File > Back to the start
+  page** closes it (the model is already in its file).
+- Ctrl+N and Ctrl+O work on the start page.
+
 *As built (step 8):* tidy sockets, with these things settled in the
 building:
 

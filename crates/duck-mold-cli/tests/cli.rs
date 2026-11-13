@@ -1163,6 +1163,60 @@ fn new_starts_a_recipe_and_never_writes_over_one() {
     assert_eq!(report["triangles"], 12);
 }
 
+#[test]
+fn new_can_start_from_a_copy_of_an_example() {
+    let folder = folder("cli_new_example");
+    // Every example is in the program, whatever folder it is run from,
+    // and each copy is a clean model, the same as the one in the
+    // repository.
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for example in duck_mold_core::tools::EXAMPLES {
+        let name = format!("my_{}.toml", example.name);
+        let output = run(
+            &folder,
+            &["new", &name, "--example", example.name, "--json"],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}: {}",
+            example.name,
+            stderr(&output)
+        );
+        let report = json(&output);
+        assert_eq!(report["ok"], true, "{}", example.name);
+        assert_eq!(report["name"], example.name);
+        // (But for how each system ends its lines.)
+        let unix = |text: String| text.replace("\r\n", "\n");
+        assert_eq!(
+            unix(std::fs::read_to_string(folder.join(&name)).unwrap()),
+            unix(std::fs::read_to_string(examples.join(format!("{}.toml", example.name))).unwrap()),
+            "{}",
+            example.name
+        );
+    }
+    // The desk's lamp and crate came with it.
+    assert!(folder.join("parts/lamp.gltf").is_file());
+    assert!(folder.join("parts/crate.glb").is_file());
+
+    // Never over a file that is there; and a name that isn't an example
+    // lists the ones there are.
+    let output = run(&folder, &["new", "my_dog.toml", "--example", "robot"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("is already there: new never writes over a file"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(&folder, &["new", "other.toml", "--example", "robbot"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: there is no example called \"robbot\". Did you mean \"robot\"?\n"
+    );
+    assert!(!folder.join("other.toml").exists());
+}
+
 // ---- the guide for agents ----------------------------------------------------
 
 /// The guide, as it is in the repository.

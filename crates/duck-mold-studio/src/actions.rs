@@ -67,6 +67,10 @@ pub enum Action {
     RenderPicture,
     /// Close the file and go back to the start page.
     StartPage,
+    /// Open this file: one opened lately.
+    OpenFile(std::path::PathBuf),
+    /// Open a copy of this example.
+    OpenExample(&'static str),
     /// Show the list of keys.
     ShowKeys,
     /// Show what this program is.
@@ -109,7 +113,7 @@ pub const KEYS: [(&str, &str); 21] = [
 
 /// The File, Edit, View and Help menus of the top bar. Every line shows
 /// its key, so the menus teach the keys. Gives what was chosen.
-pub fn menus(ui: &mut egui::Ui, studio: &Studio) -> Option<Action> {
+pub fn menus(ui: &mut egui::Ui, studio: &Studio, recent: &[std::path::PathBuf]) -> Option<Action> {
     let mut chosen = None;
     let edits = !studio.look_only();
     let any = !studio.selection().is_empty();
@@ -123,6 +127,28 @@ pub fn menus(ui: &mut egui::Ui, studio: &Studio) -> Option<Action> {
     ui.menu_button("File", |ui| {
         pick(ui, true, "New model...", "Ctrl+N", Action::NewModel);
         pick(ui, true, "Open...", "Ctrl+O", Action::Open);
+        ui.menu_button("Open an example", |ui| {
+            ui.label(RichText::new("Opens a copy of your own").weak().small());
+            for example in duck_mold_core::tools::EXAMPLES {
+                pick(
+                    ui,
+                    true,
+                    example.name,
+                    "",
+                    Action::OpenExample(example.name),
+                );
+            }
+        });
+        ui.add_enabled_ui(!recent.is_empty(), |ui| {
+            ui.menu_button("Opened lately", |ui| {
+                for file in recent {
+                    let name = file
+                        .file_name()
+                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                    pick(ui, true, &name, "", Action::OpenFile(file.clone()));
+                }
+            });
+        });
         ui.separator();
         pick(ui, true, "Export", "Ctrl+E", Action::Export);
         pick(ui, true, "Render picture", "", Action::RenderPicture);

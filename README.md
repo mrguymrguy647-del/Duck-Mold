@@ -117,6 +117,16 @@ without opening a window:
 target/release/duck-mold studio examples/robot.toml
 ```
 
+Started with no file (or by double-clicking it), the Studio shows its
+**start page**: New model and Open a model; the models you opened
+lately, each with its picture; and the **examples**, twelve of them,
+each with its picture. Click an example to open a copy of your own: the
+copy goes in the folder `Duck Mold` in your Documents (as `robot.toml`,
+or `robot_2.toml` if that is taken), so you can change it as you like
+and the example stays as it is. The examples are inside the program, so
+they are there wherever it was started from. File > Open an example and
+File > Opened lately offer the same lists once a model is open.
+
 Drag with the left mouse button to turn the model, with the right one
 to slide it, and roll the wheel to come closer. The parts are listed on
 the left, and what is wrong with the recipe (if anything) at the bottom.
@@ -251,8 +261,8 @@ these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
   what hangs over it. It is the Studio's only: `render`'s pictures and
   the exported model have none.
 
-**The menus.** File (New model, Open, Export, Render picture, Back to
-the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
+**The menus.** File (New model, Open, Open an example, Opened lately,
+Export, Render picture, Back to the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
 Unjoin, Remove, Tidy sockets, Select all), View (the four views, Frame, Grid,
 Wireframe, Shadow, Hide, Show everything hidden) and Help (The keys,
 About). Every line shows its key.
@@ -321,7 +331,7 @@ only: nothing can be changed there.
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
-| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. Never writes over a file. |
+| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`): a copy of that example, with the files it uses. Never writes over a file. |
 | `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
 | `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |
 | `duck-mold guide` | Prints the guide for AI agents. |

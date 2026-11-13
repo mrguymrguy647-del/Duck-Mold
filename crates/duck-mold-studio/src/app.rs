@@ -15,7 +15,7 @@ use eframe::egui::{self, Rect, RichText, Sense};
 
 use crate::actions::{self, Action};
 use crate::recent::Recent;
-use crate::{library, palette, properties, theme, view};
+use crate::{gallery, library, palette, properties, theme, view};
 
 /// The Studio's window: a file that is open, or the start page.
 pub struct StudioApp {
@@ -37,6 +37,26 @@ pub struct StudioApp {
     recent: Recent,
     /// Which of Help's windows is open, if one is.
     showing: Option<Showing>,
+    /// The start page's pictures.
+    gallery: gallery::Gallery,
+    /// Where a copy of an example goes: the person's own
+    /// `Documents\Duck Mold` folder.
+    models_folder: PathBuf,
+}
+
+/// The folder a person's own models go in: `Duck Mold` in their
+/// Documents folder.
+fn own_models_folder() -> PathBuf {
+    let documents = if cfg!(windows) {
+        std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("Documents"))
+    } else {
+        std::env::var_os("XDG_DOCUMENTS_DIR")
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Documents")))
+    };
+    documents
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("Duck Mold")
 }
 
 /// One of Help's windows.
@@ -66,6 +86,8 @@ impl StudioApp {
             thumbs: library::Thumbs::default(),
             recent: Recent::nowhere(),
             showing: None,
+            gallery: gallery::Gallery::default(),
+            models_folder: own_models_folder(),
         }
     }
 
@@ -97,6 +119,56 @@ impl StudioApp {
             self.notice = Some(format!("There is no file \"{}\".", path.display()));
         }
         self.view.reset();
+        // The start page's pictures of the models opened lately are
+        // drawn again next time: this one may be about to change.
+        self.gallery.forget_recent();
+    }
+
+    /// Puts copies of the examples in `folder` instead of the person's
+    /// own Documents folder (for the tests).
+    pub fn keeping_models_in(mut self, folder: impl Into<PathBuf>) -> StudioApp {
+        self.models_folder = folder.into();
+        self
+    }
+
+    /// Where a copy of an example goes.
+    pub fn models_folder(&self) -> &Path {
+        &self.models_folder
+    }
+
+    /// Opens a copy of an example to play with: the copy goes in the
+    /// person's own models folder, as `robot.toml`, or `robot_2.toml` if
+    /// that is taken. The example itself, inside the program, can't be
+    /// spoiled.
+    pub fn open_example(&mut self, name: &str) {
+        let folder = self.models_folder.clone();
+        if let Err(error) = std::fs::create_dir_all(&folder) {
+            self.notice = Some(format!(
+                "Couldn't make the folder \"{}\" for your models: {error}",
+                folder.display()
+            ));
+            return;
+        }
+        let path = (1..)
+            .map(|count| {
+                if count == 1 {
+                    folder.join(format!("{name}.toml"))
+                } else {
+                    folder.join(format!("{name}_{count}.toml"))
+                }
+            })
+            .find(|path| !path.exists())
+            .expect("there is always a name that isn't taken");
+        match tools::new_from_example(&path, name) {
+            Ok(_) => self.open(path, false),
+            Err(failure) => {
+                self.notice = failure
+                    .report()
+                    .errors
+                    .first()
+                    .map(|issue| issue.message.clone());
+            }
+        }
     }
 
     /// Makes a new recipe (one box) at `path` and opens it.
@@ -162,7 +234,13 @@ impl StudioApp {
                         .on_hover_text("Nothing can be changed here. Open the recipe in the Studio to edit it.");
                 }
                 ui.separator();
-                if let Some(action) = actions::menus(ui, studio) {
+                let recent: Vec<PathBuf> = self
+                    .recent
+                    .files()
+                    .into_iter()
+                    .map(Path::to_path_buf)
+                    .collect();
+                if let Some(action) = actions::menus(ui, studio, &recent) {
                     asked = Some(action);
                 }
                 ui.separator();
@@ -371,6 +449,8 @@ impl StudioApp {
         let mut open_another = false;
         let mut new_model = false;
         let mut to_start = false;
+        let mut open_file: Option<PathBuf> = None;
+        let mut open_example: Option<&'static str> = None;
         if let Some(action) = asked {
             // Only what changes nothing is done when looking only.
             let allowed = !studio.look_only()
@@ -391,6 +471,8 @@ impl StudioApp {
                         | Action::StartPage
                         | Action::ShowKeys
                         | Action::About
+                        | Action::OpenFile(_)
+                        | Action::OpenExample(_)
                 );
             match action {
                 _ if !allowed => {}
@@ -413,6 +495,8 @@ impl StudioApp {
                     let _ = studio.render_picture();
                 }
                 Action::StartPage => to_start = true,
+                Action::OpenFile(file) => open_file = Some(file),
+                Action::OpenExample(name) => open_example = Some(name),
                 Action::ShowKeys => self.showing = Some(Showing::Keys),
                 Action::About => self.showing = Some(Showing::About),
                 Action::Duplicate => {
@@ -497,6 +581,12 @@ impl StudioApp {
             self.studio = None;
             self.view.reset();
         }
+        if let Some(file) = open_file {
+            self.open(file, false);
+        }
+        if let Some(name) = open_example {
+            self.open_example(name);
+        }
     }
 
     /// The list of keys, or what the program is: Help's two windows.
@@ -551,60 +641,168 @@ impl StudioApp {
         }
     }
 
-    /// The page shown when no file is open.
+    /// The page shown when no file is open: the name, the two ways to
+    /// begin, the models opened lately and the examples, each with its
+    /// picture, and how it works in three lines.
     fn start_page(&mut self, ui: &mut egui::Ui) {
         let mut open = false;
         let mut new = false;
         let mut again: Option<PathBuf> = None;
+        let mut example: Option<&'static str> = None;
+        let recent: Vec<PathBuf> = self
+            .recent
+            .files()
+            .into_iter()
+            .map(Path::to_path_buf)
+            .collect();
         egui::CentralPanel::default().show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.add_space(ui.available_height() * 0.25);
-                ui.label(RichText::new("Duck Mold Studio").size(30.0).strong());
-                ui.add_space(4.0);
-                ui.label("Build a 3D model from parts that join at sockets.");
-                ui.add_space(20.0);
-                if ui.add(theme::primary_button("Open a model")).clicked() {
-                    open = true;
-                }
-                ui.add_space(6.0);
-                if ui
-                    .button("New model")
-                    .on_hover_text("Starts a recipe with one box in it")
-                    .clicked()
-                {
-                    new = true;
-                }
-                if let Some(notice) = &self.notice {
-                    ui.add_space(16.0);
-                    ui.colored_label(theme::BAD, notice);
-                }
-                let recent: Vec<PathBuf> = self
-                    .recent
-                    .files()
-                    .into_iter()
-                    .map(Path::to_path_buf)
-                    .collect();
-                if !recent.is_empty() {
-                    ui.add_space(24.0);
-                    ui.label(RichText::new("Opened lately").weak());
-                    ui.add_space(4.0);
-                    for file in recent {
-                        let name = file
-                            .file_name()
-                            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-                        if ui
-                            .button(name)
-                            .on_hover_text(file.display().to_string())
-                            .clicked()
-                        {
-                            again = Some(file);
-                        }
-                    }
-                }
-            });
+            egui::ScrollArea::vertical()
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    // One column, not wider than is comfortable to read.
+                    let wide = ui.available_width().min(860.0);
+                    let margin = ((ui.available_width() - wide) / 2.0).max(12.0);
+                    ui.horizontal(|ui| {
+                        ui.add_space(margin);
+                        ui.vertical(|ui| {
+                            ui.set_width(wide - 24.0);
+                            ui.add_space(24.0);
+                            // ---- the duck and the name
+                            ui.horizontal(|ui| {
+                                if let Some(duck) = self.gallery.example(ui.ctx(), "duck") {
+                                    ui.add(
+                                        egui::Image::new(duck)
+                                            .fit_to_exact_size(egui::vec2(56.0, 56.0))
+                                            .corner_radius(8.0),
+                                    );
+                                }
+                                ui.vertical(|ui| {
+                                    ui.add_space(4.0);
+                                    ui.label(
+                                        RichText::new("Duck Mold Studio").size(28.0).strong(),
+                                    );
+                                    ui.label("Build 3D models from parts, for Duck Forge games.");
+                                });
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Min),
+                                    |ui| {
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "version {}",
+                                                env!("CARGO_PKG_VERSION")
+                                            ))
+                                            .weak(),
+                                        );
+                                    },
+                                );
+                            });
+                            ui.add_space(16.0);
+                            // ---- the two ways to begin
+                            ui.horizontal(|ui| {
+                                if ui
+                                    .add(theme::primary_button("New model"))
+                                    .on_hover_text("Starts a recipe with one box in it (Ctrl+N)")
+                                    .clicked()
+                                {
+                                    new = true;
+                                }
+                                if ui
+                                    .button("Open a model")
+                                    .on_hover_text("Open a recipe or a model file (Ctrl+O)")
+                                    .clicked()
+                                {
+                                    open = true;
+                                }
+                            });
+                            if let Some(notice) = &self.notice {
+                                ui.add_space(10.0);
+                                ui.colored_label(theme::BAD, notice);
+                            }
+
+                            // ---- the models opened lately
+                            if !recent.is_empty() {
+                                ui.add_space(20.0);
+                                ui.label(RichText::new("Opened lately").strong());
+                                ui.add_space(4.0);
+                                ui.horizontal_wrapped(|ui| {
+                                    for file in &recent {
+                                        let name = file.file_name().map_or_else(String::new, |name| {
+                                            name.to_string_lossy().into_owned()
+                                        });
+                                        let picture =
+                                            self.gallery.recent(ui.ctx(), file).cloned();
+                                        let tip = match &picture {
+                                            Some(_) => file.display().to_string(),
+                                            None => format!(
+                                                "{}\nIt has a mistake in it: open it to see what",
+                                                file.display()
+                                            ),
+                                        };
+                                        if tile(ui, picture.as_ref(), &name, 96.0)
+                                            .on_hover_text(tip)
+                                            .clicked()
+                                        {
+                                            again = Some(file.clone());
+                                        }
+                                    }
+                                });
+                            }
+
+                            // ---- the examples
+                            ui.add_space(20.0);
+                            ui.label(
+                                RichText::new("Examples: click one to open a copy of your own")
+                                    .strong(),
+                            );
+                            ui.label(
+                                RichText::new(format!(
+                                    "The copy goes in {}. Change it as you like: the example stays as it is.",
+                                    self.models_folder.display()
+                                ))
+                                .weak()
+                                .small(),
+                            );
+                            ui.add_space(4.0);
+                            ui.horizontal_wrapped(|ui| {
+                                for known in tools::EXAMPLES {
+                                    let picture = self.gallery.example(ui.ctx(), known.name).cloned();
+                                    if tile(ui, picture.as_ref(), known.name, 120.0)
+                                        .on_hover_text(known.about)
+                                        .clicked()
+                                    {
+                                        example = Some(known.name);
+                                    }
+                                }
+                            });
+
+                            // ---- how it works
+                            ui.add_space(20.0);
+                            ui.label(RichText::new("How it works").strong());
+                            ui.add_space(2.0);
+                            for line in [
+                                "1. A model is made of parts: boxes, balls, tubes, arches...",
+                                "2. Parts stand free, or join at dots, so they stay together.",
+                                "3. Everything you do is written to a recipe file as you go. Export turns it into the model file for your game.",
+                            ] {
+                                ui.label(line);
+                            }
+                            ui.add_space(24.0);
+                        });
+                    });
+                });
         });
+        // The same keys as with a model open.
+        if !ui.ctx().egui_wants_keyboard_input() {
+            ui.input_mut(|input| {
+                new |= input.consume_key(egui::Modifiers::COMMAND, egui::Key::N);
+                open |= input.consume_key(egui::Modifiers::COMMAND, egui::Key::O);
+            });
+        }
         if let Some(file) = again {
             self.open(file, false);
+        }
+        if let Some(name) = example {
+            self.open_example(name);
         }
         if open && let Some(path) = pick_file() {
             self.open(path, false);
@@ -613,6 +811,74 @@ impl StudioApp {
             self.start_new(&path);
         }
     }
+}
+
+/// A tile of the start page: a picture with a name under it, to click.
+/// With no picture (a model that doesn't build), the tile is plain.
+fn tile(
+    ui: &mut egui::Ui,
+    picture: Option<&egui::TextureHandle>,
+    name: &str,
+    side: f32,
+) -> egui::Response {
+    let size = egui::vec2(side + 12.0, side + 30.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        let painter = ui.painter();
+        painter.rect_filled(rect, 6.0, visuals.weak_bg_fill);
+        if response.hovered() || response.has_focus() {
+            painter.rect_stroke(
+                rect,
+                6.0,
+                egui::Stroke::new(1.5, theme::DUCK_YELLOW),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let frame = Rect::from_min_size(rect.min + egui::vec2(6.0, 6.0), egui::vec2(side, side));
+        match picture {
+            Some(picture) => {
+                egui::Image::new(picture)
+                    .corner_radius(4.0)
+                    .paint_at(ui, frame);
+            }
+            None => {
+                painter.rect_filled(frame, 4.0, ui.visuals().extreme_bg_color);
+                painter.text(
+                    frame.center(),
+                    egui::Align2::CENTER_CENTER,
+                    "?",
+                    egui::FontId::proportional(side * 0.4),
+                    ui.visuals().weak_text_color(),
+                );
+            }
+        }
+        // The name, cut short if it is too long for the tile.
+        let mut shown = name.to_owned();
+        let font = egui::FontId::proportional(13.0);
+        let fits = |text: &str| {
+            painter
+                .layout_no_wrap(text.to_owned(), font.clone(), visuals.text_color())
+                .size()
+                .x
+                <= side + 4.0
+        };
+        if !fits(&shown) {
+            while shown.chars().count() > 1 && !fits(&format!("{shown}...")) {
+                shown.pop();
+            }
+            shown.push_str("...");
+        }
+        painter.text(
+            egui::pos2(rect.center().x, frame.bottom() + 12.0),
+            egui::Align2::CENTER_CENTER,
+            shown,
+            font,
+            visuals.text_color(),
+        );
+    }
+    response
 }
 
 impl eframe::App for StudioApp {

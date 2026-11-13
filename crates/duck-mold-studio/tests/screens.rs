@@ -1896,3 +1896,153 @@ fn the_panel_lists_a_parts_sockets_to_rename_and_remove() {
     assert!(now.contains("lid = "), "{now}");
     screen.get_by_label_contains("Removed 1 socket nothing uses: post.spot");
 }
+
+// ---- the start page's examples ----------------------------------------------------
+
+#[test]
+fn an_example_on_the_start_page_opens_a_copy_of_your_own() {
+    use duck_mold_core::tools::EXAMPLES;
+    let models = folder("screens_gallery").join("Documents/Duck Mold");
+    let mut screen = harness(StudioApp::new().keeping_models_in(&models), false);
+    screen.step();
+    // The page: the name and what it is, the version, the two ways to
+    // begin, every example by name, and how it works.
+    screen.get_by_label("Duck Mold Studio");
+    screen.get_by_label("Build 3D models from parts, for Duck Forge games.");
+    screen.get_by_label_contains("version 0.");
+    screen.get_by_label("New model");
+    screen.get_by_label("Open a model");
+    screen.get_by_label("Examples: click one to open a copy of your own");
+    for example in EXAMPLES {
+        screen.get_by_label(example.name);
+    }
+    screen.get_by_label("How it works");
+    screen.get_by_label_contains("Parts stand free, or join at dots");
+    // Nothing is made until an example is asked for.
+    assert!(!models.exists());
+
+    // A click opens a copy, in the folder for the person's own models.
+    screen.get_by_label("robot").click();
+    screen.run_steps(3);
+    assert_eq!(screen.state().title(), "robot.toml - Duck Mold Studio");
+    let copy = models.join("robot.toml");
+    assert_eq!(
+        std::fs::read_to_string(&copy)
+            .unwrap()
+            .replace("\r\n", "\n"),
+        std::fs::read_to_string(examples().join("robot.toml"))
+            .unwrap()
+            .replace("\r\n", "\n")
+    );
+    // It is a model of one's own: it can be changed.
+    {
+        let studio = screen.state_mut().studio_mut().unwrap();
+        assert!(!studio.look_only());
+        assert!(!studio.has_mistakes());
+        studio.select(Some("head"));
+        studio.remove_selected(true).unwrap();
+    }
+    assert!(
+        !std::fs::read_to_string(&copy)
+            .unwrap()
+            .contains("name = \"head\"")
+    );
+
+    // Back on the start page, the same example again is another copy;
+    // the first, with its change, is left alone.
+    screen.get_by_label("File").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("Back to the start page")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    screen.get_by_label("robot").click();
+    screen.run_steps(3);
+    assert_eq!(screen.state().title(), "robot_2.toml - Duck Mold Studio");
+    assert!(
+        std::fs::read_to_string(models.join("robot_2.toml"))
+            .unwrap()
+            .contains("name = \"head\"")
+    );
+    assert!(
+        !std::fs::read_to_string(&copy)
+            .unwrap()
+            .contains("name = \"head\"")
+    );
+
+    // From the File menu too. The desk brings the files it uses.
+    screen.get_by_label("File").click();
+    screen.run_steps(3);
+    screen.get_by_label("Open an example").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("desk")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(screen.state().title(), "desk.toml - Duck Mold Studio");
+    assert!(models.join("parts/lamp.gltf").is_file());
+    assert!(models.join("parts/crate.glb").is_file());
+    assert!(!screen.state().studio().unwrap().has_mistakes());
+    assert!(screen.state().studio().unwrap().part("lamp").is_some());
+}
+
+#[test]
+fn models_opened_lately_have_pictures_and_are_in_the_file_menu() {
+    use duck_mold_studio::recent::Recent;
+    let folder = folder("screens_recent_tiles");
+    let list = folder.join("settings/recent.txt");
+    for name in ["robot.toml", "house.toml"] {
+        std::fs::copy(examples().join(name), folder.join(name)).unwrap();
+    }
+    // One that no longer builds.
+    std::fs::write(
+        folder.join("broken.toml"),
+        "version = 0\n[[parts]]\nshape = \"blob\"\n",
+    )
+    .unwrap();
+    let mut screen = harness(
+        StudioApp::new()
+            .remembering(Recent::kept_in(list.clone()))
+            .keeping_models_in(folder.join("models")),
+        false,
+    );
+    for name in ["robot.toml", "broken.toml", "house.toml"] {
+        screen.state_mut().open(folder.join(name), false);
+    }
+    screen.run_steps(2);
+
+    // The File menu lists them, newest first, and opens one.
+    screen.get_by_label("File").click();
+    screen.run_steps(3);
+    screen.get_by_label("Opened lately").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("robot.toml")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(screen.state().title(), "robot.toml - Duck Mold Studio");
+
+    // On the start page each is a tile; the broken one too, and it
+    // still opens, to show what is wrong with it.
+    let mut screen = harness(
+        StudioApp::new()
+            .remembering(Recent::kept_in(list))
+            .keeping_models_in(folder.join("models")),
+        false,
+    );
+    screen.run_steps(2);
+    screen.get_by_label("Opened lately");
+    for name in ["robot.toml", "house.toml", "broken.toml"] {
+        screen.get_by_label(name);
+    }
+    screen.get_by_label("broken.toml").click();
+    screen.run_steps(3);
+    assert_eq!(screen.state().title(), "broken.toml - Duck Mold Studio");
+    assert!(screen.state().studio().unwrap().has_mistakes());
+}
