@@ -2014,3 +2014,190 @@ fn handles_are_drawn_and_only_on_what_can_be_changed() {
     assert_eq!(looking.grab(VIEW, (320.0, 240.0)), None);
     assert_eq!(studio.snap_text(), "Snap 0.1 m, 15°  (Ctrl: off)");
 }
+
+// ---- Phase 3, step 2: the Size tool ------------------------------------------
+
+#[test]
+fn pulling_a_face_of_a_box_changes_its_size_and_keeps_the_face_opposite() {
+    let (recipe, mut studio) = boxes("size_box");
+    studio.tool = Tool::Size;
+    // Six knobs: right and left, top and bottom, front and back.
+    assert_eq!(studio.grips(), (0..6).map(Grip::Knob).collect::<Vec<_>>());
+    let was = studio.part("crate").unwrap().bounds.unwrap();
+
+    // The right face, pulled out 0.2 m.
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.2, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("width 0.7 m"));
+    assert_eq!(file(&recipe), BOXES, "nothing is written while it is held");
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Set \"crate\": size [0.7, 0.5, 0.5], move [0.6, 0.35, 0]"
+    );
+    let now = file(&recipe);
+    assert_eq!(
+        changed(BOXES, &now),
+        (
+            vec![
+                "size = [0.5, 0.5, 0.5]",
+                "color = \"red\"",
+                "move = [0.5, 0.35, 0]   # on the floor"
+            ],
+            vec![
+                "size = [0.7, 0.5, 0.5]",
+                "color = \"red\"",
+                "move = [0.6, 0.35, 0]   # on the floor"
+            ]
+        )
+    );
+    // The left face is where it was; the right one is 0.2 m further out.
+    let is = studio.part("crate").unwrap().bounds.unwrap();
+    let offset_change = 0.0;
+    let shown = |bounds: duck_mold_core::math::Bounds, studio: &Studio| {
+        (bounds.min + studio.offset(), bounds.max + studio.offset())
+    };
+    let _ = offset_change;
+    let (was_min, was_max) = (was.min, was.max);
+    let (is_min, is_max) = shown(is, &studio);
+    // (Measured in the picture's space, where the grid stays put.)
+    let (was_min, was_max) = {
+        let (_, before) = boxes("size_box_before");
+        (was_min + before.offset(), was_max + before.offset())
+    };
+    assert!(
+        (is_min.x - was_min.x).abs() < 1e-9,
+        "{is_min:?} {was_min:?}"
+    );
+    assert!((is_max.x - was_max.x - 0.2).abs() < 1e-9);
+    // One step to undo.
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), BOXES);
+
+    // The top, pushed down 0.2 m: lower, and still standing on the floor.
+    pull(
+        &mut studio,
+        Grip::Knob(2),
+        |from| from + vec3(0.0, -0.2, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("height 0.3 m"));
+    studio.release().unwrap().unwrap();
+    assert!(file(&recipe).contains("size = [0.5, 0.3, 0.5]"));
+    assert!(file(&recipe).contains("move = [0.5, 0.25, 0]"));
+    // A face can't be pushed through the one opposite: a centimetre is
+    // the least.
+    pull(
+        &mut studio,
+        Grip::Knob(4),
+        |from| from + vec3(0.0, 0.0, -3.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("depth 0.01 m"));
+    studio.cancel_drag();
+    // It snaps in steps; with snapping off it is where the pointer is.
+    pull(
+        &mut studio,
+        Grip::Knob(1),
+        |from| from + vec3(-0.07, 0.0, 0.0),
+        true,
+    );
+    assert_eq!(studio.drag_label(), Some("width 0.57 m"));
+    studio.cancel_drag();
+}
+
+#[test]
+fn round_shapes_have_knobs_for_radius_and_height() {
+    let recipe = folder("size_round").join("round.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\n[[parts]]\nname = \"post\"\nshape = \"cylinder\"\nradius = 0.2\nheight = 1\n\n[[parts]]\nname = \"ball\"\nshape = \"sphere\"\nradius = 0.3\nattach = \"bottom\"\nto = \"post.top\"\n",
+    )
+    .unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    studio.tool = Tool::Size;
+
+    // A cylinder: top, bottom, and one on its side.
+    assert!(studio.select(Some("post")));
+    assert_eq!(
+        studio.grips(),
+        [Grip::Knob(0), Grip::Knob(1), Grip::Knob(2)]
+    );
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.0, 0.5, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("height 1.5 m"));
+    studio.release().unwrap().unwrap();
+    pull(
+        &mut studio,
+        Grip::Knob(2),
+        |from| from + vec3(0.1, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("radius 0.3 m"));
+    studio.release().unwrap().unwrap();
+    let text = file(&recipe);
+    assert!(text.contains("radius = 0.3\nheight = 1.5\n"), "{text}");
+
+    // A ball: one knob. It is joined, so only its size changes: its join
+    // keeps it on the post.
+    assert!(studio.select(Some("ball")));
+    assert_eq!(studio.grips(), [Grip::Knob(0)]);
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.2, 0.0, 0.0),
+        false,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Set \"ball\": radius 0.5");
+    let ball = studio.part("ball").unwrap().bounds.unwrap();
+    let post = studio.part("post").unwrap().bounds.unwrap();
+    assert!((ball.min.y - post.max.y).abs() < 1e-6, "still on the post");
+    // (The post is free, so pulling its top did move its middle.)
+    assert!(file(&recipe).contains("move = [0, 0.25, 0]"));
+}
+
+#[test]
+fn the_size_tool_is_for_shapes_and_changes_a_definition_for_all_its_parts() {
+    let recipe = copy_of("robot", "size_definition");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    studio.tool = Tool::Size;
+    // A part made of parts has no size of its own.
+    assert!(studio.select(Some("left_arm")));
+    assert!(studio.grips().is_empty());
+    // An eye is made from a definition: pulling its face changes the
+    // definition, and so the other eye.
+    assert!(studio.select(Some("left_eye")));
+    assert_eq!(studio.grips().len(), 6);
+    let other_was = studio.part("right_eye").unwrap().bounds.unwrap().size();
+    pull(
+        &mut studio,
+        Grip::Knob(2),
+        |from| from + vec3(0.0, 0.02, 0.0),
+        true,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Set \"left_eye\": size [0.08, 0.1, 0.03] (also changed: right_eye)"
+    );
+    let other_is = studio.part("right_eye").unwrap().bounds.unwrap().size();
+    assert!((other_is.y - other_was.y - 0.02).abs() < 1e-9);
+
+    // The knobs are drawn on the faces.
+    let (_, mut studio) = boxes("size_picture");
+    studio.tool = Tool::Size;
+    let on_top = studio.grip_point(Grip::Knob(2)).unwrap();
+    studio.hover(VIEW, Some(on_top));
+    check_picture("studio-handles-size", &studio.picture(VIEW.0, VIEW.1));
+}

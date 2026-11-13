@@ -147,6 +147,9 @@ fn the_screens_look_as_they_did() {
         screen.key_press(egui::Key::R);
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "handles-rotate"));
+        screen.key_press(egui::Key::T);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "handles-size"));
     }
 
     // A recipe saved with a mistake: the problems, and the last good

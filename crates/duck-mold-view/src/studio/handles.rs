@@ -23,6 +23,7 @@
 
 use duck_mold_core::edit::{self, Changes, Edit, Facts};
 use duck_mold_core::math::{Mat3, Vec3, vec3};
+use duck_mold_core::model::Part;
 use duck_mold_core::source::Syntax;
 
 use super::viewport::{self, Mark};
@@ -119,6 +120,37 @@ struct Gizmo {
     /// there run the other way.
     sense: f64,
     joined: Option<Joined>,
+    /// The Size tool's knobs, on the faces of a shape.
+    knobs: Vec<Knob>,
+}
+
+/// Which of a shape's own sizes a knob changes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Sized {
+    /// One of the three numbers of `size`: 0, 1, 2 for width, height,
+    /// depth.
+    Side(usize),
+    /// `height`.
+    Height,
+    /// `radius`.
+    Radius,
+}
+
+/// A knob of the Size tool: it sits on a face and pulls it out or in.
+#[derive(Debug, Clone, PartialEq)]
+struct Knob {
+    /// Where it is, in the picture's space.
+    at: Vec3,
+    /// The way the face goes when it is pulled out, 1 long.
+    out: Vec3,
+    /// How many metres of the model one of the shape's own units is,
+    /// that way (its `scale`, and that of what it is inside).
+    unit: f64,
+    sized: Sized,
+    /// How far the part's middle has to move, in its list, for each unit
+    /// the size grows, so that the opposite face stays where it is.
+    /// Nothing for a radius, which grows all round.
+    carry: Vec3,
 }
 
 /// A handle in hand.
@@ -285,6 +317,11 @@ impl Studio {
                 .map_or(part.place.shift, |bounds| bounds.center()),
         } + offset;
         let away = self.orbit.to_view(centre).z.max(0.05);
+        let knobs = if self.tool == Tool::Size {
+            self.knobs_of(part, offset)
+        } else {
+            Vec::new()
+        };
         Some(Gizmo {
             part: path.to_owned(),
             centre,
@@ -294,7 +331,55 @@ impl Studio {
             own,
             sense: if frame.determinant() < 0.0 { -1.0 } else { 1.0 },
             joined,
+            knobs,
         })
+    }
+
+    /// The Size tool's knobs for a part that is one shape: one on each
+    /// face whose place is one of the shape's own sizes.
+    fn knobs_of(&self, part: &Part, offset: Vec3) -> Vec<Knob> {
+        let Some(facts) = self.facts() else {
+            return Vec::new();
+        };
+        let sizes = &facts.sizes;
+        // A knob out along one of the shape's own directions, `reach` of
+        // its own units from its middle.
+        let knob = |which: usize, sign: f64, reach: f64, sized: Sized, carried: bool| {
+            let mut own = [0.0; 3];
+            own[which] = sign;
+            let own: Vec3 = own.into();
+            let way = part.place.turn * own;
+            let unit = way.length();
+            Some(Knob {
+                at: part.place.apply(own * reach) + offset,
+                out: way.normalized()?,
+                unit,
+                sized,
+                carry: if carried {
+                    part.local.turn * own * 0.5
+                } else {
+                    Vec3::ZERO
+                },
+            })
+        };
+        let mut knobs = Vec::new();
+        if let Some(size) = sizes.size {
+            // A box, or a shape measured like one: six sides.
+            for (which, side) in size.into_iter().enumerate() {
+                for sign in [1.0, -1.0] {
+                    knobs.extend(knob(which, sign, side / 2.0, Sized::Side(which), true));
+                }
+            }
+        }
+        if let Some(height) = sizes.height {
+            for sign in [1.0, -1.0] {
+                knobs.extend(knob(1, sign, height / 2.0, Sized::Height, true));
+            }
+        }
+        if let Some(radius) = sizes.radius {
+            knobs.extend(knob(0, 1.0, radius, Sized::Radius, false));
+        }
+        knobs
     }
 
     /// The handles of the tool in hand, around `gizmo`.
@@ -367,7 +452,20 @@ impl Studio {
                     color: MIDDLE,
                 });
             }
-            (Tool::Size | Tool::Paint, _) => {}
+            (Tool::Size, _) => {
+                for (at, knob) in gizmo.knobs.iter().enumerate() {
+                    handles.push(Handle {
+                        grip: Grip::Knob(at),
+                        points: vec![knob.at],
+                        color: match knob.sized {
+                            Sized::Side(which) => AXIS_COLORS[which],
+                            Sized::Height => AXIS_COLORS[1],
+                            Sized::Radius => AXIS_COLORS[0],
+                        },
+                    });
+                }
+            }
+            (Tool::Paint, _) => {}
         }
         handles
     }
@@ -437,7 +535,9 @@ impl Studio {
             .filter_map(|handle| {
                 let distance = match handle.grip {
                     // Only the box itself, not the line it stands on.
-                    Grip::Box(_) | Grip::Middle => away(seen(*handle.points.last()?)?) - 2.0,
+                    Grip::Box(_) | Grip::Middle | Grip::Knob(_) => {
+                        away(seen(*handle.points.last()?)?) - 2.0
+                    }
                     _ => handle
                         .points
                         .windows(2)
@@ -538,6 +638,10 @@ impl Studio {
                         nearest_on_line(gizmo.centre, along, eye, ray)?
                     }
                     Grip::Box(which) => nearest_on_line(gizmo.centre, gizmo.own[which], eye, ray)?,
+                    Grip::Knob(which) => {
+                        let knob = gizmo.knobs.get(which)?;
+                        nearest_on_line(knob.at, knob.out, eye, ray)?
+                    }
                     _ => 0.0,
                 };
                 (grip, hold, gizmo.centre)
@@ -780,7 +884,54 @@ impl Studio {
                     (_, Some(_)) => (Vec::new(), String::new()),
                 }
             }
-            (Grip::Knob(_), _) => return,
+            // ---- a face of a shape, pulled out or in
+            (Grip::Knob(which), _) => {
+                let Some(knob) = gizmo.knobs.get(which) else {
+                    return;
+                };
+                let Some(now) = nearest_on_line(knob.at, knob.out, eye, ray) else {
+                    return;
+                };
+                let was = &grab.facts.sizes;
+                let (was_size, name) = match knob.sized {
+                    Sized::Side(side) => (
+                        was.size.map_or(1.0, |size| size[side]),
+                        ["width", "height", "depth"][side],
+                    ),
+                    Sized::Height => (was.height.unwrap_or(1.0), "height"),
+                    Sized::Radius => (was.radius.unwrap_or(0.5), "radius"),
+                };
+                // Never down to nothing: a centimetre at the least.
+                let grown = snapped((now - grab.hold) / knob.unit, step, free).max(0.01 - was_size);
+                let is = ((was_size + grown) * 10_000.0).round() / 10_000.0;
+                let mut sizes = edit::Sizes::default();
+                match knob.sized {
+                    Sized::Side(side) => {
+                        let mut size = was.size.unwrap_or([1.0; 3]);
+                        size[side] = is;
+                        sizes.size = Some(size);
+                    }
+                    Sized::Height => sizes.height = Some(is),
+                    Sized::Radius => sizes.radius = Some(is),
+                }
+                // A free part's middle goes half as far, so the face
+                // opposite stays where it is. A joined part is held by
+                // its join.
+                let carried = knob.carry * (is - was_size);
+                let move_to = (grab.facts.to.is_none() && carried.length() > 1e-9).then(|| {
+                    let at = Vec3::from(grab.facts.position) + carried;
+                    at.to_array()
+                        .map(|number| (number * 10_000.0).round() / 10_000.0 + 0.0)
+                });
+                (
+                    vec![set(Changes {
+                        sizes,
+                        move_to,
+                        ..Changes::default()
+                    })],
+                    format!("{name} {} m", short(is)),
+                )
+            }
         };
         self.hold_edits(edits, label);
     }

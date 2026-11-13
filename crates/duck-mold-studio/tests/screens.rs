@@ -719,7 +719,27 @@ fn the_tools_are_buttons_and_keys() {
     drag(&mut screen, start, end);
     let text = std::fs::read_to_string(&recipe).unwrap();
     assert!(text.contains("scale = [1, 2, 1]"), "{text}");
-    let _ = vec3(0.0, 0.0, 0.0);
+
+    // The Size tool (T): the knob on the crate's top, pulled up 0.4 m.
+    // The crate is scaled to twice its height, so that is 0.2 of its
+    // own size.
+    screen.key_press(egui::Key::T);
+    screen.run_steps(2);
+    assert_eq!(tool(&screen), Tool::Size);
+    screen.get_by_role_and_label(egui::accesskit::Role::Button, "Size");
+    let from = screen
+        .state()
+        .studio()
+        .unwrap()
+        .grip_at(Grip::Knob(2))
+        .unwrap();
+    let (start, end) = (
+        point_on_screen(&screen, from),
+        point_on_screen(&screen, from + vec3(0.0, 0.4, 0.0)),
+    );
+    drag(&mut screen, start, end);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("size = [0.5, 0.7, 0.5]"), "{text}");
 
     // When only looking there are no tools.
     let mut looking = harness(StudioApp::with_file(&recipe, true), false);

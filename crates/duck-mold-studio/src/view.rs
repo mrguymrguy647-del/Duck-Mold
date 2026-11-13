@@ -302,6 +302,12 @@ fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
             "S",
             "Boxes: drag one to make the part bigger or smaller",
         ),
+        (
+            Tool::Size,
+            "Size",
+            "T",
+            "Knobs on a shape's faces: pull one to change its width, height, depth or radius",
+        ),
     ];
     for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {
         let place = Rect::from_min_size(

@@ -1730,6 +1730,14 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 2):* the Size tool, as designed. One thing to know: a
+box that is joined is held by its join, so pulling a face changes its
+size about its middle and the join then puts it back on its socket;
+only a free part keeps the opposite face exactly where it was, by
+moving its middle half as far in the same edit. A part made from a
+definition has the definition's knobs, and pulling one changes every
+part made from it (the status line names them).
+
 *As built (step 1):*
 
 - **Moves snap in steps from where the part was**, not onto the grid's

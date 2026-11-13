@@ -267,6 +267,7 @@ impl StudioApp {
                 (egui::Key::G, Tool::Move),
                 (egui::Key::R, Tool::Rotate),
                 (egui::Key::S, Tool::Scale),
+                (egui::Key::T, Tool::Size),
             ] {
                 if ui.input(|input| input.modifiers.is_none() && input.key_pressed(key)) {
                     studio.tool = tool;

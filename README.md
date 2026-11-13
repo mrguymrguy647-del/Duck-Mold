@@ -135,7 +135,7 @@ change would reach:
 > Made from the definition "eye". Changing its shape, size or colour
 > also changes: right_eye.
 
-**Moving, turning and sizing a part.** Three tools stand down the left
+**Moving, turning and sizing a part.** Four tools stand down the left
 edge of the picture, each with a key. They put handles on the selected
 part:
 
@@ -143,7 +143,8 @@ part:
 |---|---|---|---|
 | Move | G | Three arrows: red, green, blue | Moves the part left-right, up-down or front-back. Dragging the part itself slides it over the ground. |
 | Rotate | R | Three rings | Turns it, 15 degrees at a time. |
-| Scale | S | Three small boxes, and one in the middle | Stretches it one way, or makes all of it bigger or smaller. |
+| Scale | S | Three small boxes, and one in the middle | Stretches it one way, or makes all of it bigger or smaller. Works on any part. |
+| Size | T | A round knob on each face of a shape | Pulls that face out or in: changes the shape's own width, height, depth or radius. The face opposite stays where it is. |
 
 - That is for a **free** part: one that is joined to nothing (a
   duplicate, say). A **joined** part slides along the surface it sits
