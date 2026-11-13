@@ -1,0 +1,52 @@
+# A rock made from one box by moving its corners. Three cuts through the
+# middle (`at = 0`) split every side in four, so the box has 26 corners:
+# its own eight, one in the middle of each edge and one in the middle of
+# each side. The eight outer ones are pulled in, the middles of some
+# sides pushed out, and the bottom is left flat so it sits on the ground.
+#
+#   duck-mold inspect examples/rock.toml --faces
+#
+# A corner is named by the faces that meet there, joined with `+`, in
+# any order: the cuts named the slices (`top_right_front` is the piece
+# of the top towards the right and the front), so these names stay put
+# when the rock is made bigger.
+
+version = 0
+name = "rock"
+description = "A rock: a box cut three ways through its middle, with its corners moved in and out."
+
+[palette]
+stone = "#8C8A84"
+moss  = "#6E8B4E"
+
+[[parts]]
+name = "rock"
+shape = "box"
+size = [1.2, 0.8, 1.0]
+color = "stone"
+changes = [
+  { cut = "right", at = 0 },
+  { cut = "top", at = 0 },
+  { cut = "front", at = 0 },
+  # The eight corners of the box, each pulled in towards the middle by a
+  # different amount: the top ones most, so it is rounder on top.
+  { move = "bottom+back+left", by = [0.15, 0.05, 0.12] },
+  { move = "bottom_right+back_right+right", by = [-0.12, 0.04, 0.15] },
+  { move = "bottom_front+front+left_front", by = [0.18, 0.06, -0.1] },
+  { move = "bottom_right_front+front_right+right_front", by = [-0.1, 0.05, -0.14] },
+  { move = "top+back_top+left_top", by = [0.25, -0.18, 0.2] },
+  { move = "top_right+back_right_top+right_top", by = [-0.22, -0.12, 0.24] },
+  { move = "top_front+front_top+left_top_front", by = [0.2, -0.15, -0.22] },
+  { move = "top_right_front+front_right_top+right_top_front", by = [-0.28, -0.2, -0.18] },
+  # The middles of the top and of four sides, pushed out a little.
+  { move = "top+top_right+top_front+top_right_front", by = [0.05, 0.12, -0.03] },
+  { move = "front+front_right+front_top+front_right_top", by = [0.04, 0.02, 0.08] },
+  { move = "back+back_right+back_top+back_right_top", by = [-0.03, 0, -0.07] },
+  { move = "left+left_top+left_front+left_top_front", by = [-0.08, 0.03, 0] },
+  { move = "right+right_top+right_front+right_top_front", by = [0.06, -0.02, 0.02] },
+  # Two edges along the top, pulled in, so the top isn't a ridge.
+  { move = "top+top_front+left_top+left_top_front", by = [0.08, -0.06, 0] },
+  { move = "top_right+top_right_front+right_top+right_top_front", by = [-0.1, -0.04, 0.02] },
+]
+# Moss on the four pieces of the top.
+colors = { top = "moss", top_right = "moss", top_front = "moss", top_right_front = "moss" }

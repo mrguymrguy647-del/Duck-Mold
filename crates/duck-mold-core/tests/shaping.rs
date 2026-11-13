@@ -1915,3 +1915,52 @@ fn a_part_is_saved_alone_with_the_colours_it_uses() {
     assert!(plain.contains("[palette]\nplaster = \"#E8E0D0\"\n\n"));
     assert!(!plain.contains("wood"));
 }
+
+// ---- Phase 4, step 9: the examples ---------------------------------------------------
+
+#[test]
+fn the_shaped_examples_are_closed_and_face_outwards() {
+    let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    fn shaped_parts<'a>(parts: &'a [Part], into: &mut Vec<&'a Part>) {
+        for part in parts {
+            if part.shaped.is_some() {
+                into.push(part);
+            }
+            shaped_parts(&part.parts, into);
+        }
+    }
+    for (example, count, corners) in [
+        ("chair", 1, None),
+        ("window_wall", 1, None),
+        ("rock", 1, Some(26)),
+        ("house", 2, None),
+    ] {
+        let built = duck_mold_core::tools::build(&folder.join(format!("{example}.toml")))
+            .unwrap_or_else(|_| panic!("{example} builds"));
+        assert!(built.warnings.is_empty(), "{example}: {:?}", built.warnings);
+        let mut found = Vec::new();
+        shaped_parts(&built.model.parts, &mut found);
+        assert_eq!(found.len(), count, "{example}");
+        for part in found {
+            let shaped = part.shaped.as_ref().unwrap();
+            whole(shaped).unwrap_or_else(|why| panic!("{example}/{}: {why}", part.path));
+            if let Some(corners) = corners {
+                assert_eq!(shaped.corners.len(), corners, "{example}");
+            }
+        }
+    }
+    // The chair has every name the design gave it.
+    let built = duck_mold_core::tools::build(&folder.join("chair.toml")).unwrap();
+    let chair = built.model.parts[0].shaped.as_ref().unwrap();
+    let names = chair.names();
+    for name in [
+        "leg_lf",
+        "leg_rb",
+        "backrest",
+        "backrest_front",
+        "top",
+        "top_left_back",
+    ] {
+        assert!(names.iter().any(|known| known == name), "{name}: {names:?}");
+    }
+}

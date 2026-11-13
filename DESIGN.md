@@ -3011,6 +3011,17 @@ Four, each with its stored model, report and picture:
   to a frame and a pane, and the pane pushed back. Its stored files
   change on purpose; no other example's change by one byte.
 
+*As built (step 9):* the four are as above. The chair is 108
+triangles, not the 118 the design guessed: the cut faces under the legs
+are pulled whole, and nothing is left over. The wall's frame is
+painted by face name, and it has a socket on a face an inset made (the
+strip above the window). The rock's corners are named as the cuts
+name them (`top_right_front+front_right_top+right_top_front`); it moves
+the eight outer corners in, the middles of five sides out and two top
+edges in, and leaves the bottom flat. The house's two windows are one
+`[define.window]`, used twice. The chair, the wall and the rock are on
+the start page too, so it has fifteen examples.
+
 ### Nothing changes in the `.glb` or in Duck Forge
 
 A shaped part is only more triangles, which the reader there already

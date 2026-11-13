@@ -1,0 +1,76 @@
+{
+  "ok": true,
+  "summary": "rock: 1.34 x 0.92 x 1.15 m, 48 triangles, 1 part, 2 colours, rests on the ground, nothing floating, nothing overlapping",
+  "source": "examples/rock.toml",
+  "name": "rock",
+  "size": [
+    1.34,
+    0.92,
+    1.15
+  ],
+  "bounds": {
+    "min": [
+      -0.67,
+      0.0,
+      -0.575
+    ],
+    "max": [
+      0.67,
+      0.92,
+      0.575
+    ]
+  },
+  "triangles": 48,
+  "vertices": 144,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "stone",
+      "hex": "#8C8A84",
+      "triangles": 40
+    },
+    {
+      "name": "moss",
+      "hex": "#6E8B4E",
+      "triangles": 8
+    }
+  ],
+  "parts": [
+    {
+      "name": "rock",
+      "kind": "box",
+      "changes": 18,
+      "triangles": 48,
+      "size": [
+        1.34,
+        0.92,
+        1.15
+      ],
+      "bounds": {
+        "min": [
+          -0.67,
+          0.0,
+          -0.575
+        ],
+        "max": [
+          0.67,
+          0.92,
+          0.575
+        ]
+      },
+      "colors": [
+        "stone",
+        "moss"
+      ],
+      "attached_to": null,
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [],
+  "warnings": [],
+  "errors": []
+}

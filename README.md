@@ -119,7 +119,7 @@ target/release/duck-mold studio examples/robot.toml
 
 Started with no file (or by double-clicking it), the Studio shows its
 **start page**: New model and Open a model; the models you opened
-lately, each with its picture; and the **examples**, twelve of them,
+lately, each with its picture; and the **examples**, fifteen of them,
 each with its picture. Click an example to open a copy of your own: the
 copy goes in the folder `Duck Mold` in your Documents (as `robot.toml`,
 or `robot_2.toml` if that is taken), so you can change it as you like
@@ -127,7 +127,7 @@ and the example stays as it is. The examples are inside the program, so
 they are there wherever it was started from. File > Open an example and
 File > Opened lately offer the same lists once a model is open.
 
-![The start page: models opened lately and the twelve examples, each with its picture](docs/studio-start.png)
+![The start page: models opened lately and the fifteen examples, each with its picture](docs/studio-start.png)
 
 The first model you open to work on gets **five small tips**, one at a
 time, each pointing at what it is about: the picture, a part, the
@@ -422,7 +422,7 @@ only: nothing can be changed there.
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
-| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`): a copy of that example, with the files it uses. Never writes over a file. |
+| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`): a copy of that example, with the files it uses. Never writes over a file. |
 | `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
 | `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |
 | `duck-mold guide` | Prints the guide for AI agents. |
@@ -519,7 +519,7 @@ A recipe can be written as TOML (the examples) or as JSON
 | [crate.toml](examples/crate.toml) | The smallest useful recipe: one box, two colours. |
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
-| [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, windows and a chimney placed by sockets, and a skylight on the roof's `slope`. |
+| [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, framed windows (one box inset to a frame and a pane, defined once) and a chimney placed by sockets, and a skylight on the roof's `slope`. |
 | [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
@@ -531,6 +531,9 @@ A recipe can be written as TOML (the examples) or as JSON
 | [barn.toml](examples/barn.toml) | `prism`: a ridged roof in one part, its ends coloured by name, and a silo with a round cap. |
 | [slide.toml](examples/slide.toml) | `stairs`: steps up to a platform that is placed with `move`, and a ramp down the other side. |
 | [gate.toml](examples/gate.toml) | `arch`: a doorway between two towers that are tapered and bevelled, defined once and used twice. |
+| [chair.toml](examples/chair.toml) | Shaping: a chair from one box. Four cuts slice the seat's edges; four legs are pulled down from the corners and the back pulled up from the back strip. |
+| [window_wall.toml](examples/window_wall.toml) | Shaping: a wall with a framed window, made by two insets and a pull, painted by face name, with a socket on a face an inset made. |
+| [rock.toml](examples/rock.toml) | Shaping: a box cut three ways through its middle, so it has 26 corners, with its corners moved in and out by name. |
 
 Each is commented line by line.
 
@@ -582,7 +585,7 @@ Duck-Mold/
 ├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
 ├── release/                   what goes in the download beside the programs
 ├── Cargo.toml                 the workspace: four crates, built together
-├── examples/                  fifteen recipes to read and change, and parts/ for files they use
+├── examples/                  eighteen recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/

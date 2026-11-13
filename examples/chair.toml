@@ -1,0 +1,40 @@
+# A chair made from one box: the seat is sliced near its edges, four
+# legs are pulled down from the corners of its underside, and the back
+# is pulled up from its back strip. Nothing is joined: it is one part.
+#
+#   duck-mold inspect examples/chair.toml --faces
+#
+# The faces a change makes are named by words passed down from the box
+# (`top_left_back` is the piece of the top towards the left and the
+# back), so the names stay the same when the sizes change.
+
+version = 0
+name = "chair"
+description = "A chair shaped from one box: four legs and a back pulled out of its seat."
+
+[palette]
+wood    = "#9C6B3E"
+cushion = "#C8553D"
+
+[[parts]]
+name = "chair"
+shape = "box"
+size = [0.5, 0.06, 0.5]             # the seat
+color = "wood"
+changes = [
+  # A slice off each side of the seat, 80% of the way from its middle.
+  # Where two slices cross, at the corners, is where the legs go.
+  { cut = "left", at = 0.8 },       # makes top_left, bottom_left, front_left, back_left
+  { cut = "right", at = 0.8 },
+  { cut = "front", at = 0.8 },      # makes top_front, top_left_front, top_right_front...
+  { cut = "back", at = 0.8 },
+  # Four legs, pulled down from the corners of the underside.
+  { pull = "bottom_left_front", by = 0.42, name = "leg_lf" },
+  { pull = "bottom_right_front", by = 0.42, name = "leg_rf" },
+  { pull = "bottom_left_back", by = 0.42, name = "leg_lb" },
+  { pull = "bottom_right_back", by = 0.42, name = "leg_rb" },
+  # The back: the seat's back strip, pulled up as one piece.
+  { pull = ["top_left_back", "top_back", "top_right_back"], by = 0.5, name = "backrest" },
+]
+# The seat's top, without its edges, is the cushion.
+colors = { top = "cushion" }

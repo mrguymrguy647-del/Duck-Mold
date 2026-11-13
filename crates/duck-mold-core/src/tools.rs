@@ -385,7 +385,7 @@ pub struct Example {
 }
 
 /// The examples, in the order the start page shows them.
-pub const EXAMPLES: [Example; 12] = [
+pub const EXAMPLES: [Example; 15] = [
     Example {
         name: "robot",
         about: "Parts made of parts, and a mirrored arm",
@@ -394,7 +394,7 @@ pub const EXAMPLES: [Example; 12] = [
     },
     Example {
         name: "house",
-        about: "A roof of two ramps, with a door, windows and a chimney on sockets",
+        about: "A roof of two ramps, with a door, framed windows and a chimney on sockets",
         recipe: include_str!("../../../examples/house.toml"),
         files: &[],
     },
@@ -465,6 +465,24 @@ pub const EXAMPLES: [Example; 12] = [
         name: "gate",
         about: "An arch between two towers that are tapered and bevelled",
         recipe: include_str!("../../../examples/gate.toml"),
+        files: &[],
+    },
+    Example {
+        name: "chair",
+        about: "One box, shaped: legs and a back pulled out of its seat",
+        recipe: include_str!("../../../examples/chair.toml"),
+        files: &[],
+    },
+    Example {
+        name: "window_wall",
+        about: "A wall with a framed window, made by inset",
+        recipe: include_str!("../../../examples/window_wall.toml"),
+        files: &[],
+    },
+    Example {
+        name: "rock",
+        about: "A box cut through its middle, its corners moved in and out",
+        recipe: include_str!("../../../examples/rock.toml"),
         files: &[],
     },
 ];

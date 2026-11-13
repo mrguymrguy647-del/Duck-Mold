@@ -92,8 +92,10 @@ target/release/duck-mold new my_robot.toml --example robot
 
 The examples are `robot`, `house`, `snowman`, `desk`, `duck`, `dog`
 (capsules), `doughnut` (a torus), `mug` (a tube), `temple` (a pyramid
-and stairs), `barn` (a prism), `slide` (stairs) and `gate` (an arch,
-taper and bevel). `new` never writes over a file. Without `--example`
+and stairs), `barn` (a prism), `slide` (stairs), `gate` (an arch,
+taper and bevel), and three made by shaping one box: `chair` (cuts and
+pulls), `window_wall` (insets) and `rock` (corners moved). `new` never
+writes over a file. Without `--example`
 it starts a recipe with one box in it.
 
 ## 3. A first recipe

@@ -1,0 +1,37 @@
+# A wall with a framed window, made from one box by insetting its front
+# twice and pushing the glass back.
+#
+#   duck-mold inspect examples/window_wall.toml --faces
+#
+# An inset leaves the face's name on the ring around the new face in its
+# middle: after the first, `front` is the wall round the window, and
+# `window` the face where the window goes. The second inset makes the
+# frame (`window` is now the ring) and the glass inside it.
+
+version = 0
+name = "window_wall"
+description = "A wall with a framed window, made by inset."
+
+[palette]
+plaster = "#E8E0D0"
+wood    = "#8B5A2B"
+sky     = "#9FD3F0"
+
+[[parts]]
+name = "wall"
+shape = "box"
+size = [3, 2.4, 0.2]
+color = "plaster"
+changes = [
+  { inset = "front", by = 0.6, name = "window" },
+  { inset = "window", by = 0.06, name = "glass" },
+  # Pushed in: the walls round it (`glass_side`) are the frame's inside.
+  { pull = "glass", by = -0.08 },
+]
+colors = { window = "wood", glass = "sky", glass_side = "wood" }
+
+# A socket on a face the first inset made, by its name: the strip of
+# wall above the window (`window_rim_top`), for a lamp or a sign. It
+# moves with the strip when the window is made bigger or smaller.
+[parts.sockets]
+lamp = { on = "window_rim_top" }

@@ -26,9 +26,25 @@ use std::process::Command;
 #[path = "../../../docs/forge/duck_mold_glb.rs"]
 mod forge;
 
-const EXAMPLES: [&str; 15] = [
-    "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck", "dog", "doughnut",
-    "mug", "temple", "barn", "slide", "gate",
+const EXAMPLES: [&str; 18] = [
+    "crate",
+    "table",
+    "tree",
+    "house",
+    "robot",
+    "snowman",
+    "desk",
+    "duck",
+    "dog",
+    "doughnut",
+    "mug",
+    "temple",
+    "barn",
+    "slide",
+    "gate",
+    "chair",
+    "window_wall",
+    "rock",
 ];
 
 /// The top of the repository.
