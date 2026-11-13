@@ -1,0 +1,146 @@
+# A dog made of capsules: the `capsule` shape.
+#
+#   duck-mold studio examples/dog.toml
+#
+# It shows: capsules (a cylinder with round ends: `height` is the whole
+# length, ends included), one lying down with `rotate` for the body,
+# one leg defined once and used four times, and sockets declared at
+# points of the body's round surface, some with a `facing` of their
+# own, so that nothing needs a coordinate.
+
+version = 0
+name = "dog"
+description = "A small dog made of capsules."
+
+[palette]
+coat  = "#C8894A"
+dark  = "#6E4424"
+nose  = "#1E1A18"
+white = "#F4EFE6"
+
+[define.leg]
+shape = "capsule"
+radius = 0.07
+height = 0.42
+segments = 12
+color = "coat"
+
+[define.ear]
+shape = "capsule"
+radius = 0.05
+height = 0.22
+segments = 8
+color = "dark"
+
+[define.eye]
+shape = "sphere"
+radius = 0.025
+segments = 8
+color = "nose"
+
+# The body lies along z: a capsule stands upright, so it is turned a
+# quarter turn about x, forwards. Its own `top` is now its front end,
+# its own `back` is on top, and its own `front` is underneath.
+[[parts]]
+name = "body"
+shape = "capsule"
+radius = 0.2
+height = 0.9
+segments = 16
+rotate = [-90, 0, 0]
+color = "coat"
+
+[parts.sockets]
+neck            = { on = "back", shift = [0, 0.5, 0] }
+tail            = { on = "back", shift = [0, -0.8, 0], facing = [0, -1, -1] }
+front_left_leg  = { on = "front", shift = [-0.5, 0.5, 0], facing = "front" }
+front_right_leg = { on = "front", shift = [0.5, 0.5, 0], facing = "front" }
+back_left_leg   = { on = "front", shift = [-0.5, -0.5, 0], facing = "front" }
+back_right_leg  = { on = "front", shift = [0.5, -0.5, 0], facing = "front" }
+
+# The head lies the same way. It is joined by a socket on its own
+# `front` (its underside, once it lies down), near its back end.
+[[parts]]
+name = "head"
+shape = "capsule"
+radius = 0.16
+height = 0.42
+segments = 16
+color = "coat"
+attach = "under"
+to = "body.neck"
+
+[parts.sockets]
+under     = { on = "front", shift = [0, -0.4, 0] }
+snout     = { on = "top" }
+left_ear  = { on = "left", shift = [0, -0.3, -0.5] }
+right_ear = { on = "right", shift = [0, -0.3, -0.5] }
+left_eye  = { on = "top", shift = [-0.45, 0, -0.5] }
+right_eye = { on = "top", shift = [0.45, 0, -0.5] }
+
+[[parts]]
+name = "nose"
+shape = "sphere"
+radius = 0.045
+segments = 8
+color = "nose"
+attach = "center"
+to = "head.snout"
+
+[[parts]]
+name = "left_ear"
+use = "ear"
+attach = "right"
+to = "head.left_ear"
+
+[[parts]]
+name = "right_ear"
+use = "ear"
+attach = "left"
+to = "head.right_ear"
+
+[[parts]]
+name = "left_eye"
+use = "eye"
+attach = "center"
+to = "head.left_eye"
+
+[[parts]]
+name = "right_eye"
+use = "eye"
+attach = "center"
+to = "head.right_eye"
+
+[[parts]]
+name = "front_left_leg"
+use = "leg"
+attach = "top"
+to = "body.front_left_leg"
+
+[[parts]]
+name = "front_right_leg"
+use = "leg"
+attach = "top"
+to = "body.front_right_leg"
+
+[[parts]]
+name = "back_left_leg"
+use = "leg"
+attach = "top"
+to = "body.back_left_leg"
+
+[[parts]]
+name = "back_right_leg"
+use = "leg"
+attach = "top"
+to = "body.back_right_leg"
+
+[[parts]]
+name = "tail"
+shape = "capsule"
+radius = 0.04
+height = 0.3
+segments = 8
+color = "white"
+attach = "bottom"
+to = "body.tail"

@@ -1,0 +1,126 @@
+# A temple: the `pyramid` shape.
+#
+#   duck-mold studio examples/temple.toml
+#
+# It shows: a pyramid (four slopes to a point; its `top` socket is the
+# point, its side sockets are halfway up the slopes), boxes with their
+# edges cut (`bevel`) for the platforms, stairs up the front, and one
+# column defined once and used four times.
+
+version = 0
+name = "temple"
+description = "A small temple: platforms, columns and a pyramid roof."
+
+[palette]
+stone = "#C9BFA5"
+dark  = "#9A8F78"
+gold  = "#E2B33C"
+red   = "#A8402E"
+
+[define.column]
+shape = "cylinder"
+radius = 0.14
+height = 1.3
+segments = 12
+bevel = 0.03
+color = "stone"
+
+[[parts]]
+name = "ground"
+shape = "box"
+size = [4.4, 0.3, 4.4]
+bevel = 0.06
+color = "dark"
+
+[[parts]]
+name = "platform"
+shape = "box"
+size = [3.4, 0.3, 3.4]
+bevel = 0.06
+color = "stone"
+attach = "bottom"
+to = "ground.top"
+
+[parts.sockets]
+front_left  = { on = "top", shift = [-0.75, 0, 0.75] }
+front_right = { on = "top", shift = [0.75, 0, 0.75] }
+back_left   = { on = "top", shift = [-0.75, 0, -0.75] }
+back_right  = { on = "top", shift = [0.75, 0, -0.75] }
+steps       = { on = "front", shift = [0, -1, 0], facing = "front" }
+
+# Four steps from the ground in front up to the top of the platform.
+# The middle of their back meets the foot of the platform's front, so
+# the lower two stand in front of the ground slab and the upper two on
+# it. (The platform's edges are cut, so its `steps` socket says which
+# way it faces: on the cut it would lean.)
+[[parts]]
+name = "steps"
+shape = "stairs"
+size = [1.2, 0.6, 1.2]
+steps = 4
+color = "stone"
+attach = "back"
+to = "platform.steps"
+
+[[parts]]
+name = "column_front_left"
+use = "column"
+attach = "bottom"
+to = "platform.front_left"
+
+[[parts]]
+name = "column_front_right"
+use = "column"
+attach = "bottom"
+to = "platform.front_right"
+
+[[parts]]
+name = "column_back_left"
+use = "column"
+attach = "bottom"
+to = "platform.back_left"
+
+[[parts]]
+name = "column_back_right"
+use = "column"
+attach = "bottom"
+to = "platform.back_right"
+
+[[parts]]
+name = "altar"
+shape = "box"
+size = [0.6, 0.5, 0.6]
+bevel = 0.05
+color = "red"
+attach = "bottom"
+to = "platform.top"
+
+# The roof's slab rests on the four columns. It is joined to one of
+# them, by the point of its underside that is over that column.
+[[parts]]
+name = "slab"
+shape = "box"
+size = [3.2, 0.2, 3.2]
+color = "dark"
+attach = "over_column"
+to = "column_front_left.top"
+
+[parts.sockets]
+over_column = { on = "bottom", shift = [-0.797, 0, 0.797] }
+
+[[parts]]
+name = "roof"
+shape = "pyramid"
+size = [3.2, 1.4, 3.2]
+color = "red"
+attach = "bottom"
+to = "slab.top"
+
+[[parts]]
+name = "tip"
+shape = "sphere"
+radius = 0.14
+segments = 12
+color = "gold"
+attach = "center"
+to = "roof.top"

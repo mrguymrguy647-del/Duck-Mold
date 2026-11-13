@@ -26,8 +26,9 @@ use std::process::Command;
 #[path = "../../../docs/forge/duck_mold_glb.rs"]
 mod forge;
 
-const EXAMPLES: [&str; 8] = [
-    "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck",
+const EXAMPLES: [&str; 15] = [
+    "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck", "dog", "doughnut",
+    "mug", "temple", "barn", "slide", "gate",
 ];
 
 /// The top of the repository.
@@ -170,14 +171,22 @@ fn every_example_is_a_clean_model() {
         }
         assert_eq!(report["ground"]["rests_on_ground"], true, "{name}");
         assert_eq!(report["floating"], serde_json::json!([]), "{name}");
-        // Only the tree, the snowman and the duck overlap, and they mean
-        // to: the tree's tiers are pushed into each other, the snowman's
-        // five lumps of coal are pressed into the snow, and the duck's
-        // two eyes into its head.
+        // Where parts overlap, they mean to: the tree's tiers are pushed
+        // into each other, the snowman's five lumps of coal are pressed
+        // into the snow, and the duck's two eyes into its head. Of the
+        // newer ones: the dog's nose and eyes are in its head and its
+        // four legs a hair into its round body; the doughnut's icing is
+        // over its dough; the mug's handle is in its wall; the temple's
+        // steps go through its ground and platform, and its tip is on
+        // the roof's point; the barn's silo has half a ball in its top;
+        // and the gate's towers lean into its arch.
         let overlaps = report["overlapping"].as_array().unwrap().len();
         let meant = match name {
-            "tree" | "duck" => 2,
+            "tree" | "duck" | "gate" => 2,
             "snowman" => 5,
+            "dog" => 7,
+            "temple" => 3,
+            "doughnut" | "mug" | "barn" => 1,
             _ => 0,
         };
         assert_eq!(overlaps, meant, "{name}");

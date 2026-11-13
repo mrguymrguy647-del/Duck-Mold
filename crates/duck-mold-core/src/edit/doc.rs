@@ -536,7 +536,18 @@ impl Doc {
                 ));
             }
             Form::Root | Form::Header => {
-                self.line_start(entry.key_span.start)..self.line_end(entry.node.span.end)
+                let mut start = self.line_start(entry.key_span.start);
+                // A table under a header of its own takes the blank line
+                // above the header with it.
+                if self.text[start..].trim_start().starts_with('[') {
+                    let above = &self.text[..start];
+                    if above.ends_with("\r\n\r\n") {
+                        start -= 2;
+                    } else if above.ends_with("\n\n") {
+                        start -= 1;
+                    }
+                }
+                start..self.line_end(entry.node.span.end)
             }
             Form::Inline => {
                 if at + 1 < entries.len() {
@@ -549,6 +560,19 @@ impl Doc {
             }
         };
         self.splice(range, "")
+    }
+
+    /// Renames a field of a table where it stands: its value, and
+    /// everything round it, stays as it is.
+    pub fn rename_field(&mut self, table: &[Step], name: &str, new: &str) -> Done {
+        let Some(entry) = self.entry(table, name) else {
+            return cant(format!("there is no {name} in {}", show(table)));
+        };
+        let written = match self.syntax {
+            Syntax::Toml => toml_key(new),
+            Syntax::Json => quoted(new),
+        };
+        self.splice(entry.key_span.clone(), &written)
     }
 
     /// Adds a table under a header of its own (TOML) or as a field
@@ -593,14 +617,46 @@ impl Doc {
 
     /// Adds a table to the end of a list of tables. Gives its place.
     pub fn append_item(&mut self, list: &[Step], fields: &[(String, Val)]) -> Result<usize, Cant> {
+        let newline = self.newline();
         let Some(items) = self.items(list) else {
-            return cant(format!("there is no list {} in the recipe", show(list)));
+            // The recipe's own list can be started: a recipe with no
+            // parts yet gets its first.
+            let [Step::Key(name)] = list else {
+                return cant(format!("there is no list {} in the recipe", show(list)));
+            };
+            if self.entry(&[], name).is_some() {
+                return cant(format!("{} in the recipe is not a list", show(list)));
+            }
+            match self.syntax {
+                Syntax::Toml => {
+                    let at = self.text.len();
+                    let mut block = self.gap_before(at);
+                    block.push_str(&format!("[[{}]]{newline}", Self::header_name(list)));
+                    for (name, value) in fields {
+                        block.push_str(&field_text(name, value, Syntax::Toml));
+                        block.push_str(newline);
+                    }
+                    self.splice(at..at, &block)?;
+                }
+                Syntax::Json => {
+                    let first = Val::List(vec![Val::Table(fields.to_vec())]);
+                    self.set_field(&[], name, &first, &[])?;
+                }
+            }
+            return Ok(0);
         };
         let count = items.len();
         let Some(last) = items.last() else {
-            return cant(format!("the list {} is empty", show(list)));
+            if self.syntax == Syntax::Json {
+                self.set_value(list, &Val::List(vec![Val::Table(fields.to_vec())]))?;
+                return Ok(0);
+            }
+            return cant(format!(
+                "the list {} is written on one line; to add to it, write its items under [[{}]] headers",
+                show(list),
+                Self::header_name(list)
+            ));
         };
-        let newline = self.newline();
         match self.form(list) {
             Form::Header => {
                 let headers = self.headers();

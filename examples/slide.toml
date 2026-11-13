@@ -1,0 +1,96 @@
+# A playground slide: the `stairs` shape.
+#
+#   duck-mold studio examples/slide.toml
+#
+# It shows: stairs (steps going up from the front edge to the full
+# height at the back; `steps` says how many), a platform on posts, a
+# long ramp (`wedge`) for the slide itself, and capsules for the rails.
+
+version = 0
+name = "slide"
+description = "A playground slide with steps up one side."
+
+[palette]
+wood   = "#B9834A"
+red    = "#D2432F"
+yellow = "#F4C534"
+steel  = "#8A939B"
+
+[define.rail]
+shape = "capsule"
+radius = 0.03
+height = 0.6
+segments = 8
+color = "yellow"
+
+# The platform everything hangs from. Its underside is 1.2 m up: the
+# steps and the slide are both 1.2 tall, and stand on the ground.
+[[parts]]
+name = "platform"
+shape = "box"
+size = [0.9, 0.1, 0.9]
+color = "wood"
+move = [0, 1.25, 0]
+
+[parts.sockets]
+steps_side  = { on = "back", shift = [0, 1, 0] }
+slide_side  = { on = "front", shift = [0, 1, 0] }
+rail_left   = { on = "top", shift = [-0.85, 0, 0] }
+rail_right  = { on = "top", shift = [0.85, 0, 0] }
+post_left   = { on = "bottom", shift = [-0.8, 0, 0] }
+post_right  = { on = "bottom", shift = [0.8, 0, 0] }
+
+# The steps climb towards their own back, so they are turned half round
+# to climb towards the platform.
+[[parts]]
+name = "steps"
+shape = "stairs"
+size = [0.9, 1.3, 1.5]
+steps = 6
+color = "wood"
+attach = "back_top"
+to = "platform.steps_side"
+
+[parts.sockets]
+back_top = { on = "back", shift = [0, 1, 0] }
+
+# The slide: a ramp, highest at its back, which is at the platform.
+[[parts]]
+name = "chute"
+shape = "wedge"
+size = [0.7, 1.3, 2.4]
+color = "red"
+colors = { slope = "steel" }
+attach = "back_top"
+to = "platform.slide_side"
+
+[parts.sockets]
+back_top = { on = "back", shift = [0, 1, 0] }
+
+[[parts]]
+name = "post_left"
+shape = "box"
+size = [0.08, 1.2, 0.08]
+color = "steel"
+attach = "top"
+to = "platform.post_left"
+
+[[parts]]
+name = "post_right"
+shape = "box"
+size = [0.08, 1.2, 0.08]
+color = "steel"
+attach = "top"
+to = "platform.post_right"
+
+[[parts]]
+name = "rail_left"
+use = "rail"
+attach = "bottom"
+to = "platform.rail_left"
+
+[[parts]]
+name = "rail_right"
+use = "rail"
+attach = "bottom"
+to = "platform.rail_right"

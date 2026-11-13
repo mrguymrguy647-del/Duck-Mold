@@ -1,0 +1,432 @@
+{
+  "ok": true,
+  "summary": "dog: 0.506 x 1.148 x 1.111 m, 1424 triangles, 12 parts, 4 colours, rests on the ground, nothing floating, 7 overlaps",
+  "source": "examples/dog.toml",
+  "name": "dog",
+  "size": [
+    0.506284,
+    1.148126,
+    1.111438
+  ],
+  "bounds": {
+    "min": [
+      -0.253142,
+      0.0,
+      -0.555719
+    ],
+    "max": [
+      0.253142,
+      1.148126,
+      0.555719
+    ]
+  },
+  "triangles": 1424,
+  "vertices": 3104,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "coat",
+      "hex": "#C8894A",
+      "triangles": 1088
+    },
+    {
+      "name": "dark",
+      "hex": "#6E4424",
+      "triangles": 128
+    },
+    {
+      "name": "nose",
+      "hex": "#1E1A18",
+      "triangles": 144
+    },
+    {
+      "name": "white",
+      "hex": "#F4EFE6",
+      "triangles": 64
+    }
+  ],
+  "parts": [
+    {
+      "name": "body",
+      "kind": "capsule",
+      "triangles": 256,
+      "size": [
+        0.4,
+        0.4,
+        0.9
+      ],
+      "bounds": {
+        "min": [
+          -0.2,
+          0.395057,
+          -0.421872
+        ],
+        "max": [
+          0.2,
+          0.795057,
+          0.478128
+        ]
+      },
+      "colors": [
+        "coat"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "head",
+      "kind": "capsule",
+      "triangles": 256,
+      "size": [
+        0.32,
+        0.33336,
+        0.41193
+      ],
+      "bounds": {
+        "min": [
+          -0.16,
+          0.795057,
+          0.099654
+        ],
+        "max": [
+          0.16,
+          1.128417,
+          0.511584
+        ]
+      },
+      "colors": [
+        "coat"
+      ],
+      "attached_to": "body.neck",
+      "parts": []
+    },
+    {
+      "name": "nose",
+      "kind": "sphere",
+      "triangles": 48,
+      "size": [
+        0.09,
+        0.088271,
+        0.08827
+      ],
+      "bounds": {
+        "min": [
+          -0.045,
+          0.958571,
+          0.467449
+        ],
+        "max": [
+          0.045,
+          1.046842,
+          0.555719
+        ]
+      },
+      "colors": [
+        "nose"
+      ],
+      "attached_to": "head.snout",
+      "parts": []
+    },
+    {
+      "name": "left_ear",
+      "kind": "capsule",
+      "uses": "ear",
+      "triangles": 64,
+      "size": [
+        0.141178,
+        0.207427,
+        0.112784
+      ],
+      "bounds": {
+        "min": [
+          -0.253142,
+          0.940699,
+          0.158602
+        ],
+        "max": [
+          -0.111964,
+          1.148126,
+          0.271386
+        ]
+      },
+      "colors": [
+        "dark"
+      ],
+      "attached_to": "head.left_ear",
+      "parts": []
+    },
+    {
+      "name": "right_ear",
+      "kind": "capsule",
+      "uses": "ear",
+      "triangles": 64,
+      "size": [
+        0.141178,
+        0.207427,
+        0.112784
+      ],
+      "bounds": {
+        "min": [
+          0.111964,
+          0.940699,
+          0.158602
+        ],
+        "max": [
+          0.253142,
+          1.148126,
+          0.271386
+        ]
+      },
+      "colors": [
+        "dark"
+      ],
+      "attached_to": "head.right_ear",
+      "parts": []
+    },
+    {
+      "name": "left_eye",
+      "kind": "sphere",
+      "uses": "eye",
+      "triangles": 48,
+      "size": [
+        0.0464,
+        0.04765,
+        0.048801
+      ],
+      "bounds": {
+        "min": [
+          -0.0952,
+          1.048939,
+          0.429321
+        ],
+        "max": [
+          -0.0488,
+          1.096589,
+          0.478122
+        ]
+      },
+      "colors": [
+        "nose"
+      ],
+      "attached_to": "head.left_eye",
+      "parts": []
+    },
+    {
+      "name": "right_eye",
+      "kind": "sphere",
+      "uses": "eye",
+      "triangles": 48,
+      "size": [
+        0.0464,
+        0.04765,
+        0.048801
+      ],
+      "bounds": {
+        "min": [
+          0.0488,
+          1.048939,
+          0.429321
+        ],
+        "max": [
+          0.0952,
+          1.096589,
+          0.478122
+        ]
+      },
+      "colors": [
+        "nose"
+      ],
+      "attached_to": "head.right_eye",
+      "parts": []
+    },
+    {
+      "name": "front_left_leg",
+      "kind": "capsule",
+      "uses": "leg",
+      "triangles": 144,
+      "size": [
+        0.14,
+        0.42,
+        0.14
+      ],
+      "bounds": {
+        "min": [
+          -0.17,
+          0.0,
+          0.183128
+        ],
+        "max": [
+          -0.03,
+          0.42,
+          0.323128
+        ]
+      },
+      "colors": [
+        "coat"
+      ],
+      "attached_to": "body.front_left_leg",
+      "parts": []
+    },
+    {
+      "name": "front_right_leg",
+      "kind": "capsule",
+      "uses": "leg",
+      "triangles": 144,
+      "size": [
+        0.14,
+        0.42,
+        0.14
+      ],
+      "bounds": {
+        "min": [
+          0.03,
+          0.0,
+          0.183128
+        ],
+        "max": [
+          0.17,
+          0.42,
+          0.323128
+        ]
+      },
+      "colors": [
+        "coat"
+      ],
+      "attached_to": "body.front_right_leg",
+      "parts": []
+    },
+    {
+      "name": "back_left_leg",
+      "kind": "capsule",
+      "uses": "leg",
+      "triangles": 144,
+      "size": [
+        0.14,
+        0.42,
+        0.14
+      ],
+      "bounds": {
+        "min": [
+          -0.17,
+          0.0,
+          -0.266872
+        ],
+        "max": [
+          -0.03,
+          0.42,
+          -0.126872
+        ]
+      },
+      "colors": [
+        "coat"
+      ],
+      "attached_to": "body.back_left_leg",
+      "parts": []
+    },
+    {
+      "name": "back_right_leg",
+      "kind": "capsule",
+      "uses": "leg",
+      "triangles": 144,
+      "size": [
+        0.14,
+        0.42,
+        0.14
+      ],
+      "bounds": {
+        "min": [
+          0.03,
+          0.0,
+          -0.266872
+        ],
+        "max": [
+          0.17,
+          0.42,
+          -0.126872
+        ]
+      },
+      "colors": [
+        "coat"
+      ],
+      "attached_to": "body.back_right_leg",
+      "parts": []
+    },
+    {
+      "name": "tail",
+      "kind": "capsule",
+      "triangles": 64,
+      "size": [
+        0.08,
+        0.235563,
+        0.235563
+      ],
+      "bounds": {
+        "min": [
+          -0.04,
+          0.745758,
+          -0.555719
+        ],
+        "max": [
+          0.04,
+          0.981321,
+          -0.320156
+        ]
+      },
+      "colors": [
+        "white"
+      ],
+      "attached_to": "body.tail",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "front_left_leg",
+      "b": "body",
+      "depth": 0.00473,
+      "hidden": false
+    },
+    {
+      "a": "front_right_leg",
+      "b": "body",
+      "depth": 0.00473,
+      "hidden": false
+    },
+    {
+      "a": "back_left_leg",
+      "b": "body",
+      "depth": 0.00473,
+      "hidden": false
+    },
+    {
+      "a": "back_right_leg",
+      "b": "body",
+      "depth": 0.00473,
+      "hidden": false
+    },
+    {
+      "a": "nose",
+      "b": "head",
+      "depth": 0.044135,
+      "hidden": false
+    },
+    {
+      "a": "left_eye",
+      "b": "head",
+      "depth": 0.025,
+      "hidden": false
+    },
+    {
+      "a": "right_eye",
+      "b": "head",
+      "depth": 0.025,
+      "hidden": false
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

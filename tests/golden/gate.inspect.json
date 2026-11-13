@@ -1,0 +1,359 @@
+{
+  "ok": true,
+  "summary": "gate: 5.74 x 5.50 x 1.50 m, 272 triangles, 8 parts, 5 colours, rests on the ground, nothing floating, 2 overlaps",
+  "source": "examples/gate.toml",
+  "name": "gate",
+  "size": [
+    5.74,
+    5.5,
+    1.5
+  ],
+  "bounds": {
+    "min": [
+      -2.87,
+      0.0,
+      -0.75
+    ],
+    "max": [
+      2.87,
+      5.5,
+      0.75
+    ]
+  },
+  "triangles": 272,
+  "vertices": 610,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "stone",
+      "hex": "#A9A49A",
+      "triangles": 66
+    },
+    {
+      "name": "light",
+      "hex": "#C9C4B8",
+      "triangles": 66
+    },
+    {
+      "name": "dark",
+      "hex": "#6F6B63",
+      "triangles": 116
+    },
+    {
+      "name": "roof",
+      "hex": "#8C3B2E",
+      "triangles": 12
+    },
+    {
+      "name": "wood",
+      "hex": "#6B4A2B",
+      "triangles": 12
+    }
+  ],
+  "parts": [
+    {
+      "name": "arch",
+      "kind": "arch",
+      "triangles": 72,
+      "size": [
+        3.0,
+        3.2,
+        1.0
+      ],
+      "bounds": {
+        "min": [
+          -1.5,
+          0.0,
+          -0.5
+        ],
+        "max": [
+          1.5,
+          3.2,
+          0.5
+        ]
+      },
+      "colors": [
+        "stone",
+        "light",
+        "dark"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "left_tower",
+      "kind": "assembly",
+      "uses": "tower",
+      "triangles": 94,
+      "size": [
+        1.5,
+        5.5,
+        1.5
+      ],
+      "bounds": {
+        "min": [
+          -2.87,
+          0.0,
+          -0.75
+        ],
+        "max": [
+          -1.37,
+          5.5,
+          0.75
+        ]
+      },
+      "colors": [
+        "stone",
+        "light",
+        "dark",
+        "roof"
+      ],
+      "attached_to": "arch.left_foot",
+      "parts": [
+        {
+          "name": "left_tower/shaft",
+          "kind": "box",
+          "triangles": 44,
+          "size": [
+            1.3944,
+            4.0,
+            1.3944
+          ],
+          "bounds": {
+            "min": [
+              -2.8172,
+              0.0,
+              -0.6972
+            ],
+            "max": [
+              -1.4228,
+              4.0,
+              0.6972
+            ]
+          },
+          "colors": [
+            "stone",
+            "light"
+          ],
+          "attached_to": null,
+          "parts": []
+        },
+        {
+          "name": "left_tower/ledge",
+          "kind": "box",
+          "triangles": 44,
+          "size": [
+            1.5,
+            0.3,
+            1.5
+          ],
+          "bounds": {
+            "min": [
+              -2.87,
+              4.0,
+              -0.75
+            ],
+            "max": [
+              -1.37,
+              4.3,
+              0.75
+            ]
+          },
+          "colors": [
+            "dark"
+          ],
+          "attached_to": "shaft.top",
+          "parts": []
+        },
+        {
+          "name": "left_tower/roof",
+          "kind": "pyramid",
+          "triangles": 6,
+          "size": [
+            1.5,
+            1.2,
+            1.5
+          ],
+          "bounds": {
+            "min": [
+              -2.87,
+              4.3,
+              -0.75
+            ],
+            "max": [
+              -1.37,
+              5.5,
+              0.75
+            ]
+          },
+          "colors": [
+            "roof"
+          ],
+          "attached_to": "ledge.top",
+          "parts": []
+        }
+      ]
+    },
+    {
+      "name": "right_tower",
+      "kind": "assembly",
+      "uses": "tower",
+      "triangles": 94,
+      "size": [
+        1.5,
+        5.5,
+        1.5
+      ],
+      "bounds": {
+        "min": [
+          1.37,
+          0.0,
+          -0.75
+        ],
+        "max": [
+          2.87,
+          5.5,
+          0.75
+        ]
+      },
+      "colors": [
+        "stone",
+        "light",
+        "dark",
+        "roof"
+      ],
+      "attached_to": "arch.right_foot",
+      "parts": [
+        {
+          "name": "right_tower/shaft",
+          "kind": "box",
+          "triangles": 44,
+          "size": [
+            1.3944,
+            4.0,
+            1.3944
+          ],
+          "bounds": {
+            "min": [
+              1.4228,
+              0.0,
+              -0.6972
+            ],
+            "max": [
+              2.8172,
+              4.0,
+              0.6972
+            ]
+          },
+          "colors": [
+            "stone",
+            "light"
+          ],
+          "attached_to": null,
+          "parts": []
+        },
+        {
+          "name": "right_tower/ledge",
+          "kind": "box",
+          "triangles": 44,
+          "size": [
+            1.5,
+            0.3,
+            1.5
+          ],
+          "bounds": {
+            "min": [
+              1.37,
+              4.0,
+              -0.75
+            ],
+            "max": [
+              2.87,
+              4.3,
+              0.75
+            ]
+          },
+          "colors": [
+            "dark"
+          ],
+          "attached_to": "shaft.top",
+          "parts": []
+        },
+        {
+          "name": "right_tower/roof",
+          "kind": "pyramid",
+          "triangles": 6,
+          "size": [
+            1.5,
+            1.2,
+            1.5
+          ],
+          "bounds": {
+            "min": [
+              1.37,
+              4.3,
+              -0.75
+            ],
+            "max": [
+              2.87,
+              5.5,
+              0.75
+            ]
+          },
+          "colors": [
+            "roof"
+          ],
+          "attached_to": "ledge.top",
+          "parts": []
+        }
+      ]
+    },
+    {
+      "name": "door",
+      "kind": "box",
+      "triangles": 12,
+      "size": [
+        2.0,
+        1.7,
+        0.12
+      ],
+      "bounds": {
+        "min": [
+          -1.0,
+          0.0,
+          -0.36
+        ],
+        "max": [
+          1.0,
+          1.7,
+          -0.24
+        ]
+      },
+      "colors": [
+        "wood"
+      ],
+      "attached_to": "arch.door",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "left_tower/shaft",
+      "b": "arch",
+      "depth": 0.0772,
+      "hidden": false
+    },
+    {
+      "a": "right_tower/shaft",
+      "b": "arch",
+      "depth": 0.0772,
+      "hidden": false
+    }
+  ],
+  "warnings": [],
+  "errors": []
+}

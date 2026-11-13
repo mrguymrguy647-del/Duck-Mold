@@ -108,6 +108,7 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
         faces,
         parts,
         sockets: body.all_sockets(&Transform::IDENTITY),
+        zero: body.zero,
     })
 }
 
@@ -155,6 +156,12 @@ struct Body {
     /// the model is and where the ground is; on the surface, a table's
     /// `bottom` would be up under its top, between its legs.
     whole: bool,
+    /// For a whole recipe: where its own zero ended up when it was
+    /// shifted to put its zero point at zero.
+    zero: Vec3,
+    /// The names a recipe's `colors` can give its own faces, by the
+    /// group each face is in.
+    names: Vec<String>,
 }
 
 /// A part placed in the list it belongs to.
@@ -183,6 +190,8 @@ impl Body {
             bounds: None,
             broken: true,
             whole: false,
+            zero: Vec3::ZERO,
+            names: Vec::new(),
         }
     }
 
@@ -192,6 +201,7 @@ impl Body {
         file: Option<String>,
         faces: Vec<Polygon>,
         colors: Vec<Option<usize>>,
+        names: Vec<String>,
     ) -> Body {
         let mut body = Body {
             kind: PartKind {
@@ -206,6 +216,8 @@ impl Body {
             bounds: None,
             broken: false,
             whole: false,
+            zero: Vec3::ZERO,
+            names,
         };
         body.measure();
         body
@@ -229,6 +241,8 @@ impl Body {
             bounds: None,
             broken,
             whole: false,
+            zero: Vec3::ZERO,
+            names: Vec::new(),
         };
         body.measure();
         body
@@ -285,7 +299,7 @@ impl Body {
             .cloned()
     }
 
-    /// Whether it is one of the five built-in shapes.
+    /// Whether it is one of the built-in shapes.
     fn is_shape(&self) -> bool {
         !self.broken && self.nodes.is_empty() && Shape::NAMES.contains(&self.kind.shape.as_str())
     }
@@ -313,6 +327,11 @@ impl Body {
             return Landing::Already;
         };
         if side == Side::Center || self.whole || self.broken {
+            return Landing::Already;
+        }
+        // An arch stands on its two feet: what is under it is the ground
+        // between them, not the top of its doorway.
+        if side == Side::Bottom && self.is_shape() && self.kind.shape == "arch" {
             return Landing::Already;
         }
         let size = bounds.size();
@@ -519,6 +538,7 @@ impl Assembler<'_> {
         };
         if let Some(origin) = origin {
             body.shift(-origin.at);
+            body.zero = -origin.at;
         }
         body
     }
@@ -761,21 +781,29 @@ impl Assembler<'_> {
     fn source(&mut self, part: &PartDef, scope: &Scope<'_>) -> Body {
         match &part.source {
             Source::Shape(shape) => {
-                let faces = shapes::build(shape);
+                let faces = shapes::build_trimmed(shape, &part.trim);
                 if !self.count(&faces, &part.loc) {
                     return Body::broken();
                 }
-                let words: Vec<String> = shapes::face_words(shape)
+                let words: Vec<String> = shapes::face_words(shape, &part.trim)
                     .into_iter()
                     .map(str::to_owned)
                     .collect();
                 let colors = self.paint_faces(
                     &faces,
-                    &|name| shapes::face_groups(shape, name),
+                    &|name| shapes::face_groups(shape, &part.trim, name),
                     &words,
                     &|_| false,
                 );
-                Body::solid(shape.name(), None, faces, colors)
+                // The names of the groups of faces, as they are numbered.
+                let mut names: Vec<String> = shapes::face_names(shape)
+                    .iter()
+                    .map(|name| (*name).to_owned())
+                    .collect();
+                if words.iter().any(|word| word == shapes::BEVEL) {
+                    names.push(shapes::BEVEL.to_owned());
+                }
+                Body::solid(shape.name(), None, faces, colors, names)
             }
             Source::Use(named) => {
                 let Some(define) = scope
@@ -866,7 +894,13 @@ impl Assembler<'_> {
                     let message = kept_colours_message(&mesh.file, &kept);
                     self.issues.push(entry.warning(Code::NoColor, message));
                 }
-                Body::solid("mesh", Some(mesh.file.clone()), faces, colors)
+                Body::solid(
+                    "mesh",
+                    Some(mesh.file.clone()),
+                    faces,
+                    colors,
+                    mesh.materials.clone(),
+                )
             }
             // A file that couldn't be read, or a part that couldn't be:
             // already reported.
@@ -1328,6 +1362,7 @@ fn emit(
             };
             let first = faces.len();
             let mut lost = 0;
+            let mut face_groups = Vec::new();
             for (polygon, &color) in node.body.faces.iter().zip(&node.body.colors) {
                 let placed = polygon.transformed(&place);
                 let face = Face {
@@ -1336,6 +1371,7 @@ fn emit(
                 };
                 if face.normal().is_some() {
                     faces.push(face);
+                    face_groups.push(polygon.group as u16);
                 } else {
                     lost += 1;
                 }
@@ -1365,6 +1401,7 @@ fn emit(
                 attached_to: node.attached_to.clone(),
                 mirrored: place.is_mirrored(),
                 place,
+                local: node.place,
                 sockets: node.body.all_sockets(&place),
                 bounds: Bounds::around(
                     faces[own.clone()]
@@ -1373,6 +1410,8 @@ fn emit(
                 ),
                 faces: own,
                 parts,
+                face_names: node.body.names.clone(),
+                face_groups,
             }
         })
         .collect()

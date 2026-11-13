@@ -7,8 +7,9 @@ use std::path::Path;
 use duckforge::glb::GlbModel;
 use duckforge::prelude::Mesh;
 
-const EXAMPLES: [&str; 8] = [
-    "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck",
+const EXAMPLES: [&str; 15] = [
+    "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck", "dog", "doughnut",
+    "mug", "temple", "barn", "slide", "gate",
 ];
 
 #[test]

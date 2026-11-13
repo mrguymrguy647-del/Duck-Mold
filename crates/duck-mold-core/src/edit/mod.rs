@@ -28,6 +28,7 @@ use crate::assemble::assemble;
 use crate::inspect::{Inspection, inspect};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
+use crate::math::Mat3;
 use crate::model::{Model, Part};
 use crate::recipe::{PART_FIELDS, Shape, Side, rgb_of};
 use crate::source::{Node, Syntax, Value};
@@ -37,8 +38,7 @@ use doc::{Doc, Step, TreePath, Val, key, with};
 /// What a new part is made of.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Made {
-    /// One of the five shapes: `box`, `cylinder`, `sphere`, `cone`,
-    /// `wedge`.
+    /// One of the built-in shapes: `box`, `cylinder`, `torus`...
     Shape(String),
     /// A part the recipe defines: `use = "arm"`.
     Use(String),
@@ -49,14 +49,29 @@ pub enum Made {
 /// The sizes a shape can have. Only those that are given are written.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct Sizes {
-    /// `size = [x, y, z]`, for a box or a wedge.
+    /// `size = [x, y, z]`, for a box, a wedge, a pyramid, a prism,
+    /// stairs or an arch.
     pub size: Option<[f64; 3]>,
-    /// `radius`, for a cylinder, a sphere or a cone.
+    /// `radius`, for a round shape.
     pub radius: Option<f64>,
-    /// `height`, for a cylinder or a cone.
+    /// `tube`: how thick a torus's ring is.
+    pub tube: Option<f64>,
+    /// `wall`: how thick a tube's or an arch's wall is.
+    pub wall: Option<f64>,
+    /// `height`, for a cylinder, a cone, a capsule or a tube.
     pub height: Option<f64>,
     /// `segments`: how many flat sides a round shape has.
     pub segments: Option<u32>,
+    /// `steps`: how many steps stairs have.
+    pub steps: Option<u32>,
+    /// `bevel`: how much is cut off the edges of a box or a cylinder.
+    /// 0 takes the bevel away.
+    pub bevel: Option<f64>,
+    /// `bevel_steps`: how many flat cuts go round each edge.
+    pub bevel_steps: Option<u32>,
+    /// `taper`: how wide (x) and deep (z) the top of a box, a cylinder
+    /// or a tube is, as a share of the bottom. 1 and 1 take it away.
+    pub taper: Option<[f64; 2]>,
 }
 
 impl Sizes {
@@ -64,19 +79,60 @@ impl Sizes {
         *self == Sizes::default()
     }
 
-    fn fields(&self) -> Vec<(String, Val)> {
+    /// The fields to write, in the order a recipe has them. A bevel of 0
+    /// and a taper of 1 are no bevel and no taper: `None` says the
+    /// field is to go.
+    fn fields(&self) -> Vec<(String, Option<Val>)> {
         let mut fields = Vec::new();
+        let mut put = |name: &str, value: Option<Val>| fields.push((name.to_owned(), value));
         if let Some(size) = self.size {
-            fields.push(("size".to_owned(), Val::three(size)));
+            put("size", Some(Val::three(size)));
         }
         if let Some(radius) = self.radius {
-            fields.push(("radius".to_owned(), Val::Num(radius)));
+            put("radius", Some(Val::Num(radius)));
+        }
+        if let Some(tube) = self.tube {
+            put("tube", Some(Val::Num(tube)));
+        }
+        if let Some(wall) = self.wall {
+            put("wall", Some(Val::Num(wall)));
         }
         if let Some(height) = self.height {
-            fields.push(("height".to_owned(), Val::Num(height)));
+            put("height", Some(Val::Num(height)));
         }
         if let Some(segments) = self.segments {
-            fields.push(("segments".to_owned(), Val::Num(f64::from(segments))));
+            put("segments", Some(Val::Num(f64::from(segments))));
+        }
+        if let Some(steps) = self.steps {
+            put("steps", Some(Val::Num(f64::from(steps))));
+        }
+        if let Some(bevel) = self.bevel {
+            if bevel == 0.0 {
+                put("bevel", None);
+                put("bevel_steps", None);
+            } else {
+                put("bevel", Some(Val::Num(bevel)));
+            }
+        }
+        if let Some(steps) = self.bevel_steps
+            && self.bevel != Some(0.0)
+        {
+            put(
+                "bevel_steps",
+                (steps > 1).then_some(Val::Num(f64::from(steps))),
+            );
+        }
+        if let Some([across, deep]) = self.taper {
+            put(
+                "taper",
+                if across == 1.0 && deep == 1.0 {
+                    None
+                } else if across == deep {
+                    Some(Val::Num(across))
+                } else {
+                    Some(Val::List(vec![Val::Num(across), Val::Num(deep)]))
+                },
+            );
         }
         fields
     }
@@ -95,20 +151,43 @@ pub struct Changes {
     pub face_colors: Vec<(String, String)>,
     /// Degrees to twist it around its join.
     pub twist: Option<f64>,
+    /// Where a free part's middle goes: `move = [x, y, z]`.
+    pub move_to: Option<[f64; 3]>,
+    /// How a free part is turned: `rotate = [x, y, z]`, in degrees.
+    pub rotate: Option<[f64; 3]>,
+    /// How much bigger the part is each way: `scale`. Written as one
+    /// number when the three are alike.
+    pub scale: Option<[f64; 3]>,
+}
+
+/// Where a new part that is joined to nothing goes.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Free {
+    /// Its middle: `move = [x, y, z]`. Without it, the part is stood on
+    /// the ground.
+    pub move_to: Option<[f64; 3]>,
+    /// Where on the ground it is stood, when `move_to` isn't given: x
+    /// and z, in the recipe's own measurements. Without it: at zero.
+    pub stand: Option<[f64; 2]>,
+    /// How it is turned: `rotate = [x, y, z]`.
+    pub rotate: Option<[f64; 3]>,
+    /// How much bigger it is each way: `scale`.
+    pub scale: Option<[f64; 3]>,
 }
 
 /// One change to a recipe. A part is named as `inspect` prints it:
 /// `head`, `left_arm/hand`, or `#2` for a part with no name.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Edit {
-    /// Adds a part, joined to a socket.
+    /// Adds a part: joined to a socket, or free.
     Add {
         /// The new part's name.
         name: String,
         /// What it is made of.
         made: Made,
-        /// The socket it joins: `head.top`.
-        to: String,
+        /// The socket it joins: `head.top`. Without one the part is
+        /// free: it is added to the model's own list, where `free` says.
+        to: Option<String>,
         /// Its own socket to join by. Without one: the side opposite the
         /// socket it joins (`bottom` on a `top`), otherwise `bottom`.
         attach: Option<String>,
@@ -118,6 +197,8 @@ pub enum Edit {
         color: Option<String>,
         /// Degrees to twist it around the join.
         twist: Option<f64>,
+        /// Where a part that joins nothing goes.
+        free: Free,
     },
     /// Removes a part.
     Remove {
@@ -178,6 +259,14 @@ pub enum Edit {
         /// `#RRGGBB`.
         hex: String,
     },
+    /// Takes a colour out of the recipe's palette.
+    RemoveColor {
+        /// Its name.
+        name: String,
+        /// The colour everything painted with it gets instead. Without
+        /// one, the edit is refused if anything is painted with it.
+        replace_with: Option<String>,
+    },
     /// Declares a socket on one side of a part.
     AddSocket {
         /// The part.
@@ -188,6 +277,26 @@ pub enum Edit {
         on: String,
         /// How far it is slid across the side, -1 to 1 each way.
         shift: [f64; 3],
+    },
+    /// Renames a socket a part declares, and everything that names it.
+    RenameSocket {
+        /// The socket: `body.spot`.
+        socket: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Removes a socket a part declares. Refused if anything uses it.
+    RemoveSocket {
+        /// The socket: `body.spot`.
+        socket: String,
+    },
+    /// Removes the sockets the Studio made (`spot`, `spot_2`...) that
+    /// nothing uses any more.
+    TidySockets,
+    /// Makes a joined part free, exactly where it stands.
+    Unjoin {
+        /// The part.
+        part: String,
     },
     /// Moves a socket that was declared on a side of a part.
     SetSocket {
@@ -204,7 +313,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 10] = [
+    pub const COMMANDS: [&'static str; 15] = [
         "add",
         "remove",
         "rename",
@@ -213,8 +322,13 @@ impl Edit {
         "duplicate",
         "add-color",
         "set-color",
+        "remove-color",
         "add-socket",
         "set-socket",
+        "rename-socket",
+        "remove-socket",
+        "tidy-sockets",
+        "unjoin",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -228,8 +342,13 @@ impl Edit {
             Edit::Duplicate { .. } => "duplicate",
             Edit::AddColor { .. } => "add-color",
             Edit::SetColor { .. } => "set-color",
+            Edit::RemoveColor { .. } => "remove-color",
             Edit::AddSocket { .. } => "add-socket",
             Edit::SetSocket { .. } => "set-socket",
+            Edit::RenameSocket { .. } => "rename-socket",
+            Edit::RemoveSocket { .. } => "remove-socket",
+            Edit::TidySockets => "tidy-sockets",
+            Edit::Unjoin { .. } => "unjoin",
         }
     }
 }
@@ -500,20 +619,133 @@ fn free_name(base: &str, taken: &[String]) -> String {
 
 /// The size fields and face names a shape has.
 fn shape_words(shape: &str) -> Option<(&'static [&'static str], &'static [&'static str])> {
-    Some(match shape {
-        "box" => (
-            &["size"],
-            &["top", "bottom", "left", "right", "front", "back", "sides"],
-        ),
-        "wedge" => (&["size"], &["slope", "bottom", "back", "left", "right"]),
-        "cylinder" => (
-            &["radius", "height", "segments"],
-            &["top", "bottom", "side"],
-        ),
-        "cone" => (&["radius", "height", "segments"], &["side", "bottom"]),
-        "sphere" => (&["radius", "segments"], &["side"]),
-        _ => return None,
-    })
+    Shape::NAMES
+        .contains(&shape)
+        .then(|| (Shape::size_fields(shape), Shape::face_words(shape)))
+}
+
+/// Where a socket of the part `found` is named, besides where it is
+/// declared: the `to` of every part joined to it, the part's own
+/// `attach`, and the `from` of a socket that what the list belongs to
+/// passes on. Each with what to call it in a message.
+fn socket_uses(doc: &Doc, found: &Found, socket: &str) -> Vec<(TreePath, String)> {
+    let mut uses = Vec::new();
+    let items = doc.items(&found.list).unwrap_or_default();
+    let own = with(&found.list, Step::Index(found.at));
+    if let Some(item) = items.get(found.at)
+        && text_of(item, "attach") == Some(socket)
+    {
+        uses.push((
+            with(&own, key("attach")),
+            "the part itself, which joins by it".to_owned(),
+        ));
+    }
+    // Only a part with a name can be joined to, or passed on from.
+    let Some(name) = &found.name else {
+        return uses;
+    };
+    let full = format!("{name}.{socket}");
+    for (at, item) in items.iter().enumerate() {
+        if text_of(item, "to") == Some(full.as_str()) {
+            let called = text_of(item, "name").map_or_else(|| format!("#{at}"), str::to_owned);
+            uses.push((with(&with(&found.list, Step::Index(at)), key("to")), called));
+        }
+    }
+    let owner = &found.list[..found.list.len().saturating_sub(1)];
+    let passed = with(owner, key("sockets"));
+    for entry in doc.entries(&passed).unwrap_or_default() {
+        if text_of(&entry.node, "from") == Some(full.as_str()) {
+            uses.push((
+                with(&with(&passed, key(&entry.key)), key("from")),
+                format!("the socket \"{}\", which passes it on", entry.key),
+            ));
+        }
+    }
+    uses
+}
+
+/// The sockets a part declares, by name.
+fn declared_sockets(doc: &Doc, found: &Found) -> Vec<String> {
+    doc.entries(&with(&found.path(), key("sockets")))
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect()
+}
+
+/// A declared socket of a part, or why there is none by that name.
+fn declared(doc: &Doc, part: &str, name: &str) -> Result<Found, Stop> {
+    let found = find(doc, part)?;
+    let names = declared_sockets(doc, &found);
+    if names.iter().any(|known| known == name) {
+        return Ok(found);
+    }
+    Err(problem(
+        Code::UnknownSocket,
+        if Side::from_name(name).is_some() || name == "slope" {
+            format!("\"{name}\" is built in: every part has it, and it can't be renamed or removed")
+        } else {
+            format!("\"{part}\" declares no socket called \"{name}\"")
+        },
+    )
+    .got(name)
+    .one_of(name, names))
+}
+
+/// True for the names the Studio gives the sockets it makes: `spot`,
+/// `spot_2`, `spot_3`...
+pub fn is_studio_socket(name: &str) -> bool {
+    match name.strip_prefix("spot") {
+        Some("") => true,
+        Some(rest) => rest
+            .strip_prefix('_')
+            .is_some_and(|number| !number.is_empty() && number.chars().all(|c| c.is_ascii_digit())),
+        None => false,
+    }
+}
+
+/// Every list of parts in the recipe: the model's own, each definition's,
+/// and those of the parts inside them.
+fn part_lists(doc: &Doc) -> Vec<TreePath> {
+    fn inside(doc: &Doc, list: TreePath, into: &mut Vec<TreePath>) {
+        let Some(items) = doc.items(&list) else {
+            return;
+        };
+        let count = items.len();
+        into.push(list.clone());
+        for at in 0..count {
+            inside(doc, with(&with(&list, Step::Index(at)), key("parts")), into);
+        }
+    }
+    let mut lists = Vec::new();
+    inside(doc, vec![key("parts")], &mut lists);
+    let defined: Vec<String> = doc
+        .entries(&[key("define")])
+        .unwrap_or_default()
+        .iter()
+        .map(|entry| entry.key.clone())
+        .collect();
+    for name in defined {
+        inside(
+            doc,
+            vec![key("define"), key(&name), key("parts")],
+            &mut lists,
+        );
+    }
+    lists
+}
+
+/// Takes a socket out of a part's `sockets`, and the table with it if
+/// that leaves it empty.
+fn drop_socket(doc: &mut Doc, part: &[Step], name: &str) -> Result<(), Stop> {
+    let sockets = with(part, key("sockets"));
+    doc.remove_field(&sockets, name).map_err(cant)?;
+    if doc.entries(&sockets).is_some_and(<[_]>::is_empty) {
+        // An empty table left behind is harmless, so if it can't be
+        // taken out as it is written, it stays.
+        let _ = doc.remove_field(part, "sockets");
+    }
+    Ok(())
 }
 
 fn set(doc: &mut Doc, table: &[Step], name: &str, value: Val) -> Result<(), Stop> {
@@ -578,7 +810,58 @@ struct Outcome {
     touched: Option<Found>,
 }
 
-fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
+/// A number as a recipe should hold it: to a tenth of a millimetre (or
+/// of a degree's hundredth), and never `-0`.
+fn tidy_number(value: f64, decimals: i32) -> f64 {
+    let unit = 10f64.powi(decimals);
+    (value * unit).round() / unit + 0.0
+}
+
+/// The flip and stretch a part's own `mirror` and `scale` ask for.
+fn stretch_of(node: &Node) -> Mat3 {
+    let Value::Table(entries) = &node.value else {
+        return Mat3::IDENTITY;
+    };
+    let number = |node: &Node| match node.value {
+        Value::Int(whole) => Some(whole as f64),
+        Value::Float(number) => Some(number),
+        _ => None,
+    };
+    let mut scale = [1.0; 3];
+    if let Some(entry) = entries.iter().find(|entry| entry.key == "scale") {
+        match &entry.node.value {
+            Value::Array(items) if items.len() == 3 => {
+                for (at, item) in items.iter().enumerate() {
+                    scale[at] = number(item).unwrap_or(1.0);
+                }
+            }
+            _ => scale = [number(&entry.node).unwrap_or(1.0); 3],
+        }
+    }
+    match text_of(node, "mirror") {
+        Some("x") => scale[0] = -scale[0],
+        Some("y") => scale[1] = -scale[1],
+        Some("z") => scale[2] = -scale[2],
+        _ => {}
+    }
+    Mat3::stretch(scale.into())
+}
+
+/// The part of the built model with this path.
+fn part_in<'a>(model: &'a Model, path: &str) -> Option<&'a Part> {
+    fn find<'a>(parts: &'a [Part], path: &str) -> Option<&'a Part> {
+        parts.iter().find_map(|part| {
+            if part.path == path {
+                Some(part)
+            } else {
+                find(&part.parts, path)
+            }
+        })
+    }
+    find(&model.parts, path)
+}
+
+fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Stop> {
     match edit {
         Edit::Add {
             name,
@@ -588,18 +871,9 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
             sizes,
             color,
             twist,
+            free,
         } => {
             check_name(name)?;
-            let (target, _) = split_socket(to)?;
-            let found = find(doc, target)?;
-            let (target_name, socket) = sibling(doc, &found.list, to)?;
-            if names_in(doc, &found.list).contains(name) {
-                return Err(problem(
-                    Code::DuplicateName,
-                    format!("there is already a part called \"{name}\" there: choose another name"),
-                )
-                .got(name.as_str()));
-            }
             let (field, what) = match made {
                 Made::Shape(shape) => ("shape", shape),
                 Made::Use(defined) => ("use", defined),
@@ -615,10 +889,77 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 ("name".to_owned(), text(name)),
                 (field.to_owned(), text(what)),
             ];
-            fields.extend(sizes.fields());
+            fields.extend(
+                sizes
+                    .fields()
+                    .into_iter()
+                    .filter_map(|(name, value)| Some((name, value?))),
+            );
             if let Some(color) = color {
                 fields.push(("color".to_owned(), text(color)));
             }
+            let taken = |list: &[Step]| {
+                if names_in(doc, list).contains(name) {
+                    Err(problem(
+                        Code::DuplicateName,
+                        format!(
+                            "there is already a part called \"{name}\" there: choose another name"
+                        ),
+                    )
+                    .got(name.as_str()))
+                } else {
+                    Ok(())
+                }
+            };
+            let scale_field = |scale: [f64; 3]| {
+                let scale = scale.map(|number| tidy_number(number, 4));
+                if scale[0] == scale[1] && scale[1] == scale[2] {
+                    Val::Num(scale[0])
+                } else {
+                    Val::three(scale)
+                }
+            };
+            let Some(to) = to else {
+                // A free part: in the model's own list, placed by `move`.
+                if attach.is_some() || twist.is_some() {
+                    return Err(problem(
+                        Code::Conflict,
+                        "--attach and --twist belong to a join: give --to as well, or leave them out for a part that stands free",
+                    ));
+                }
+                let list: TreePath = vec![key("parts")];
+                taken(&list)?;
+                if let Some(turn) = free.rotate.filter(|turn| *turn != [0.0; 3]) {
+                    fields.push((
+                        "rotate".to_owned(),
+                        Val::three(turn.map(|number| tidy_number(number, 2))),
+                    ));
+                }
+                if let Some(at) = free.move_to {
+                    fields.push((
+                        "move".to_owned(),
+                        Val::three(at.map(|number| tidy_number(number, 4))),
+                    ));
+                }
+                if let Some(scale) = free.scale.filter(|scale| *scale != [1.0; 3]) {
+                    fields.push(("scale".to_owned(), scale_field(scale)));
+                }
+                doc.append_item(&list, &fields).map_err(cant)?;
+                return Ok(Outcome {
+                    summary: format!("added \"{name}\" ({what}), standing free"),
+                    touched: None,
+                });
+            };
+            if *free != Free::default() && free.scale.is_none() {
+                return Err(problem(
+                    Code::Conflict,
+                    "--move, --stand and --rotate are for a part that stands free: a part joined with --to goes where its socket is",
+                ));
+            }
+            let (target, _) = split_socket(to)?;
+            let found = find(doc, target)?;
+            let (target_name, socket) = sibling(doc, &found.list, to)?;
+            taken(&found.list)?;
             let attach = attach
                 .as_deref()
                 .or(opposite(socket))
@@ -628,6 +969,9 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
             fields.push(("to".to_owned(), text(&format!("{target_name}.{socket}"))));
             if let Some(twist) = twist.filter(|twist| *twist != 0.0) {
                 fields.push(("twist".to_owned(), Val::Num(twist)));
+            }
+            if let Some(scale) = free.scale.filter(|scale| *scale != [1.0; 3]) {
+                fields.push(("scale".to_owned(), scale_field(scale)));
             }
             doc.append_item(&found.list, &fields).map_err(cant)?;
             Ok(Outcome {
@@ -781,6 +1125,9 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 color,
                 face_colors,
                 twist,
+                move_to,
+                rotate,
+                scale,
             } = changes;
             let found = find(doc, part)?;
             // Twist is the part's own. What it is made of is written in
@@ -809,7 +1156,7 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 }
                 set(doc, &table, "shape", text(shape))?;
                 // Sizes and face colours the new shape doesn't have go.
-                for field in ["size", "radius", "height", "segments"] {
+                for field in Shape::SIZE_FIELDS {
                     if !size_fields.contains(&field) {
                         doc.remove_field(&table, field).map_err(cant)?;
                     }
@@ -832,8 +1179,24 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
             }
             for (name, value) in sizes.fields() {
                 made_changed = true;
-                said.push(format!("{name} {}", value.write(doc.syntax)));
-                set(doc, &table, &name, value)?;
+                match value {
+                    Some(value) => {
+                        said.push(format!("{name} {}", value.write(doc.syntax)));
+                        set(doc, &table, &name, value)?;
+                    }
+                    // No bevel, or no taper: the field goes.
+                    None => {
+                        if doc.entry(&table, &name).is_some() {
+                            doc.remove_field(&table, &name).map_err(cant)?;
+                        }
+                        if name != "bevel_steps" {
+                            said.push(format!("no {name}"));
+                        } else if sizes.bevel != Some(0.0) {
+                            // One cut is what a bevel has unsaid.
+                            said.push("bevel_steps 1".to_owned());
+                        }
+                    }
+                }
             }
             if let Some(color) = color {
                 made_changed = true;
@@ -843,6 +1206,18 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
             for (face, color) in face_colors {
                 made_changed = true;
                 let colors = with(&table, key("colors"));
+                if color == "none" {
+                    // The face has no colour of its own again: it takes
+                    // the part's.
+                    if doc.entry(&colors, face).is_some() {
+                        doc.remove_field(&colors, face).map_err(cant)?;
+                        if doc.entries(&colors).is_some_and(<[_]>::is_empty) {
+                            doc.remove_field(&table, "colors").map_err(cant)?;
+                        }
+                    }
+                    said.push(format!("{face} no colour of its own"));
+                    continue;
+                }
                 if doc.entries(&colors).is_some() {
                     doc.set_field(&colors, face, &text(color), &[])
                         .map_err(cant)?;
@@ -860,10 +1235,48 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 set(doc, &own, "twist", Val::Num(*twist))?;
                 said.push(format!("twist {}", doc::number_text(*twist)));
             }
+            // Where a free part is. A joined part is where its socket is.
+            let joined = doc.text_at(&own, "to").map(str::to_owned);
+            if let Some(to) = move_to {
+                if let Some(joined) = &joined {
+                    return Err(problem(
+                        Code::Conflict,
+                        format!(
+                            "\"{part}\" is joined to {joined}, so it goes where that socket is. Slide the socket with set-socket, or make the part free first with unjoin"
+                        ),
+                    ));
+                }
+                let value = Val::three(to.map(|number| tidy_number(number, 4)));
+                said.push(format!("move {}", value.write(doc.syntax)));
+                set(doc, &own, "move", value)?;
+            }
+            if let Some(turn) = rotate {
+                if let Some(joined) = &joined {
+                    return Err(problem(
+                        Code::Conflict,
+                        format!(
+                            "\"{part}\" is joined to {joined}, so it faces the way that socket does. Turn it around its join with --twist, or make it free first with unjoin"
+                        ),
+                    ));
+                }
+                let value = Val::three(turn.map(|number| tidy_number(number, 2)));
+                said.push(format!("rotate {}", value.write(doc.syntax)));
+                set(doc, &own, "rotate", value)?;
+            }
+            if let Some(scale) = scale {
+                let scale = scale.map(|number| tidy_number(number, 4));
+                let value = if scale[0] == scale[1] && scale[1] == scale[2] {
+                    Val::Num(scale[0])
+                } else {
+                    Val::three(scale)
+                };
+                said.push(format!("scale {}", value.write(doc.syntax)));
+                set(doc, &own, "scale", value)?;
+            }
             if said.is_empty() {
                 return Err(problem(
                     Code::MissingField,
-                    "nothing to set: give at least one of --shape, --size, --radius, --height, --segments, --color, --face-color, --twist",
+                    "nothing to set: give at least one of --shape, --size, --radius, --tube, --wall, --height, --segments, --steps, --bevel, --bevel-steps, --taper, --color, --face-color, --twist, --move, --rotate, --scale",
                 ));
             }
             // Changing what a definition is made of changes every part
@@ -879,6 +1292,162 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
             Ok(Outcome {
                 summary: format!("set \"{part}\": {}", said.join(", ")),
                 touched: Some(touched),
+            })
+        }
+        Edit::RenameSocket { socket, new_name } => {
+            let (part, name) = split_socket(socket)?;
+            check_name(new_name)?;
+            let found = declared(doc, part, name)?;
+            if Side::from_name(new_name).is_some() || new_name == "slope" {
+                return Err(problem(
+                    Code::DuplicateName,
+                    format!("\"{new_name}\" is a built-in socket's name: choose another"),
+                )
+                .got(new_name.as_str()));
+            }
+            if declared_sockets(doc, &found).contains(new_name) {
+                return Err(problem(
+                    Code::DuplicateName,
+                    format!("\"{part}\" already has a socket called \"{new_name}\""),
+                )
+                .got(new_name.as_str()));
+            }
+            // Everything that names it, first; then the socket itself.
+            let uses = socket_uses(doc, &found, name);
+            let own_name = found.name.clone().unwrap_or_default();
+            for (path, _) in &uses {
+                let last = path.last();
+                let value = if matches!(last, Some(Step::Key(field)) if field == "attach") {
+                    text(new_name)
+                } else {
+                    text(&format!("{own_name}.{new_name}"))
+                };
+                doc.set_value(path, &value).map_err(cant)?;
+            }
+            doc.rename_field(&with(&found.path(), key("sockets")), name, new_name)
+                .map_err(cant)?;
+            Ok(Outcome {
+                summary: format!("renamed the socket \"{part}.{name}\" to \"{new_name}\""),
+                touched: Some(found),
+            })
+        }
+        Edit::RemoveSocket { socket } => {
+            let (part, name) = split_socket(socket)?;
+            let found = declared(doc, part, name)?;
+            let uses = socket_uses(doc, &found, name);
+            if !uses.is_empty() {
+                let what: Vec<String> = uses.into_iter().map(|(_, called)| called).collect();
+                return Err(problem(
+                    Code::Conflict,
+                    format!(
+                        "the socket \"{part}.{name}\" is in use by: {}. Join that somewhere else first, or remove it",
+                        what.join(", ")
+                    ),
+                )
+                .got(name));
+            }
+            drop_socket(doc, &found.path(), name)?;
+            Ok(Outcome {
+                summary: format!("removed the socket \"{part}.{name}\""),
+                touched: Some(found),
+            })
+        }
+        Edit::TidySockets => {
+            // Found first, removed after: removing one changes nothing
+            // about where the others are.
+            let mut unused: Vec<(TreePath, String, String)> = Vec::new();
+            for list in part_lists(doc) {
+                let count = doc.items(&list).map_or(0, <[_]>::len);
+                for at in 0..count {
+                    let part = with(&list, Step::Index(at));
+                    let name = doc.text_at(&part, "name").map(str::to_owned);
+                    let found = Found {
+                        list: list.clone(),
+                        at,
+                        name: name.clone(),
+                        definition: None,
+                        inside: String::new(),
+                    };
+                    for socket in declared_sockets(doc, &found) {
+                        if is_studio_socket(&socket) && socket_uses(doc, &found, &socket).is_empty()
+                        {
+                            let called = name.clone().unwrap_or_else(|| format!("#{at}"));
+                            unused.push((
+                                part.clone(),
+                                socket.clone(),
+                                format!("{called}.{socket}"),
+                            ));
+                        }
+                    }
+                }
+            }
+            for (part, socket, _) in &unused {
+                drop_socket(doc, part, socket)?;
+            }
+            let names: Vec<String> = unused.into_iter().map(|(_, _, called)| called).collect();
+            Ok(Outcome {
+                summary: match names.len() {
+                    0 => {
+                        "found no sockets to tidy away: every \"spot\" socket is in use".to_owned()
+                    }
+                    1 => format!("removed 1 socket nothing uses: {}", names[0]),
+                    count => format!("removed {count} sockets nothing uses: {}", names.join(", ")),
+                },
+                touched: None,
+            })
+        }
+        Edit::Unjoin { part } => {
+            let found = find(doc, part)?;
+            let own = found.path();
+            let Some(joined) = doc.text_at(&own, "to").map(str::to_owned) else {
+                return Err(problem(
+                    Code::Conflict,
+                    format!("\"{part}\" isn't joined to anything: it is free already"),
+                ));
+            };
+            let Some((model, placed)) =
+                model.and_then(|model| Some((model, part_in(model, part)?)))
+            else {
+                return Err(problem(
+                    Code::Unsupported,
+                    format!(
+                        "the recipe has mistakes, so where \"{part}\" stands isn't known: fix them first"
+                    ),
+                ));
+            };
+            // Where it is in its own list. The model's list is shifted to
+            // put the model's zero point at zero; a recipe measures from
+            // its own zero.
+            let mut at = placed.local.shift;
+            if !part.contains('/') {
+                at = at - model.zero;
+            }
+            // Its turn, without the flip and stretch it has of its own:
+            // those stay in `mirror` and `scale`.
+            let stretch = stretch_of(doc.node(&own).expect("the part was found"));
+            let Some(unstretch) = stretch.inverse() else {
+                return Err(problem(
+                    Code::Unsupported,
+                    format!("\"{part}\" is scaled to nothing, so it can't be placed"),
+                ));
+            };
+            let turn = (placed.local.turn * unstretch).to_rotate();
+            for field in ["attach", "to", "twist"] {
+                doc.remove_field(&own, field).map_err(cant)?;
+            }
+            let turn = turn.map(|degrees| tidy_number(degrees, 2));
+            if turn != [0.0; 3] {
+                set(doc, &own, "rotate", Val::three(turn))?;
+            }
+            set(
+                doc,
+                &own,
+                "move",
+                Val::three(at.to_array().map(|number| tidy_number(number, 4))),
+            )?;
+            Ok(Outcome {
+                summary: format!("unjoined \"{part}\" from {joined}: it is free, where it stood"),
+                touched: Some(found),
             })
         }
         Edit::Duplicate {
@@ -1050,6 +1619,149 @@ fn run(doc: &mut Doc, edit: &Edit) -> Result<Outcome, Stop> {
                 touched: None,
             })
         }
+        Edit::RemoveColor { name, replace_with } => {
+            let palette = [key("palette")];
+            if let Some(file) = doc.text_at(&[], "palette") {
+                return Err(problem(
+                    Code::Unsupported,
+                    format!(
+                        "this recipe's palette is the file \"{file}\": remove the colour there"
+                    ),
+                ));
+            }
+            let names: Vec<String> = doc
+                .entries(&palette)
+                .unwrap_or_default()
+                .iter()
+                .map(|entry| entry.key.clone())
+                .collect();
+            if !names.contains(name) {
+                return Err(problem(
+                    Code::UnknownColor,
+                    format!("there is no colour \"{name}\" in this recipe's palette"),
+                )
+                .got(name.as_str())
+                .one_of(name, names));
+            }
+            // Everything painted with it: a part's `color`, and a face's
+            // colour in `colors`, anywhere in the recipe.
+            let mut uses: Vec<(TreePath, String)> = Vec::new();
+            fn painted(
+                node: &Node,
+                path: &mut TreePath,
+                name: &str,
+                into: &mut Vec<(TreePath, String)>,
+            ) {
+                match &node.value {
+                    Value::Table(entries) => {
+                        // What to call this table: a part's name, if it
+                        // has one.
+                        let called = entries
+                            .iter()
+                            .find(|entry| entry.key == "name")
+                            .and_then(|entry| match &entry.node.value {
+                                Value::Str(text) => Some(text.clone()),
+                                _ => None,
+                            })
+                            .unwrap_or_else(|| doc::show(path));
+                        for entry in entries {
+                            path.push(key(&entry.key));
+                            match (&entry.node.value, entry.key.as_str()) {
+                                (Value::Str(color), "color") if color == name => {
+                                    into.push((path.clone(), called.clone()));
+                                }
+                                (Value::Table(faces), "colors") => {
+                                    for face in faces {
+                                        if matches!(&face.node.value, Value::Str(color) if color == name)
+                                        {
+                                            path.push(key(&face.key));
+                                            into.push((
+                                                path.clone(),
+                                                format!("{called} ({})", face.key),
+                                            ));
+                                            path.pop();
+                                        }
+                                    }
+                                }
+                                _ => painted(&entry.node, path, name, into),
+                            }
+                            path.pop();
+                        }
+                    }
+                    Value::Array(items) => {
+                        for (at, item) in items.iter().enumerate() {
+                            path.push(Step::Index(at));
+                            painted(item, path, name, into);
+                            path.pop();
+                        }
+                    }
+                    _ => {}
+                }
+            }
+            for top in ["parts", "define"] {
+                if let Some(node) = doc.node(&[key(top)]) {
+                    painted(node, &mut vec![key(top)], name, &mut uses);
+                }
+            }
+            let mut summary = format!("removed the colour \"{name}\"");
+            match (replace_with, uses.is_empty()) {
+                (_, true) => {}
+                (None, false) => {
+                    let mut what: Vec<String> =
+                        uses.iter().map(|(_, called)| called.clone()).collect();
+                    what.dedup();
+                    let others: Vec<&String> =
+                        names.iter().filter(|other| *other != name).collect();
+                    let hint = match others.first() {
+                        Some(other) => {
+                            format!("Say what to paint them instead, like --replace-with {other}")
+                        }
+                        None => "Add another colour first, to paint them with instead".to_owned(),
+                    };
+                    return Err(problem(
+                        Code::Conflict,
+                        format!(
+                            "the colour \"{name}\" is in use: {} painted with it ({}). {hint}",
+                            if what.len() == 1 {
+                                "1 thing is".to_owned()
+                            } else {
+                                format!("{} things are", what.len())
+                            },
+                            what.join(", ")
+                        ),
+                    )
+                    .got(name.as_str()));
+                }
+                (Some(other), false) => {
+                    if other == name || !names.contains(other) {
+                        return Err(problem(
+                            Code::UnknownColor,
+                            format!(
+                                "\"{other}\" can't replace \"{name}\": it must be another colour of this recipe's palette"
+                            ),
+                        )
+                        .got(other.as_str())
+                        .one_of(other, names.iter().filter(|known| *known != name).cloned()));
+                    }
+                    for (path, _) in &uses {
+                        doc.set_value(path, &text(other)).map_err(cant)?;
+                    }
+                    summary.push_str(&format!(
+                        ", and painted {} with \"{other}\" instead",
+                        if uses.len() == 1 {
+                            "1 thing".to_owned()
+                        } else {
+                            format!("{} things", uses.len())
+                        }
+                    ));
+                }
+            }
+            doc.remove_field(&palette, name).map_err(cant)?;
+            Ok(Outcome {
+                summary,
+                touched: None,
+            })
+        }
         Edit::AddSocket {
             part,
             name,
@@ -1218,7 +1930,7 @@ fn share(found: &Found, model: Option<&Model>, part: &str) -> Option<Shared> {
 }
 
 /// The names of the parts the recipe defines, to `use`: what the Studio
-/// offers beside the five shapes when a part is added.
+/// offers beside the built-in shapes when a part is added.
 pub fn definitions(text: &str, syntax: Syntax) -> Vec<String> {
     let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let Ok(doc) = Doc::parse(text, syntax) else {
@@ -1256,12 +1968,28 @@ pub struct Facts {
     pub sizes: Sizes,
     /// Its palette colour, its own or its definition's.
     pub color: Option<String>,
+    /// The colours its single faces have: `colors = { top = "grass" }`,
+    /// its own or its definition's.
+    pub face_colors: Vec<(String, String)>,
+    /// The sockets it declares, by name, each with how many things use
+    /// it (parts joined to it, its own join, a socket that passes it
+    /// on).
+    pub sockets: Vec<(String, usize)>,
     /// The socket it is joined to: `body.neck`.
     pub to: Option<String>,
     /// Its own socket that joins there.
     pub attach: Option<String>,
     /// Degrees it is twisted around its join.
     pub twist: f64,
+    /// Where a free part's middle is: its `move`, measured from the
+    /// recipe's own zero. (For a joined part: zero, and not used.)
+    pub position: [f64; 3],
+    /// How a free part is turned: its `rotate`, in degrees.
+    pub rotation: [f64; 3],
+    /// How much bigger it is each way: its `scale`, as three numbers.
+    pub scale: [f64; 3],
+    /// The direction it is flipped across, if it is: `x`, `y` or `z`.
+    pub mirror: Option<String>,
     /// Set when the part is inside a definition: every edit to it
     /// changes the other parts named here too.
     pub inside: Option<Shared>,
@@ -1283,6 +2011,20 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
             Value::Float(number) => Some(number),
             _ => None,
         }
+    }
+    fn two(node: &Node, name: &str) -> Option<[f64; 2]> {
+        let Value::Table(entries) = &node.value else {
+            return None;
+        };
+        let Value::Array(items) = &entries.iter().find(|entry| entry.key == name)?.node.value
+        else {
+            return None;
+        };
+        let numbers: Vec<f64> = items
+            .iter()
+            .filter_map(|item| item.value.as_number())
+            .collect();
+        <[f64; 2]>::try_from(numbers).ok()
     }
     fn three(node: &Node, name: &str) -> Option<[f64; 3]> {
         let Value::Table(entries) = &node.value else {
@@ -1322,19 +2064,42 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
         .map(str::to_owned);
     let mut sizes = Sizes::default();
     if let Some((fields, _)) = shape.as_deref().and_then(shape_words) {
-        let round = if shape.as_deref() == Some("sphere") {
-            12
-        } else {
-            16
+        let shape = shape.as_deref().unwrap_or_default();
+        let whole = |name: &str, default: u32| {
+            Some(number(made_node, name).map_or(default, |count| count.max(0.0) as u32))
         };
         for field in fields {
             match *field {
                 "size" => sizes.size = Some(three(made_node, "size").unwrap_or([1.0; 3])),
-                "radius" => sizes.radius = Some(number(made_node, "radius").unwrap_or(0.5)),
+                "radius" => {
+                    let default = if shape == "capsule" { 0.25 } else { 0.5 };
+                    sizes.radius = Some(number(made_node, "radius").unwrap_or(default));
+                }
+                "tube" => sizes.tube = Some(number(made_node, "tube").unwrap_or(0.15)),
+                "wall" => {
+                    let default = if shape == "arch" { 0.2 } else { 0.1 };
+                    sizes.wall = Some(number(made_node, "wall").unwrap_or(default));
+                }
                 "height" => sizes.height = Some(number(made_node, "height").unwrap_or(1.0)),
+                "segments" => {
+                    sizes.segments = whole(
+                        "segments",
+                        match shape {
+                            "sphere" => 12,
+                            "arch" => 8,
+                            _ => 16,
+                        },
+                    );
+                }
+                "steps" => sizes.steps = whole("steps", 4),
+                "bevel" => sizes.bevel = Some(number(made_node, "bevel").unwrap_or(0.0)),
+                "bevel_steps" => sizes.bevel_steps = whole("bevel_steps", 1),
                 _ => {
-                    sizes.segments = Some(
-                        number(made_node, "segments").map_or(round, |count| count.max(0.0) as u32),
+                    sizes.taper = Some(
+                        number(made_node, "taper")
+                            .map(|all| [all; 2])
+                            .or_else(|| two(made_node, "taper"))
+                            .unwrap_or([1.0; 2]),
                     );
                 }
             }
@@ -1358,9 +2123,42 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
         shape,
         sizes,
         color: text_of(made_node, "color").map(str::to_owned),
+        face_colors: match &made_node.value {
+            Value::Table(entries) => entries
+                .iter()
+                .find(|entry| entry.key == "colors")
+                .and_then(|entry| match &entry.node.value {
+                    Value::Table(faces) => Some(faces),
+                    _ => None,
+                })
+                .map(|faces| {
+                    faces
+                        .iter()
+                        .filter_map(|face| match &face.node.value {
+                            Value::Str(color) => Some((face.key.clone(), color.clone())),
+                            _ => None,
+                        })
+                        .collect()
+                })
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        },
+        sockets: declared_sockets(&doc, &found)
+            .into_iter()
+            .map(|socket| {
+                let uses = socket_uses(&doc, &found, &socket).len();
+                (socket, uses)
+            })
+            .collect(),
         to: text_of(own, "to").map(str::to_owned),
         attach: text_of(own, "attach").map(str::to_owned),
         twist: number(own, "twist").unwrap_or(0.0),
+        position: three(own, "move").unwrap_or([0.0; 3]),
+        rotation: three(own, "rotate").unwrap_or([0.0; 3]),
+        scale: three(own, "scale")
+            .or_else(|| number(own, "scale").map(|all| [all; 3]))
+            .unwrap_or([1.0; 3]),
+        mirror: text_of(own, "mirror").map(str::to_owned),
         inside,
         uses,
     })
@@ -1407,6 +2205,78 @@ pub fn apply(
     display: &str,
     edit: &Edit,
 ) -> Result<Applied, Failure> {
+    apply_many(text, syntax, path, display, std::slice::from_ref(edit))
+}
+
+/// The part an edit is about, by path (nothing for a palette edit).
+fn part_of(edit: &Edit) -> &str {
+    match edit {
+        Edit::Add { to, .. } => to
+            .as_deref()
+            .and_then(|to| to.rsplit_once('.'))
+            .map_or("", |(part, _)| part),
+        Edit::Remove { part, .. }
+        | Edit::Rename { part, .. }
+        | Edit::Join { part, .. }
+        | Edit::Set { part, .. }
+        | Edit::Duplicate { part, .. }
+        | Edit::Unjoin { part }
+        | Edit::AddSocket { part, .. } => part,
+        Edit::SetSocket { socket, .. }
+        | Edit::RenameSocket { socket, .. }
+        | Edit::RemoveSocket { socket } => socket.rsplit_once('.').map_or("", |(part, _)| part),
+        Edit::AddColor { .. }
+        | Edit::SetColor { .. }
+        | Edit::RemoveColor { .. }
+        | Edit::TidySockets => "",
+    }
+}
+
+/// Gives the new free part `name` the `move` that stands it on the
+/// ground with its middle over `at` (x and z, in the recipe's own
+/// measurements). `built` is the recipe with the part in it at zero;
+/// `before` is the model without it, whose ground is the ground. If the
+/// recipe doesn't build, the part stays at zero.
+fn stand_on_ground(
+    doc: &mut Doc,
+    name: &str,
+    at: [f64; 2],
+    built: Option<&Model>,
+    before: Option<&Model>,
+) -> Result<(), Stop> {
+    let Some(built) = built else {
+        return Ok(());
+    };
+    let Some(bounds) = built
+        .parts
+        .iter()
+        .find(|part| part.name == name)
+        .and_then(|part| part.bounds)
+    else {
+        return Ok(());
+    };
+    // The box round the part, in the recipe's own measurements.
+    let (low, middle) = (bounds.min - built.zero, bounds.center() - built.zero);
+    // The ground is where the model stood before the part came. (A
+    // first part makes its own ground.)
+    let ground = before
+        .and_then(|model| model.bounds().map(|all| all.min.y - model.zero.y))
+        .unwrap_or(low.y);
+    let to =
+        [at[0] - middle.x, ground - low.y, at[1] - middle.z].map(|number| tidy_number(number, 4));
+    let found = find(doc, name)?;
+    set(doc, &found.path(), "move", Val::three(to))
+}
+
+/// [`apply`] for several edits, made one after the other on the same
+/// text and checked once, together: the Studio's "one step".
+pub fn apply_many(
+    text: &str,
+    syntax: Syntax,
+    path: &Path,
+    display: &str,
+    edits: &[Edit],
+) -> Result<Applied, Failure> {
     // The invisible mark some Windows editors put first stays first.
     let (mark, body) = match text.strip_prefix('\u{feff}') {
         Some(body) => ("\u{feff}", body),
@@ -1415,8 +2285,39 @@ pub fn apply(
     let (old_model, old_issues) = build(text, syntax, path, display);
     let mut doc = Doc::parse(body, syntax)
         .map_err(|_| Failure::Invalid(Report::from_issues(old_issues.clone())))?;
-    let outcome =
-        run(&mut doc, edit).map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
+    let mut said = Vec::new();
+    let mut shared = None;
+    for edit in edits {
+        let outcome = run(&mut doc, edit, old_model.as_ref())
+            .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
+        said.push(outcome.summary);
+        // A new part that stands free, with no place given, is stood on
+        // the ground.
+        if let Edit::Add {
+            name,
+            to: None,
+            free,
+            ..
+        } = edit
+            && free.move_to.is_none()
+        {
+            let built = build(&format!("{mark}{}", doc.text), syntax, path, display).0;
+            stand_on_ground(
+                &mut doc,
+                name,
+                free.stand.unwrap_or([0.0; 2]),
+                built.as_ref(),
+                old_model.as_ref(),
+            )
+            .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
+        }
+        if shared.is_none() {
+            shared = outcome
+                .touched
+                .as_ref()
+                .and_then(|found| share(found, old_model.as_ref(), part_of(edit)));
+        }
+    }
     let new_text = format!("{mark}{}", doc.text);
     let (model, issues) = build(&new_text, syntax, path, display);
     let before = Report::from_issues(old_issues).errors.len();
@@ -1424,25 +2325,10 @@ pub fn apply(
     if report.errors.len() > before {
         return Err(Failure::Invalid(report));
     }
-    let part = match edit {
-        Edit::Add { to, .. } => to.rsplit_once('.').map_or("", |(part, _)| part),
-        Edit::Remove { part, .. }
-        | Edit::Rename { part, .. }
-        | Edit::Join { part, .. }
-        | Edit::Set { part, .. }
-        | Edit::Duplicate { part, .. }
-        | Edit::AddSocket { part, .. } => part,
-        Edit::SetSocket { socket, .. } => socket.rsplit_once('.').map_or("", |(part, _)| part),
-        Edit::AddColor { .. } | Edit::SetColor { .. } => "",
-    };
-    let shared = outcome
-        .touched
-        .as_ref()
-        .and_then(|found| share(found, old_model.as_ref(), part));
     Ok(Applied {
         lines: changed_lines(text, &new_text),
         text: new_text,
-        summary: outcome.summary,
+        summary: said.join(", then "),
         shared,
         model,
         issues,
@@ -1565,6 +2451,12 @@ pub fn swap_in(path: &Path, expected: Option<&str>, text: &str) -> Result<bool, 
 /// there now, so both changes are kept. With `dry_run`, nothing is
 /// written.
 pub fn edit_file(path: &Path, edit: &Edit, dry_run: bool) -> Result<Edited, Failure> {
+    edit_file_many(path, std::slice::from_ref(edit), dry_run)
+}
+
+/// [`edit_file`] for several edits made together: worked out one after
+/// the other, checked once, and written once.
+pub fn edit_file_many(path: &Path, edits: &[Edit], dry_run: bool) -> Result<Edited, Failure> {
     let display = display_path(path);
     let Some(syntax) = Syntax::from_path(path) else {
         return Err(Failure::Usage(boxed(problem(
@@ -1577,7 +2469,7 @@ pub fn edit_file(path: &Path, edit: &Edit, dry_run: bool) -> Result<Edited, Fail
         tries += 1;
         let before =
             std::fs::read_to_string(path).map_err(|error| io_problem(path, "read", &error))?;
-        let applied = apply(&before, syntax, path, &display, edit)?;
+        let applied = apply_many(&before, syntax, path, &display, edits)?;
         let changed = applied.text != before;
         let written = if dry_run || !changed {
             false
@@ -1606,7 +2498,7 @@ pub fn edit_file(path: &Path, edit: &Edit, dry_run: bool) -> Result<Edited, Fail
             inspection,
             errors: report.errors,
             edit: EditInfo {
-                command: edit.command(),
+                command: edits.first().map_or("", Edit::command),
                 summary: applied.summary,
                 file: display,
                 written,

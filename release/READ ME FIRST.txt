@@ -16,17 +16,34 @@ TO START
 
 
 A FIRST LOOK
-  In the Studio, click "Open a model" and choose examples\robot.toml.
+  The Studio opens on its start page. Click one of the examples (the
+  robot, say): a copy of your own opens, in the folder "Duck Mold" in
+  your Documents, so you can change it as you like. The first time,
+  five small tips show you round (Help > Show the tips again brings
+  them back).
   - Drag to turn the model, right-drag to slide it, roll the wheel to
     come closer.
   - Click a part to select it. Its properties are on the right: change
     its size or colour there.
+  - "Add", at the top, puts a new shape on the ground, joined to
+    nothing. Drag it by its arrows, or drag the shape itself.
+  - The buttons at the top left of the picture are the tools: Move
+    (arrows), Rotate (rings), Scale (boxes) and Size (dots on the
+    faces: pull one to make the shape longer or wider). Their keys are
+    G, R, S and T. Hold Ctrl while dragging to move without snapping.
   - Click one of the small round markers on the selected part and pick
     a shape: a new part is joined there.
-  - Drag the selected part onto another marker to move it.
+  - Drag the selected part onto another part's marker to join it there.
+    "Unjoin", on the right, makes a joined part free again.
+  - Shift+click selects several parts, to move or colour together.
+    Right-click a part for its menu. Delete removes it; Ctrl+D copies
+    it; H hides it so you can get at what is behind (Shift+H shows it
+    again).
+  - "Front", "Side", "Top" and "3/4" turn the view. "Wire" lets you see
+    through the model.
   - "Export" writes the model as a .glb file next to the recipe, for a
     Duck Forge game. "Render picture" writes a picture of it.
-  - Undo is Ctrl+Z.
+  - Undo is Ctrl+Z. Help > The keys lists every key.
 
   "New model" starts a recipe of your own with one box in it.
 

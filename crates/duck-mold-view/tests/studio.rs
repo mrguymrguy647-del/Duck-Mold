@@ -5,9 +5,10 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use duck_mold_core::edit::{Changes, Edit, Made, Sizes};
-use duck_mold_core::math::{Vec3, vec3};
+use duck_mold_core::edit::{Changes, Edit, Free, Made, Sizes};
+use duck_mold_core::math::{Mat3, Vec3, vec3};
 use duck_mold_view::render::BACKGROUND;
+use duck_mold_view::studio::handles::{Grip, Tool};
 use duck_mold_view::studio::viewport::Picture;
 use duck_mold_view::studio::{Clicked, Studio};
 
@@ -321,7 +322,10 @@ fn a_model_file_is_opened_to_look_at_only() {
 /// Where the middle of a part is in a picture `size` x `size`.
 fn on_screen(studio: &Studio, part: &str, size: usize) -> (f64, f64) {
     let middle = studio.part(part).unwrap().bounds.unwrap().center();
-    studio.orbit.on_screen(middle, size, size).unwrap()
+    studio
+        .orbit
+        .on_screen(middle + studio.offset(), size, size)
+        .unwrap()
 }
 
 #[test]
@@ -539,7 +543,7 @@ fn the_selection_follows_the_part_through_an_edit() {
         .apply(&Edit::Add {
             name: "hat".into(),
             made: Made::Shape("cone".into()),
-            to: "head.top".into(),
+            to: Some("head.top".into()),
             attach: None,
             sizes: Sizes {
                 radius: Some(0.1),
@@ -548,6 +552,7 @@ fn the_selection_follows_the_part_through_an_edit() {
             },
             color: Some("red".into()),
             twist: None,
+            free: Free::default(),
         })
         .unwrap();
     assert_eq!(studio.selected(), Some("hat"));
@@ -651,7 +656,10 @@ const VIEW: (usize, usize) = (640, 480);
 
 /// Where a point of the model is in the 640 x 480 picture.
 fn seen(studio: &Studio, point: Vec3) -> (f64, f64) {
-    studio.orbit.on_screen(point, VIEW.0, VIEW.1).unwrap()
+    studio
+        .orbit
+        .on_screen(point + studio.offset(), VIEW.0, VIEW.1)
+        .unwrap()
 }
 
 /// Where a socket of a part is in the picture.
@@ -797,10 +805,15 @@ fn a_click_on_the_selected_parts_surface_makes_a_socket_there() {
     let (middle, half) = (bounds.center(), bounds.half());
     let point = middle + vec3(half.x * 0.5, half.y * -0.6, half.z);
     let head_was_seen = seen(&studio, middle);
-    let clicked = studio.point_at(VIEW, seen(&studio, point));
-    let Clicked::Surface { part, spot } = clicked else {
-        panic!("expected the head's surface, got {clicked:?}");
-    };
+    // A click there no longer opens anything: it would be the start of
+    // a drag. The place is asked for (the right-click menu does).
+    assert_eq!(
+        studio.point_at(VIEW, seen(&studio, point)),
+        Clicked::Selected("head".into())
+    );
+    let (part, spot) = studio
+        .spot_at(VIEW, seen(&studio, point))
+        .expect("the pointer is on the head");
     assert_eq!(part, "head");
     assert_eq!(spot.on, "front");
     assert!((spot.shift[0] - 0.5).abs() < 0.02, "{spot:?}");
@@ -844,9 +857,9 @@ fn a_click_on_the_selected_parts_surface_makes_a_socket_there() {
     assert!(studio.select(Some("head")));
     let middle = studio.part("head").unwrap().bounds.unwrap().center();
     let other = middle + vec3(half.x * -0.5, half.y * -0.6, half.z);
-    let Clicked::Surface { spot, .. } = studio.point_at(VIEW, seen(&studio, other)) else {
-        panic!("expected the head's surface");
-    };
+    let (_, spot) = studio
+        .spot_at(VIEW, seen(&studio, other))
+        .expect("the pointer is on a part");
     studio
         .add_to_surface("head", &spot, &Made::Shape("box".into()))
         .unwrap();
@@ -1100,9 +1113,9 @@ fn edits_made_together_are_one_step() {
             bounds.half().y * -0.6,
             bounds.half().z,
         );
-    let Clicked::Surface { spot, .. } = studio.point_at(VIEW, seen(&studio, point)) else {
-        panic!("expected the head's surface");
-    };
+    let (_, spot) = studio
+        .spot_at(VIEW, seen(&studio, point))
+        .expect("the pointer is on a part");
     studio
         .add_to_surface("head", &spot, &Made::Shape("cone".into()))
         .unwrap();
@@ -1318,9 +1331,9 @@ fn a_library_part_is_added_to_a_socket_like_a_shape() {
     assert!(studio.select(Some("body")));
     let body = studio.part("body").unwrap().bounds.unwrap();
     let point = body.center() + vec3(body.half().x * 0.75, body.half().y * -0.6, body.half().z);
-    let Clicked::Surface { spot, .. } = studio.point_at(VIEW, seen(&studio, point)) else {
-        panic!("expected the body's surface");
-    };
+    let (_, spot) = studio
+        .spot_at(VIEW, seen(&studio, point))
+        .expect("the pointer is on a part");
     studio
         .add_to_surface("body", &spot, &Made::File("parts/lamp.gltf".into()))
         .unwrap();
@@ -1454,4 +1467,1793 @@ fn a_json_recipe_is_edited_and_undone_the_same_way() {
 
     studio.undo().unwrap();
     assert_eq!(std::fs::read_to_string(&recipe).unwrap(), before);
+}
+
+// ---- Phase 3, step 1: handles ------------------------------------------------
+
+/// A floor with a crate standing free on it.
+const BOXES: &str = r##"# Two boxes.
+version = 0
+name = "boxes"
+
+[palette]
+stone = "#C0C0C0"
+red   = "#D0453A"
+
+[[parts]]
+name = "floor"
+shape = "box"
+size = [2, 0.2, 2]
+color = "stone"
+
+# A crate, standing free.
+[[parts]]
+name = "crate"
+shape = "box"
+size = [0.5, 0.5, 0.5]
+color = "red"
+move = [0.5, 0.35, 0]   # on the floor
+"##;
+
+/// The boxes in a folder of their own, with the crate selected and the
+/// pointer's picture set.
+fn boxes(test: &str) -> (PathBuf, Studio) {
+    let recipe = folder(test).join("boxes.toml");
+    std::fs::write(&recipe, BOXES).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    assert!(studio.select(Some("crate")));
+    studio.hover(VIEW, None);
+    (recipe, studio)
+}
+
+/// Where a point of the picture's space is on the 640 x 480 screen.
+fn at_screen(studio: &Studio, point: Vec3) -> (f64, f64) {
+    studio.orbit.on_screen(point, VIEW.0, VIEW.1).unwrap()
+}
+
+/// Presses on a handle, moves the pointer so that the handle's own point
+/// goes to `to`, and leaves it held there.
+fn pull(studio: &mut Studio, grip: Grip, to: impl Fn(Vec3) -> Vec3, free: bool) {
+    let from = studio.grip_at(grip).unwrap();
+    assert_eq!(studio.grab(VIEW, at_screen(studio, from)), Some(grip));
+    let to = to(from);
+    studio.drag(VIEW, at_screen(studio, to), free);
+}
+
+fn file(recipe: &Path) -> String {
+    std::fs::read_to_string(recipe).unwrap()
+}
+
+#[test]
+fn an_arrow_moves_a_free_part_and_writes_once_when_let_go() {
+    let (recipe, mut studio) = boxes("handles_move");
+    assert_eq!(studio.tool, Tool::Move);
+    assert_eq!(
+        studio.grips(),
+        [Grip::Arrow(0), Grip::Arrow(1), Grip::Arrow(2)]
+    );
+
+    // The red arrow, pulled 0.3 m along x.
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + vec3(0.3, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.grabbed(), Some(Grip::Arrow(0)));
+    assert_eq!(studio.drag_label(), Some("x 0.8 m"));
+    // While it is held, the picture shows the crate moved, and the file
+    // is as it was.
+    assert_eq!(file(&recipe), BOXES);
+    let shown = studio.shown_model().unwrap();
+    let crate_shown = shown
+        .parts
+        .iter()
+        .find(|part| part.name == "crate")
+        .unwrap();
+    assert!(((crate_shown.local.shift - shown.zero).x - 0.8).abs() < 1e-9);
+    assert!(
+        ((studio.part("crate").unwrap().local.shift - studio.model().unwrap().zero).x - 0.5).abs()
+            < 1e-9
+    );
+
+    // Let go: one line of the file changes, comment and all else kept.
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Set \"crate\": move [0.8, 0.35, 0]");
+    let now = file(&recipe);
+    assert_eq!(
+        changed(BOXES, &now),
+        (
+            vec!["move = [0.5, 0.35, 0]   # on the floor"],
+            vec!["move = [0.8, 0.35, 0]   # on the floor"]
+        )
+    );
+    assert_eq!(studio.grabbed(), None);
+    assert_eq!(studio.selected(), Some("crate"));
+    // One step to undo, back to the byte.
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), BOXES);
+    assert_eq!(studio.can_undo(), None);
+
+    // It snaps to the grid: 0.33 m further is 0.3 m further. With
+    // snapping off, it is where the pointer is.
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + vec3(0.33, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("x 0.8 m"));
+    studio.cancel_drag();
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + vec3(0.33, 0.0, 0.0),
+        true,
+    );
+    assert_eq!(studio.drag_label(), Some("x 0.83 m"));
+    // Escape lets go and writes nothing.
+    studio.cancel_drag();
+    assert_eq!(studio.grabbed(), None);
+    assert_eq!(file(&recipe), BOXES);
+    assert_eq!(studio.shown_model(), studio.model());
+
+    // Up, and front to back.
+    pull(
+        &mut studio,
+        Grip::Arrow(1),
+        |from| from + vec3(0.0, 0.5, 0.0),
+        false,
+    );
+    studio.release().unwrap().unwrap();
+    pull(
+        &mut studio,
+        Grip::Arrow(2),
+        |from| from + vec3(0.0, 0.0, -0.4),
+        false,
+    );
+    studio.release().unwrap().unwrap();
+    let now = file(&recipe);
+    let line = now
+        .lines()
+        .find(|line| line.starts_with("move = "))
+        .unwrap();
+    assert_eq!(line, "move = [0.5, 0.85, -0.4]   # on the floor");
+}
+
+#[test]
+fn the_grid_stays_put_when_a_part_moves() {
+    let (_, mut studio) = boxes("handles_grid");
+    // Where the floor is on the screen, and the recipe's own zero.
+    let floor_was = seen(
+        &studio,
+        studio.part("floor").unwrap().bounds.unwrap().center(),
+    );
+    // Move the crate far out to one side: the model's middle moves.
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + vec3(3.0, 0.0, 0.0),
+        false,
+    );
+    studio.release().unwrap().unwrap();
+    let zero = studio.model().unwrap().zero;
+    assert!(
+        zero.x < -0.5,
+        "the model's zero point went after the crate: {zero:?}"
+    );
+    // The floor hasn't moved in the picture, and the crate is 3 m along.
+    let floor_is = seen(
+        &studio,
+        studio.part("floor").unwrap().bounds.unwrap().center(),
+    );
+    assert!((floor_is.0 - floor_was.0).abs() < 1e-6 && (floor_is.1 - floor_was.1).abs() < 1e-6);
+    let shown_at = studio.part("crate").unwrap().bounds.unwrap().center() + studio.offset();
+    assert!((shown_at.x - 3.5).abs() < 1e-9, "{shown_at:?}");
+}
+
+#[test]
+fn lifting_the_lowest_part_says_what_happens_instead() {
+    // The floor is the lowest part. Lifted a little, it is still the
+    // lowest: it stays on the ground, and the crate comes down.
+    let (recipe, mut studio) = boxes("handles_lowest");
+    assert!(studio.select(Some("floor")));
+    let crate_was = studio.part("crate").unwrap().bounds.unwrap().min.y;
+    pull(
+        &mut studio,
+        Grip::Arrow(1),
+        |from| from + vec3(0.0, 0.1, 0.0),
+        false,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Set \"floor\": move [0, 0.1, 0]. It is the lowest part, so it stays on the ground and the others come down instead"
+    );
+    assert!(file(&recipe).contains("move = [0, 0.1, 0]"));
+    assert_eq!(studio.part("floor").unwrap().bounds.unwrap().min.y, 0.0);
+    let crate_is = studio.part("crate").unwrap().bounds.unwrap().min.y;
+    assert!((crate_was - crate_is - 0.1).abs() < 1e-9);
+
+    // A model with one part: lifting it shows nothing at all.
+    let lone = recipe.with_file_name("lone.toml");
+    duck_mold_core::tools::new_file(&lone).unwrap();
+    let mut studio = Studio::open(&lone, false);
+    studio.hover(VIEW, None);
+    assert!(studio.select(Some("body")));
+    let before = studio.picture(VIEW.0, VIEW.1);
+    pull(
+        &mut studio,
+        Grip::Arrow(1),
+        |from| from + vec3(0.0, 1.0, 0.0),
+        false,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert!(
+        said.ends_with("It is the only part, and a model always stands on the ground, so lifting it shows nothing"),
+        "{said}"
+    );
+    assert!(file(&lone).contains("move = [0, 1, 0]"));
+    assert_eq!(studio.picture(VIEW.0, VIEW.1), before);
+    // Sideways it does move, over the grid.
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + vec3(1.0, 0.0, 0.0),
+        false,
+    );
+    studio.release().unwrap().unwrap();
+    assert_ne!(studio.picture(VIEW.0, VIEW.1), before);
+}
+
+#[test]
+fn dragging_a_free_part_slides_it_over_the_ground_or_onto_a_socket() {
+    let (recipe, mut studio) = boxes("handles_body");
+    // Take hold of the crate itself, by a point of its top.
+    let top = studio.part("crate").unwrap().bounds.unwrap();
+    // (Not its middle: the green arrow stands there.)
+    let hold = vec3(top.center().x + 0.15, top.max.y, top.center().z + 0.15) + studio.offset();
+    assert_eq!(
+        studio.grab(VIEW, at_screen(&studio, hold)),
+        Some(Grip::Body)
+    );
+    // To a point of the same height, 0.4 m along x and 0.3 m along z.
+    studio.drag(VIEW, at_screen(&studio, hold + vec3(0.4, 0.0, 0.3)), false);
+    assert_eq!(studio.drag_label(), Some("x 0.9 m, z 0.3 m"));
+    assert_eq!(file(&recipe), BOXES);
+    studio.release().unwrap().unwrap();
+    assert!(
+        file(&recipe).contains("move = [0.9, 0.35, 0.3]"),
+        "{}",
+        file(&recipe)
+    );
+
+    // Dropped on a dot of the floor, it is joined there.
+    let hold = hold + vec3(0.4, 0.0, 0.3);
+    assert_eq!(
+        studio.grab(VIEW, at_screen(&studio, hold)),
+        Some(Grip::Body)
+    );
+    assert!(studio.markers().iter().any(|marker| marker.part == "floor"));
+    let dot = socket_at(&studio, "floor", "front") + studio.offset();
+    studio.drag(VIEW, at_screen(&studio, dot), false);
+    assert_eq!(studio.drag_label(), Some("join floor.front"));
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Joined \"crate\" to floor.front");
+    let text = file(&recipe);
+    assert!(text.contains("to = \"floor.front\""), "{text}");
+    assert!(
+        !text.contains("move = [0.9"),
+        "a joined part has no move: {text}"
+    );
+    assert_eq!(
+        studio.part("crate").unwrap().attached_to.as_deref(),
+        Some("floor.front")
+    );
+}
+
+#[test]
+fn a_ring_turns_a_free_part_in_steps_of_fifteen_degrees() {
+    let (recipe, mut studio) = boxes("handles_rotate");
+    studio.tool = Tool::Rotate;
+    assert_eq!(
+        studio.grips(),
+        [Grip::Ring(0), Grip::Ring(1), Grip::Ring(2)]
+    );
+    // The middle of the rings is the crate's own middle.
+    let middle = studio.part("crate").unwrap().place.shift + studio.offset();
+    let turned =
+        |degrees: f64| move |from: Vec3| middle + Mat3::around_y(degrees) * (from - middle);
+
+    // The green ring, turned 37 degrees: it snaps to 30.
+    pull(&mut studio, Grip::Ring(1), turned(37.0), false);
+    assert_eq!(studio.drag_label(), Some("30°"));
+    assert_eq!(file(&recipe), BOXES);
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Set \"crate\": rotate [0, 30, 0]");
+    let now = file(&recipe);
+    let (gone, new) = changed(BOXES, &now);
+    assert!(gone.is_empty());
+    assert_eq!(new, ["rotate = [0, 30, 0]"]);
+    // The crate is turned that way in the model.
+    let turn = studio.part("crate").unwrap().place.turn;
+    let wanted = Mat3::around_y(30.0);
+    for row in 0..3 {
+        for column in 0..3 {
+            assert!((turn.rows[row][column] - wanted.rows[row][column]).abs() < 1e-9);
+        }
+    }
+
+    // Again, with snapping off: 37 more.
+    pull(&mut studio, Grip::Ring(1), turned(37.0), true);
+    assert_eq!(studio.drag_label(), Some("37°"));
+    studio.release().unwrap().unwrap();
+    assert!(
+        file(&recipe).contains("rotate = [0, 67, 0]"),
+        "{}",
+        file(&recipe)
+    );
+
+    // A turn around another direction is added to the first, as one
+    // `rotate` that gives the same turn.
+    let before = studio.part("crate").unwrap().place.turn;
+    let around_x = move |from: Vec3| middle + Mat3::around_x(90.0) * (from - middle);
+    pull(&mut studio, Grip::Ring(0), around_x, false);
+    assert_eq!(studio.drag_label(), Some("90°"));
+    studio.release().unwrap().unwrap();
+    let turn = studio.part("crate").unwrap().place.turn;
+    let wanted = Mat3::around_x(90.0) * before;
+    for row in 0..3 {
+        for column in 0..3 {
+            assert!(
+                (turn.rows[row][column] - wanted.rows[row][column]).abs() < 1e-3,
+                "{turn:?} for {wanted:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn boxes_scale_a_part_one_way_or_all_round() {
+    let (recipe, mut studio) = boxes("handles_scale");
+    studio.tool = Tool::Scale;
+    assert_eq!(
+        studio.grips(),
+        [Grip::Box(0), Grip::Box(1), Grip::Box(2), Grip::Middle]
+    );
+    let middle = studio.part("crate").unwrap().bounds.unwrap().center() + studio.offset();
+
+    // The red box, pulled out to one and a half times as far.
+    pull(
+        &mut studio,
+        Grip::Box(0),
+        |from| middle + (from - middle) * 1.5,
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("x x 1.5"));
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Set \"crate\": scale [1.5, 1, 1]");
+    let now = file(&recipe);
+    let (gone, new) = changed(BOXES, &now);
+    assert!(gone.is_empty());
+    assert_eq!(new, ["scale = [1.5, 1, 1]"]);
+    let wide = studio.part("crate").unwrap().bounds.unwrap().size();
+    assert!((wide.x - 0.75).abs() < 1e-9 && (wide.y - 0.5).abs() < 1e-9);
+
+    // The middle box: 60 pixels to the right is half as big again, all
+    // round.
+    studio.undo().unwrap();
+    let from = studio.grip_point(Grip::Middle).unwrap();
+    assert_eq!(studio.grab(VIEW, from), Some(Grip::Middle));
+    studio.drag(VIEW, (from.0 + 60.0, from.1), false);
+    studio.release().unwrap().unwrap();
+    let now = file(&recipe);
+    assert_eq!(changed(BOXES, &now).1, ["scale = 1.5"]);
+
+    // Never down to nothing.
+    pull(
+        &mut studio,
+        Grip::Box(1),
+        |from| middle + (from - middle) * 0.001,
+        false,
+    );
+    studio.release().unwrap().unwrap();
+    assert!(
+        file(&recipe).contains("scale = [1.5, 0.1, 1.5]"),
+        "{}",
+        file(&recipe)
+    );
+}
+
+#[test]
+fn a_joined_part_slides_along_its_surface_and_twists_around_its_join() {
+    let recipe = copy_of("robot", "handles_joined");
+    let before = file(&recipe);
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+
+    // The red panel sits on the body's `chest`. It has two arrows, lying
+    // on the body's front.
+    assert!(studio.select(Some("panel")));
+    assert_eq!(studio.grips(), [Grip::Arrow(0), Grip::Arrow(1)]);
+    let chest_was = socket_at(&studio, "body", "chest");
+    let along = studio.grip_at(Grip::Arrow(0)).unwrap() - (chest_was + studio.offset());
+    let along = along.normalized().unwrap();
+    assert!(
+        along.z.abs() < 1e-9,
+        "the arrow lies on the body's front: {along:?}"
+    );
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + along * 0.1,
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("slid 0.1 m"));
+    assert_eq!(file(&recipe), before);
+    let said = studio.release().unwrap().unwrap();
+    assert!(said.starts_with("Moved the socket body.chest"), "{said}");
+    // The socket moved 0.1 m that way, and the panel with it; only the
+    // socket's line changed.
+    let chest_is = socket_at(&studio, "body", "chest");
+    assert!(
+        (chest_is - (chest_was + along * 0.1)).length() < 0.002,
+        "{chest_is:?}"
+    );
+    let now = file(&recipe);
+    let (gone, new) = changed(&before, &now);
+    assert_eq!((gone.len(), new.len()), (1, 1));
+    assert!(
+        new[0].starts_with("chest     = { on = \"front\", shift = ["),
+        "{new:?}"
+    );
+
+    // One ring, around the join: it twists.
+    studio.tool = Tool::Rotate;
+    assert_eq!(studio.grips(), [Grip::Ring(0)]);
+    let join = chest_is + studio.offset();
+    let facing = vec3(0.0, 0.0, 1.0);
+    pull(
+        &mut studio,
+        Grip::Ring(0),
+        |from| join + Mat3::around(facing, 45.0) * (from - join),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("twist 45°"));
+    studio.release().unwrap().unwrap();
+    assert!(
+        file(&recipe).contains("to = \"body.chest\"\ntwist = 45\n"),
+        "{}",
+        file(&recipe)
+    );
+
+    // The antenna's tip sits on a built-in socket, which can't be moved:
+    // sliding it makes a socket for it.
+    studio.tool = Tool::Move;
+    assert!(studio.select(Some("antenna_tip")));
+    let across = studio.grip_at(Grip::Arrow(0)).unwrap()
+        - (socket_at(&studio, "antenna", "top") + studio.offset());
+    let across = across.normalized().unwrap();
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + across * 0.01,
+        true,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert!(
+        said.starts_with("Added the socket \"spot\" on the top of \"antenna\"")
+            && said.ends_with("then joined \"antenna_tip\" to antenna.spot"),
+        "{said}"
+    );
+    assert!(!studio.has_mistakes());
+}
+
+#[test]
+fn a_part_inside_a_turned_part_moves_in_that_parts_own_directions() {
+    let recipe = folder("handles_nested").join("nested.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\n[[parts]]\nname = \"table\"\nrotate = [0, 90, 0]\nscale = 2\n\n[[parts.parts]]\nname = \"top\"\nshape = \"box\"\nsize = [1, 0.1, 1]\n\n[[parts.parts]]\nname = \"cup\"\nshape = \"cylinder\"\nradius = 0.1\nheight = 0.2\nmove = [0, 0.15, 0]\n",
+    )
+    .unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    assert!(studio.select(Some("table/cup")));
+    // The red arrow points along the table's own x, which the table's
+    // quarter turn has made the model's -z. Pulled 0.4 m in the model is
+    // 0.2 of the table's own units, since the table is twice as big.
+    let from = studio.grip_at(Grip::Arrow(0)).unwrap();
+    let middle = studio.part("table/cup").unwrap().bounds.unwrap().center() + studio.offset();
+    let along = (from - middle).normalized().unwrap();
+    assert!((along - vec3(0.0, 0.0, -1.0)).length() < 1e-9, "{along:?}");
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + along * 0.4,
+        false,
+    );
+    studio.release().unwrap().unwrap();
+    assert!(
+        file(&recipe).contains("move = [0.2, 0.15, 0]"),
+        "{}",
+        file(&recipe)
+    );
+}
+
+#[test]
+fn handles_are_drawn_and_only_on_what_can_be_changed() {
+    let (recipe, mut studio) = boxes("handles_pictures");
+    check_picture("studio-handles-move", &studio.picture(VIEW.0, VIEW.1));
+    studio.tool = Tool::Rotate;
+    check_picture("studio-handles-rotate", &studio.picture(VIEW.0, VIEW.1));
+    studio.tool = Tool::Scale;
+    // The pointer on a handle lights it up.
+    let on_box = studio.grip_point(Grip::Box(1)).unwrap();
+    studio.hover(VIEW, Some(on_box));
+    check_picture("studio-handles-scale", &studio.picture(VIEW.0, VIEW.1));
+    // A part being dragged is drawn where it would go.
+    studio.tool = Tool::Move;
+    pull(
+        &mut studio,
+        Grip::Arrow(1),
+        |from| from + vec3(0.0, 0.6, 0.0),
+        false,
+    );
+    check_picture("studio-handles-dragging", &studio.picture(VIEW.0, VIEW.1));
+    studio.cancel_drag();
+
+    // Nothing selected: no handles, and a press takes hold of nothing.
+    studio.select(None);
+    assert!(studio.grips().is_empty());
+    assert_eq!(studio.grab(VIEW, (320.0, 240.0)), None);
+    // When only looking: none either.
+    let mut looking = Studio::open(&recipe, true);
+    looking.hover(VIEW, None);
+    assert!(looking.select(Some("crate")));
+    assert!(looking.grips().is_empty());
+    assert_eq!(looking.grab(VIEW, (320.0, 240.0)), None);
+    assert_eq!(studio.snap_text(), "Snap 0.1 m, 15°  (Ctrl: off)");
+}
+
+// ---- Phase 3, step 2: the Size tool ------------------------------------------
+
+#[test]
+fn pulling_a_face_of_a_box_changes_its_size_and_keeps_the_face_opposite() {
+    let (recipe, mut studio) = boxes("size_box");
+    studio.tool = Tool::Size;
+    // Six knobs: right and left, top and bottom, front and back.
+    assert_eq!(studio.grips(), (0..6).map(Grip::Knob).collect::<Vec<_>>());
+    let was = studio.part("crate").unwrap().bounds.unwrap();
+
+    // The right face, pulled out 0.2 m.
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.2, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("width 0.7 m"));
+    assert_eq!(file(&recipe), BOXES, "nothing is written while it is held");
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Set \"crate\": size [0.7, 0.5, 0.5], move [0.6, 0.35, 0]"
+    );
+    let now = file(&recipe);
+    assert_eq!(
+        changed(BOXES, &now),
+        (
+            vec![
+                "size = [0.5, 0.5, 0.5]",
+                "color = \"red\"",
+                "move = [0.5, 0.35, 0]   # on the floor"
+            ],
+            vec![
+                "size = [0.7, 0.5, 0.5]",
+                "color = \"red\"",
+                "move = [0.6, 0.35, 0]   # on the floor"
+            ]
+        )
+    );
+    // The left face is where it was; the right one is 0.2 m further out.
+    let is = studio.part("crate").unwrap().bounds.unwrap();
+    let offset_change = 0.0;
+    let shown = |bounds: duck_mold_core::math::Bounds, studio: &Studio| {
+        (bounds.min + studio.offset(), bounds.max + studio.offset())
+    };
+    let _ = offset_change;
+    let (was_min, was_max) = (was.min, was.max);
+    let (is_min, is_max) = shown(is, &studio);
+    // (Measured in the picture's space, where the grid stays put.)
+    let (was_min, was_max) = {
+        let (_, before) = boxes("size_box_before");
+        (was_min + before.offset(), was_max + before.offset())
+    };
+    assert!(
+        (is_min.x - was_min.x).abs() < 1e-9,
+        "{is_min:?} {was_min:?}"
+    );
+    assert!((is_max.x - was_max.x - 0.2).abs() < 1e-9);
+    // One step to undo.
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), BOXES);
+
+    // The top, pushed down 0.2 m: lower, and still standing on the floor.
+    pull(
+        &mut studio,
+        Grip::Knob(2),
+        |from| from + vec3(0.0, -0.2, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("height 0.3 m"));
+    studio.release().unwrap().unwrap();
+    assert!(file(&recipe).contains("size = [0.5, 0.3, 0.5]"));
+    assert!(file(&recipe).contains("move = [0.5, 0.25, 0]"));
+    // A face can't be pushed through the one opposite: a centimetre is
+    // the least.
+    pull(
+        &mut studio,
+        Grip::Knob(4),
+        |from| from + vec3(0.0, 0.0, -3.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("depth 0.01 m"));
+    studio.cancel_drag();
+    // It snaps in steps; with snapping off it is where the pointer is.
+    pull(
+        &mut studio,
+        Grip::Knob(1),
+        |from| from + vec3(-0.07, 0.0, 0.0),
+        true,
+    );
+    assert_eq!(studio.drag_label(), Some("width 0.57 m"));
+    studio.cancel_drag();
+}
+
+#[test]
+fn round_shapes_have_knobs_for_radius_and_height() {
+    let recipe = folder("size_round").join("round.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\n[[parts]]\nname = \"post\"\nshape = \"cylinder\"\nradius = 0.2\nheight = 1\n\n[[parts]]\nname = \"ball\"\nshape = \"sphere\"\nradius = 0.3\nattach = \"bottom\"\nto = \"post.top\"\n",
+    )
+    .unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    studio.tool = Tool::Size;
+
+    // A cylinder: top, bottom, and one on its side.
+    assert!(studio.select(Some("post")));
+    assert_eq!(
+        studio.grips(),
+        [Grip::Knob(0), Grip::Knob(1), Grip::Knob(2)]
+    );
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.0, 0.5, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("height 1.5 m"));
+    studio.release().unwrap().unwrap();
+    pull(
+        &mut studio,
+        Grip::Knob(2),
+        |from| from + vec3(0.1, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("radius 0.3 m"));
+    studio.release().unwrap().unwrap();
+    let text = file(&recipe);
+    assert!(text.contains("radius = 0.3\nheight = 1.5\n"), "{text}");
+
+    // A ball: one knob. It is joined, so only its size changes: its join
+    // keeps it on the post.
+    assert!(studio.select(Some("ball")));
+    assert_eq!(studio.grips(), [Grip::Knob(0)]);
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.2, 0.0, 0.0),
+        false,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Set \"ball\": radius 0.5");
+    let ball = studio.part("ball").unwrap().bounds.unwrap();
+    let post = studio.part("post").unwrap().bounds.unwrap();
+    assert!((ball.min.y - post.max.y).abs() < 1e-6, "still on the post");
+    // (The post is free, so pulling its top did move its middle.)
+    assert!(file(&recipe).contains("move = [0, 0.25, 0]"));
+}
+
+#[test]
+fn the_size_tool_is_for_shapes_and_changes_a_definition_for_all_its_parts() {
+    let recipe = copy_of("robot", "size_definition");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    studio.tool = Tool::Size;
+    // A part made of parts has no size of its own.
+    assert!(studio.select(Some("left_arm")));
+    assert!(studio.grips().is_empty());
+    // An eye is made from a definition: pulling its face changes the
+    // definition, and so the other eye.
+    assert!(studio.select(Some("left_eye")));
+    assert_eq!(studio.grips().len(), 6);
+    let other_was = studio.part("right_eye").unwrap().bounds.unwrap().size();
+    pull(
+        &mut studio,
+        Grip::Knob(2),
+        |from| from + vec3(0.0, 0.02, 0.0),
+        true,
+    );
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Set \"left_eye\": size [0.08, 0.1, 0.03] (also changed: right_eye)"
+    );
+    let other_is = studio.part("right_eye").unwrap().bounds.unwrap().size();
+    assert!((other_is.y - other_was.y - 0.02).abs() < 1e-9);
+
+    // The knobs are drawn on the faces.
+    let (_, mut studio) = boxes("size_picture");
+    studio.tool = Tool::Size;
+    let on_top = studio.grip_point(Grip::Knob(2)).unwrap();
+    studio.hover(VIEW, Some(on_top));
+    check_picture("studio-handles-size", &studio.picture(VIEW.0, VIEW.1));
+}
+
+// ---- adding a part that is joined to nothing --------------------------------
+
+#[test]
+fn a_part_is_added_on_clear_ground_towards_the_eye() {
+    let (recipe, mut studio) = boxes("add_free");
+    let said = studio.add_free(&Made::Shape("sphere".into())).unwrap();
+    assert_eq!(said, "Added \"sphere\" (sphere), standing free");
+    // Half the model's smallest side across, in the selected part's
+    // colour, on the ground the floor lies on, clear of the floor on the
+    // side the eye is on.
+    let now = file(&recipe);
+    let (gone, new) = changed(BOXES, &now);
+    assert!(gone.is_empty(), "{gone:?}");
+    assert_eq!(
+        new,
+        [
+            "",
+            "[[parts]]",
+            "name = \"sphere\"",
+            "shape = \"sphere\"",
+            "radius = 0.175",
+            "color = \"red\"",
+            "move = [0.7, 0.075, 1.3]",
+        ]
+    );
+    // It is selected, with the arrows on it, and it can be moved.
+    assert_eq!(studio.selected(), Some("sphere"));
+    assert_eq!(studio.tool, Tool::Move);
+    assert_eq!(
+        studio.grips(),
+        [Grip::Arrow(0), Grip::Arrow(1), Grip::Arrow(2)]
+    );
+    let model = studio.model().unwrap();
+    let ball = studio.part("sphere").unwrap().bounds.unwrap();
+    assert!((ball.min.y - model.bounds().unwrap().min.y).abs() < 1e-9);
+    assert_eq!(studio.part("sphere").unwrap().attached_to, None);
+    // Nothing else moved in the picture: the floor is where it was.
+    let floor = studio.part("floor").unwrap().bounds.unwrap();
+    assert!((floor.min + studio.offset() - vec3(-1.0, 0.0, -1.0)).length() < 1e-9);
+
+    // The next one doesn't land on the first.
+    studio.add_free(&Made::Shape("sphere".into())).unwrap();
+    assert_eq!(studio.selected(), Some("sphere_2"));
+    let (first, second) = (
+        studio.part("sphere").unwrap().bounds.unwrap(),
+        studio.part("sphere_2").unwrap().bounds.unwrap(),
+    );
+    assert!(first.gap_to(&second) > 0.05, "{first:?} {second:?}");
+
+    // Each was one step.
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), now);
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), BOXES);
+}
+
+#[test]
+fn a_new_free_part_takes_the_first_colour_when_nothing_is_selected() {
+    let (recipe, mut studio) = boxes("add_free_colour");
+    studio.select(None);
+    studio.add_free(&Made::Shape("box".into())).unwrap();
+    let now = file(&recipe);
+    assert!(
+        now.ends_with(
+            "name = \"box\"\nshape = \"box\"\nsize = [0.35, 0.35, 0.35]\ncolor = \"stone\"\nmove = [0.7, 0.075, 1.3]\n"
+        ),
+        "{now}"
+    );
+}
+
+#[test]
+fn where_the_view_looks_is_where_a_free_part_goes() {
+    let (recipe, mut studio) = boxes("add_free_view");
+    // Looking at empty ground three metres to the right.
+    studio.orbit.target = vec3(3.04, 0.0, -2.0);
+    studio.add_free(&Made::Shape("box".into())).unwrap();
+    let now = file(&recipe);
+    assert!(now.ends_with("move = [3, 0.075, -2]\n"), "{now}");
+}
+
+#[test]
+fn a_part_from_the_library_or_a_definition_stands_free_too() {
+    let recipe = robot_with_library("add_free_library");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    let before = file(&recipe);
+    studio
+        .add_free(&Made::File("parts/crate.glb".into()))
+        .unwrap();
+    assert_eq!(studio.selected(), Some("crate"));
+    let model = studio.model().unwrap();
+    let new = studio.part("crate").unwrap();
+    assert_eq!(new.attached_to, None);
+    assert!((new.bounds.unwrap().min.y - model.bounds().unwrap().min.y).abs() < 1e-9);
+    // It is clear of every other part.
+    for other in &model.parts {
+        if other.name != "crate" {
+            let gap = other.bounds.unwrap().gap_to(&new.bounds.unwrap());
+            assert!(gap > 0.05, "{}: {gap}", other.name);
+        }
+    }
+    let now = file(&recipe);
+    let (gone, new) = changed(&before, &now);
+    assert!(gone.is_empty(), "{gone:?}");
+    assert_eq!(
+        new[1..4],
+        [
+            "[[parts]]",
+            "name = \"crate\"",
+            "file = \"parts/crate.glb\""
+        ]
+    );
+
+    // A part the recipe defines.
+    studio.add_free(&Made::Use("arm".into())).unwrap();
+    assert_eq!(studio.selected(), Some("arm"));
+    assert!(file(&recipe).contains("name = \"arm\"\nuse = \"arm\"\nmove = ["));
+
+    // A window that only looks adds nothing.
+    let mut looking = Studio::open(&recipe, true);
+    assert!(looking.add_free(&Made::Shape("box".into())).is_err());
+}
+
+// ---- the newer shapes ----------------------------------------------------------
+
+#[test]
+fn every_shape_can_be_added_at_any_size() {
+    use duck_mold_core::recipe::Shape;
+    // A big model and a tiny one: a new shape's sizes must fit each
+    // other whatever they are measured from.
+    for (test, size) in [("shapes_big", 3.0), ("shapes_tiny", 0.04)] {
+        let recipe = folder(test).join("one.toml");
+        let start = format!(
+            "version = 0\n[palette]\nstone = \"#C0C0C0\"\n[[parts]]\nname = \"block\"\nshape = \"box\"\nsize = [{size}, {size}, {size}]\ncolor = \"stone\"\n"
+        );
+        std::fs::write(&recipe, &start).unwrap();
+        let mut studio = Studio::open(&recipe, false);
+        studio.hover(VIEW, None);
+        for shape in Shape::NAMES {
+            // Standing free on the ground.
+            let said = studio.add_free(&Made::Shape(shape.into()));
+            assert!(said.is_ok(), "{shape} at {size}: {said:?}");
+            assert!(!studio.has_mistakes(), "{shape}: {:?}", studio.problems());
+            assert_eq!(studio.selected(), Some(shape));
+            let new = studio.part(shape).unwrap().bounds.unwrap().size();
+            let biggest = new.x.max(new.y).max(new.z);
+            assert!(
+                biggest > size * 0.3 && biggest < size * 0.7,
+                "{shape} is {biggest} beside {size}"
+            );
+            studio.undo().unwrap();
+            // And joined to the block's top.
+            let said = studio.add_to_socket("block", "top", &Made::Shape(shape.into()));
+            assert!(said.is_ok(), "{shape} at {size}: {said:?}");
+            assert!(!studio.has_mistakes(), "{shape}: {:?}", studio.problems());
+            studio.undo().unwrap();
+            assert_eq!(file(&recipe), start);
+        }
+    }
+}
+
+#[test]
+fn a_ring_and_a_pill_have_knobs_for_their_sizes() {
+    let recipe = folder("size_newer").join("newer.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\n[[parts]]\nname = \"ring\"\nshape = \"torus\"\nradius = 0.5\ntube = 0.1\n\n[[parts]]\nname = \"pill\"\nshape = \"capsule\"\nradius = 0.2\nheight = 1\nmove = [2, 0.4, 0]\n\n[[parts]]\nname = \"steps\"\nshape = \"stairs\"\nsize = [1, 1, 1]\nmove = [-2, 0.4, 0]\n",
+    )
+    .unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    studio.tool = Tool::Size;
+
+    // A ring: one knob on its outside for how big it is, one on top for
+    // how thick.
+    assert!(studio.select(Some("ring")));
+    assert_eq!(studio.grips(), [Grip::Knob(0), Grip::Knob(1)]);
+    let outside = studio.grip_at(Grip::Knob(0)).unwrap() - studio.offset();
+    let ring = studio.part("ring").unwrap().bounds.unwrap();
+    assert!((outside.x - ring.max.x).abs() < 1e-9, "{outside:?}");
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.2, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("radius 0.7 m"));
+    studio.release().unwrap().unwrap();
+    pull(
+        &mut studio,
+        Grip::Knob(1),
+        |from| from + vec3(0.0, 0.1, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("tube 0.2 m"));
+    assert_eq!(studio.release().unwrap().unwrap(), "Set \"ring\": tube 0.2");
+    assert!(file(&recipe).contains("radius = 0.7\ntube = 0.2\n"));
+    // Thicker than the hole is wide can't be: the drag says why, and
+    // letting go changes nothing.
+    let before = file(&recipe);
+    pull(
+        &mut studio,
+        Grip::Knob(1),
+        |from| from + vec3(0.0, 0.6, 0.0),
+        false,
+    );
+    let refused = studio.release().unwrap();
+    assert!(refused.is_err(), "{refused:?}");
+    assert_eq!(file(&recipe), before);
+
+    // A pill: top, bottom and side, like a cylinder.
+    assert!(studio.select(Some("pill")));
+    assert_eq!(
+        studio.grips(),
+        [Grip::Knob(0), Grip::Knob(1), Grip::Knob(2)]
+    );
+    pull(
+        &mut studio,
+        Grip::Knob(0),
+        |from| from + vec3(0.0, 0.5, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("height 1.5 m"));
+    studio.release().unwrap().unwrap();
+
+    // Stairs are measured like a box: six knobs.
+    assert!(studio.select(Some("steps")));
+    assert_eq!(studio.grips(), (0..6).map(Grip::Knob).collect::<Vec<_>>());
+    pull(
+        &mut studio,
+        Grip::Knob(4),
+        |from| from + vec3(0.0, 0.0, 1.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("depth 2 m"));
+    studio.release().unwrap().unwrap();
+    assert!(file(&recipe).contains("size = [1, 1, 2]"));
+}
+
+// ---- several parts, hiding, and what is done to a selection ---------------------
+
+const YARD: &str = r##"# A yard.
+version = 0
+name = "yard"
+
+[palette]
+stone = "#C0C0C0"
+red   = "#D0453A"
+blue  = "#3A6FD0"
+
+[[parts]]
+name = "floor"
+shape = "box"
+size = [4, 0.2, 4]
+color = "stone"
+
+[[parts]]
+name = "crate"
+shape = "box"
+size = [0.5, 0.5, 0.5]
+color = "red"
+move = [0.5, 0.35, 0]
+
+[[parts]]
+name = "post"
+shape = "cylinder"
+radius = 0.1
+height = 1
+color = "blue"
+move = [-0.5, 0.6, 0.5]
+
+# On the post: it goes where the post goes.
+[[parts]]
+name = "cap"
+shape = "sphere"
+radius = 0.15
+color = "red"
+attach = "bottom"
+to = "post.top"
+
+# On the floor.
+[[parts]]
+name = "flag"
+shape = "box"
+size = [0.3, 0.3, 0.05]
+color = "blue"
+attach = "bottom"
+to = "floor.top"
+"##;
+
+fn yard(test: &str) -> (PathBuf, Studio) {
+    let recipe = folder(test).join("yard.toml");
+    std::fs::write(&recipe, YARD).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    (recipe, studio)
+}
+
+/// The middle of a part's box, in the model.
+fn middle(studio: &Studio, part: &str) -> Vec3 {
+    studio.part(part).unwrap().bounds.unwrap().center()
+}
+
+#[test]
+fn several_parts_are_selected_one_after_the_other() {
+    let (_, mut studio) = yard("group_select");
+    assert!(studio.selection().is_empty());
+    assert!(studio.select(Some("crate")));
+    assert!(studio.toggle("post"));
+    // The one added last is the one the panel shows.
+    assert_eq!(studio.selection(), ["crate", "post"]);
+    assert_eq!(studio.selected(), Some("post"));
+    assert!(studio.is_selected("crate") && studio.is_selected("post"));
+    assert!(!studio.is_selected("floor"));
+    // Again takes it out.
+    assert!(!studio.toggle("post"));
+    assert_eq!(studio.selection(), ["crate"]);
+    assert!(!studio.toggle("nothing"));
+    // A plain selection is one part again.
+    studio.toggle("post");
+    studio.select(Some("floor"));
+    assert_eq!(studio.selection(), ["floor"]);
+    // Every part of the model's own list.
+    studio.select_all();
+    assert_eq!(
+        studio.selection(),
+        ["floor", "crate", "post", "cap", "flag"]
+    );
+
+    // In the picture: Shift+click on the crate, then on the post.
+    studio.select(None);
+    let on =
+        |studio: &Studio, part: &str| at_screen(studio, middle(studio, part) + studio.offset());
+    let crate_at = {
+        let top = studio.part("crate").unwrap().bounds.unwrap();
+        at_screen(
+            &studio,
+            vec3(top.center().x, top.max.y, top.center().z) + studio.offset(),
+        )
+    };
+    studio.click_adding(VIEW, crate_at);
+    let post_at = on(&studio, "post");
+    studio.click_adding(VIEW, post_at);
+    assert_eq!(studio.selection(), ["crate", "post"]);
+    // On nothing: nothing changes.
+    studio.click_adding(VIEW, (2.0, 2.0));
+    assert_eq!(studio.selection(), ["crate", "post"]);
+    // A plain click on nothing lets go of them all.
+    studio.click(VIEW, (2.0, 2.0));
+    assert!(studio.selection().is_empty());
+}
+
+#[test]
+fn several_parts_move_turn_and_grow_together() {
+    let (recipe, mut studio) = yard("group_handles");
+    studio.select(Some("crate"));
+    studio.toggle("post");
+    studio.toggle("flag");
+    let cap_was = middle(&studio, "cap");
+
+    // Move: three arrows in the middle of them. The flag is joined to
+    // the floor, which isn't selected: it stays, and the Studio says so.
+    assert_eq!(
+        studio.grips(),
+        [Grip::Arrow(0), Grip::Arrow(1), Grip::Arrow(2)]
+    );
+    pull(
+        &mut studio,
+        Grip::Arrow(0),
+        |from| from + vec3(0.3, 0.0, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("x +0.3 m"));
+    // Nothing is written until it is let go.
+    assert_eq!(file(&recipe), YARD);
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(
+        said,
+        "Moved 2 parts: x +0.3 m. Not moved: flag (joined to a part that isn't selected, or inside another part)"
+    );
+    let now = file(&recipe);
+    assert_eq!(
+        changed(YARD, &now),
+        (
+            vec![
+                "move = [0.5, 0.35, 0]",
+                "",
+                "[[parts]]",
+                "name = \"post\"",
+                "shape = \"cylinder\"",
+                "radius = 0.1",
+                "height = 1",
+                "color = \"blue\"",
+                "move = [-0.5, 0.6, 0.5]"
+            ],
+            vec![
+                "move = [0.8, 0.35, 0]",
+                "",
+                "[[parts]]",
+                "name = \"post\"",
+                "shape = \"cylinder\"",
+                "radius = 0.1",
+                "height = 1",
+                "color = \"blue\"",
+                "move = [-0.2, 0.6, 0.5]"
+            ]
+        )
+    );
+    // The cap is on the post, so it went along without an edit.
+    assert!((middle(&studio, "cap") - cap_was - vec3(0.3, 0.0, 0.0)).length() < 1e-9);
+    // They are all still selected, and it was one step.
+    assert_eq!(studio.selection(), ["crate", "post", "flag"]);
+    assert_eq!(studio.can_undo(), Some(said.as_str()));
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+
+    // Dragging one of them slides them all over the ground.
+    studio.select(Some("crate"));
+    studio.toggle("post");
+    // (By the foot of its front, clear of the arrows in the middle.)
+    let hold = {
+        let around = studio.part("crate").unwrap().bounds.unwrap();
+        vec3(around.center().x + 0.15, around.min.y + 0.1, around.max.z) + studio.offset()
+    };
+    assert_eq!(
+        studio.grab(VIEW, at_screen(&studio, hold)),
+        Some(Grip::Body)
+    );
+    studio.drag(VIEW, at_screen(&studio, hold + vec3(-0.4, 0.0, 0.2)), false);
+    assert_eq!(studio.drag_label(), Some("x -0.4 m, z +0.2 m"));
+    studio.release().unwrap().unwrap();
+    let now = file(&recipe);
+    assert!(now.contains("move = [0.1, 0.35, 0.2]"), "{now}");
+    assert!(now.contains("move = [-0.9, 0.6, 0.7]"), "{now}");
+    studio.undo().unwrap();
+
+    // Rotate: a quarter turn about the upright line through the middle
+    // of the two. Each is turned, and carried round the middle.
+    studio.tool = Tool::Rotate;
+    assert_eq!(
+        studio.grips(),
+        [Grip::Ring(0), Grip::Ring(1), Grip::Ring(2)]
+    );
+    let (crate_was, post_was) = (middle(&studio, "crate"), middle(&studio, "post"));
+    // The middle of the rings is the middle of the box round both.
+    let middle_of_ring = {
+        let (a, b) = (
+            studio.part("crate").unwrap().bounds.unwrap(),
+            studio.part("post").unwrap().bounds.unwrap(),
+        );
+        (a.min.min(b.min) + a.max.max(b.max)) * 0.5 + studio.offset()
+    };
+    pull(
+        &mut studio,
+        Grip::Ring(1),
+        |from| middle_of_ring + Mat3::around_y(90.0) * (from - middle_of_ring),
+        false,
+    );
+    let label = studio.drag_label().unwrap().to_owned();
+    assert!(label == "90°" || label == "-90°", "{label}");
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, format!("Turned 2 parts: {label}"));
+    let (crate_is, post_is) = (middle(&studio, "crate"), middle(&studio, "post"));
+    // As far apart as they were, and as far from the middle, but each a
+    // quarter turn round it.
+    let flat = |v: Vec3| vec3(v.x, 0.0, v.z);
+    let mid = middle_of_ring - studio.offset();
+    for (was, is) in [(crate_was, crate_is), (post_was, post_is)] {
+        let (a, b) = (flat(was - mid), flat(is - mid));
+        assert!((a.length() - b.length()).abs() < 1e-3, "{a:?} {b:?}");
+        assert!(a.dot(b).abs() < 1e-3, "not a quarter turn: {a:?} {b:?}");
+        assert!((was.y - is.y).abs() < 1e-9);
+    }
+    let now = file(&recipe);
+    assert_eq!(now.matches("rotate = [0, ").count(), 2, "{now}");
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+
+    // Scale: one box in the middle. Twice as big, and twice as far
+    // from the middle of the two.
+    studio.tool = Tool::Scale;
+    assert_eq!(studio.grips(), [Grip::Middle]);
+    let from = studio.grip_at(Grip::Middle).unwrap();
+    let press = at_screen(&studio, from);
+    assert_eq!(studio.grab(VIEW, press), Some(Grip::Middle));
+    studio.drag(VIEW, (press.0 + 120.0, press.1), false);
+    assert_eq!(studio.drag_label(), Some("x 2"));
+    assert_eq!(studio.release().unwrap().unwrap(), "Scaled 2 parts: x 2");
+    let now = file(&recipe);
+    assert_eq!(now.matches("scale = 2\n").count(), 2, "{now}");
+    let apart_was = flat(crate_was - post_was).length();
+    let apart_is = flat(middle(&studio, "crate") - middle(&studio, "post")).length();
+    assert!(
+        (apart_is - apart_was * 2.0).abs() < 1e-3,
+        "{apart_was} {apart_is}"
+    );
+
+    // The Size tool is for one shape: no knobs on several.
+    studio.tool = Tool::Size;
+    assert!(studio.grips().is_empty());
+}
+
+#[test]
+fn a_hidden_part_isnt_drawn_or_clicked_but_stays_in_the_model() {
+    let (recipe, mut studio) = yard("hide");
+    let shown = studio.picture(VIEW.0, VIEW.1);
+    let crate_at = {
+        let top = studio.part("crate").unwrap().bounds.unwrap();
+        at_screen(
+            &studio,
+            vec3(top.center().x, top.max.y, top.center().z) + studio.offset(),
+        )
+    };
+    studio.select(Some("crate"));
+    assert_eq!(studio.hide_selected(), 1);
+    assert_eq!(
+        studio.status(),
+        "Hid \"crate\". It is still in the model, and in what Export writes"
+    );
+    // It is no longer selected, nor drawn, nor in the way of a click.
+    assert!(studio.selection().is_empty());
+    assert!(studio.is_hidden("crate"));
+    assert_eq!(studio.hidden_count(), 1);
+    let hidden = studio.picture(VIEW.0, VIEW.1);
+    assert_ne!(hidden.pixels, shown.pixels);
+    assert_eq!(studio.click(VIEW, crate_at), Some("floor"));
+    let row = |studio: &Studio, path: &str| {
+        studio
+            .outline()
+            .into_iter()
+            .find(|row| row.path == path)
+            .unwrap()
+    };
+    assert!(row(&studio, "crate").hidden);
+    assert!(!row(&studio, "post").hidden);
+    // The recipe knows nothing of it, and the model has every part.
+    assert_eq!(file(&recipe), YARD);
+    assert!(studio.part("crate").is_some());
+    let exported = studio.export().unwrap();
+    assert!(exported.starts_with("Wrote yard.glb"), "{exported}");
+    let glb = recipe.with_extension("glb");
+    let model = duck_mold_core::glb::read_glb(&std::fs::read(glb).unwrap(), "yard.glb").unwrap();
+    assert!(model.parts.iter().any(|part| part.name == "crate"));
+
+    // Hiding a part hides what is inside it; select all leaves it out.
+    studio.select_all();
+    assert_eq!(studio.selection(), ["floor", "post", "cap", "flag"]);
+    // An edit elsewhere doesn't bring it back.
+    studio.select(Some("post"));
+    studio.duplicate_selected(false).unwrap();
+    assert!(studio.is_hidden("crate"));
+    // Showing everything does.
+    assert_eq!(studio.show_all(), 1);
+    assert_eq!(studio.status(), "Showing the hidden part again");
+    assert!(!studio.is_hidden("crate"));
+    studio.undo().unwrap();
+    assert_eq!(studio.picture(VIEW.0, VIEW.1).pixels, shown.pixels);
+
+    // One at a time, by name.
+    studio.set_hidden("post", true);
+    studio.set_hidden("flag", true);
+    assert_eq!(studio.status(), "Hid \"flag\": 2 hidden");
+    studio.set_hidden("post", false);
+    assert_eq!(studio.status(), "Showing \"post\" again: 1 still hidden");
+    assert_eq!(studio.hidden_count(), 1);
+}
+
+#[test]
+fn a_selection_is_copied_removed_coloured_and_unjoined_in_one_step() {
+    let (recipe, mut studio) = yard("group_actions");
+
+    // A copy of a free part stands beside it, selected.
+    studio.select(Some("crate"));
+    let said = studio.duplicate_selected(false).unwrap();
+    assert!(
+        said.starts_with("Copied \"crate\" as \"crate_2\""),
+        "{said}"
+    );
+    assert_eq!(studio.selection(), ["crate_2"]);
+    let now = file(&recipe);
+    assert!(
+        now.contains("name = \"crate_2\"\nshape = \"box\"\nsize = [0.5, 0.5, 0.5]\ncolor = \"red\"\nmove = [1.1, 0.35, 0]"),
+        "{now}"
+    );
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+
+    // A copy of a joined part is joined to the same socket.
+    studio.select(Some("cap"));
+    studio.duplicate_selected(false).unwrap();
+    assert_eq!(studio.selection(), ["cap_2"]);
+    assert_eq!(
+        studio.part("cap_2").unwrap().attached_to.as_deref(),
+        Some("post.top")
+    );
+    studio.undo().unwrap();
+
+    // Two at once: both copies are selected, beside the two.
+    studio.select(Some("crate"));
+    studio.toggle("post");
+    assert_eq!(studio.duplicate_selected(false).unwrap(), "Copied 2 parts");
+    assert_eq!(studio.selection(), ["crate_2", "post_2"]);
+    let apart = middle(&studio, "crate_2") - middle(&studio, "crate");
+    assert!((apart - (middle(&studio, "post_2") - middle(&studio, "post"))).length() < 1e-9);
+    assert!(apart.x > 1.0 && apart.y.abs() < 1e-9 && apart.z.abs() < 1e-9);
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+
+    // One colour for all of them.
+    studio.select(Some("crate"));
+    studio.toggle("post");
+    studio.toggle("flag");
+    assert_eq!(
+        studio.colour_selected("stone").unwrap(),
+        "Coloured 3 parts stone"
+    );
+    assert_eq!(file(&recipe).matches("color = \"stone\"").count(), 4);
+    assert_eq!(studio.selection(), ["crate", "post", "flag"]);
+    studio.undo().unwrap();
+
+    // Unjoin: only the joined ones, each right where it stands.
+    studio.select(Some("cap"));
+    studio.toggle("flag");
+    studio.toggle("crate");
+    let (cap_was, flag_was) = (middle(&studio, "cap"), middle(&studio, "flag"));
+    studio.unjoin_selected().unwrap();
+    for (part, was) in [("cap", cap_was), ("flag", flag_was)] {
+        assert_eq!(studio.part(part).unwrap().attached_to, None, "{part}");
+        assert!((middle(&studio, part) - was).length() < 1e-6, "{part}");
+    }
+    studio.undo().unwrap();
+    studio.select(Some("crate"));
+    assert!(studio.unjoin_selected().is_err());
+
+    // Remove: the cap hangs from the post and isn't selected, so the
+    // Studio can ask first.
+    studio.select(Some("post"));
+    studio.toggle("crate");
+    assert_eq!(studio.hanging_from_selection(), 1);
+    assert!(studio.remove_selected(false).is_err());
+    assert_eq!(file(&recipe), YARD);
+    assert_eq!(studio.remove_selected(true).unwrap(), "Removed 2 parts");
+    assert!(studio.selection().is_empty());
+    for gone in ["post", "crate", "cap"] {
+        assert!(studio.part(gone).is_none(), "{gone}");
+    }
+    assert!(studio.part("flag").is_some());
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), YARD);
+    // With the cap selected too, nothing is left hanging: no question.
+    studio.select(Some("post"));
+    studio.toggle("cap");
+    assert_eq!(studio.hanging_from_selection(), 0);
+    studio.remove_selected(false).unwrap();
+    assert!(studio.part("post").is_none() && studio.part("cap").is_none());
+}
+
+// ---- views, wireframe and the shadow ---------------------------------------------
+
+#[test]
+fn the_camera_looks_from_the_four_named_sides() {
+    use duck_mold_view::studio::viewport::Viewpoint;
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    let start = studio.orbit;
+    // It opens three-quarter.
+    assert_eq!((start.round, start.above), (30.0, 20.0));
+    for (from, round, above, said) in [
+        (Viewpoint::Front, 0.0, 0.0, "Looking at the front"),
+        (Viewpoint::Side, 90.0, 0.0, "Looking at the right side"),
+        (Viewpoint::Top, 0.0, 90.0, "Looking down from the top"),
+        (
+            Viewpoint::ThreeQuarter,
+            30.0,
+            20.0,
+            "Looking from the front right",
+        ),
+    ] {
+        studio.look_from(from);
+        assert_eq!((studio.orbit.round, studio.orbit.above), (round, above));
+        assert_eq!(studio.status(), said);
+        // The whole model is in the picture: every corner of its box.
+        let bounds = studio.model().unwrap().bounds().unwrap();
+        for corner in [bounds.min, bounds.max] {
+            let (x, y) = studio
+                .orbit
+                .on_screen(corner + studio.offset(), 480, 360)
+                .unwrap();
+            assert!(
+                (0.0..480.0).contains(&x) && (0.0..360.0).contains(&y),
+                "{from:?}: {x}, {y}"
+            );
+        }
+    }
+    // Back where it began.
+    assert_eq!(studio.orbit, start);
+
+    // From the front, the robot's left is on the right of the picture;
+    // from the top, its front is at the bottom.
+    studio.look_from(Viewpoint::Front);
+    check_picture("studio-robot-front", &studio.picture(480, 360));
+    let left = studio.part("left_arm").unwrap().bounds.unwrap().center();
+    let right = studio.part("right_arm").unwrap().bounds.unwrap().center();
+    let at = |studio: &Studio, point: Vec3| {
+        studio
+            .orbit
+            .on_screen(point + studio.offset(), 480, 360)
+            .unwrap()
+    };
+    assert!(at(&studio, left).0 > at(&studio, right).0);
+    studio.look_from(Viewpoint::Top);
+    check_picture("studio-robot-top", &studio.picture(480, 360));
+    let nose = studio.part("panel").unwrap().bounds.unwrap().center();
+    let back = studio.part("body").unwrap().bounds.unwrap().center();
+    assert!(at(&studio, nose).1 > at(&studio, back).1);
+
+    // With a part selected, the view goes to that part.
+    studio.select(Some("head"));
+    studio.look_from(Viewpoint::Side);
+    let head = studio.part("head").unwrap().bounds.unwrap().center();
+    let (x, y) = at(&studio, head);
+    assert!(
+        (x - 240.0).abs() < 1.0 && (y - 180.0).abs() < 1.0,
+        "{x}, {y}"
+    );
+}
+
+#[test]
+fn wireframe_shows_outlines_only_and_the_shadow_can_be_turned_off() {
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    let solid = studio.picture(480, 360);
+    // Wireframe: far fewer pixels are drawn, and what is behind shows.
+    studio.wire = true;
+    let wire = studio.picture(480, 360);
+    check_picture("studio-robot-wire", &wire);
+    assert!(drawn(&wire) < drawn(&solid));
+    assert_ne!(wire.pixels, solid.pixels);
+    // A click still finds the part there.
+    let head = studio.part("head").unwrap().bounds.unwrap().center();
+    let at = studio
+        .orbit
+        .on_screen(head + studio.offset(), 480, 360)
+        .unwrap();
+    assert!(studio.click((480, 360), at).is_some());
+    studio.select(None);
+    studio.wire = false;
+    assert_eq!(studio.picture(480, 360).pixels, solid.pixels);
+
+    // The shadow: the ground under the robot's foot is darker with it
+    // than without, and the ground far from the robot is the same.
+    studio.grid = false;
+    let with = studio.picture(480, 360);
+    studio.shadow = false;
+    let without = studio.picture(480, 360);
+    assert_ne!(with.pixels, without.pixels);
+    let brightness = |picture: &Picture, (x, y): (f64, f64)| {
+        let pixel = picture.pixels[y as usize * picture.width + x as usize];
+        ((pixel >> 16) & 0xFF) + ((pixel >> 8) & 0xFF) + (pixel & 0xFF)
+    };
+    // On the ground straight under the hand that hangs at its side.
+    let hand = studio.part("left_arm/hand").unwrap().bounds.unwrap();
+    let ground = studio.model().unwrap().bounds().unwrap().min.y;
+    let under = vec3(hand.center().x, ground, hand.center().z) + studio.offset();
+    let under = studio.orbit.on_screen(under, 480, 360).unwrap();
+    assert!(
+        brightness(&with, under) < brightness(&without, under),
+        "{} {}",
+        brightness(&with, under),
+        brightness(&without, under)
+    );
+    assert_eq!(
+        brightness(&with, (5.0, 350.0)),
+        brightness(&without, (5.0, 350.0))
+    );
+    // Seen from below the ground there is no shadow to see.
+    studio.orbit.above = -20.0;
+    studio.shadow = true;
+    let under = studio.picture(480, 360);
+    studio.shadow = false;
+    assert_eq!(studio.picture(480, 360).pixels, under.pixels);
+}
+
+// ---- colour: the Paint tool and the palette --------------------------------------
+
+/// Where the middle of the top of a part's box is in the picture.
+fn top_of(studio: &Studio, part: &str) -> (f64, f64) {
+    let around = studio.part(part).unwrap().bounds.unwrap();
+    at_screen(
+        studio,
+        vec3(around.center().x, around.max.y, around.center().z) + studio.offset(),
+    )
+}
+
+#[test]
+fn the_paint_tool_colours_the_face_under_the_pointer() {
+    let (recipe, mut studio) = yard("paint");
+    let crate_top = top_of(&studio, "crate");
+    // The face a recipe can name, under the pointer.
+    assert_eq!(
+        studio.face_under(VIEW, crate_top),
+        Some(("crate".to_owned(), "top".to_owned()))
+    );
+    assert_eq!(studio.face_under(VIEW, (2.0, 2.0)), None);
+
+    // Picking a colour takes the Paint tool in hand.
+    assert_eq!(studio.tool, Tool::Move);
+    studio.pick_colour(Some("blue"));
+    assert_eq!(studio.tool, Tool::Paint);
+    assert_eq!(studio.paint_colour().as_deref(), Some("blue"));
+    assert_eq!(
+        studio.status(),
+        "Painting with \"blue\": click a face to colour it. Shift+click colours the whole part"
+    );
+    // The face lights up under the pointer before the click.
+    studio.hover(VIEW, None);
+    let plain = studio.picture(VIEW.0, VIEW.1);
+    studio.hover(VIEW, Some(crate_top));
+    let lit = studio.picture(VIEW.0, VIEW.1);
+    assert_ne!(lit.pixels, plain.pixels);
+    assert_eq!(file(&recipe), YARD);
+
+    // A click paints that face: a `set --face-color` edit.
+    let said = studio.paint_at(VIEW, crate_top, false).unwrap();
+    assert_eq!(said, "Set \"crate\": top blue");
+    let now = file(&recipe);
+    let (gone, new) = changed(YARD, &now);
+    assert!(gone.is_empty(), "{gone:?}");
+    assert_eq!(new, ["colors = { top = \"blue\" }"]);
+    // Another face of it, with another colour.
+    let front = {
+        let around = studio.part("crate").unwrap().bounds.unwrap();
+        at_screen(
+            &studio,
+            vec3(around.center().x, around.center().y, around.max.z) + studio.offset(),
+        )
+    };
+    assert_eq!(
+        studio.face_under(VIEW, front),
+        Some(("crate".to_owned(), "front".to_owned()))
+    );
+    studio.pick_colour(Some("stone"));
+    studio.paint_at(VIEW, front, false).unwrap();
+    assert!(
+        file(&recipe).contains("colors = { top = \"blue\", front = \"stone\" }"),
+        "{}",
+        file(&recipe)
+    );
+
+    // With Shift, the whole part: one colour, and no face has its own.
+    studio.pick_colour(Some("blue"));
+    let said = studio.paint_at(VIEW, crate_top, true).unwrap();
+    assert_eq!(
+        said,
+        "Set \"crate\": colour blue, top no colour of its own, front no colour of its own"
+    );
+    let now = file(&recipe);
+    assert_eq!(
+        changed(YARD, &now),
+        (vec!["color = \"red\""], vec!["color = \"blue\""])
+    );
+    // Each click was one step.
+    for _ in 0..3 {
+        studio.undo().unwrap();
+    }
+    assert_eq!(file(&recipe), YARD);
+
+    // On nothing, and when only looking, nothing is painted.
+    assert!(studio.paint_at(VIEW, (2.0, 2.0), false).is_err());
+    assert_eq!(
+        studio.status(),
+        "Nothing to paint there: click a face of a part"
+    );
+    let mut looking = Studio::open(&recipe, true);
+    looking.hover(VIEW, None);
+    looking.pick_colour(Some("blue"));
+    assert!(looking.paint_at(VIEW, crate_top, false).is_err());
+    assert_eq!(file(&recipe), YARD);
+}
+
+#[test]
+fn painting_a_part_made_from_a_definition_paints_them_all() {
+    let recipe = copy_of("robot", "paint_definition");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    studio.pick_colour(Some("red"));
+    // The left eye is made from the definition "eye": painting it
+    // paints the definition, and so the right eye.
+    let eye = studio.part("left_eye").unwrap().bounds.unwrap();
+    let at = at_screen(
+        &studio,
+        vec3(eye.center().x, eye.center().y, eye.max.z) + studio.offset(),
+    );
+    assert_eq!(
+        studio.face_under(VIEW, at),
+        Some(("left_eye".to_owned(), "front".to_owned()))
+    );
+    let said = studio.paint_at(VIEW, at, false).unwrap();
+    assert!(said.contains("also changed: right_eye"), "{said}");
+    let both = [
+        studio.part("left_eye").unwrap(),
+        studio.part("right_eye").unwrap(),
+    ];
+    let model = studio.model().unwrap();
+    let red = model.palette.iter().position(|color| color.name == "red");
+    for eye in both {
+        let front = eye.faces_named("front");
+        assert_eq!(front.len(), 1);
+        assert_eq!(model.faces[front[0]].color, red, "{}", eye.path);
+    }
+}
+
+#[test]
+fn the_palette_gets_a_colour_changes_one_and_loses_one() {
+    let (recipe, mut studio) = yard("palette");
+    assert_eq!(
+        studio
+            .palette()
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["stone", "red", "blue"]
+    );
+    // With nothing picked, the brush has the first colour.
+    assert_eq!(studio.paint_colour().as_deref(), Some("stone"));
+
+    // A new colour is the one to paint with.
+    let said = studio.add_colour("gold", [0xFF, 0xD7, 0x00]).unwrap();
+    assert_eq!(said, "Added the colour \"gold\" (#FFD700)");
+    assert!(file(&recipe).contains("blue  = \"#3A6FD0\"\ngold = \"#FFD700\"\n"));
+    assert_eq!(studio.paint_colour().as_deref(), Some("gold"));
+    // A name that is taken is refused.
+    assert!(studio.add_colour("red", [1, 2, 3]).is_err());
+
+    // Changing a colour changes what is painted with it.
+    studio.change_colour("red", [0x10, 0x20, 0x30]).unwrap();
+    assert!(file(&recipe).contains("red   = \"#102030\""));
+    let model = studio.model().unwrap();
+    let crate_face = &model.faces[studio.part("crate").unwrap().faces.start];
+    assert_eq!(
+        model.palette[crate_face.color.unwrap()].rgb,
+        [0x10, 0x20, 0x30]
+    );
+
+    // A colour nothing is painted with just goes.
+    assert!(!studio.colour_in_use("gold"));
+    assert_eq!(
+        studio.remove_colour("gold", None).unwrap(),
+        "Removed the colour \"gold\""
+    );
+    // One that is in use is refused until something takes its place.
+    assert!(studio.colour_in_use("red"));
+    let why = studio.remove_colour("red", None).unwrap_err();
+    assert!(
+        why.contains("is in use: 2 things are painted with it (crate, cap)"),
+        "{why}"
+    );
+    let said = studio.remove_colour("red", Some("blue")).unwrap();
+    assert_eq!(
+        said,
+        "Removed the colour \"red\", and painted 2 things with \"blue\" instead"
+    );
+    let now = file(&recipe);
+    assert!(!now.contains("red"), "{now}");
+    assert_eq!(now.matches("color = \"blue\"").count(), 4);
+    assert!(!studio.has_mistakes());
+    // The brush had no colour of its own left: it has the first again.
+    assert_eq!(studio.paint_colour().as_deref(), Some("stone"));
+    // Every one of these was a step.
+    for _ in 0..4 {
+        studio.undo().unwrap();
+    }
+    assert_eq!(file(&recipe), YARD);
+}
+
+// ---- sockets the Studio made are cleared away when nothing uses them ------------
+
+#[test]
+fn a_socket_the_studio_made_goes_when_its_part_does() {
+    let (recipe, mut studio) = yard("tidy_auto");
+    // A cone added at a point of the crate's top: a socket is made
+    // there for it.
+    studio.select(Some("crate"));
+    let (part, spot) = studio.spot_at(VIEW, top_of(&studio, "crate")).unwrap();
+    assert_eq!(part, "crate");
+    studio
+        .add_to_surface(&part, &spot, &Made::Shape("cone".into()))
+        .unwrap();
+    let with_cone = file(&recipe);
+    assert!(with_cone.contains("spot = { on = \"top\""), "{with_cone}");
+    assert!(with_cone.contains("to = \"crate.spot\""), "{with_cone}");
+
+    // Removing the cone takes the socket with it, in the same step.
+    studio.select(Some("cone"));
+    let said = studio.remove_selected(false).unwrap();
+    assert_eq!(
+        said,
+        "Removed \"cone\", then removed the socket \"crate.spot\""
+    );
+    assert_eq!(file(&recipe), YARD);
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), with_cone);
+
+    // Joined somewhere else, or unjoined, the socket it left goes too.
+    for change in [
+        Edit::Join {
+            part: "cone".into(),
+            to: "post.front".into(),
+            attach: None,
+        },
+        Edit::Unjoin {
+            part: "cone".into(),
+        },
+    ] {
+        studio.apply(&change).unwrap();
+        let now = file(&recipe);
+        assert!(!now.contains("spot"), "{change:?}:\n{now}");
+        assert!(studio.part("cone").is_some());
+        studio.undo().unwrap();
+        assert_eq!(file(&recipe), with_cone);
+    }
+
+    // A second part on the same socket keeps it there.
+    studio
+        .add_to_socket("crate", "spot", &Made::Shape("sphere".into()))
+        .unwrap();
+    studio.select(Some("cone"));
+    studio.remove_selected(false).unwrap();
+    assert!(file(&recipe).contains("spot = { on = \"top\""));
+    // A socket a person named stays, used or not.
+    studio
+        .apply(&Edit::RenameSocket {
+            socket: "crate.spot".into(),
+            new_name: "lid".into(),
+        })
+        .unwrap();
+    studio.select(Some("sphere"));
+    studio.remove_selected(false).unwrap();
+    assert!(file(&recipe).contains("lid = { on = \"top\""));
+    // What the panel is told about the crate's sockets.
+    studio.select(Some("crate"));
+    assert_eq!(studio.facts().unwrap().sockets, [("lid".to_owned(), 0)]);
+
+    // Tidy sockets, asked for by hand, takes only the Studio's names.
+    studio
+        .apply(&Edit::AddSocket {
+            part: "post".into(),
+            name: "spot_3".into(),
+            on: "front".into(),
+            shift: [0.0; 3],
+        })
+        .unwrap();
+    let said = studio.apply(&Edit::TidySockets).unwrap();
+    assert_eq!(said, "Removed 1 socket nothing uses: post.spot_3");
+    assert!(file(&recipe).contains("lid = "));
 }

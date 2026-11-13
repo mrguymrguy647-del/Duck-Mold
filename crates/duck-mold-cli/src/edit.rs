@@ -3,21 +3,26 @@
 //! `Edit` values from clicks, so whatever it can do, this can.
 
 use clap::{Args, Subcommand};
-use duck_mold_core::edit::{Changes, Edit, Made, Sizes};
+use duck_mold_core::edit::{Changes, Edit, Free, Made, Sizes};
 
 /// One change to a recipe.
 #[derive(Subcommand)]
 pub enum Change {
-    /// Add a part, joined to a socket.
+    /// Add a part: joined to a socket (--to), or standing free.
     ///
     /// Say what it is made of with one of --shape, --use and --file.
+    /// Without --to the part is joined to nothing: it is stood on the
+    /// ground, at the recipe's zero or where --stand says, unless --move
+    /// says exactly where its middle goes.
     Add {
         /// The new part's name.
         name: String,
-        /// The socket it joins, like head.top.
+        /// The socket it joins, like head.top. Without it the part
+        /// stands free.
         #[arg(long, value_name = "PART.SOCKET")]
-        to: String,
-        /// One of the five shapes: box, cylinder, sphere, cone, wedge.
+        to: Option<String>,
+        /// A built-in shape: box, cylinder, sphere, cone, wedge, capsule,
+        /// torus, tube, pyramid, prism, stairs or arch.
         #[arg(long, group = "made")]
         shape: Option<String>,
         /// A part the recipe defines.
@@ -39,6 +44,20 @@ pub enum Change {
         /// Degrees to twist it around the join.
         #[arg(long, allow_negative_numbers = true)]
         twist: Option<f64>,
+        /// For a free part: where its middle goes, x,y,z in metres.
+        #[arg(long = "move", value_name = "X,Y,Z", allow_hyphen_values = true)]
+        move_to: Option<String>,
+        /// For a free part with no --move: where on the ground it is
+        /// stood, x,z in metres.
+        #[arg(long, value_name = "X,Z", allow_hyphen_values = true)]
+        stand: Option<String>,
+        /// For a free part: how it is turned, degrees around x, then y,
+        /// then z.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        rotate: Option<String>,
+        /// How much bigger it is: one number, or x,y,z.
+        #[arg(long, value_name = "N or X,Y,Z")]
+        scale: Option<String>,
     },
     /// Remove a part.
     ///
@@ -83,12 +102,49 @@ pub enum Change {
         #[arg(long)]
         color: Option<String>,
         /// A colour for one face, like top=plank. Can be given more than
-        /// once.
+        /// once. top=none takes the face's own colour away again, so it
+        /// has the part's.
         #[arg(long = "face-color", value_name = "FACE=COLOUR")]
         face_colors: Vec<String>,
         /// Degrees to twist it around its join.
         #[arg(long, allow_negative_numbers = true)]
         twist: Option<f64>,
+        /// Where a free part's middle goes: x,y,z, in metres. (A joined
+        /// part goes where its socket is.)
+        #[arg(long = "move", value_name = "X,Y,Z", allow_hyphen_values = true)]
+        move_to: Option<String>,
+        /// How a free part is turned: degrees around x, then y, then z.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        rotate: Option<String>,
+        /// How much bigger the part is: one number, or x,y,z to stretch
+        /// it.
+        #[arg(long, value_name = "N or X,Y,Z")]
+        scale: Option<String>,
+    },
+    /// Rename a socket a part declares. Everything that names it follows.
+    RenameSocket {
+        /// The socket, like body.spot.
+        #[arg(value_name = "PART.SOCKET")]
+        socket: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Remove a socket a part declares.
+    ///
+    /// Refused if anything uses it, saying what.
+    RemoveSocket {
+        /// The socket, like body.spot.
+        #[arg(value_name = "PART.SOCKET")]
+        socket: String,
+    },
+    /// Remove the sockets the Studio made (spot, spot_2...) that nothing
+    /// uses any more.
+    TidySockets,
+    /// Make a joined part free, exactly where it stands: its join becomes
+    /// a `move` and a `rotate`.
+    Unjoin {
+        /// The part.
+        part: String,
     },
     /// Copy a part, comments and all, straight after it.
     Duplicate {
@@ -119,6 +175,18 @@ pub enum Change {
         name: String,
         /// The new colour, as #RRGGBB.
         hex: String,
+    },
+    /// Take a colour out of the recipe's palette.
+    ///
+    /// Refused if anything is painted with it, saying what, unless
+    /// --replace-with names the colour those get instead.
+    RemoveColor {
+        /// Its name.
+        name: String,
+        /// The palette colour to paint with instead, wherever this one
+        /// is used.
+        #[arg(long, value_name = "COLOUR")]
+        replace_with: Option<String>,
     },
     /// Declare a socket on one side of a part. It sits on the surface.
     AddSocket {
@@ -155,15 +223,35 @@ pub struct SizeOptions {
     /// Width, height and depth of a box or a wedge: x,y,z.
     #[arg(long, value_name = "X,Y,Z")]
     size: Option<String>,
-    /// The radius of a cylinder, a sphere or a cone.
+    /// The radius of a round shape.
     #[arg(long)]
     radius: Option<f64>,
-    /// The height of a cylinder or a cone.
+    /// How thick a torus's ring is: from its middle to its surface.
+    #[arg(long)]
+    tube: Option<f64>,
+    /// How thick the wall of a tube or an arch is.
+    #[arg(long)]
+    wall: Option<f64>,
+    /// The height of a cylinder, a cone, a capsule or a tube.
     #[arg(long)]
     height: Option<f64>,
     /// How many flat sides a round shape has.
     #[arg(long)]
     segments: Option<u32>,
+    /// How many steps stairs have.
+    #[arg(long)]
+    steps: Option<u32>,
+    /// How much to cut off the edges of a box or a cylinder, in metres.
+    /// 0 makes them sharp again.
+    #[arg(long)]
+    bevel: Option<f64>,
+    /// How many flat cuts go round each cut edge: 1 to 4.
+    #[arg(long, value_name = "COUNT")]
+    bevel_steps: Option<u32>,
+    /// How wide the top of a box, a cylinder or a tube is, as a share of
+    /// its bottom: one number, or x,z. 1 makes the sides straight again.
+    #[arg(long, value_name = "N or X,Z")]
+    taper: Option<String>,
 }
 
 /// `1,2,0.5` as three numbers.
@@ -186,8 +274,30 @@ impl SizeOptions {
                 .map(|size| three("--size", size))
                 .transpose()?,
             radius: self.radius,
+            tube: self.tube,
+            wall: self.wall,
             height: self.height,
             segments: self.segments,
+            steps: self.steps,
+            bevel: self.bevel,
+            bevel_steps: self.bevel_steps,
+            taper: self
+                .taper
+                .as_deref()
+                .map(|written| {
+                    let numbers: Vec<f64> = written
+                        .split(',')
+                        .filter_map(|number| number.trim().parse().ok())
+                        .collect();
+                    match numbers.as_slice() {
+                        [all] => Ok([*all; 2]),
+                        [across, deep] => Ok([*across, *deep]),
+                        _ => Err(format!(
+                            "--taper needs one number, like 0.5, or two, like 0.5,1, not \"{written}\""
+                        )),
+                    }
+                })
+                .transpose()?,
         })
     }
 }
@@ -207,6 +317,10 @@ impl Change {
                 sizes,
                 color,
                 twist,
+                move_to,
+                stand,
+                rotate,
+                scale,
             } => Edit::Add {
                 name: name.clone(),
                 made: match (shape, uses, file) {
@@ -225,6 +339,35 @@ impl Change {
                 sizes: sizes.sizes()?,
                 color: color.clone(),
                 twist: *twist,
+                free: Free {
+                    move_to: move_to
+                        .as_deref()
+                        .map(|written| three("--move", written))
+                        .transpose()?,
+                    stand: stand
+                        .as_deref()
+                        .map(|written| {
+                            let numbers: Vec<f64> = written
+                                .split(',')
+                                .filter_map(|number| number.trim().parse().ok())
+                                .collect();
+                            <[f64; 2]>::try_from(numbers).map_err(|_| {
+                                format!("--stand needs two numbers, like 1,-0.5, not \"{written}\"")
+                            })
+                        })
+                        .transpose()?,
+                    rotate: rotate
+                        .as_deref()
+                        .map(|written| three("--rotate", written))
+                        .transpose()?,
+                    scale: scale
+                        .as_deref()
+                        .map(|written| match written.trim().parse::<f64>() {
+                            Ok(all) => Ok([all; 3]),
+                            Err(_) => three("--scale", written),
+                        })
+                        .transpose()?,
+                },
             },
             Change::Remove {
                 part,
@@ -249,6 +392,9 @@ impl Change {
                 color,
                 face_colors,
                 twist,
+                move_to,
+                rotate,
+                scale,
             } => Edit::Set {
                 part: part.clone(),
                 changes: Changes {
@@ -267,8 +413,32 @@ impl Change {
                     })
                     .collect::<Result<_, _>>()?,
                 twist: *twist,
+                move_to: move_to
+                    .as_deref()
+                    .map(|written| three("--move", written))
+                    .transpose()?,
+                rotate: rotate
+                    .as_deref()
+                    .map(|written| three("--rotate", written))
+                    .transpose()?,
+                scale: scale
+                    .as_deref()
+                    .map(|written| match written.trim().parse::<f64>() {
+                        Ok(all) => Ok([all; 3]),
+                        Err(_) => three("--scale", written),
+                    })
+                    .transpose()?,
                 },
             },
+            Change::RenameSocket { socket, new_name } => Edit::RenameSocket {
+                socket: socket.clone(),
+                new_name: new_name.clone(),
+            },
+            Change::RemoveSocket { socket } => Edit::RemoveSocket {
+                socket: socket.clone(),
+            },
+            Change::TidySockets => Edit::TidySockets,
+            Change::Unjoin { part } => Edit::Unjoin { part: part.clone() },
             Change::Duplicate {
                 part,
                 name,
@@ -287,6 +457,10 @@ impl Change {
             Change::SetColor { name, hex } => Edit::SetColor {
                 name: name.clone(),
                 hex: hex.clone(),
+            },
+            Change::RemoveColor { name, replace_with } => Edit::RemoveColor {
+                name: name.clone(),
+                replace_with: replace_with.clone(),
             },
             Change::AddSocket {
                 part,

@@ -1708,3 +1708,801 @@ These were the five questions; all were answered yes.
 4. **Whole-screen pictures are compared on Linux only**; the viewport's
    pictures and all the clicking tests run on both.
 5. **A zip, not an installer**, and an icon made in Duck Mold itself.
+
+## 19. Phase 3: a real 3D tool
+
+**Status: approved**, with all eight decisions at the end as
+recommended.
+
+Phase 2's Studio could add a part at a socket and change its numbers. A
+person who opened it found that it "looks like a very simple and weak
+version of Blender": the cube couldn't be dragged, moved or formed, the
+options were few, and the first page was a title and two buttons.
+
+Phase 3 fixes those four things. Ten steps, one commit each, in the
+order of the brief.
+
+The four rules stay:
+
+1. The recipe is the model. The Studio keeps no model of its own.
+2. Every Studio action that changes the model is an edit command an
+   agent can run too.
+3. An edit changes only what it has to in the file.
+4. The viewport is Duck Forge's CPU renderer.
+
+*As built (step 10):* the first-run tour, as designed, with these
+things settled in the building:
+
+- **Each tip is a small box beside what it is about**, with a ring
+  round the thing and a line to it. It is not in the way: the Studio
+  works as usual while a tip is up.
+- **The tips about the arrows and the dots need a part selected**, so
+  from the third tip on the tour selects the first part if none is
+  (selecting changes nothing in the model), and the third takes the
+  Move tool.
+- **Shown once** means once for the person, not once for each model:
+  an empty file `tips-seen` beside the list of models opened lately
+  says they were shown, or skipped. Where there is nowhere to keep
+  that (the tests), no tips are shown.
+- **Not when only looking** (`duck-mold preview`, a model file):
+  there is nothing there to learn to do.
+- The last tip's button says Done, and has no Skip beside it.
+
+*As built (step 9):* the start page, as designed, with these things
+settled in the building:
+
+- **The examples are inside the program** (the recipes' text, and the
+  two model files the desk uses), so the gallery and
+  `duck-mold new <recipe> --example <name>` work wherever the program
+  is, with no `examples` folder beside it.
+- **The examples' pictures are stored files** (192 pixels square, in
+  `assets/examples/`), put inside the program too. A test draws each
+  again from its recipe with `render`'s code and fails if a stored one
+  is no longer what the recipe draws, as the icon's test does. The
+  models opened lately are drawn when the start page is shown; one
+  that no longer builds is a plain tile with a question mark, and
+  still opens, to show what is wrong.
+- **The copies' folder** is `Duck Mold` in the person's Documents
+  (`%USERPROFILE%\Documents` on Windows; `$XDG_DOCUMENTS_DIR` or
+  `~/Documents` elsewhere). It is made the first time an example is
+  opened, and the page says where it is. The desk's copy brings its
+  `parts` folder; a file already there is left as it is.
+- **The duck on the page** is the duck example's picture.
+- **File > Open an example** and **File > Opened lately** offer the
+  same two lists once a model is open, and **File > Back to the start
+  page** closes it (the model is already in its file).
+- Ctrl+N and Ctrl+O work on the start page.
+
+*As built (step 8):* tidy sockets, with these things settled in the
+building:
+
+- **What counts as using a socket**: a part joined to it (`to`), the
+  part's own join if it joins by it (`attach`), and a socket of what
+  the part is inside that passes it on (`from`). `rename-socket`
+  changes all three; `remove-socket` is refused while there is any,
+  and says which.
+- **Only declared sockets** can be renamed or removed: the seven every
+  part has, and a wedge's `slope`, are built in.
+- **The Studio clears away its own sockets by itself.** When an edit
+  removes a part, joins it somewhere else or unjoins it, and that
+  leaves a socket called `spot` (or `spot_2`...) with nothing on it,
+  a `remove-socket` for it is added to the same step. The status line
+  says so, and one undo brings the part and the socket back together.
+  A socket with any other name stays: a person named it.
+- **`tidy-sockets`** does the same for the whole recipe at once: it
+  removes every unused socket with one of the Studio's names, and says
+  which. Run again it changes nothing.
+- **Removing a part's last socket** takes the empty `sockets` table
+  with it, and the blank line above it, so the file is as it was
+  before the socket came.
+- **In the panel** each declared socket is a line: its name in a field
+  to type in, how many things use it, and a "remove socket" button
+  that only works when nothing does.
+- **The "remove them too?" question** became a small window in the
+  middle: with the palette under the properties, it could end up
+  scrolled out of sight at the bottom of the panel.
+
+*As built (step 7):* the palette panel and the Paint tool, with these
+things settled in the building:
+
+- **A part of the model knows the names of its faces** now: which of
+  its faces is the `top`, which the `side`. That is what lets a click
+  find the name to write in `colors`. (It is also the first thing
+  Phase 4's face editing needs.)
+- **Picking a colour takes the Paint tool.** With the tool in hand and
+  no colour picked, the brush has the palette's first colour. Clicking
+  the picked colour again puts the brush down and gives the arrows
+  back.
+- **With the Paint tool, a click paints and selects nothing**, and
+  Shift+click paints the whole part rather than adding to the
+  selection. Shift+click also takes away the colours the part's single
+  faces had, so the part really is one colour.
+- **`remove-color` is refused while the colour is in use**, naming
+  everything painted with it, a part's `color` or a face's, anywhere in
+  the recipe, definitions included. `--replace-with` repaints those
+  first. The Studio asks in a small window, with the first other
+  colour offered.
+- **The two forms** (a new colour; what to paint with instead) are
+  small windows in the middle, not rows of the panel: the panel is too
+  short to hold them without scrolling.
+- A colour square in the palette is the same colour picker the
+  properties panel has; letting go of the mouse makes the `set-color`
+  edit.
+- A recipe whose palette is another file can be painted with, but not
+  changed here: the edit says to change that file.
+
+*As built (step 6):* views, wireframe, the shadow and the menus, with
+these things settled in the building:
+
+- **The shadow is a grid of cells on the ground**, 96 along the model's
+  longer side. Every face darkens the cells straight under it, the
+  more the nearer it is to the ground (a foot on the ground is darkest,
+  a roof four metres up palest), and the edges are softened by
+  averaging each cell with its neighbours three times. It is drawn as
+  flat squares before the grid's lines, so the lines stay on top. From
+  below the ground it isn't drawn. It is worked out again only when the
+  picture is.
+- **Wireframe draws each face's outline** in the face's own colour made
+  lighter (a selected part's lighter still). A click still finds the
+  part: the faces are there, only not filled.
+- **The four views keep what is selected in view**, or the whole model
+  when nothing is: they turn the camera and then frame, as F does.
+  "Three-quarter" is how the Studio opens (30 degrees round, 20 up),
+  so key 4 is the way back. From the top, the model's front is at the
+  bottom of the picture.
+- **The status line moved** from the top bar to the right end of the
+  Problems row, as the design's sketch has it: the top bar needed the
+  room for the views and the switches.
+- **The top bar wraps** to a second row on a narrow window.
+- **File > Open an example and Opened lately** come with the start
+  page (step 9); **Edit > Tidy sockets** with step 8; **Help > Show
+  the tips again** with step 10.
+- **Ctrl+N, Ctrl+O and Ctrl+E** work when looking only too, as Frame,
+  the views, the switches and hiding do: none of them changes the
+  model.
+
+*As built (step 5):* the right-click menu, the keys, several parts and
+hiding, with these things settled in the building:
+
+- **Which parts a group edit moves.** The free parts in the same list
+  as the part selected last get an edit each. A part joined to one of
+  them (or to one joined to one of them), and a part inside one of
+  them, goes along with no edit. Any other selected part stays, and
+  the status line names it: "Not moved: flag (joined to a part that
+  isn't selected, or inside another part)".
+- **Scale with several parts has one handle**, the box in the middle:
+  bigger or smaller all round, and further from or nearer to the
+  middle of them. Scaling several parts along one direction would need
+  each part's own sides to line up with it, which they needn't.
+- **A turn carries each part round the middle of the group** as well
+  as turning it, so the group turns as one thing. The middle is the
+  middle of the box round the parts that move.
+- **Selecting a part and a part inside it** would move the inner one
+  twice. Shift+clicking one takes the other out.
+- **A copy of a free part stands beside the original**, one step past
+  its width along x, because a copy in exactly the same place can't be
+  seen or told apart. (This is the copy the first trial of the Studio
+  couldn't move.) Several copied together keep their places relative
+  to each other. A copy of a joined part is still on the same socket:
+  drag it to where it goes.
+- **Remove asks only about parts that aren't selected.** If what hangs
+  from the selected parts is itself selected, nothing is asked.
+- **The status line says a group edit in a few words** ("Moved 3
+  parts: x +0.3 m"), and so does Undo's tip. The recipe still gets one
+  `set` for each part.
+- **Hide** is by part: a part joined to a hidden part is still drawn.
+  The eye is the word "hide" (or "show") at the end of the part's line
+  in the list, not a picture of an eye: the font the Studio ships has
+  none that reads well at that size. A hidden part can't be clicked in
+  the picture, isn't selected by Ctrl+A, and is in every export.
+- **The right-click menu is the same in the picture and in the list.**
+  From the picture, "Add a part here" adds at the point that was
+  clicked; from the list, on the part's `top`.
+- **Shift+A opens a small window** in the middle of the picture with
+  the same choices as the Add menu, rather than the menu itself.
+- **Looking only** (`duck-mold preview`, and model files): Frame, Hide
+  and Select all work; nothing that changes the model does.
+- The File, Edit, View and Help menus come with the views, in step 6,
+  from the same list of actions the keys and the right-click menu use.
+
+*As built (step 4):* the seven shapes, `bevel`, `bevel_steps` and
+`taper`, as designed, with these things settled in the building:
+
+- **Every face is still flat and bulges nowhere inwards**, which is
+  what sockets and Phase 4's face editing count on. So an arch's front
+  is a leg at each side and triangles from its two top corners to the
+  round top; stairs' sides are one upright strip per step; a tube's
+  ends are one four-cornered face per side. Every edge of every shape
+  is shared by exactly two faces: no cracks.
+- **Which way a face points** is found two ways. A shape that bulges
+  outwards everywhere is turned by where its middle is, as before. The
+  four that don't (torus, tube, stairs, arch) start from the face
+  furthest to the right and go from face to face across shared edges.
+- **A low arch** (less tall than half its width, plus its wall) has a
+  flatter round top instead of being an error.
+- **A capsule no taller than it is wide** is all ends: it has no
+  `side` faces.
+- **Taper bends some faces** (a cylinder narrowed more one way than the
+  other, the upright cut of a bevelled box narrowed two ways). A face
+  it bends is cut into triangles, which are always flat.
+- **Bevel and taper together**: the bevel is made first, then the
+  taper, so the widest place is where the bevel ends, a little above
+  the bottom, and the shape is a hair narrower than its `size` there.
+- **Sockets at a cut edge lean with the cut.** That is the old rule
+  (a socket sits on the surface and faces out of it), but it surprised
+  me twice in the examples: a socket declared at the foot of a bevelled
+  box's side, and the join of two sockets that face the same way. The
+  examples say `facing` there, and the docs say why.
+- **The Size tool** has a second knob on a torus, on top of the ring,
+  for `tube`; its `radius` knob is on the outside of the ring. `wall`,
+  `steps`, `bevel` and `taper` are in the panel, not on knobs.
+- **New shapes are added with every size said**, each a share of the
+  size they are added at, because a default (a wall of 0.2 m) can be
+  bigger than the whole shape.
+- **The lists of shapes** (the Add menu, and the one a dot opens) are
+  in two columns: twelve in one column didn't fit the screen with the
+  library under them.
+- `set --bevel 0` and `--taper 1` take the field out of the recipe
+  rather than writing a 0 or a 1.
+
+*As built (step 3):* the Add menu, and `add` with no `--to`.
+
+- **Where the new part goes.** "In front of the camera" is the ground
+  under the point the view looks at, snapped to the step. Usually the
+  model is standing right there, so the Studio first builds the part
+  to see how much room it takes, and then walks from that point
+  towards the eye, a step at a time, until the part's box is one step
+  clear of every other part's. So it lands just in front of the model
+  as you see it, never inside it or behind it.
+- **Its size and colour.** A new shape is half the model's smallest
+  side across, to two figures (the same rule as a part added on a dot,
+  which is half the part it sits on). It has the selected part's
+  colour, or the palette's first.
+- **The ground it stands on** is the ground the model stood on before:
+  the underside of its lowest part. The edit works this out, not the
+  Studio, so an agent's `add` with no `--to` stands on the ground too
+  (`--stand x,z` says where; `--move x,y,z` gives the middle exactly).
+- **A recipe with no parts** can be added to: the first part starts
+  the list.
+- **A free part that touches nothing gets the usual warning** ("it
+  floats 0.125 from ..."), as any part that touches nothing always has.
+  It goes when the part is moved against another, or joined.
+- The Add menu shares its list with the one a dot opens. Shift+A comes
+  with the other keys, in step 5.
+
+*As built (step 2):* the Size tool, as designed. One thing to know: a
+box that is joined is held by its join, so pulling a face changes its
+size about its middle and the join then puts it back on its socket;
+only a free part keeps the opposite face exactly where it was, by
+moving its middle half as far in the same edit. A part made from a
+definition has the definition's knobs, and pulling one changes every
+part made from it (the status line names them).
+
+*As built (step 1):*
+
+- **Moves snap in steps from where the part was**, not onto the grid's
+  lines. Shapes are placed by their middle, so a crate half a metre
+  wide standing on a floor has its middle at 0.35 m; snapping it onto
+  the lines would lift it off the floor every time it was touched. In
+  steps of 0.1 m it stays on the floor. Scales do snap to whole
+  tenths, and turns to whole steps of 15 degrees from where they were.
+- **Lifting the lowest part** leaves it on the ground and brings the
+  others down, and the status line says so. Only a model with one part
+  shows nothing at all, and the status line says that instead.
+- **A ring turns the part around the list's own x, y or z**, and the
+  recipe's `rotate` is worked out afresh as the three numbers that give
+  the same turn (to a hundredth of a degree). After a second turn
+  around another direction the numbers can all change; the part is
+  where the rings put it.
+- **Rotate turns a free part about the point `move` places**, the
+  shape's own middle, so only `rotate` changes. Move and Scale stand at
+  the middle of the part's box.
+- **`unjoin` was needed sooner than the right-click menu**, so it is a
+  button in the properties panel already.
+- A click on the selected part no longer opens the "add here" list
+  (decision 3). Until the right-click menu of step 5, a part is added
+  at a point of a surface from the command line only.
+- The library gained what this needed: a matrix's inverse and its turn
+  back to `rotate` numbers, each part's place in its own list, the
+  model's zero in the recipe's measurements, and `apply_many`, which
+  works out several edits as one and is what the preview uses.
+
+### Why the cube couldn't be moved
+
+A new model is one box. Duplicate it, and the copy is a *free* part: it
+is joined to nothing, and its place is two fields in the recipe, `move`
+and `rotate`. Phase 2 had no edit for those fields. Dragging only knew
+how to drop a part on a socket.
+
+So the heart of this phase is: **free parts can be moved, turned and
+sized with the mouse**, and joined parts can be slid and twisted the
+same way.
+
+### The ground and the grid
+
+Two things about the ground change, because handles need a ground that
+stays put.
+
+- **The grid no longer slides.** Today, adding a part on one side moves
+  the model's middle, and the grid moves under everything. From now on
+  the grid is fixed to the recipe's own measurements: a part with
+  `move = [1, 0, 2]` stands over the grid's line 1 and line 2.
+- **The ground is always under the lowest part.** This isn't new: a
+  model's zero point is the middle of its underside, which is how a
+  game stands it on the floor. It has one visible consequence. Lifting
+  the lowest part, or the only part, changes nothing you can see: the
+  ground comes up with it. The Studio will say so in the status line
+  ("this is the lowest part: the model always stands on the ground").
+  With a second part under it, lifting works as you expect.
+
+A small marker on the ground shows the model's zero point: the point a
+game holds the model by.
+
+The grid itself was on by default, but was easy to miss. It becomes:
+light lines every 10 cm near the model, heavier lines every metre, a
+red line and a blue line through the middle, reaching well past the
+model.
+
+### The tools
+
+A strip of five buttons down the left edge of the viewport. One is
+active at a time. Each has a key.
+
+| Tool | Key | What shows on the selected part | What dragging does |
+|---|---|---|---|
+| **Move** | G | Three arrows: red (left-right), green (up-down), blue (front-back) | Moves it. This is the tool the Studio opens with. |
+| **Rotate** | R | Three rings in the same colours | Turns it. |
+| **Scale** | S | Three small boxes on lines, and one in the middle | Makes it bigger or smaller, or stretches it one way. Works on any part. |
+| **Size** | T | A round knob on each face of a shape | Pulls that face: changes the shape's own width, height, depth or radius. |
+| **Paint** | P | Nothing; the face under the pointer lights up | A click colours that face (step 7). |
+
+G, R and S are Blender's keys.
+
+**What each handle writes, for a free part:**
+
+| Handle | Recipe field | Snaps to |
+|---|---|---|
+| A move arrow | `move = [x, y, z]`, one number | The grid: 0.1 m, or 0.01 m when you are zoomed in close |
+| Dragging the part itself | `move`, across the ground (x and z) | The same |
+| A rotate ring | `rotate = [x, y, z]` | 15 degrees |
+| A scale box on a line | `scale = [x, y, z]`, one number | 0.1 |
+| The middle scale box | `scale`, all three alike | 0.1 |
+
+**For a joined part**, the same tools do what a join allows:
+
+| Handle | What it does | Recipe field |
+|---|---|---|
+| Move: two arrows lying on the surface | Slides the part along the surface it sits on | The socket's `shift` (a socket is made for it if it sat on a built-in one, as in Phase 2) |
+| Dragging the part itself | Slides it the same way; dropped on another part's dot, it joins there | `shift`, or `to` |
+| Rotate: one ring around the join | Twists it | `twist`, in steps of 15 degrees |
+| Scale | The same as for a free part | `scale` |
+
+A joined part can't be lifted off its surface: that is what joined
+means. To move it freely, **Unjoin** it (right-click). It then stays
+exactly where it is, as a free part.
+
+**Size handles** (step 2), on a part that is one shape:
+
+| Shape | Knobs | Field |
+|---|---|---|
+| box, wedge, pyramid, prism, stairs, arch | One on each of the six sides | `size`, one number |
+| cylinder, cone, capsule, tube | Top and bottom; one on the side | `height`; `radius` |
+| sphere | One | `radius` |
+| torus | One on the outside; one on the tube | `radius`; `tube` |
+
+Pulling a face moves that face and leaves the opposite one where it is.
+(For a free part that means `size` and `move` change together, as one
+step.) Sizes snap like moves.
+
+**Snapping.** Snapping is on. Hold **Ctrl** while dragging to turn it
+off. The step in use is written at the bottom of the viewport: "Snap
+0.1 m, 15°".
+
+**While you drag**, the part moves under the pointer, and a small label
+shows the number ("x 1.2 m", "45°"). Nothing is written to the file
+until you let go: what you see is what the recipe *would* build, the
+same thing `--dry-run` shows an agent. Letting go writes once, as one
+undo step. Escape during a drag drops it and writes nothing.
+
+**Exact numbers.** The properties panel gets the fields the handles
+write: Position, Rotation and Scale for a free part, beside what it
+already has. Typing a number is the same edit as dragging.
+
+### New edit commands
+
+```bash
+duck-mold edit model.toml add crate --shape box --move 1,0.5,0
+duck-mold edit model.toml set crate --move 2,0.5,0 --rotate 0,45,0
+duck-mold edit model.toml set crate --scale 1,2,1
+duck-mold edit model.toml set crate --bevel 0.05 --taper 0.8
+duck-mold edit model.toml unjoin hat
+duck-mold edit model.toml set crate --face-color top=none
+duck-mold edit model.toml remove-color gold --replace-with red
+duck-mold edit model.toml rename-socket body.spot badge
+duck-mold edit model.toml remove-socket body.spot_2
+duck-mold edit model.toml tidy-sockets
+duck-mold new castle.toml --example gate
+```
+
+| Command | What it does | Step |
+|---|---|---|
+| `set <part> --move x,y,z` | Puts a free part's middle there. Refused for a joined part, with what to do instead (slide its socket, or unjoin it). | 1 |
+| `set <part> --rotate x,y,z` | Turns a free part: degrees around x, then y, then z. For a joined part the message says to use `--twist`. | 1 |
+| `set <part> --scale n` or `x,y,z` | Makes any part bigger or smaller, or stretches it. | 1 |
+| `unjoin <part>` | Makes a joined part free, exactly where it stands: writes its `move` and `rotate`, and takes away `attach`, `to` and `twist`. | 1 |
+| `add <name> --shape box` with no `--to` | Adds a free part. `--move`, `--rotate`, `--scale` place it; without `--move` it stands on the ground in the middle. | 3 |
+| `set <part> --tube`, `--wall`, `--steps` | The new shapes' own sizes. | 4 |
+| `set <part> --bevel`, `--bevel-steps`, `--taper` | The two new options. | 4 |
+| `set <part> --face-color top=none` | Takes a face's own colour away again. | 7 |
+| `remove-color <name>` | Removes a palette colour. Refused if anything is painted with it, naming what; `--replace-with <other>` repaints those first. | 7 |
+| `rename-socket <part.socket> <new name>` | Renames a socket, and every `to` and `from` that names it. | 8 |
+| `remove-socket <part.socket>` | Removes a declared socket. Refused if a part sits on it, naming the part. | 8 |
+| `tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing sits on. | 8 |
+| `new <recipe> --example <name>` | Starts a recipe as a copy of an example. | 9 |
+
+All of them follow Phase 2's rules: the same report as `inspect`,
+`--json`, `--dry-run`, refused if the recipe would have more mistakes
+afterwards, and a line each in the agent guide (a test fails if one is
+missing).
+
+Edits that already exist and get a new button or key: `duplicate`,
+`duplicate --mirror`, `remove`, `rename`, `join`, `add-color`,
+`set-color`, `set --face-color`.
+
+**Not edit commands**, because they change how you look, not the model:
+the tools, the camera views, wireframe, the shadow, hiding a part (see
+the decisions), and the tour.
+
+### New shapes
+
+Seven, written like the five there are. All are centred on their own
+middle, and all can be coloured face by face.
+
+| `shape` | Fields (defaults) | What it is | Face names |
+|---|---|---|---|
+| `capsule` | `radius` (0.25), `height` (1), `segments` (16) | A cylinder with a round cap on each end. `height` is the whole length, caps included. | `side`, `top`, `bottom` |
+| `torus` | `radius` (0.5), `tube` (0.15), `segments` (16) | A ring lying flat. `radius` is from the middle of the hole to the middle of the tube; `tube` is how thick the tube is, as a radius. | `side` |
+| `tube` | `radius` (0.5), `wall` (0.1), `height` (1), `segments` (16) | A pipe standing up, open at both ends. `wall` is how thick it is. | `side`, `inside`, `top`, `bottom` |
+| `pyramid` | `size` ([1, 1, 1]) | Four slopes from a rectangle up to a point. | `front`, `back`, `left`, `right`, `sides`, `bottom` |
+| `prism` | `size` ([1, 1, 1]) | A roof: two slopes that meet in a ridge running front to back. | `left`, `right`, `front`, `back`, `bottom` |
+| `stairs` | `size` ([1, 1, 1]), `steps` (4) | Steps that climb from the front to the back, like the wedge. | `top` (every tread), `front` (every riser), `back`, `left`, `right`, `bottom` |
+| `arch` | `size` ([1, 1, 1]), `wall` (0.2), `segments` (8) | A wall with a round-topped doorway through it, front to back. `wall` is how thick the two legs are, and the stone over the top of the curve. | `front`, `back`, `left`, `right`, `top`, `bottom`, `inside` |
+
+```toml
+[[parts]]
+name = "handle"
+shape = "torus"
+radius = 0.3
+tube = 0.05
+color = "steel"
+
+[[parts]]
+name = "steps"
+shape = "stairs"
+size = [1.2, 0.8, 1.6]
+steps = 5
+colors = { top = "plank", front = "dark" }
+```
+
+(A prism with more than three sides is already there: a cylinder with
+`segments = 6`.)
+
+**Their sockets sit on the surface**, by the rule there is: a socket
+starts on the box around the shape and moves straight in until it
+touches. Three places need saying:
+
+- A torus's and a tube's `top` and `bottom` are in the middle of the
+  opening, level with the rim: a lid sits there. To sit on the rim, use
+  a socket with `on = "top"` and a `shift`.
+- An arch's `bottom` is between its feet, at ground level, and its
+  `front` and `back` are in the doorway's mouth: a door joined to
+  `arch.front` stands in the doorway.
+- A pyramid's `top` is its point; a prism's is the middle of its ridge.
+  Their side sockets lie on the slopes and face out of them.
+
+### Two options: bevel and taper
+
+| Field | On | What it does | Range |
+|---|---|---|---|
+| `bevel = 0.05` | box, cylinder | Cuts that many metres off every edge, so they aren't sharp. | 0 to just under half the smallest side |
+| `bevel_steps = 1` | with `bevel` | 1 is one flat cut. 2 to 4 make the edge rounder, with more triangles. | 1 to 4 |
+| `taper = 0.5` | box, cylinder, tube | The top is half as wide as the bottom. 1 is straight; above 1 it widens. Two numbers, `[0.5, 1]`, taper width and depth apart. | 0.01 to 10 |
+
+```toml
+[[parts]]
+name = "tower"
+shape = "cylinder"
+radius = 0.6
+height = 2.4
+taper = 0.8
+bevel = 0.04
+```
+
+- The cut faces are called `bevel`, to colour them
+  (`colors = { bevel = "trim" }`). Without that they have the part's
+  colour.
+- A tapered side leans, and its sockets lean with it, sitting on it.
+- A box with `taper = 0.01` is nearly a pyramid; that is fine.
+
+**Nothing changes in the `.glb` or in Duck Forge.** A new shape is only
+more triangles, and the reader there already reads those. The recipe
+format's `version` stays 0: these are additions, and every recipe there
+is still builds the same, byte for byte. The golden files prove it.
+
+**Seven new examples**, one for each shape, each a small model rather
+than the bare shape: a dog (capsules), a doughnut (torus), a mug (tube),
+a temple (pyramid), a barn (prism), a playground slide (stairs), a
+castle gate (arch, with tapered and bevelled towers). Each gets the
+stored model, report and picture the other examples have.
+
+### The top bar and the menus
+
+```text
++--------------------------------------------------------------------------------+
+| (duck) robot.toml | File  Edit  View  Help |  Undo Redo | Add v |               |
+|        Front Side Top 3/4 | Frame | Grid Wire Shadow | Export  Render picture   |
++--+----------+--------------------------------------------------+---------------+
+|  | PARTS    |  [G] Move                                        | PROPERTIES    |
+|  |  body    |  [R] Rotate                                      |  name  head   |
+|  |  head  o |  [S] Scale        the viewport                   |  position ... |
+|  |  hat   o |  [T] Size                                        |  size  ...    |
+|  |          |  [P] Paint                                       |  colour ...   |
+|  +----------+                                                  +---------------+
+|  | LIBRARY  |                                                  | SOCKETS       |
+|  | [] []    |                                                  |  neck  [x]    |
+|  |          |          Snap 0.1 m, 15°  (Ctrl: off)            +---------------+
+|  |          |                                                  | PALETTE       |
+|  |          |                                                  |  [] steel  +  |
++--+----------+--------------------------------------------------+---------------+
+| PROBLEMS  None                                       Moved "hat" to 1, 0.5, 0   |
++--------------------------------------------------------------------------------+
+```
+
+(The bar is one row on a wide window; it wraps to two on a narrow one.
+The `o` beside a part in the list is its eye: click it to hide the
+part.)
+
+| Menu | What is in it |
+|---|---|
+| **File** | New model, Open, Open an example, Opened lately, Export, Render picture, Back to the start page |
+| **Edit** | Undo, Redo, Duplicate, Mirror copy, Remove, Rename, Unjoin, Tidy sockets, Select all |
+| **View** | Front, Side, Top, Three-quarter, Frame, Grid, Wireframe, Shadow, Show everything hidden |
+| **Help** | Show the tips again, The keys (this list), About |
+| **Add** | The twelve shapes with a small picture each, then the recipe's defined parts, then the library. The new part stands on the ground where the middle of your view meets it, joined to nothing, selected, with the Move tool on. |
+
+Every menu line shows its key, so the menus teach the keys.
+
+### The keys
+
+| Key | Does |
+|---|---|
+| G, R, S, T, P | Move, Rotate, Scale, Size, Paint tool |
+| Delete or Backspace | Remove the selected parts |
+| Ctrl+D | Duplicate |
+| Ctrl+Z; Ctrl+Y or Ctrl+Shift+Z | Undo; redo |
+| F | Frame: bring what is selected (or everything) into view |
+| 1, 2, 3, 4 | Front, side, top, three-quarter view |
+| Z | Wireframe on and off |
+| H; Shift+H | Hide what is selected; show everything |
+| F2 | Rename |
+| Shift+A | Open the Add menu |
+| Shift+click | Add a part to the selection, or take it out |
+| Ctrl+A | Select every part |
+| Ctrl held while dragging | No snapping |
+| Escape | Lets go: of a drag, then of a menu, then of the selection |
+| Ctrl+N, Ctrl+O, Ctrl+E | New model, Open, Export |
+
+Keys don't fire while you type in a field. The mouse is as before: drag
+on empty space turns the view, right-drag (or Shift+drag, or
+middle-drag) slides it, the wheel zooms.
+
+### Right-click, several parts, hiding (step 5)
+
+**Right-click a part**, in the picture or in the list:
+
+```text
+  Duplicate            Ctrl+D
+  Mirror copy
+  Rename               F2
+  Remove               Delete
+  ---------------------------
+  Join to            > body > top, front, neck ...
+  Unjoin
+  Add a part here    > Box, Cylinder ...
+  ---------------------------
+  Frame                F
+  Hide                 H
+```
+
+**Several parts.** Shift+click adds to the selection. With several
+selected:
+
+- Move moves them together. Rotate and Scale turn and size them around
+  the middle of the group.
+- A joined part in the group goes where the part it is joined to goes.
+  If that part isn't in the group, it stays, and the status line says
+  which stayed.
+- The properties panel shows "3 parts" and what can be set for all:
+  colour, and the Duplicate, Remove and Hide buttons.
+- It is one undo step. In the file it is the same edit made once for
+  each part; an agent runs the command once for each.
+
+### Views and look (step 6)
+
+- **Front, Side, Top, Three-quarter** turn the camera; the model stays
+  in view.
+- **Wireframe** draws every face's outline and doesn't fill it, so you
+  can see through.
+- **Shadow** darkens the ground softly under the model, straight down,
+  so you can see what touches the ground and what hangs over it. It is
+  in the Studio only: `render`'s pictures don't change.
+- All are drawn by the CPU renderer, as lines and triangles.
+
+### Colour (step 7)
+
+- **A palette panel** lists the recipe's colours as squares with names.
+  `+` adds one, a click on a square changes it (everything painted with
+  it changes), and the bin removes it. If it is in use, the Studio asks
+  which colour to repaint with.
+- **The Paint tool**: pick a colour in the panel, click a face. A face
+  here is one the recipe can name: a box's `top`, a cylinder's `side`,
+  a file part's material. The face lights up under the pointer first.
+  Shift+click paints the whole part.
+- A single triangle can't be painted yet. That needs Phase 4.
+
+### Sockets (step 8)
+
+- The properties panel lists the selected part's declared sockets, each
+  with rename and remove.
+- When a Studio action leaves one of the sockets it made (`spot`,
+  `spot_2`...) with nothing on it, it removes it in the same undo step.
+  Sockets you named yourself are never removed for you.
+
+### The start page (step 9)
+
+```text
++--------------------------------------------------------------------------+
+|   (duck)   Duck Mold Studio                                       0.3.0  |
+|            Build 3D models from parts, for Duck Forge games.             |
+|                                                                          |
+|   [ New model ]   [ Open a model ]                                       |
+|                                                                          |
+|   Opened lately                                                          |
+|   +--------+  +--------+  +--------+                                     |
+|   | (pic)  |  | (pic)  |  | (pic)  |                                     |
+|   +--------+  +--------+  +--------+                                     |
+|   castle      my_robot    crate                                          |
+|                                                                          |
+|   Examples: click one to open a copy of your own                         |
+|   +------+ +------+ +------+ +------+ +------+ +------+                  |
+|   |robot | |house | |snow- | |desk  | |duck  | |dog   |                  |
+|   |      | |      | | man  | |      | |      | |      |                  |
+|   +------+ +------+ +------+ +------+ +------+ +------+                  |
+|   +------+ +------+ +------+ +------+ +------+ +------+                  |
+|   |dough-| |mug   | |temple| |barn  | |slide | |gate  |                  |
+|   | nut  | |      | |      | |      | |      | |      |                  |
+|   +------+ +------+ +------+ +------+ +------+ +------+                  |
+|                                                                          |
+|   How it works                                                           |
+|   1. A model is made of parts: boxes, balls, tubes, arches...            |
+|   2. Parts stand free, or join at dots, so they stay together.           |
+|   3. Everything you do is written to a recipe file as you go.            |
+|      Export turns it into the model file for your game.                  |
++--------------------------------------------------------------------------+
+```
+
+- The examples are inside the program, so the gallery is always there,
+  wherever the program was started from.
+- A click copies the example into `Documents\Duck Mold\` (as
+  `robot.toml`, or `robot_2.toml` if that is taken) and opens the copy.
+  The example itself can't be spoiled.
+- Every picture is drawn by the same code as `render`. A recent model
+  that no longer builds shows a plain tile with its name.
+
+### The first-run tour (step 10)
+
+Five small tips, shown once, on the first model you open. Each points
+at the thing it is about, with **Next** and **Skip the tips**.
+
+1. On the picture: "Drag to look around. Roll the wheel to come
+   closer."
+2. On a part: "Click a part to select it."
+3. On the arrows: "Drag an arrow to move it. R turns it, S sizes it."
+4. On a dot: "Dots are sockets. Click one to add a part that stays
+   joined there."
+5. On Add: "Add puts a new shape on the ground."
+
+Help > Show the tips again brings them back. That they were seen is
+kept in the Studio's settings file, with the recent list.
+
+### How this leaves room for Phase 4
+
+Phase 4 is moving single corners, edges and faces. Phase 3 is built so
+that fits in, not so it has to be rebuilt:
+
+- **The handles don't know what a part is.** Arrows, rings and boxes
+  act on "a thing with a middle and three directions". In Phase 3 that
+  thing is a part or a group of parts. In Phase 4 it can be a corner,
+  an edge or a face, with the same handles and the same snapping.
+- **A click already knows more than the part.** From this phase it
+  knows the face, by name, and the nearest edge and corner. The Paint
+  tool uses the face; Phase 4 uses the rest.
+- **Every shape's corners and faces come in a fixed, tested order.**
+  That is what will let a recipe say "this corner, moved this far" in
+  Phase 4 and mean the same corner on every computer.
+- **Shapes are changed in fixed stages**: the shape, then bevel, then
+  taper, then scale and mirror, then its place. Phase 4's corner moves
+  are one more stage, between taper and scale.
+- **The tool strip has room** for a "whole part / corner / edge / face"
+  switch above it.
+- **Dragging shows a preview and writes once.** That works for any
+  edit, so Phase 4's drags get it for nothing.
+
+What Phase 4 will have to decide, and this phase doesn't: how a moved
+corner is written in a recipe.
+
+### Testing
+
+- **Each new edit command**: on every example, in TOML and JSON, with
+  only the expected lines changed.
+- **Each new shape and option**: its triangle count, that it is closed
+  (no holes), its sockets on its surface, and a stored picture. The old
+  golden files must not change by one byte.
+- **Handles without a screen**: tests press on a handle at its place in
+  the picture, move the pointer, and let go, then read the recipe file.
+  With snapping and without. For free parts, joined parts and groups.
+  Escape writes nothing. One drag is one undo step.
+- **Stored pictures of the viewport**, byte for byte on both systems:
+  each tool's handles, the grid, wireframe, the shadow, each view.
+- **Stored pictures of every new screen** (Linux, as before): the start
+  page, the top bar with each menu open, the right-click menu, several
+  parts selected, the palette panel, the sockets list, each tip of the
+  tour.
+- **The real screens clicked** on Windows and Linux: every menu line,
+  every key in the list above.
+
+### What still won't be in the Studio after this phase
+
+Corners, edges and faces; extrude; sculpting; booleans; bones;
+animation; UVs; textures (all by the brief). Also: making a definition
+from a part, changing the order of parts, sockets written with `at` or
+`from`, and docking inside Duck Forge's Studio.
+
+### The decisions
+
+Eight places where a choice was made. All eight were approved as
+recommended.
+
+1. **Hiding a part is like turning the camera: it isn't saved in the
+   recipe.** A hidden part is still in the model and still exported.
+   The bar says "2 hidden" so it isn't forgotten. *The other way:* a
+   `hidden` field in the recipe, which would leave the part out of the
+   exported model too. I think that is a trap: hide a wall to look
+   inside, export, and the game has no wall.
+2. **The ground stays under the lowest part**, so the only part of a
+   model can't be lifted into the air (the Studio says why). *The other
+   way:* new models get a fixed zero point, parts can float or sink,
+   and a model can be exported hanging above the floor or half in it. I
+   recommend keeping the promise that a model always stands on the
+   ground.
+3. **A click on the selected part no longer opens the "add here"
+   list.** In Phase 2 it did. With handles, a click on the part is the
+   start of a drag, and the list got in the way. "Add a part here"
+   moves to the right-click menu. The dots work as before.
+4. **`prism` is the roof shape, and `arch` is a wall with a doorway.**
+   A prism could also mean a bar with any number of sides, and an arch
+   a curved band standing free. Say if you meant those.
+5. **Bevel is one flat cut unless `bevel_steps` asks for more.** Round
+   edges cost triangles, and a game model should be light by default.
+6. **Scale and Size are two tools**, as the brief lists them. Scale
+   works on anything and writes `scale`; Size pulls one face of a shape
+   and writes its own size. If two feels like one too many once you try
+   it, they can share a button.
+7. **Example copies go to `Documents\Duck Mold\`.**
+8. **A zip to try after step 3.** How handles feel is the point of this
+   phase, and only a person at a PC can judge it. After steps 1 to 3
+   (handles, size handles, the Add menu) I will have GitHub build the
+   Windows zip from the branch and give you the link, and keep building
+   unless you tell me to stop.
+
+The version becomes 0.3.0.

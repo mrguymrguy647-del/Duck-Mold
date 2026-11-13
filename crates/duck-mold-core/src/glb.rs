@@ -737,6 +737,7 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         faces,
         parts,
         sockets,
+        zero: Vec3::ZERO,
     })
 }
 
@@ -796,12 +797,15 @@ fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Fa
             attached_to: None,
             mirrored: false,
             place: Transform::IDENTITY,
+            local: Transform::IDENTITY,
             sockets: Vec::new(),
             bounds: Bounds::around(
                 faces[own.clone()]
                     .iter()
                     .flat_map(|face| face.corners.iter().copied()),
             ),
+            face_names: Vec::new(),
+            face_groups: Vec::new(),
             faces: own.clone(),
             parts: if *assembly {
                 part_tree(name, entries, faces)

@@ -216,10 +216,17 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         attached_to: None,
         mirrored: false,
         place: Transform::IDENTITY,
+        local: Transform::IDENTITY,
         sockets: Vec::new(),
         bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
         faces: 0..faces.len(),
         parts: Vec::new(),
+        face_names: mesh.materials.clone(),
+        face_groups: mesh
+            .material_of
+            .iter()
+            .map(|&material| material as u16)
+            .collect(),
     };
     Model {
         name,
@@ -227,6 +234,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         faces,
         parts: vec![part],
         sockets: Vec::new(),
+        zero: Vec3::ZERO,
     }
 }
 
@@ -343,9 +351,162 @@ size = [1, 1, 1]
 color = "duck"
 "##;
 
+/// An example recipe that is inside the program: the Studio's start
+/// page shows them, and `duck-mold new --example` copies one out.
+#[derive(Debug, Clone, Copy)]
+pub struct Example {
+    /// Its name: `robot`.
+    pub name: &'static str,
+    /// What it shows, in a few words.
+    pub about: &'static str,
+    /// The recipe's text.
+    pub recipe: &'static str,
+    /// The files the recipe uses, each with where it goes from the
+    /// recipe's folder: `parts/lamp.gltf`.
+    pub files: &'static [(&'static str, &'static [u8])],
+}
+
+/// The examples, in the order the start page shows them.
+pub const EXAMPLES: [Example; 12] = [
+    Example {
+        name: "robot",
+        about: "Parts made of parts, and a mirrored arm",
+        recipe: include_str!("../../../examples/robot.toml"),
+        files: &[],
+    },
+    Example {
+        name: "house",
+        about: "A roof of two ramps, with a door, windows and a chimney on sockets",
+        recipe: include_str!("../../../examples/house.toml"),
+        files: &[],
+    },
+    Example {
+        name: "snowman",
+        about: "Eyes, buttons and arms that follow round surfaces",
+        recipe: include_str!("../../../examples/snowman.toml"),
+        files: &[],
+    },
+    Example {
+        name: "desk",
+        about: "Parts made elsewhere: a lamp and a crate from model files",
+        recipe: include_str!("../../../examples/desk.toml"),
+        files: &[
+            (
+                "parts/lamp.gltf",
+                include_bytes!("../../../examples/parts/lamp.gltf"),
+            ),
+            (
+                "parts/crate.glb",
+                include_bytes!("../../../examples/parts/crate.glb"),
+            ),
+        ],
+    },
+    Example {
+        name: "duck",
+        about: "A ball stretched into a body, and one wing used twice",
+        recipe: include_str!("../../../examples/duck.toml"),
+        files: &[],
+    },
+    Example {
+        name: "dog",
+        about: "Capsules: a body lying down and a leg used four times",
+        recipe: include_str!("../../../examples/dog.toml"),
+        files: &[],
+    },
+    Example {
+        name: "doughnut",
+        about: "A torus, with icing, sprinkles and a bevelled plate",
+        recipe: include_str!("../../../examples/doughnut.toml"),
+        files: &[],
+    },
+    Example {
+        name: "mug",
+        about: "A tube that widens with taper, and a ring for a handle",
+        recipe: include_str!("../../../examples/mug.toml"),
+        files: &[],
+    },
+    Example {
+        name: "temple",
+        about: "A pyramid roof on columns, with stairs up the front",
+        recipe: include_str!("../../../examples/temple.toml"),
+        files: &[],
+    },
+    Example {
+        name: "barn",
+        about: "A prism for a ridged roof, and a silo with a round cap",
+        recipe: include_str!("../../../examples/barn.toml"),
+        files: &[],
+    },
+    Example {
+        name: "slide",
+        about: "Stairs up to a platform and a ramp down the other side",
+        recipe: include_str!("../../../examples/slide.toml"),
+        files: &[],
+    },
+    Example {
+        name: "gate",
+        about: "An arch between two towers that are tapered and bevelled",
+        recipe: include_str!("../../../examples/gate.toml"),
+        files: &[],
+    },
+];
+
+/// `duck-mold new --example`: writes a copy of an example to `path`,
+/// with the files it uses beside it. The recipe must not be there yet;
+/// a file it uses that is there already is left as it is.
+pub fn new_from_example(path: &Path, example: &str) -> Result<Inspection, Failure> {
+    let Some(found) = EXAMPLES.iter().find(|known| known.name == example) else {
+        let names = EXAMPLES.iter().map(|known| known.name);
+        return Err(Failure::Usage(Box::new(
+            Issue::error(
+                Code::Io,
+                "",
+                format!("there is no example called \"{example}\""),
+            )
+            .got(example)
+            .one_of(example, names),
+        )));
+    };
+    new_recipe(path, found.recipe)?;
+    let folder = path.parent().unwrap_or(Path::new(""));
+    for (name, bytes) in found.files {
+        let file = folder.join(name);
+        if file.exists() {
+            continue;
+        }
+        if let Some(within) = file.parent() {
+            std::fs::create_dir_all(within).map_err(|error| {
+                Failure::Usage(Box::new(Issue::error(
+                    Code::Io,
+                    "",
+                    format!(
+                        "couldn't make the folder \"{}\": {error}",
+                        display_path(within)
+                    ),
+                )))
+            })?;
+        }
+        write_file(&file, bytes)?;
+    }
+    inspect_file(path)
+}
+
 /// `duck-mold new`: writes the starter recipe to `path`, which must end
 /// in `.toml` and must not be there yet. Nothing is ever written over.
 pub fn new_file(path: &Path) -> Result<Inspection, Failure> {
+    let name = path
+        .file_stem()
+        .map(|stem| stem.to_string_lossy().into_owned())
+        .filter(|stem| !stem.is_empty() && !stem.contains(['"', '\\']))
+        .unwrap_or_else(|| "model".to_owned());
+    let text = STARTER.replacen("\"model\"", &format!("\"{name}\""), 1);
+    new_recipe(path, &text)?;
+    inspect_file(path)
+}
+
+/// Writes a new recipe's text to `path`, which must end in `.toml` and
+/// must not be there yet.
+fn new_recipe(path: &Path, text: &str) -> Result<(), Failure> {
     let refuse = |why: String| Failure::Usage(Box::new(Issue::error(Code::Io, "", why)));
     let is_toml = path
         .extension()
@@ -363,12 +524,5 @@ pub fn new_file(path: &Path) -> Result<Inspection, Failure> {
             display_path(path)
         )));
     }
-    let name = path
-        .file_stem()
-        .map(|stem| stem.to_string_lossy().into_owned())
-        .filter(|stem| !stem.is_empty() && !stem.contains(['"', '\\']))
-        .unwrap_or_else(|| "model".to_owned());
-    let text = STARTER.replacen("\"model\"", &format!("\"{name}\""), 1);
-    write_file(path, text.as_bytes())?;
-    inspect_file(path)
+    write_file(path, text.as_bytes())
 }

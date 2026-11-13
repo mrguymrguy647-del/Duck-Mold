@@ -21,6 +21,7 @@
 use std::path::Path;
 
 use duck_mold_studio::StudioApp;
+use eframe::egui;
 use egui_kittest::kittest::Queryable;
 use egui_kittest::{Harness, SnapshotOptions};
 
@@ -59,11 +60,45 @@ fn robot() -> Harness<'static, StudioApp> {
 fn the_screens_look_as_they_did() {
     let mut wrong: Vec<String> = Vec::new();
 
-    // The start page.
+    // The start page: first with nothing opened yet, then with models
+    // opened lately, one of which no longer builds. (The folder for
+    // copies of the examples is named as on any machine.)
     {
-        let mut screen = harness(StudioApp::new(), true);
+        let mut screen = harness(
+            StudioApp::new().keeping_models_in("Documents/Duck Mold"),
+            true,
+        );
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "start"));
+    }
+    {
+        use duck_mold_studio::recent::Recent;
+        let folder = folder("pictures_start");
+        for name in ["castle", "my_robot", "mistake"] {
+            let from = match name {
+                "castle" => "gate.toml",
+                _ => "robot.toml",
+            };
+            std::fs::copy(examples().join(from), folder.join(format!("{name}.toml"))).unwrap();
+        }
+        std::fs::write(
+            folder.join("mistake.toml"),
+            "version = 0\n[[parts]]\nshape = \"blob\"\n",
+        )
+        .unwrap();
+        let list = folder.join("recent.txt");
+        let mut recent = Recent::kept_in(list.clone());
+        for name in ["mistake", "my_robot", "castle"] {
+            recent.opened(&folder.join(format!("{name}.toml")));
+        }
+        let mut screen = harness(
+            StudioApp::new()
+                .remembering(Recent::kept_in(list))
+                .keeping_models_in("Documents/Duck Mold"),
+            true,
+        );
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "start-recent"));
     }
 
     // A recipe open, with nothing selected.
@@ -123,6 +158,209 @@ fn the_screens_look_as_they_did() {
         click_at(&mut screen, at);
         screen.run_steps(2);
         wrong.extend(check(&mut screen, "library"));
+    }
+
+    // The handles: a free part with the Move tool's arrows, then the
+    // Rotate tool's rings.
+    {
+        let recipe = folder("pictures_handles").join("boxes.toml");
+        std::fs::write(
+            &recipe,
+            "version = 0\nname = \"boxes\"\n\n[palette]\nstone = \"#C0C0C0\"\nred = \"#D0453A\"\n\n[[parts]]\nname = \"floor\"\nshape = \"box\"\nsize = [2, 0.2, 2]\ncolor = \"stone\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.5, 0.5, 0.5]\ncolor = \"red\"\nmove = [0.5, 0.35, 0]\n",
+        )
+        .unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("crate"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "handles-move"));
+        screen.key_press(egui::Key::R);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "handles-rotate"));
+        screen.key_press(egui::Key::T);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "handles-size"));
+
+        // The Add menu, open; then the part it adds, standing on the
+        // ground beside the floor with the arrows on it.
+        screen.get_by_label("Add").click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "add-menu"));
+        screen
+            .get_by_role_and_label(egui::accesskit::Role::Button, "Cone")
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "add-free"));
+    }
+
+    // The newer shapes: an arch with its sizes in the panel and the Size
+    // tool's knobs on it; a tower's tapered, bevelled shaft; and a ring
+    // with a knob for how big it is and one for how thick.
+    {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("gate.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("arch"));
+        screen.key_press(egui::Key::T);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "shape-arch"));
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("left_tower/shaft"));
+        screen.key_press(egui::Key::G);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "shape-bevel-taper"));
+    }
+    {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("doughnut.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("dough"));
+        screen.key_press(egui::Key::T);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "shape-torus"));
+    }
+
+    // Several parts selected, with the arrows that move them together
+    // and the panel for them all; the right-click menu; and a hidden
+    // part, struck through in the list and counted in the bar.
+    {
+        let recipe = folder("pictures_several").join("yard.toml");
+        std::fs::write(
+            &recipe,
+            "version = 0\nname = \"yard\"\n\n[palette]\nstone = \"#C0C0C0\"\nred = \"#D0453A\"\nblue = \"#3A6FD0\"\n\n[[parts]]\nname = \"floor\"\nshape = \"box\"\nsize = [4, 0.2, 4]\ncolor = \"stone\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.5, 0.5, 0.5]\ncolor = \"red\"\nmove = [0.8, 0.35, 0.6]\n\n[[parts]]\nname = \"post\"\nshape = \"cylinder\"\nradius = 0.1\nheight = 1\ncolor = \"blue\"\nmove = [-0.8, 0.6, 0.5]\n\n[[parts]]\nname = \"cap\"\nshape = \"sphere\"\nradius = 0.15\ncolor = \"red\"\nattach = \"bottom\"\nto = \"post.top\"\n",
+        )
+        .unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("crate"));
+        screen.state_mut().studio_mut().unwrap().toggle("post");
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "several"));
+        let at = on_screen(&screen, "crate");
+        right_click_at(&mut screen, at);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "menu"));
+        screen.key_press(egui::Key::Escape);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("post"));
+        screen.key_press(egui::Key::H);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "hidden"));
+    }
+
+    // The first run's tips: the first, the one that points at an arrow,
+    // the one that points at a dot, and the one that points at Add.
+    {
+        use duck_mold_studio::recent::Recent;
+        let folder = folder("pictures_tour");
+        let mut screen = harness(
+            StudioApp::new()
+                .remembering(Recent::kept_in(folder.join("recent.txt")))
+                .keeping_models_in("Documents/Duck Mold"),
+            true,
+        );
+        screen
+            .state_mut()
+            .open(examples().join("robot.toml"), false);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "tour-1"));
+        for name in ["tour-2", "tour-3", "tour-4", "tour-5"] {
+            screen.get_by_label("Next").click();
+            screen.run_steps(3);
+            if name != "tour-2" {
+                wrong.extend(check(&mut screen, name));
+            }
+        }
+    }
+
+    // Colour: the palette with a colour picked and the Paint tool in
+    // hand, over a face that lights up; a face painted; and the question
+    // asked when a colour in use is removed.
+    {
+        let mut screen = harness(
+            StudioApp::with_file(copy_of("house.toml", "pictures_paint"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .get_by_role_and_label(egui::accesskit::Role::Button, "glass")
+            .click();
+        screen.run_steps(3);
+        let at = on_screen(&screen, "door");
+        screen.hover_at(at);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "paint"));
+        click_at(&mut screen, at);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "painted"));
+        screen.query_all_by_label("remove").next().unwrap().click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "palette-remove"));
+    }
+
+    // Sockets: a part that declares some, listed in the panel with how
+    // much each is used.
+    {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("duck.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "sockets"));
+    }
+
+    // The look: wireframe, the view from the top, and the View menu.
+    {
+        let mut screen = harness(
+            StudioApp::with_file(examples().join("temple.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen.key_press(egui::Key::Z);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "wireframe"));
+        screen.key_press(egui::Key::Z);
+        screen.key_press(egui::Key::Num3);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "view-top"));
+        screen.key_press(egui::Key::Num4);
+        screen.run_steps(2);
+        screen.get_by_label("View").click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "menu-view"));
     }
 
     // A recipe saved with a mistake: the problems, and the last good

@@ -58,7 +58,10 @@ pub fn on_screen(screen: &Harness<'static, StudioApp>, part: &str) -> egui::Pos2
     let (rect, [width, height]) = screen.state().viewport().unwrap();
     let studio = screen.state().studio().unwrap();
     let middle = studio.part(part).unwrap().bounds.unwrap().center();
-    let (x, y) = studio.orbit.on_screen(middle, width, height).unwrap();
+    let (x, y) = studio
+        .orbit
+        .on_screen(middle + studio.offset(), width, height)
+        .unwrap();
     rect.min
         + egui::vec2(
             x as f32 * rect.width() / width as f32,
@@ -97,10 +100,98 @@ pub fn socket_on_screen(
         .find(|known| known.name == socket)
         .unwrap()
         .at;
-    let (x, y) = studio.orbit.on_screen(at, width, height).unwrap();
+    let (x, y) = studio
+        .orbit
+        .on_screen(at + studio.offset(), width, height)
+        .unwrap();
     rect.min
         + egui::vec2(
             x as f32 * rect.width() / width as f32,
             y as f32 * rect.height() / height as f32,
         )
+}
+
+/// Presses on one point, moves to another in a few steps, and lets go.
+pub fn drag(screen: &mut Harness<'static, StudioApp>, from: egui::Pos2, to: egui::Pos2) {
+    screen.hover_at(from);
+    screen.step();
+    screen.drag_at(from);
+    screen.step();
+    for part in 1..=4 {
+        screen.hover_at(from + (to - from) * (part as f32 / 4.0));
+        screen.step();
+    }
+    screen.event(egui::Event::PointerButton {
+        pos: to,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    });
+    screen.run_steps(3);
+}
+
+/// Where a point of the picture's own space is on the screen.
+pub fn point_on_screen(
+    screen: &Harness<'static, StudioApp>,
+    point: duck_mold_core::math::Vec3,
+) -> egui::Pos2 {
+    let (rect, [width, height]) = screen.state().viewport().unwrap();
+    let studio = screen.state().studio().unwrap();
+    let (x, y) = studio.orbit.on_screen(point, width, height).unwrap();
+    rect.min
+        + egui::vec2(
+            x as f32 * rect.width() / width as f32,
+            y as f32 * rect.height() / height as f32,
+        )
+}
+
+/// A click with another button, or with a key held: presses and lets
+/// go without moving.
+pub fn click_with(
+    screen: &mut Harness<'static, StudioApp>,
+    at: egui::Pos2,
+    button: egui::PointerButton,
+    modifiers: egui::Modifiers,
+) {
+    screen.hover_at(at);
+    screen.step();
+    for pressed in [true, false] {
+        screen.event_modifiers(
+            egui::Event::PointerButton {
+                pos: at,
+                button,
+                pressed,
+                modifiers,
+            },
+            modifiers,
+        );
+        screen.step();
+    }
+    screen.run_steps(2);
+}
+
+/// A click of the right button.
+pub fn right_click_at(screen: &mut Harness<'static, StudioApp>, at: egui::Pos2) {
+    click_with(
+        screen,
+        at,
+        egui::PointerButton::Secondary,
+        egui::Modifiers::NONE,
+    );
+}
+
+/// A click with Shift held.
+pub fn shift_click_at(screen: &mut Harness<'static, StudioApp>, at: egui::Pos2) {
+    click_with(
+        screen,
+        at,
+        egui::PointerButton::Primary,
+        egui::Modifiers::SHIFT,
+    );
+}
+
+/// The paths of the selected parts.
+pub fn selection(screen: &Harness<'static, StudioApp>) -> Vec<String> {
+    let studio = screen.state().studio().unwrap();
+    studio.selection().into_iter().map(str::to_owned).collect()
 }

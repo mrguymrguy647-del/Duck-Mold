@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -453,6 +453,401 @@ fn edit_changes_the_recipe_and_prints_the_report() {
 }
 
 #[test]
+fn add_without_a_socket_stands_the_part_on_the_ground() {
+    let folder = folder("cli_edit_free");
+    // The trunk is 1.2 tall round the recipe's zero, so the ground is at
+    // -0.6, and the middle of a rock 0.2 tall is 0.1 above it.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "rock",
+            "--shape",
+            "box",
+            "--size",
+            "0.4,0.2,0.4",
+            "--color",
+            "bark",
+            "--stand",
+            "1,-0.5",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("edited tree.toml: added \"rock\" (box), standing free\n"),
+        "{}",
+        stdout(&output)
+    );
+    let rock = "\n[[parts]]\nname = \"rock\"\nshape = \"box\"\nsize = [0.4, 0.2, 0.4]\ncolor = \"bark\"\nmove = [1, -0.5, -0.5]\n";
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        format!("{TREE}{rock}")
+    );
+
+    // An exact place, a turn and a size, as JSON.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "cloud",
+            "--shape",
+            "sphere",
+            "--radius",
+            "0.3",
+            "--color",
+            "leaf",
+            "--move",
+            "-1,3,0",
+            "--rotate",
+            "0,45,0",
+            "--scale",
+            "2,1,1",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "add");
+    assert_eq!(
+        report["edit"]["summary"],
+        "added \"cloud\" (sphere), standing free"
+    );
+    assert!(
+        std::fs::read_to_string(folder.join("tree.toml"))
+            .unwrap()
+            .ends_with(
+                "color = \"leaf\"\nrotate = [0, 45, 0]\nmove = [-1, 3, 0]\nscale = [2, 1, 1]\n"
+            )
+    );
+
+    // A join's words with no join, and a place with a join: exit code 2.
+    let before = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "x",
+            "--shape",
+            "box",
+            "--attach",
+            "top",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--attach and --twist belong to a join"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "x",
+            "--shape",
+            "box",
+            "--to",
+            "trunk.top",
+            "--stand",
+            "1,1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("goes where its socket is"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add",
+            "x",
+            "--shape",
+            "box",
+            "--stand",
+            "1",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--stand needs two numbers"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn the_newer_shapes_and_options_are_edited_from_the_command_line() {
+    let folder = folder("cli_edit_shapes");
+    // The trunk gets cut rims and a narrower top.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--bevel",
+            "0.03",
+            "--bevel-steps",
+            "2",
+            "--taper",
+            "0.6",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output)
+            .starts_with("edited tree.toml: set \"trunk\": bevel 0.03, bevel_steps 2, taper 0.6\n"),
+        "{}",
+        stdout(&output)
+    );
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(
+        text.contains("segments = 8\nbevel = 0.03\nbevel_steps = 2\ntaper = 0.6\ncolor = \"bark\""),
+        "{text}"
+    );
+    // Two numbers narrow it one way more than the other; 1 makes it
+    // straight again, and 0 its rims sharp.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "trunk", "--taper", "0.6,0.9"],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        std::fs::read_to_string(folder.join("tree.toml"))
+            .unwrap()
+            .contains("taper = [0.6, 0.9]")
+    );
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--taper",
+            "1",
+            "--bevel",
+            "0",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        TREE
+    );
+
+    // A ring round the trunk, steps beside it and an arch over it.
+    for (name, words) in [
+        (
+            "swing",
+            &["--shape", "torus", "--radius", "0.4", "--tube", "0.05"][..],
+        ),
+        (
+            "ladder",
+            &["--shape", "stairs", "--size", "0.5,0.6,0.6", "--steps", "3"][..],
+        ),
+        (
+            "gate",
+            &["--shape", "arch", "--size", "2,2.5,0.3", "--wall", "0.25"][..],
+        ),
+        (
+            "pipe",
+            &[
+                "--shape", "tube", "--radius", "0.2", "--wall", "0.02", "--height", "0.5",
+            ][..],
+        ),
+    ] {
+        let mut arguments = vec!["edit", "tree.toml", "add", name, "--color", "bark"];
+        arguments.extend_from_slice(words);
+        let output = run(&folder, &arguments);
+        assert_eq!(output.status.code(), Some(0), "{name}: {}", stderr(&output));
+    }
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    for written in [
+        "shape = \"torus\"\nradius = 0.4\ntube = 0.05\n",
+        "shape = \"stairs\"\nsize = [0.5, 0.6, 0.6]\nsteps = 3\n",
+        "shape = \"arch\"\nsize = [2, 2.5, 0.3]\nwall = 0.25\n",
+        "shape = \"tube\"\nradius = 0.2\nwall = 0.02\nheight = 0.5\n",
+    ] {
+        assert!(text.contains(written), "{written} isn't in:\n{text}");
+    }
+    let output = run(&folder, &["inspect", "tree.toml", "--json"]);
+    assert_eq!(json(&output)["parts"].as_array().unwrap().len(), 6);
+
+    // Words that are wrong: exit code 2, and nothing written.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "trunk", "--taper", "1,2,3"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("--taper needs one number"),
+        "{}",
+        stderr(&output)
+    );
+    // An option the shape can't have: exit code 1, with why.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "leaves", "--bevel", "0.1"],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("only a box and a cylinder have edges to cut"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        text
+    );
+}
+
+#[test]
+fn a_colour_is_removed_and_a_faces_colour_taken_away_from_the_command_line() {
+    let folder = folder("cli_edit_colours");
+    // In use: it can't be done as asked (exit code 2, one line), which
+    // names what is painted with it.
+    let output = run(&folder, &["edit", "tree.toml", "remove-color", "bark"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains(
+            "the colour \"bark\" is in use: 1 thing is painted with it (trunk). Say what to paint them instead, like --replace-with leaf"
+        ),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        TREE
+    );
+    // Repainted first, it goes.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "remove-color",
+            "bark",
+            "--replace-with",
+            "leaf",
+            "--json",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "remove-color");
+    assert_eq!(
+        report["edit"]["summary"],
+        "removed the colour \"bark\", and painted 1 thing with \"leaf\" instead"
+    );
+    assert_eq!(report["palette"].as_array().unwrap().len(), 1);
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(!text.contains("bark"), "{text}");
+
+    // A face gets a colour of its own, and loses it again.
+    let before = text;
+    for (face, wanted) in [("top=leaf", true), ("top=none", false)] {
+        let output = run(
+            &folder,
+            &["edit", "tree.toml", "set", "trunk", "--face-color", face],
+        );
+        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+        let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+        assert_eq!(
+            text.contains("colors = { top = \"leaf\" }"),
+            wanted,
+            "{text}"
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        before
+    );
+}
+
+#[test]
+fn sockets_are_renamed_removed_and_tidied_from_the_command_line() {
+    let folder = folder("cli_edit_sockets");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    // Two sockets on the trunk, and a bird on one of them.
+    for name in ["spot", "spot_2"] {
+        let output = edit(&["add-socket", "trunk", name, "--on", "front"]);
+        assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    }
+    let output = edit(&[
+        "add",
+        "bird",
+        "--shape",
+        "sphere",
+        "--radius",
+        "0.05",
+        "--color",
+        "leaf",
+        "--to",
+        "trunk.spot",
+    ]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+
+    // Renamed: the bird's join follows.
+    let output = edit(&["rename-socket", "trunk.spot", "perch"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output)
+            .starts_with("edited tree.toml: renamed the socket \"trunk.spot\" to \"perch\"\n"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(text().contains("perch = { on = \"front\" }"), "{}", text());
+    assert!(text().contains("to = \"trunk.perch\""), "{}", text());
+
+    // In use: it can't be removed, and the line says what uses it.
+    let output = edit(&["remove-socket", "trunk.perch"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: tree.toml: the socket \"trunk.perch\" is in use by: bird. Join that somewhere else first, or remove it.\n"
+    );
+    // Tidy takes the Studio's unused one, and leaves the rest.
+    let output = edit(&["tidy-sockets", "--json"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "tidy-sockets");
+    assert_eq!(
+        report["edit"]["summary"],
+        "removed 1 socket nothing uses: trunk.spot_2"
+    );
+    assert!(!text().contains("spot_2"), "{}", text());
+    assert!(text().contains("perch = "), "{}", text());
+    // With the bird gone, the socket can go.
+    assert_eq!(edit(&["remove", "bird"]).status.code(), Some(0));
+    let output = edit(&["remove-socket", "trunk.perch"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert_eq!(text(), TREE);
+}
+
+#[test]
 fn an_edit_that_cant_be_made_says_why_and_writes_nothing() {
     let folder = folder("cli_edit_refused");
     // No such part: exit code 2, one line, with the likely fix.
@@ -522,8 +917,10 @@ fn every_edit_has_a_command_and_is_in_the_guide() {
         );
         let output = run(&folder, &["edit", "tree.toml", command, "--help"]);
         assert_eq!(output.status.code(), Some(0), "{command}");
+        // (Followed by its words, or by nothing at all.)
         assert!(
-            guide.contains(&format!("`duck-mold edit <recipe> {command} ")),
+            guide.contains(&format!("`duck-mold edit <recipe> {command} "))
+                || guide.contains(&format!("`duck-mold edit <recipe> {command}`")),
             "the guide doesn't describe `duck-mold edit <recipe> {command}`"
         );
     }
@@ -764,6 +1161,60 @@ fn new_starts_a_recipe_and_never_writes_over_one() {
     assert_eq!(report["ok"], true);
     assert_eq!(report["name"], "second");
     assert_eq!(report["triangles"], 12);
+}
+
+#[test]
+fn new_can_start_from_a_copy_of_an_example() {
+    let folder = folder("cli_new_example");
+    // Every example is in the program, whatever folder it is run from,
+    // and each copy is a clean model, the same as the one in the
+    // repository.
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    for example in duck_mold_core::tools::EXAMPLES {
+        let name = format!("my_{}.toml", example.name);
+        let output = run(
+            &folder,
+            &["new", &name, "--example", example.name, "--json"],
+        );
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}: {}",
+            example.name,
+            stderr(&output)
+        );
+        let report = json(&output);
+        assert_eq!(report["ok"], true, "{}", example.name);
+        assert_eq!(report["name"], example.name);
+        // (But for how each system ends its lines.)
+        let unix = |text: String| text.replace("\r\n", "\n");
+        assert_eq!(
+            unix(std::fs::read_to_string(folder.join(&name)).unwrap()),
+            unix(std::fs::read_to_string(examples.join(format!("{}.toml", example.name))).unwrap()),
+            "{}",
+            example.name
+        );
+    }
+    // The desk's lamp and crate came with it.
+    assert!(folder.join("parts/lamp.gltf").is_file());
+    assert!(folder.join("parts/crate.glb").is_file());
+
+    // Never over a file that is there; and a name that isn't an example
+    // lists the ones there are.
+    let output = run(&folder, &["new", "my_dog.toml", "--example", "robot"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("is already there: new never writes over a file"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(&folder, &["new", "other.toml", "--example", "robbot"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "error: there is no example called \"robbot\". Did you mean \"robot\"?\n"
+    );
+    assert!(!folder.join("other.toml").exists());
 }
 
 // ---- the guide for agents ----------------------------------------------------

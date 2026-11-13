@@ -150,12 +150,50 @@ pub struct PartDef {
     pub mirror: Option<Axis>,
     /// Its own named sockets.
     pub sockets: Vec<SocketDef>,
+    /// A shape's cut edges and narrowed top, if it has them.
+    pub trim: Trim,
+}
+
+/// The two things that can be done to a shape after it is built: its
+/// edges cut off (`bevel`), and its top made narrower or wider than its
+/// bottom (`taper`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Trim {
+    /// How much is cut off each edge, in metres. 0 for sharp edges.
+    pub bevel: f64,
+    /// How many flat cuts round each edge: 1 is one flat cut.
+    pub bevel_steps: usize,
+    /// How wide (x) and deep (z) the top is, as a share of the bottom.
+    /// 1 for straight sides.
+    pub taper: [f64; 2],
+}
+
+impl Default for Trim {
+    fn default() -> Self {
+        Trim {
+            bevel: 0.0,
+            bevel_steps: 1,
+            taper: [1.0; 2],
+        }
+    }
+}
+
+impl Trim {
+    /// Whether the shape's edges are cut.
+    pub fn is_bevelled(&self) -> bool {
+        self.bevel > 0.0
+    }
+
+    /// Whether the top is narrower or wider than the bottom.
+    pub fn is_tapered(&self) -> bool {
+        self.taper != [1.0; 2]
+    }
 }
 
 /// Where a part gets its shape from.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Source {
-    /// One of the five built-in shapes.
+    /// One of the built-in shapes.
     Shape(Shape),
     /// A part from `define`.
     Use(Named),
@@ -211,11 +249,70 @@ pub enum Shape {
         /// Its three sizes.
         size: [f64; 3],
     },
+    /// An upright cylinder with round ends: a pill.
+    Capsule {
+        /// From the middle to the middle of a flat side.
+        radius: f64,
+        /// From bottom to top, round ends included.
+        height: f64,
+        /// How many flat sides round it.
+        segments: usize,
+    },
+    /// A ring lying flat: a doughnut.
+    Torus {
+        /// From the middle of the hole to the middle of the ring.
+        radius: f64,
+        /// How thick the ring is: from its middle to its surface.
+        tube: f64,
+        /// How many flat sides go round the hole.
+        segments: usize,
+    },
+    /// An upright pipe, open at both ends.
+    Tube {
+        /// From the middle to the middle of a flat side, outside.
+        radius: f64,
+        /// How thick its wall is.
+        wall: f64,
+        /// From bottom to top.
+        height: f64,
+        /// How many flat sides.
+        segments: usize,
+    },
+    /// Four slopes meeting in a point at the top.
+    Pyramid {
+        /// Its three sizes.
+        size: [f64; 3],
+    },
+    /// A roof: two slopes, left and right, meeting in a ridge that runs
+    /// from front to back.
+    Prism {
+        /// Its three sizes.
+        size: [f64; 3],
+    },
+    /// Steps going up from the front edge to the full height at the back.
+    Stairs {
+        /// Its three sizes.
+        size: [f64; 3],
+        /// How many steps.
+        steps: usize,
+    },
+    /// A wall with a round-topped doorway through it, front to back.
+    Arch {
+        /// Its three sizes.
+        size: [f64; 3],
+        /// How thick it is at each side of the doorway and above it.
+        wall: f64,
+        /// How many flat pieces the round top is made of.
+        segments: usize,
+    },
 }
 
 impl Shape {
     /// The names a recipe can write in `shape`.
-    pub const NAMES: [&'static str; 5] = ["box", "cylinder", "sphere", "cone", "wedge"];
+    pub const NAMES: [&'static str; 12] = [
+        "box", "cylinder", "sphere", "cone", "wedge", "capsule", "torus", "tube", "pyramid",
+        "prism", "stairs", "arch",
+    ];
 
     /// The shape's name: `box`, `cylinder`...
     pub fn name(&self) -> &'static str {
@@ -225,15 +322,73 @@ impl Shape {
             Shape::Sphere { .. } => "sphere",
             Shape::Cone { .. } => "cone",
             Shape::Wedge { .. } => "wedge",
+            Shape::Capsule { .. } => "capsule",
+            Shape::Torus { .. } => "torus",
+            Shape::Tube { .. } => "tube",
+            Shape::Pyramid { .. } => "pyramid",
+            Shape::Prism { .. } => "prism",
+            Shape::Stairs { .. } => "stairs",
+            Shape::Arch { .. } => "arch",
         }
     }
 
-    /// The size fields a shape of this name takes.
-    fn size_fields(name: &str) -> &'static [&'static str] {
+    /// The fields that give a shape of this name its size, and the
+    /// options it can have, in the order a recipe usually writes them.
+    pub fn size_fields(name: &str) -> &'static [&'static str] {
         match name {
-            "box" | "wedge" => &["size"],
-            "cylinder" | "cone" => &["radius", "height", "segments"],
+            "box" => &["size", "bevel", "bevel_steps", "taper"],
+            "cylinder" => &[
+                "radius",
+                "height",
+                "segments",
+                "bevel",
+                "bevel_steps",
+                "taper",
+            ],
+            "cone" | "capsule" => &["radius", "height", "segments"],
             "sphere" => &["radius", "segments"],
+            "torus" => &["radius", "tube", "segments"],
+            "tube" => &["radius", "wall", "height", "segments", "taper"],
+            "wedge" | "pyramid" | "prism" => &["size"],
+            "stairs" => &["size", "steps"],
+            "arch" => &["size", "wall", "segments"],
+            _ => &[],
+        }
+    }
+
+    /// Every field that gives some shape its size or is an option of
+    /// one, in the order they are read.
+    pub const SIZE_FIELDS: [&'static str; 10] = [
+        "size",
+        "radius",
+        "height",
+        "segments",
+        "tube",
+        "wall",
+        "steps",
+        "bevel",
+        "bevel_steps",
+        "taper",
+    ];
+
+    /// The names of the faces of a shape of this name, as a recipe's
+    /// `colors` can name them. `bevel` is there only once the shape has
+    /// one.
+    pub fn face_words(name: &str) -> &'static [&'static str] {
+        match name {
+            "box" => &[
+                "top", "bottom", "left", "right", "front", "back", "sides", "bevel",
+            ],
+            "cylinder" => &["top", "bottom", "side", "bevel"],
+            "sphere" | "torus" => &["side"],
+            "cone" => &["side", "bottom"],
+            "wedge" => &["slope", "bottom", "back", "left", "right"],
+            "capsule" => &["side", "top", "bottom"],
+            "tube" => &["side", "inside", "top", "bottom"],
+            "pyramid" => &["front", "back", "left", "right", "bottom", "sides"],
+            "prism" => &["left", "right", "front", "back", "bottom"],
+            "stairs" => &["top", "front", "back", "left", "right", "bottom"],
+            "arch" => &["front", "back", "left", "right", "top", "bottom", "inside"],
             _ => &[],
         }
     }
@@ -420,9 +575,33 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-pub(crate) const PART_FIELDS: [&str; 20] = [
-    "name", "shape", "use", "file", "parts", "size", "radius", "height", "segments", "color",
-    "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note",
+pub(crate) const PART_FIELDS: [&str; 26] = [
+    "name",
+    "shape",
+    "use",
+    "file",
+    "parts",
+    "size",
+    "radius",
+    "tube",
+    "wall",
+    "height",
+    "segments",
+    "steps",
+    "bevel",
+    "bevel_steps",
+    "taper",
+    "color",
+    "colors",
+    "attach",
+    "to",
+    "twist",
+    "rotate",
+    "move",
+    "scale",
+    "mirror",
+    "sockets",
+    "note",
 ];
 
 /// The fields at the top of a recipe.
@@ -455,6 +634,8 @@ const MOVE_RANGE: (f64, f64) = (-10_000.0, 10_000.0);
 const SCALE_RANGE: (f64, f64) = (0.001, 1000.0);
 /// The most flat sides a round shape can have.
 const MAX_SEGMENTS: f64 = 64.0;
+/// The narrowest and widest a top can be, as a share of the bottom.
+const TAPER_RANGE: (f64, f64) = (0.01, 10.0);
 
 /// True for a name made of letters, digits, `_` and `-`.
 pub fn is_name(text: &str) -> bool {
@@ -962,6 +1143,7 @@ impl Decoder<'_> {
             scale: [1.0; 3],
             mirror: None,
             sockets: Vec::new(),
+            trim: Trim::default(),
         };
         let Some(mut fields) = self.table(node, path, "a part: a table of fields") else {
             return part;
@@ -1021,11 +1203,8 @@ impl Decoder<'_> {
 
         // ---- the shape's sizes
         let size_fields = shape_name.as_deref().map(Shape::size_fields);
-        let mut sizes: [Option<&Entry>; 4] = [None; 4];
-        for (slot, key) in sizes
-            .iter_mut()
-            .zip(["size", "radius", "height", "segments"])
-        {
+        let mut sizes: [Option<&Entry>; 10] = [None; 10];
+        for (slot, key) in sizes.iter_mut().zip(Shape::SIZE_FIELDS) {
             let Some(entry) = fields.take(key) else {
                 continue;
             };
@@ -1033,10 +1212,25 @@ impl Decoder<'_> {
                 Some(allowed) if allowed.contains(&key) => *slot = Some(entry),
                 Some(allowed) => {
                     let shape = shape_name.as_deref().unwrap_or_default();
-                    let message = format!(
-                        "a {shape} has no \"{key}\": its size is given by {}",
-                        quoted_list(allowed)
-                    );
+                    let message = match key {
+                        "bevel" | "bevel_steps" => format!(
+                            "a {shape} can't have \"{key}\": only a box and a cylinder have edges to cut"
+                        ),
+                        "taper" => format!(
+                            "a {shape} can't have \"taper\": only a box, a cylinder and a tube can be made narrower at the top"
+                        ),
+                        _ => {
+                            let own: Vec<&str> = allowed
+                                .iter()
+                                .copied()
+                                .filter(|field| !["bevel", "bevel_steps", "taper"].contains(field))
+                                .collect();
+                            format!(
+                                "a {shape} has no \"{key}\": its size is given by {}",
+                                quoted_list(&own)
+                            )
+                        }
+                    };
                     self.error(Code::UnknownField, &fields.sub(key), entry.key_pos, message);
                 }
                 None if sources.len() == 1 && sources[0].key != "shape" => {
@@ -1052,7 +1246,9 @@ impl Decoder<'_> {
             }
         }
         if let Some(name) = shape_name.as_deref() {
-            part.source = Source::Shape(self.shape(name, sizes, &fields));
+            let (shape, trim) = self.shape(name, sizes, &fields);
+            part.source = Source::Shape(shape);
+            part.trim = trim;
         }
 
         // ---- colour
@@ -1184,46 +1380,221 @@ impl Decoder<'_> {
         }
     }
 
+    /// A whole number between `fewest` and `most`.
+    fn whole(&mut self, entry: &Entry, path: &str, (fewest, most): (f64, f64)) -> Option<usize> {
+        match entry.node.value {
+            Value::Int(count) => self
+                .check_range(count as f64, entry.node.pos, path, (fewest, most))
+                .map(|count| count as usize),
+            ref other => {
+                let message = format!(
+                    "this needs a whole number, like 12, not {}",
+                    other.describe()
+                );
+                self.error(Code::TypeMismatch, path, entry.node.pos, message)
+                    .got = Some(other.to_got());
+                None
+            }
+        }
+    }
+
+    /// Says that a size doesn't go with another, and gives the nearest
+    /// one that does, so that the rest of the recipe is still checked.
+    fn too_big(
+        &mut self,
+        entry: Option<&Entry>,
+        path: &str,
+        got: f64,
+        below: f64,
+        why: &str,
+    ) -> f64 {
+        if let Some(entry) = entry {
+            let message = format!("{} is too big: {why}", plain(got));
+            let issue = self.error(Code::OutOfRange, path, entry.node.pos, message);
+            issue.got = Some(got.into());
+        }
+        below * 0.99
+    }
+
     /// Builds a shape from its name and its size fields, each already
     /// known to belong to that shape. A missing field takes its default.
-    fn shape(&mut self, name: &str, sizes: [Option<&Entry>; 4], fields: &Fields<'_>) -> Shape {
-        let [size, radius, height, segments] = sizes;
-        let size = size
+    fn shape(
+        &mut self,
+        name: &str,
+        sizes: [Option<&Entry>; 10],
+        fields: &Fields<'_>,
+    ) -> (Shape, Trim) {
+        let [
+            size_entry,
+            radius_entry,
+            height_entry,
+            segments,
+            tube_entry,
+            wall_entry,
+            steps,
+            bevel_entry,
+            bevel_steps,
+            taper,
+        ] = sizes;
+        let size = size_entry
             .and_then(|entry| {
                 self.three(&entry.node, &fields.sub("size"), SIZE_RANGE, "[1, 2, 0.5]")
             })
             .unwrap_or([1.0; 3]);
-        let radius = radius
+        let radius = radius_entry
             .and_then(|entry| self.ranged(&entry.node, &fields.sub("radius"), SIZE_RANGE, "0.5"))
-            .unwrap_or(0.5);
-        let height = height
+            .unwrap_or(if name == "capsule" { 0.25 } else { 0.5 });
+        let mut height = height_entry
             .and_then(|entry| self.ranged(&entry.node, &fields.sub("height"), SIZE_RANGE, "1.5"))
             .unwrap_or(1.0);
-        let (fewest, default) = if name == "sphere" {
-            (4.0, 12)
-        } else {
-            (3.0, 16)
+        let (fewest, default) = match name {
+            "sphere" => (4.0, 12),
+            // The round top of an arch's doorway.
+            "arch" => (2.0, 8),
+            _ => (3.0, 16),
         };
         let segments = segments
-            .and_then(|entry| {
-                let path = fields.sub("segments");
-                match entry.node.value {
-                    Value::Int(count) => self
-                        .check_range(count as f64, entry.node.pos, &path, (fewest, MAX_SEGMENTS))
-                        .map(|count| count as usize),
-                    ref other => {
-                        let message = format!(
-                            "this needs a whole number, like 12, not {}",
-                            other.describe()
-                        );
-                        self.error(Code::TypeMismatch, &path, entry.node.pos, message)
-                            .got = Some(other.to_got());
-                        None
-                    }
-                }
-            })
+            .and_then(|entry| self.whole(entry, &fields.sub("segments"), (fewest, MAX_SEGMENTS)))
             .unwrap_or(default);
+        let steps = steps
+            .and_then(|entry| self.whole(entry, &fields.sub("steps"), (1.0, MAX_SEGMENTS)))
+            .unwrap_or(4);
+        let mut tube = tube_entry
+            .and_then(|entry| self.ranged(&entry.node, &fields.sub("tube"), SIZE_RANGE, "0.15"))
+            .unwrap_or(0.15);
+        let mut wall = wall_entry
+            .and_then(|entry| self.ranged(&entry.node, &fields.sub("wall"), SIZE_RANGE, "0.1"))
+            .unwrap_or(if name == "arch" { 0.2 } else { 0.1 });
+
+        // ---- sizes that must fit each other
         match name {
+            "capsule" if height < radius * 2.0 => {
+                let entry = height_entry.or(radius_entry);
+                let key = if height_entry.is_some() {
+                    "height"
+                } else {
+                    "radius"
+                };
+                if let Some(entry) = entry {
+                    let message = format!(
+                        "a capsule's height includes its two round ends, so it is at least twice its radius: {} or more",
+                        plain(radius * 2.0)
+                    );
+                    let issue =
+                        self.error(Code::OutOfRange, &fields.sub(key), entry.node.pos, message);
+                    issue.got = Some(height.into());
+                }
+                height = radius * 2.0;
+            }
+            "torus" if tube >= radius => {
+                tube = self.too_big(
+                    tube_entry.or(radius_entry),
+                    &fields.sub(if tube_entry.is_some() { "tube" } else { "radius" }),
+                    tube,
+                    radius,
+                    &format!(
+                        "the ring would close its own hole. \"tube\" must be less than \"radius\" ({})",
+                        plain(radius)
+                    ),
+                );
+            }
+            "tube" if wall >= radius => {
+                wall = self.too_big(
+                    wall_entry.or(radius_entry),
+                    &fields.sub(if wall_entry.is_some() {
+                        "wall"
+                    } else {
+                        "radius"
+                    }),
+                    wall,
+                    radius,
+                    &format!(
+                        "the tube would have no hole. \"wall\" must be less than \"radius\" ({})",
+                        plain(radius)
+                    ),
+                );
+            }
+            "arch" => {
+                let most = (size[0] / 2.0).min(size[1]);
+                if wall >= most {
+                    wall = self.too_big(
+                        wall_entry.or(size_entry),
+                        &fields.sub(if wall_entry.is_some() { "wall" } else { "size" }),
+                        wall,
+                        most,
+                        &format!(
+                            "there would be no doorway. \"wall\" must be less than half the arch's width and less than its height ({})",
+                            plain(most)
+                        ),
+                    );
+                }
+            }
+            _ => {}
+        }
+
+        // ---- the options
+        let mut trim = Trim::default();
+        if let Some(entry) = bevel_entry {
+            let path = fields.sub("bevel");
+            if let Some(bevel) = self.ranged(&entry.node, &path, (0.0, SIZE_RANGE.1), "0.05") {
+                // Each edge can lose just under half of the shortest
+                // side it runs between.
+                let most = if name == "box" {
+                    size[0].min(size[1]).min(size[2]) / 2.0
+                } else {
+                    radius.min(height / 2.0)
+                };
+                trim.bevel = if bevel >= most {
+                    self.too_big(
+                        Some(entry),
+                        &path,
+                        bevel,
+                        most,
+                        &format!(
+                            "nothing would be left of the {name}'s smallest side. \"bevel\" must be less than {}",
+                            plain(most)
+                        ),
+                    )
+                } else {
+                    bevel
+                };
+            }
+        }
+        if let Some(entry) = bevel_steps {
+            trim.bevel_steps = self
+                .whole(entry, &fields.sub("bevel_steps"), (1.0, 4.0))
+                .unwrap_or(1);
+        }
+        if let Some(entry) = taper {
+            let path = fields.sub("taper");
+            trim.taper = match &entry.node.value {
+                Value::Array(items) if items.len() == 2 => {
+                    let mut both = [1.0; 2];
+                    for (at, item) in items.iter().enumerate() {
+                        if let Some(number) =
+                            self.ranged(item, &format!("{path}[{at}]"), TAPER_RANGE, "0.5")
+                        {
+                            both[at] = number;
+                        }
+                    }
+                    both
+                }
+                Value::Array(items) => {
+                    let message = format!(
+                        "this needs one number, like 0.5, or two, for x and z, like [0.5, 1], not a list of {}",
+                        items.len()
+                    );
+                    self.error(Code::TypeMismatch, &path, entry.node.pos, message)
+                        .got = Some(entry.node.value.to_got());
+                    [1.0; 2]
+                }
+                _ => self
+                    .ranged(&entry.node, &path, TAPER_RANGE, "0.5")
+                    .map_or([1.0; 2], |all| [all; 2]),
+            };
+        }
+
+        let shape = match name {
             "box" => Shape::Box { size },
             "cylinder" => Shape::Cylinder {
                 radius,
@@ -1236,8 +1607,33 @@ impl Decoder<'_> {
                 height,
                 segments,
             },
+            "capsule" => Shape::Capsule {
+                radius,
+                height,
+                segments,
+            },
+            "torus" => Shape::Torus {
+                radius,
+                tube,
+                segments,
+            },
+            "tube" => Shape::Tube {
+                radius,
+                wall,
+                height,
+                segments,
+            },
+            "pyramid" => Shape::Pyramid { size },
+            "prism" => Shape::Prism { size },
+            "stairs" => Shape::Stairs { size, steps },
+            "arch" => Shape::Arch {
+                size,
+                wall,
+                segments,
+            },
             _ => Shape::Wedge { size },
-        }
+        };
+        (shape, trim)
     }
 
     /// `attach`, `to` and `twist`, or `move` and `rotate`.

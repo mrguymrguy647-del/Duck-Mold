@@ -2,18 +2,24 @@
 //!
 //! - Drag turns the view; right-drag (or middle-drag, or Shift and drag)
 //!   slides it; the wheel zooms.
-//! - A click selects the part under the pointer.
-//! - With a part selected, its sockets show as markers. A click on one,
-//!   or on the part's surface, opens a short list of what to add there.
-//! - Dragging the selected part moves it: dropped on a socket of another
-//!   part it joins there, dropped on a part's surface it slides there.
+//! - A click selects the part under the pointer. Shift+click adds a
+//!   part to the selection, or takes it out. A right-click opens the
+//!   menu for the part under the pointer.
+//! - With a part selected, its sockets show as dots, and the handles of
+//!   the tool in hand: arrows, rings or boxes. A click on a dot opens a
+//!   short list of what to add there.
+//! - A drag that starts on a handle, or on the selected part, moves,
+//!   turns or sizes the part. While it lasts the picture shows what the
+//!   recipe would build; the file is written when the mouse is let go.
 //!
 //! The picture is drawn by Duck Forge's CPU renderer
 //! ([`Studio::picture`]) and shown as one image.
 
+use crate::actions::{self, Action};
 use crate::library::Thumbs;
 use duck_mold_core::edit::{Made, Spot};
 use duck_mold_core::recipe::Shape;
+use duck_mold_view::studio::handles::Tool;
 use duck_mold_view::studio::viewport::Orbit;
 use duck_mold_view::studio::{Clicked, Studio};
 use eframe::egui::{
@@ -36,7 +42,11 @@ struct Drawn {
     builds: usize,
     orbit: Orbit,
     grid: bool,
-    selected: Option<String>,
+    wire: bool,
+    shadow: bool,
+    selected: Vec<String>,
+    hidden: Vec<String>,
+    tool: Tool,
     size: [usize; 2],
     /// Where the pointer is, when that changes what is drawn (a part is
     /// selected, so markers show).
@@ -47,8 +57,10 @@ struct Drawn {
 /// Where a part is about to be added.
 #[derive(Clone, PartialEq)]
 enum Place {
+    /// On a socket of a part.
     Socket { part: String, socket: String },
-    Surface { part: String, spot: Spot },
+    /// On the ground, joined to nothing.
+    Ground,
 }
 
 /// The "add a part here" list, while it is open.
@@ -68,6 +80,9 @@ pub struct View {
     /// True while the selected part is being dragged to a new place.
     moving: bool,
     adding: Option<Adding>,
+    /// The point of a part's surface the right-click menu was opened
+    /// at: where "Add a part here" adds.
+    menu_spot: Option<(String, Spot)>,
 }
 
 impl View {
@@ -94,6 +109,28 @@ impl View {
     pub fn stop_adding(&mut self) {
         self.adding = None;
     }
+
+    /// Opens the list of what can be added on the ground, in the middle
+    /// of the viewport: Shift+A.
+    pub fn add_on_ground(&mut self) {
+        let at = self.rect.map_or(pos2(200.0, 120.0), |rect| {
+            rect.center() - egui::vec2(90.0, 150.0)
+        });
+        self.adding = Some(Adding {
+            place: Place::Ground,
+            at,
+        });
+    }
+
+    /// The point of a part the right-click menu was opened at, once.
+    pub fn take_menu_spot(&mut self) -> Option<(String, Spot)> {
+        self.menu_spot.take()
+    }
+
+    /// Forgets that point: the menu was opened from the parts list.
+    pub fn clear_menu_spot(&mut self) {
+        self.menu_spot = None;
+    }
 }
 
 /// How many pixels the viewport's picture has: one for each of the
@@ -109,13 +146,19 @@ fn picture_size(ui: &egui::Ui, rect: Rect) -> (usize, usize) {
     (width.max(1), height.max(1))
 }
 
-/// Draws the viewport and handles the mouse on it.
-pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mut Thumbs) {
+/// Draws the viewport and handles the mouse on it. Gives what was asked
+/// for in its right-click menu, if something was.
+pub fn show(
+    ui: &mut egui::Ui,
+    studio: &mut Studio,
+    view: &mut View,
+    thumbs: &mut Thumbs,
+) -> Option<Action> {
     let rect = ui.available_rect_before_wrap();
     view.rect = Some(rect);
     let response = ui.allocate_rect(rect, Sense::click_and_drag());
     if rect.width() < 2.0 || rect.height() < 2.0 {
-        return;
+        return None;
     }
     let size = picture_size(ui, rect);
     // A point of the screen in the picture's own pixels, whatever size
@@ -131,14 +174,14 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
         .or_else(|| response.interact_pointer_pos());
     studio.hover(size, pointer.map(in_picture));
 
-    // A drag that starts on the selected part moves the part. Any other
-    // drag turns or slides the view.
-    let shift = ui.input(|input| input.modifiers.shift);
+    // A drag that starts on a handle, or on the selected part, moves the
+    // part. Any other drag turns or slides the view.
+    let (shift, free) = ui.input(|input| (input.modifiers.shift, input.modifiers.command));
     if response.drag_started_by(PointerButton::Primary)
         && !shift
         && let Some(pressed) = ui.input(|input| input.pointer.press_origin())
     {
-        view.moving = studio.drag_start(size, in_picture(pressed));
+        view.moving = studio.grab(size, in_picture(pressed)).is_some();
         if view.moving {
             view.adding = None;
         }
@@ -146,12 +189,15 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
     if view.moving {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Grabbing);
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            studio.drag_cancel();
+            studio.cancel_drag();
             view.moving = false;
         } else if response.drag_stopped() {
             // What it did, or why not, is in the status line.
-            let _ = studio.drag_end();
+            let _ = studio.release();
             view.moving = false;
+        } else if let Some(pointer) = pointer {
+            // Ctrl held: nothing snaps.
+            studio.drag(size, in_picture(pointer), free);
         }
     } else {
         let moved = response.drag_delta();
@@ -169,18 +215,44 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
     if response.clicked()
         && let Some(pointer) = response.interact_pointer_pos()
     {
-        view.adding = match studio.point_at(size, in_picture(pointer)) {
-            Clicked::Socket { part, socket } => Some(Adding {
-                place: Place::Socket { part, socket },
-                at: pointer,
-            }),
-            Clicked::Surface { part, spot } => Some(Adding {
-                place: Place::Surface { part, spot },
-                at: pointer,
-            }),
-            Clicked::Selected(_) | Clicked::Nothing => None,
-        };
+        if studio.tool == Tool::Paint && !studio.look_only() {
+            // The Paint tool: the face under the pointer gets the colour
+            // in hand; with Shift, the whole part does. What it did, or
+            // why not, is in the status line.
+            let _ = studio.paint_at(size, in_picture(pointer), shift);
+            view.adding = None;
+        } else if shift {
+            // Shift+click: the part joins the selection, or leaves it.
+            studio.click_adding(size, in_picture(pointer));
+            view.adding = None;
+        } else {
+            view.adding = match studio.point_at(size, in_picture(pointer)) {
+                Clicked::Socket { part, socket } => Some(Adding {
+                    place: Place::Socket { part, socket },
+                    at: pointer,
+                }),
+                Clicked::Selected(_) | Clicked::Nothing => None,
+            };
+        }
     }
+    // A right-click (not a right-drag, which slides the view) opens the
+    // menu for the part under the pointer. A part that isn't selected
+    // becomes the selection first.
+    if response.secondary_clicked()
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        let at = in_picture(pointer);
+        view.menu_spot = None;
+        if let Some(part) = studio.part_under(size, at) {
+            if !studio.is_selected(&part) {
+                studio.select(Some(&part));
+            }
+            view.menu_spot = studio.spot_at(size, at);
+        }
+        view.adding = None;
+    }
+    let mut asked = None;
+    response.context_menu(|ui| asked = actions::part_menu(ui, studio, thumbs));
     if response.hovered() {
         let rolled = ui.input(|input| input.smooth_scroll_delta.y);
         if rolled != 0.0 {
@@ -193,15 +265,20 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
         builds: studio.builds(),
         orbit: studio.orbit,
         grid: studio.grid,
-        selected: studio.selected().map(str::to_owned),
+        wire: studio.wire,
+        shadow: studio.shadow,
+        selected: studio.selection().into_iter().map(str::to_owned).collect(),
+        hidden: studio.hidden().to_vec(),
+        tool: studio.tool,
         size: [size.0, size.1],
         pointer: pointer
-            .filter(|_| shows_markers)
+            .filter(|_| shows_markers || studio.tool == Tool::Paint)
             .map(in_picture)
             .map(|(x, y)| (x.round() as i32, y.round() as i32)),
         dragging: studio.dragging().is_some(),
     };
-    if view.drawn.as_ref() != Some(&now) || view.texture.is_none() {
+    // While a handle is held the picture changes with every move.
+    if view.drawn.as_ref() != Some(&now) || view.texture.is_none() || view.moving {
         let picture = studio.picture(size.0, size.1);
         let image = ColorImage::new(
             now.size,
@@ -234,23 +311,105 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, view: &mut View, thumbs: &mu
         );
     }
 
-    // What the mouse does here, in a line at the bottom.
+    // What the mouse does here, in a line at the bottom, and how moves
+    // snap.
+    let handles = shows_markers && studio.facts().is_some();
     let hint = if view.moving {
-        "Drop it on a socket to join it there, or on a part to put it at that point. Escape lets go."
-    } else if shows_markers && studio.facts().is_some() {
-        "Click a socket, or the part itself, to add a part there. Drag the part to move it."
+        "Let go to make the change. Escape lets go without changing anything."
+    } else if studio.tool == Tool::Paint && !studio.look_only() {
+        "Click a face to colour it. Shift+click colours the whole part. Pick the colour in the palette."
+    } else if studio.selection().len() > 1 {
+        "Drag a handle, or one of the parts, to change them together. Shift+click adds or takes out a part."
+    } else if handles {
+        "Drag an arrow, a ring or a box, or the part itself. Click a dot to add a part there. Right-click for more."
     } else {
         "Drag to turn, right-drag to slide, roll the wheel to zoom. Click a part to select it."
     };
-    ui.painter_at(rect).text(
+    let quiet = Color32::from_white_alpha(150);
+    let painter = ui.painter_at(rect);
+    painter.text(
         rect.left_bottom() + egui::vec2(8.0, -6.0),
         egui::Align2::LEFT_BOTTOM,
         hint,
         egui::FontId::proportional(12.0),
-        Color32::from_white_alpha(150),
+        quiet,
     );
+    if handles {
+        painter.text(
+            rect.right_bottom() + egui::vec2(-8.0, -6.0),
+            egui::Align2::RIGHT_BOTTOM,
+            studio.snap_text(),
+            egui::FontId::proportional(12.0),
+            quiet,
+        );
+    }
+    // What the drag has done so far, beside the pointer.
+    if let (Some(label), Some(pointer)) = (studio.drag_label(), pointer) {
+        let at = pointer + egui::vec2(16.0, -18.0);
+        let text = painter.layout_no_wrap(
+            label.to_owned(),
+            egui::FontId::proportional(13.0),
+            Color32::WHITE,
+        );
+        let back = Rect::from_min_size(at, text.size()).expand(4.0);
+        painter.rect_filled(back, 4.0, Color32::from_black_alpha(200));
+        painter.galley(at, text, Color32::WHITE);
+    }
 
+    tool_strip(ui, studio, rect);
     add_list(ui, studio, view, thumbs, rect);
+    asked
+}
+
+/// The tools, down the left edge of the viewport: one is in hand.
+fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
+    if studio.look_only() {
+        return;
+    }
+    let tools = [
+        (Tool::Move, "Move", "G", "Arrows: drag one to move the part"),
+        (
+            Tool::Rotate,
+            "Rotate",
+            "R",
+            "Rings: drag one to turn the part",
+        ),
+        (
+            Tool::Scale,
+            "Scale",
+            "S",
+            "Boxes: drag one to make the part bigger or smaller",
+        ),
+        (
+            Tool::Size,
+            "Size",
+            "T",
+            "Knobs on a shape's faces: pull one to change its width, height, depth or radius",
+        ),
+        (
+            Tool::Paint,
+            "Paint",
+            "P",
+            "Click a face to colour it with the colour picked in the palette. Shift+click colours the whole part",
+        ),
+    ];
+    for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {
+        let place = Rect::from_min_size(
+            within.left_top() + egui::vec2(8.0, 8.0 + row as f32 * 30.0),
+            egui::vec2(76.0, 24.0),
+        );
+        // A dark plate behind it, so it reads over the picture.
+        ui.painter_at(within)
+            .rect_filled(place, 4.0, Color32::from_black_alpha(150));
+        let button = egui::Button::selectable(studio.tool == tool, name);
+        if ui
+            .put(place, button)
+            .on_hover_text(format!("{tip} ({key})"))
+            .clicked()
+        {
+            studio.tool = tool;
+        }
+    }
 }
 
 /// The short list that opens where a part is to be added: the five
@@ -267,14 +426,16 @@ fn add_list(
     };
     let title = match &adding.place {
         Place::Socket { part, socket } => format!("Add a part on {part}.{socket}"),
-        Place::Surface { part, spot } => format!("Add a part on the {} of {part}", spot.on),
+        Place::Ground => "Add a part on the ground".to_owned(),
     };
     let mut chosen: Option<Made> = None;
     let mut open = true;
     // Kept inside the viewport, beside the click.
     let at = pos2(
         (adding.at.x + 12.0).min(within.right() - 190.0),
-        (adding.at.y + 12.0).min(within.bottom() - 260.0),
+        (adding.at.y + 12.0)
+            .min(within.bottom() - 400.0)
+            .max(within.top() + 8.0),
     );
     egui::Window::new(title)
         .id(egui::Id::unique("duck_mold_add_list"))
@@ -283,50 +444,69 @@ fn add_list(
         .resizable(false)
         .open(&mut open)
         .show(ui.ctx(), |ui| {
-            for shape in Shape::NAMES {
-                // "Box", "Cylinder"...
-                let mut label = shape.to_owned();
-                if let Some(first) = label.get_mut(0..1) {
-                    first.make_ascii_uppercase();
-                }
-                if ui.button(label).clicked() {
-                    chosen = Some(Made::Shape(shape.to_owned()));
-                }
-            }
-            let defined = studio.definitions();
-            if !defined.is_empty() {
-                ui.separator();
-                ui.label(RichText::new("Defined in this recipe").weak().small());
-                for name in defined {
-                    if ui.button(&name).clicked() {
-                        chosen = Some(Made::Use(name));
-                    }
-                }
-            }
-            let library = studio.library().to_vec();
-            if !library.is_empty() {
-                ui.separator();
-                ui.label(RichText::new("From the library").weak().small());
-                egui::ScrollArea::vertical()
-                    .max_height(180.0)
-                    .show(ui, |ui| {
-                        for item in &library {
-                            if crate::library::item_button(ui, studio, thumbs, item, 32.0).clicked()
-                            {
-                                chosen = Some(Made::File(item.written.clone()));
-                            }
-                        }
-                    });
-            }
+            chosen = choices(ui, studio, thumbs);
         });
     if let Some(made) = chosen {
         // What it did, or why not, is in the status line.
         let _ = match &adding.place {
             Place::Socket { part, socket } => studio.add_to_socket(part, socket, &made),
-            Place::Surface { part, spot } => studio.add_to_surface(part, spot, &made),
+            Place::Ground => studio.add_free(&made),
         };
         view.adding = None;
     } else if !open {
         view.adding = None;
     }
+}
+
+/// The things a new part can be made of, as buttons: the shapes, the
+/// parts this recipe defines, and the library. Gives the one clicked.
+pub fn choices(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) -> Option<Made> {
+    let mut chosen = None;
+    // The shapes, in two columns so the list stays short.
+    egui::Grid::new("duck_mold_shape_choices")
+        .num_columns(2)
+        .spacing([6.0, 4.0])
+        .show(ui, |ui| {
+            for (at, shape) in Shape::NAMES.into_iter().enumerate() {
+                // "Box", "Cylinder"...
+                let mut label = shape.to_owned();
+                if let Some(first) = label.get_mut(0..1) {
+                    first.make_ascii_uppercase();
+                }
+                if ui
+                    .add_sized([78.0, 20.0], egui::Button::new(label))
+                    .clicked()
+                {
+                    chosen = Some(Made::Shape(shape.to_owned()));
+                }
+                if at % 2 == 1 {
+                    ui.end_row();
+                }
+            }
+        });
+    let defined = studio.definitions();
+    if !defined.is_empty() {
+        ui.separator();
+        ui.label(RichText::new("Defined in this recipe").weak().small());
+        for name in defined {
+            if ui.button(&name).clicked() {
+                chosen = Some(Made::Use(name));
+            }
+        }
+    }
+    let library = studio.library().to_vec();
+    if !library.is_empty() {
+        ui.separator();
+        ui.label(RichText::new("From the library").weak().small());
+        egui::ScrollArea::vertical()
+            .max_height(180.0)
+            .show(ui, |ui| {
+                for item in &library {
+                    if crate::library::item_button(ui, studio, thumbs, item, 32.0).clicked() {
+                        chosen = Some(Made::File(item.written.clone()));
+                    }
+                }
+            });
+    }
+    chosen
 }

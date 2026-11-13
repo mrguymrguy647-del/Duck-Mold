@@ -28,9 +28,18 @@ pub struct Draft {
     name: String,
     size: [f64; 3],
     radius: f64,
+    tube: f64,
+    wall: f64,
     height: f64,
     segments: u32,
+    steps: u32,
+    bevel: f64,
+    bevel_steps: u32,
+    taper: [f64; 2],
     twist: f64,
+    position: [f64; 3],
+    rotation: [f64; 3],
+    scale: [f64; 3],
     /// The "new colour" form, when it is open.
     new_color: Option<NewColor>,
     /// A palette colour being changed with the colour picker.
@@ -40,6 +49,11 @@ pub struct Draft {
     confirm_remove: Option<usize>,
     /// Why the last change wasn't made.
     failed: Option<String>,
+    /// Set to put the typing in the Name field: F2, or "Rename" in a
+    /// menu.
+    focus_name: bool,
+    /// The names of the part's sockets, as they are being typed.
+    socket_names: Vec<String>,
 }
 
 impl Draft {
@@ -47,16 +61,47 @@ impl Draft {
         self.name = facts.name.clone().unwrap_or_default();
         self.size = facts.sizes.size.unwrap_or([1.0; 3]);
         self.radius = facts.sizes.radius.unwrap_or(0.5);
+        self.tube = facts.sizes.tube.unwrap_or(0.15);
+        self.wall = facts.sizes.wall.unwrap_or(0.1);
         self.height = facts.sizes.height.unwrap_or(1.0);
         self.segments = facts.sizes.segments.unwrap_or(16);
+        self.steps = facts.sizes.steps.unwrap_or(4);
+        self.bevel = facts.sizes.bevel.unwrap_or(0.0);
+        self.bevel_steps = facts.sizes.bevel_steps.unwrap_or(1);
+        self.taper = facts.sizes.taper.unwrap_or([1.0; 2]);
         self.twist = facts.twist;
+        self.position = facts.position;
+        self.rotation = facts.rotation;
+        self.scale = facts.scale;
         self.recolor = None;
         self.confirm_remove = None;
+        self.socket_names = facts.sockets.iter().map(|(name, _)| name.clone()).collect();
     }
 }
 
 fn hex_of(rgb: [u8; 3]) -> String {
     format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2])
+}
+
+impl Draft {
+    /// Puts the typing in the Name field the next time the panel is
+    /// drawn.
+    pub fn rename(&mut self) {
+        self.focus_name = true;
+    }
+
+    /// Removes the selected parts; or, if parts that aren't selected
+    /// hang from them, asks in the panel whether those go too.
+    pub fn remove(&mut self, studio: &mut Studio) {
+        match studio.hanging_from_selection() {
+            0 => {
+                if let Err(why) = studio.remove_selected(false) {
+                    self.failed = Some(why);
+                }
+            }
+            count => self.confirm_remove = Some(count),
+        }
+    }
 }
 
 /// A small square of a colour.
@@ -84,30 +129,6 @@ fn siblings<'a>(studio: &'a Studio, path: &str) -> Vec<&'a Part> {
         .iter()
         .filter(|part| part.path != path && !part.name.starts_with('#'))
         .collect()
-}
-
-/// How many parts hang from this one, and from those.
-fn hanging(studio: &Studio, path: &str) -> usize {
-    let others = siblings(studio, path);
-    let own = path.rsplit('/').next().unwrap_or(path);
-    let mut gone = vec![own.to_owned()];
-    loop {
-        let more: Vec<String> = others
-            .iter()
-            .filter(|part| !gone.contains(&part.name))
-            .filter(|part| {
-                part.attached_to
-                    .as_deref()
-                    .and_then(|to| to.rsplit_once('.'))
-                    .is_some_and(|(target, _)| gone.iter().any(|name| name == target))
-            })
-            .map(|part| part.name.clone())
-            .collect();
-        if more.is_empty() {
-            return gone.len() - 1;
-        }
-        gone.extend(more);
-    }
 }
 
 /// Says that a part comes from a definition, and names every other part
@@ -141,15 +162,159 @@ fn definition_notice(ui: &mut egui::Ui, facts: &Facts) {
     ui.add_space(4.0);
 }
 
+/// Asks whether the parts that hang from the selected ones go too, when
+/// "Remove" found some: in a window of its own, in the middle, so it is
+/// seen wherever the panel is scrolled to.
+fn confirm_remove(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
+    let Some(count) = draft.confirm_remove else {
+        return;
+    };
+    let several = studio.selection().len() > 1;
+    let mut open = true;
+    let mut close = false;
+    egui::Window::new("Remove")
+        .collapsible(false)
+        .resizable(false)
+        .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+        .open(&mut open)
+        .show(ui.ctx(), |ui| {
+            ui.label(match (count, several) {
+                (1, false) => "Another part hangs from this one. Remove it too?".to_owned(),
+                (1, true) => "Another part hangs from these. Remove it too?".to_owned(),
+                (count, false) => {
+                    format!("{count} other parts hang from this one. Remove them too?")
+                }
+                (count, true) => format!("{count} other parts hang from these. Remove them too?"),
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                if ui.button("Remove them all").clicked() {
+                    if let Err(why) = studio.remove_selected(true) {
+                        draft.failed = Some(why);
+                    }
+                    close = true;
+                }
+                if ui.button("Keep them").clicked() {
+                    close = true;
+                }
+            });
+        });
+    if close || !open {
+        draft.confirm_remove = None;
+    }
+}
+
+/// The panel when several parts are selected: what can be set for all
+/// of them.
+fn show_several(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft, count: usize) {
+    ui.label(RichText::new(format!("{count} parts")).strong());
+    ui.separator();
+    let names: Vec<String> = studio.selection().into_iter().map(str::to_owned).collect();
+    ui.label(RichText::new(names.join(", ")).weak().small());
+    ui.add_space(4.0);
+    if studio.look_only() {
+        ui.label(RichText::new("Looking only: nothing can be changed here.").weak());
+        return;
+    }
+    ui.label(
+        RichText::new(
+            "The handles move, turn and scale them together. Shift+click a part to add it or take it out.",
+        )
+        .weak()
+        .small(),
+    );
+    ui.add_space(6.0);
+    let palette = studio.palette();
+    let mut colour = None;
+    ui.horizontal(|ui| {
+        let label = ui.label("Colour");
+        egui::ComboBox::from_id_salt("duck_mold_color_several")
+            .selected_text("choose...")
+            .show_ui(ui, |ui| {
+                for (name, rgb) in &palette {
+                    ui.horizontal(|ui| {
+                        swatch(ui, *rgb);
+                        if ui.selectable_label(false, name).clicked() {
+                            colour = Some(name.clone());
+                        }
+                    });
+                }
+            })
+            .response
+            .labelled_by(label.id);
+    });
+    let mut done = None;
+    if let Some(colour) = colour {
+        done = Some(studio.colour_selected(&colour));
+    }
+    ui.add_space(8.0);
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button("Duplicate")
+            .on_hover_text("A copy of each, beside them (Ctrl+D)")
+            .clicked()
+        {
+            done = Some(studio.duplicate_selected(false));
+        }
+        if ui.button("Mirror copy").clicked() {
+            done = Some(studio.duplicate_selected(true));
+        }
+        if ui
+            .button("Unjoin")
+            .on_hover_text("Make the joined ones free, right where they are")
+            .clicked()
+        {
+            done = Some(studio.unjoin_selected());
+        }
+        if ui
+            .button("Hide")
+            .on_hover_text("Stop drawing them. They stay in the model (H)")
+            .clicked()
+        {
+            studio.hide_selected();
+        }
+        if ui.button("Remove").on_hover_text("Delete").clicked() {
+            draft.remove(studio);
+        }
+    });
+    confirm_remove(ui, studio, draft);
+    match done {
+        Some(Ok(_)) => draft.failed = None,
+        Some(Err(why)) => draft.failed = Some(why),
+        None => {}
+    }
+    if let Some(why) = &draft.failed {
+        ui.add_space(6.0);
+        ui.colored_label(theme::BAD, why);
+    }
+}
+
 /// Draws the panel for the selected part, and makes the edit when a
 /// field's value is settled.
 pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     ui.add_space(4.0);
+    let count = studio.selection().len();
+    if count > 1 {
+        draft.of = None;
+        show_several(ui, studio, draft, count);
+        return;
+    }
     let Some(path) = studio.selected().map(str::to_owned) else {
         ui.label(RichText::new("Properties").strong());
         ui.separator();
         ui.label(RichText::new("Click a part to select it.").weak());
+        if studio.hidden_count() > 0 {
+            ui.add_space(6.0);
+            if ui
+                .button(format!("Show the {} hidden", studio.hidden_count()))
+                .on_hover_text("Draw every hidden part again (Shift+H)")
+                .clicked()
+            {
+                studio.show_all();
+            }
+        }
         draft.of = None;
+        draft.confirm_remove = None;
         return;
     };
     ui.label(RichText::new(&path).strong());
@@ -206,6 +371,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 let name = ui
                     .add(TextEdit::singleline(&mut draft.name).desired_width(150.0))
                     .labelled_by(label.id);
+                if std::mem::take(&mut draft.focus_name) {
+                    name.request_focus();
+                }
                 if name.lost_focus()
                     && !draft.name.is_empty()
                     && Some(&draft.name) != facts.name.as_ref()
@@ -289,6 +457,32 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     }
                     ui.end_row();
                 }
+                if facts.sizes.tube.is_some() {
+                    let label = ui
+                        .label("Tube")
+                        .on_hover_text("How thick the ring is: from its middle to its surface");
+                    let field = ui.add(metres(&mut draft.tube)).labelled_by(label.id);
+                    if settled(&field) && Some(draft.tube) != facts.sizes.tube {
+                        edits.push(sized(Sizes {
+                            tube: Some(draft.tube),
+                            ..Sizes::default()
+                        }));
+                    }
+                    ui.end_row();
+                }
+                if facts.sizes.wall.is_some() {
+                    let label = ui
+                        .label("Wall")
+                        .on_hover_text("How thick the wall is, in metres");
+                    let field = ui.add(metres(&mut draft.wall)).labelled_by(label.id);
+                    if settled(&field) && Some(draft.wall) != facts.sizes.wall {
+                        edits.push(sized(Sizes {
+                            wall: Some(draft.wall),
+                            ..Sizes::default()
+                        }));
+                    }
+                    ui.end_row();
+                }
                 if facts.sizes.height.is_some() {
                     let label = ui.label("Height");
                     let field = ui.add(metres(&mut draft.height)).labelled_by(label.id);
@@ -304,10 +498,10 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     let label = ui
                         .label("Sides")
                         .on_hover_text("How many flat sides the round shape has");
-                    let fewest = if facts.shape.as_deref() == Some("sphere") {
-                        4
-                    } else {
-                        3
+                    let fewest = match facts.shape.as_deref() {
+                        Some("sphere") => 4,
+                        Some("arch") => 2,
+                        _ => 3,
                     };
                     let field = ui
                         .add(DragValue::new(&mut draft.segments).range(fewest..=64))
@@ -320,6 +514,166 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     }
                     ui.end_row();
                 }
+
+                if facts.sizes.steps.is_some() {
+                    let label = ui.label("Steps").on_hover_text("How many steps");
+                    let field = ui
+                        .add(DragValue::new(&mut draft.steps).range(1..=64))
+                        .labelled_by(label.id);
+                    if settled(&field) && Some(draft.steps) != facts.sizes.steps {
+                        edits.push(sized(Sizes {
+                            steps: Some(draft.steps),
+                            ..Sizes::default()
+                        }));
+                    }
+                    ui.end_row();
+                }
+                if facts.sizes.bevel.is_some() {
+                    let label = ui.label("Bevel").on_hover_text(
+                        "How much is cut off the edges, in metres (0 for sharp edges), and how many flat cuts go round each edge (1 to 4)",
+                    );
+                    ui.horizontal(|ui| {
+                        let field = ui
+                            .add(
+                                DragValue::new(&mut draft.bevel)
+                                    .speed(0.005)
+                                    .range(0.0..=1000.0)
+                                    .max_decimals(3),
+                            )
+                            .labelled_by(label.id)
+                            .on_hover_text("How much is cut off, in metres");
+                        if settled(&field) && Some(draft.bevel) != facts.sizes.bevel {
+                            edits.push(sized(Sizes {
+                                bevel: Some(draft.bevel),
+                                ..Sizes::default()
+                            }));
+                        }
+                        let cuts = ui
+                            .add_enabled(
+                                draft.bevel > 0.0,
+                                DragValue::new(&mut draft.bevel_steps)
+                                    .range(1..=4)
+                                    .suffix(" cuts"),
+                            )
+                            .on_hover_text("How many flat cuts go round each edge");
+                        if settled(&cuts) && Some(draft.bevel_steps) != facts.sizes.bevel_steps {
+                            edits.push(sized(Sizes {
+                                bevel_steps: Some(draft.bevel_steps),
+                                ..Sizes::default()
+                            }));
+                        }
+                    });
+                    ui.end_row();
+                }
+                if facts.sizes.taper.is_some() {
+                    let label = ui.label("Taper").on_hover_text(
+                        "How wide (x) and deep (z) the top is, as a share of the bottom: 1 is straight sides, 0.5 is half as wide",
+                    );
+                    ui.horizontal(|ui| {
+                        let mut done = false;
+                        for (at, axis) in ["wide", "deep"].into_iter().enumerate() {
+                            let field = ui
+                                .add(
+                                    DragValue::new(&mut draft.taper[at])
+                                        .speed(0.01)
+                                        .range(0.01..=10.0)
+                                        .max_decimals(2),
+                                )
+                                .labelled_by(label.id)
+                                .on_hover_text(format!("How {axis} the top is"));
+                            done |= settled(&field);
+                        }
+                        if done && Some(draft.taper) != facts.sizes.taper {
+                            edits.push(sized(Sizes {
+                                taper: Some(draft.taper),
+                                ..Sizes::default()
+                            }));
+                        }
+                    });
+                    ui.end_row();
+                }
+
+                // ---- where a free part is, and how it is turned
+                if facts.to.is_none() {
+                    let label = ui
+                        .label("Position")
+                        .on_hover_text("Where its middle is: x, y, z in metres");
+                    ui.horizontal(|ui| {
+                        let mut done = false;
+                        for (at, axis) in ["x", "y", "z"].into_iter().enumerate() {
+                            let field = ui
+                                .add(
+                                    DragValue::new(&mut draft.position[at])
+                                        .speed(0.01)
+                                        .range(-10_000.0..=10_000.0)
+                                        .max_decimals(3),
+                                )
+                                .labelled_by(label.id)
+                                .on_hover_text(axis);
+                            done |= settled(&field);
+                        }
+                        if done && draft.position != facts.position {
+                            edits.push(set(Changes {
+                                move_to: Some(draft.position),
+                                ..Changes::default()
+                            }));
+                        }
+                    });
+                    ui.end_row();
+
+                    let label = ui
+                        .label("Rotation")
+                        .on_hover_text("Degrees around x, then y, then z");
+                    ui.horizontal(|ui| {
+                        let mut done = false;
+                        for (at, axis) in ["x", "y", "z"].into_iter().enumerate() {
+                            let field = ui
+                                .add(
+                                    DragValue::new(&mut draft.rotation[at])
+                                        .speed(1.0)
+                                        .range(-36_000.0..=36_000.0)
+                                        .max_decimals(1)
+                                        .suffix("°"),
+                                )
+                                .labelled_by(label.id)
+                                .on_hover_text(axis);
+                            done |= settled(&field);
+                        }
+                        if done && draft.rotation != facts.rotation {
+                            edits.push(set(Changes {
+                                rotate: Some(draft.rotation),
+                                ..Changes::default()
+                            }));
+                        }
+                    });
+                    ui.end_row();
+                }
+                // ---- how much bigger it is, joined or not
+                let label = ui
+                    .label("Scale")
+                    .on_hover_text("How many times bigger it is, each way: 1 is as it was made");
+                ui.horizontal(|ui| {
+                    let mut done = false;
+                    for (at, axis) in ["x", "y", "z"].into_iter().enumerate() {
+                        let field = ui
+                            .add(
+                                DragValue::new(&mut draft.scale[at])
+                                    .speed(0.01)
+                                    .range(0.001..=1000.0)
+                                    .max_decimals(3),
+                            )
+                            .labelled_by(label.id)
+                            .on_hover_text(axis);
+                        done |= settled(&field);
+                    }
+                    if done && draft.scale != facts.scale {
+                        edits.push(set(Changes {
+                            scale: Some(draft.scale),
+                            ..Changes::default()
+                        }));
+                    }
+                });
+                ui.end_row();
 
                 // ---- colour
                 let colour_label = ui.label("Colour");
@@ -499,6 +853,55 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 }
             });
 
+        // ---- the sockets it declares
+        if !facts.sockets.is_empty() && draft.socket_names.len() == facts.sockets.len() {
+            ui.add_space(8.0);
+            ui.label(RichText::new("Sockets").strong()).on_hover_text(
+                "The sockets this part declares: named points other parts join to. Its seven built-in ones (top, bottom...) aren't listed",
+            );
+            for (at, (name, uses)) in facts.sockets.iter().enumerate() {
+                ui.horizontal(|ui| {
+                    let field = ui
+                        .add(
+                            TextEdit::singleline(&mut draft.socket_names[at]).desired_width(100.0),
+                        )
+                        .on_hover_text("Type a new name: everything joined to it follows");
+                    if field.lost_focus()
+                        && !draft.socket_names[at].is_empty()
+                        && draft.socket_names[at] != *name
+                    {
+                        edits.push(Edit::RenameSocket {
+                            socket: format!("{path}.{name}"),
+                            new_name: draft.socket_names[at].clone(),
+                        });
+                    }
+                    ui.label(
+                        RichText::new(match uses {
+                            0 => "not used".to_owned(),
+                            1 => "1 use".to_owned(),
+                            count => format!("{count} uses"),
+                        })
+                        .weak()
+                        .small(),
+                    );
+                    let remove = ui
+                        .add_enabled(
+                            *uses == 0,
+                            egui::Button::new(RichText::new("remove socket").small()),
+                        )
+                        .on_hover_text("Take this socket away")
+                        .on_disabled_hover_text(
+                            "Something is joined to it: move that away first, or remove it",
+                        );
+                    if remove.clicked() {
+                        edits.push(Edit::RemoveSocket {
+                            socket: format!("{path}.{name}"),
+                        });
+                    }
+                });
+            }
+        }
+
         // ---- a new colour
         if let Some(new) = &mut draft.new_color {
             ui.add_space(6.0);
@@ -543,63 +946,49 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
 
         // ---- the whole part
         ui.add_space(8.0);
+        let mut done = None;
         ui.horizontal_wrapped(|ui| {
             if ui
                 .button("Duplicate")
-                .on_hover_text("A copy, joined to the same socket")
+                .on_hover_text(
+                    "A copy. Of a joined part: on the same socket. Of a free part: beside it (Ctrl+D)",
+                )
                 .clicked()
             {
-                edits.push(Edit::Duplicate {
-                    part: path.clone(),
-                    name: None,
-                    to: None,
-                    mirror: false,
-                });
+                done = Some(studio.duplicate_selected(false));
             }
             if ui
                 .button("Mirror copy")
                 .on_hover_text("A mirror image: a right arm from a left arm")
                 .clicked()
             {
-                edits.push(Edit::Duplicate {
-                    part: path.clone(),
-                    name: None,
-                    to: None,
-                    mirror: true,
-                });
+                done = Some(studio.duplicate_selected(true));
             }
-            if ui.button("Remove").clicked() {
-                match hanging(studio, &path) {
-                    0 => edits.push(Edit::Remove {
-                        part: path.clone(),
-                        with_attached: false,
-                    }),
-                    count => draft.confirm_remove = Some(count),
-                }
+            if facts.to.is_some()
+                && ui
+                    .button("Unjoin")
+                    .on_hover_text("Make it free, right where it is, so it can be moved anywhere")
+                    .clicked()
+            {
+                edits.push(Edit::Unjoin { part: path.clone() });
+            }
+            if ui
+                .button("Hide")
+                .on_hover_text("Stop drawing it. It stays in the model (H)")
+                .clicked()
+            {
+                studio.hide_selected();
+            }
+            if ui.button("Remove").on_hover_text("Delete").clicked() {
+                draft.remove(studio);
             }
         });
-        if let Some(count) = draft.confirm_remove {
-            ui.add_space(4.0);
-            egui::Frame::group(ui.style()).show(ui, |ui| {
-                ui.label(if count == 1 {
-                    "Another part hangs from this one. Remove it too?".to_owned()
-                } else {
-                    format!("{count} other parts hang from this one. Remove them too?")
-                });
-                ui.horizontal(|ui| {
-                    if ui.button("Remove them all").clicked() {
-                        edits.push(Edit::Remove {
-                            part: path.clone(),
-                            with_attached: true,
-                        });
-                        draft.confirm_remove = None;
-                    }
-                    if ui.button("Keep them").clicked() {
-                        draft.confirm_remove = None;
-                    }
-                });
-            });
+        match done {
+            Some(Ok(_)) => draft.failed = None,
+            Some(Err(why)) => draft.failed = Some(why),
+            None => {}
         }
+        confirm_remove(ui, studio, draft);
     });
 
     for edit in &edits {

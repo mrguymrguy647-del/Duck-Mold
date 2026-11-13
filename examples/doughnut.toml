@@ -1,0 +1,136 @@
+# A doughnut on a plate: the `torus` shape.
+#
+#   duck-mold studio examples/doughnut.toml
+#
+# It shows: a torus (a ring: `radius` to the middle of the ring, `tube`
+# for how thick it is), a second torus squashed with `scale` for the
+# icing, sockets at points of a round surface for the sprinkles, and a
+# cylinder with its rim cut off (`bevel`) for the plate. A torus's `top`
+# and `bottom` sockets are in the middle of the hole, level with the
+# ring, so the doughnut stands on the plate by its `bottom`.
+
+version = 0
+name = "doughnut"
+description = "A doughnut with icing and sprinkles, on a plate."
+
+[palette]
+plate  = "#E8E4DA"
+dough  = "#C98A4B"
+icing  = "#F27FA5"
+yellow = "#FFD23F"
+blue   = "#4FB3E8"
+white  = "#FFFFFF"
+
+# One sprinkle: a tiny capsule, lying down. `under` is where it touches
+# the icing.
+[define.sprinkle]
+shape = "capsule"
+radius = 0.02
+height = 0.11
+segments = 6
+
+[define.sprinkle.sockets]
+under = { on = "left" }
+
+[[parts]]
+name = "plate"
+shape = "cylinder"
+radius = 0.75
+height = 0.06
+segments = 24
+bevel = 0.025
+color = "plate"
+
+[[parts]]
+name = "dough"
+shape = "torus"
+radius = 0.35
+tube = 0.17
+segments = 24
+color = "dough"
+attach = "bottom"
+to = "plate.top"
+
+# Where the icing's middle goes: a little above the dough's own. It
+# faces down, to meet the icing's `center`, which faces up: two sockets
+# that face each other join without turning anything over.
+[parts.sockets]
+icing = { on = "center", shift = [0, 0.6, 0], facing = "down" }
+
+# The icing: the same ring, a little fatter and squashed flat, over the
+# upper half of the dough.
+[[parts]]
+name = "icing"
+shape = "torus"
+radius = 0.35
+tube = 0.19
+segments = 24
+scale = [1, 0.6, 1]
+color = "icing"
+attach = "center"
+to = "dough.icing"
+
+[parts.sockets]
+a = { on = "top", shift = [0.62, 0, 0.1] }
+b = { on = "top", shift = [0.3, 0, 0.58] }
+c = { on = "top", shift = [-0.25, 0, 0.6] }
+d = { on = "top", shift = [-0.64, 0, 0.12] }
+e = { on = "top", shift = [-0.5, 0, -0.42] }
+f = { on = "top", shift = [0.05, 0, -0.66] }
+g = { on = "top", shift = [0.52, 0, -0.38] }
+
+[[parts]]
+name = "sprinkle_a"
+use = "sprinkle"
+color = "yellow"
+attach = "under"
+to = "icing.a"
+twist = 20
+
+[[parts]]
+name = "sprinkle_b"
+use = "sprinkle"
+color = "blue"
+attach = "under"
+to = "icing.b"
+twist = 75
+
+[[parts]]
+name = "sprinkle_c"
+use = "sprinkle"
+color = "white"
+attach = "under"
+to = "icing.c"
+twist = 130
+
+[[parts]]
+name = "sprinkle_d"
+use = "sprinkle"
+color = "yellow"
+attach = "under"
+to = "icing.d"
+twist = 40
+
+[[parts]]
+name = "sprinkle_e"
+use = "sprinkle"
+color = "blue"
+attach = "under"
+to = "icing.e"
+twist = 100
+
+[[parts]]
+name = "sprinkle_f"
+use = "sprinkle"
+color = "white"
+attach = "under"
+to = "icing.f"
+twist = 160
+
+[[parts]]
+name = "sprinkle_g"
+use = "sprinkle"
+color = "yellow"
+attach = "under"
+to = "icing.g"
+twist = 60

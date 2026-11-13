@@ -5,8 +5,8 @@
 use std::path::{Path, PathBuf};
 
 use duck_mold_core::edit::{
-    Applied, Changes, Edit, Made, Sizes, apply, definitions, describe, edit_file, shared, spot,
-    swap_in, unused_name,
+    Applied, Changes, Edit, Free, Made, Sizes, apply, definitions, describe, edit_file, shared,
+    spot, swap_in, unused_name,
 };
 use duck_mold_core::issue::Code;
 use duck_mold_core::math::vec3;
@@ -164,7 +164,7 @@ fn add_hat() -> Edit {
     Edit::Add {
         name: "hat".into(),
         made: Made::Shape("cone".into()),
-        to: "pole.top".into(),
+        to: Some("pole.top".into()),
         attach: None,
         sizes: Sizes {
             radius: Some(0.2),
@@ -173,6 +173,7 @@ fn add_hat() -> Edit {
         },
         color: Some("glow".into()),
         twist: None,
+        free: Free::default(),
     }
 }
 
@@ -661,6 +662,151 @@ fn palette_colours_are_added_and_changed() {
 }
 
 #[test]
+fn a_colour_is_removed_once_nothing_is_painted_with_it() {
+    let remove = |name: &str, replace_with: Option<&str>| Edit::RemoveColor {
+        name: name.into(),
+        replace_with: replace_with.map(str::to_owned),
+    };
+    // In use: refused, naming everything painted with it and what to do.
+    let report = refused(LAMP, &remove("steel", None)).report();
+    assert_eq!(report.errors[0].code, Code::Conflict);
+    assert_eq!(
+        report.errors[0].message,
+        "the colour \"steel\" is in use: 2 things are painted with it (base, pole). Say what to paint them instead, like --replace-with glow"
+    );
+    // A face's colour counts too, and so does a definition's.
+    let report = refused(LAMP, &remove("glow", None)).report();
+    assert!(
+        report.errors[0]
+            .message
+            .contains("1 thing is painted with it (define.bulb)"),
+        "{}",
+        report.errors[0].message
+    );
+    let with_face = done(
+        LAMP,
+        Syntax::Toml,
+        &set_with(
+            "base",
+            Changes {
+                face_colors: vec![("top".into(), "glow".into())],
+                ..Changes::default()
+            },
+        ),
+    );
+    let report = refused(&with_face.text, &remove("glow", None)).report();
+    assert!(
+        report.errors[0]
+            .message
+            .contains("2 things are painted with it (base (top), define.bulb)"),
+        "{}",
+        report.errors[0].message
+    );
+
+    // Repainted first, it goes: the palette line, and every use.
+    let applied = done(
+        &with_face.text,
+        Syntax::Toml,
+        &remove("glow", Some("steel")),
+    );
+    assert_eq!(
+        applied.summary,
+        "removed the colour \"glow\", and painted 2 things with \"steel\" instead"
+    );
+    assert!(!applied.text.contains("glow"), "{}", applied.text);
+    assert!(applied.text.contains("[define.bulb]\ncolor = \"steel\""));
+    assert!(applied.text.contains("colors = { top = \"steel\" }"));
+    assert!(
+        applied
+            .text
+            .contains("steel = \"#8A939B\"   # the stand\n\n# One bulb")
+    );
+    assert_eq!(applied.model.unwrap().palette.len(), 1);
+
+    // A colour nothing uses just goes.
+    let extra = done(
+        LAMP,
+        Syntax::Toml,
+        &Edit::AddColor {
+            name: "gold".into(),
+            hex: "#FFD700".into(),
+        },
+    );
+    let applied = done(&extra.text, Syntax::Toml, &remove("gold", None));
+    assert_eq!(applied.text, LAMP);
+    assert_eq!(applied.summary, "removed the colour \"gold\"");
+
+    // What can't be: a colour that isn't there, and replacing a colour
+    // with itself or with one that isn't there.
+    let report = refused(LAMP, &remove("pink", None)).report();
+    assert_eq!(report.errors[0].code, Code::UnknownColor);
+    for other in ["steel", "pink"] {
+        let report = refused(LAMP, &remove("steel", Some(other))).report();
+        assert_eq!(report.errors[0].code, Code::UnknownColor, "{other}");
+        assert!(
+            report.errors[0].message.contains("must be another colour"),
+            "{}",
+            report.errors[0].message
+        );
+    }
+}
+
+#[test]
+fn a_faces_own_colour_is_taken_away_again() {
+    let paint = |face: &str, color: &str| {
+        set_with(
+            "base",
+            Changes {
+                face_colors: vec![(face.into(), color.into())],
+                ..Changes::default()
+            },
+        )
+    };
+    let top = done(LAMP, Syntax::Toml, &paint("top", "glow"));
+    let both = done(&top.text, Syntax::Toml, &paint("side", "glow"));
+    // What the recipe says about the part names them.
+    let facts = describe(&both.text, Syntax::Toml, both.model.as_ref(), "base").unwrap();
+    assert_eq!(
+        facts.face_colors,
+        [
+            ("top".to_owned(), "glow".to_owned()),
+            ("side".to_owned(), "glow".to_owned())
+        ]
+    );
+    // One goes: the other stays.
+    let one = done(&both.text, Syntax::Toml, &paint("side", "none"));
+    assert_eq!(one.text, top.text);
+    assert_eq!(one.summary, "set \"base\": side no colour of its own");
+    // The last goes: so does the table, and the file is as it was.
+    let none = done(&one.text, Syntax::Toml, &paint("top", "none"));
+    assert_eq!(none.text, LAMP);
+    // Taking away what isn't there changes nothing.
+    let again = done(LAMP, Syntax::Toml, &paint("top", "none"));
+    assert_eq!(again.text, LAMP);
+}
+
+#[test]
+fn a_models_parts_know_the_names_of_their_faces() {
+    let model = done(LAMP, Syntax::Toml, &add_colour_x()).model.unwrap();
+    let base = part(&model, "base");
+    assert_eq!(base.face_names, ["top", "bottom", "side"]);
+    assert_eq!(base.face_groups.len(), base.faces.len());
+    // The first face of a cylinder is its top.
+    assert_eq!(base.face_name(base.faces.start), Some("top"));
+    assert_eq!(base.face_name(base.faces.start + 5), Some("side"));
+    assert_eq!(base.faces_named("top"), [base.faces.start]);
+    assert_eq!(base.faces_named("side").len(), 16);
+    assert!(base.faces_named("lid").is_empty());
+    // A face of another part isn't this part's.
+    let pole = part(&model, "pole");
+    assert_eq!(base.face_name(pole.faces.start), None);
+    assert_eq!(pole.face_name(pole.faces.start), Some("top"));
+    // A part made of parts has none of its own.
+    assert!(part(&model, "left_bulb").face_names.is_empty());
+    assert_eq!(part(&model, "left_bulb/glass").face_names, ["side"]);
+}
+
+#[test]
 fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
     // On a part that has sockets already: one more line.
     let add = Edit::AddSocket {
@@ -741,6 +887,175 @@ fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
 // ---- parts inside definitions and files ---------------------------------------
 
 #[test]
+fn a_socket_is_renamed_with_everything_that_names_it() {
+    let rename = |socket: &str, new_name: &str| Edit::RenameSocket {
+        socket: socket.into(),
+        new_name: new_name.into(),
+    };
+    // The base declares `pole`, and the pole is joined to it.
+    let applied = done(LAMP, Syntax::Toml, &rename("base.pole", "mast"));
+    assert_eq!(
+        changed(LAMP, &applied.text),
+        (
+            vec![
+                "pole = { on = \"top\" }",
+                "",
+                "[[parts]]",
+                "name = \"pole\"",
+                "shape = \"box\"",
+                "size = [0.05, 1.0, 0.05]",
+                "color = \"steel\"",
+                "attach = \"bottom\"",
+                "to = \"base.pole\""
+            ],
+            vec![
+                "mast = { on = \"top\" }",
+                "",
+                "[[parts]]",
+                "name = \"pole\"",
+                "shape = \"box\"",
+                "size = [0.05, 1.0, 0.05]",
+                "color = \"steel\"",
+                "attach = \"bottom\"",
+                "to = \"base.mast\""
+            ]
+        )
+    );
+    assert_eq!(
+        applied.summary,
+        "renamed the socket \"base.pole\" to \"mast\""
+    );
+    // The model is the same.
+    let before = done(LAMP, Syntax::Toml, &add_colour_x()).model.unwrap();
+    assert!(same_shape(&before, applied.model.as_ref().unwrap()));
+    // What the recipe says about the base names its socket, and that
+    // one thing uses it.
+    let facts = describe(&applied.text, Syntax::Toml, applied.model.as_ref(), "base").unwrap();
+    assert_eq!(facts.sockets, [("mast".to_owned(), 1)]);
+
+    // A built-in socket can't be renamed.
+    let report = refused(LAMP, &rename("base.top", "lid")).report();
+    assert_eq!(report.errors[0].code, Code::UnknownSocket);
+    assert!(
+        report.errors[0].message.contains("is built in"),
+        "{}",
+        report.errors[0].message
+    );
+    // A name that is taken, or a built-in one, is refused.
+    let two = done(
+        LAMP,
+        Syntax::Toml,
+        &Edit::AddSocket {
+            part: "base".into(),
+            name: "knob".into(),
+            on: "front".into(),
+            shift: [0.0; 3],
+        },
+    );
+    for taken in ["knob", "top", "slope"] {
+        let report = refused(&two.text, &rename("base.pole", taken)).report();
+        assert_eq!(report.errors[0].code, Code::DuplicateName, "{taken}");
+    }
+    let report = refused(LAMP, &rename("base.pol", "mast")).report();
+    assert_eq!(report.errors[0].suggestion.as_deref(), Some("pole"));
+}
+
+#[test]
+fn a_socket_is_removed_once_nothing_uses_it_and_unused_ones_are_tidied_away() {
+    let remove = |socket: &str| Edit::RemoveSocket {
+        socket: socket.into(),
+    };
+    let socket = |part: &str, name: &str| Edit::AddSocket {
+        part: part.into(),
+        name: name.into(),
+        on: "front".into(),
+        shift: [0.5, 0.0, 0.0],
+    };
+    // In use: refused, naming what sits on it.
+    let report = refused(LAMP, &remove("base.pole")).report();
+    assert_eq!(report.errors[0].code, Code::Conflict);
+    assert_eq!(
+        report.errors[0].message,
+        "the socket \"base.pole\" is in use by: pole. Join that somewhere else first, or remove it"
+    );
+    // Not in use: it goes, and the file is as it was before it came.
+    let with = done(LAMP, Syntax::Toml, &socket("base", "knob"));
+    let without = done(&with.text, Syntax::Toml, &remove("base.knob"));
+    assert_eq!(without.text, LAMP);
+    assert_eq!(without.summary, "removed the socket \"base.knob\"");
+    // The last socket of a part takes the table with it.
+    let only = done(LAMP, Syntax::Toml, &socket("pole", "hook"));
+    assert!(
+        only.text.contains("[parts.sockets]\nhook = "),
+        "{}",
+        only.text
+    );
+    let none = done(&only.text, Syntax::Toml, &remove("pole.hook"));
+    assert!(!none.text.contains("hook"), "{}", none.text);
+    assert!(none.model.is_some());
+
+    // Tidy: only the Studio's own names, and only those nothing uses.
+    let mut text = LAMP.to_owned();
+    for (part, name) in [
+        ("base", "spot"),
+        ("base", "spot_2"),
+        ("pole", "spot"),
+        ("base", "knob"),
+        ("base", "spotty"),
+    ] {
+        text = done(&text, Syntax::Toml, &socket(part, name)).text;
+    }
+    // Something sits on base.spot_2.
+    text = done(
+        &text,
+        Syntax::Toml,
+        &Edit::Add {
+            name: "bead".into(),
+            made: Made::Shape("sphere".into()),
+            to: Some("base.spot_2".into()),
+            attach: None,
+            sizes: Sizes {
+                radius: Some(0.02),
+                ..Sizes::default()
+            },
+            color: Some("glow".into()),
+            twist: None,
+            free: Free::default(),
+        },
+    )
+    .text;
+    let tidied = done(&text, Syntax::Toml, &Edit::TidySockets);
+    assert_eq!(
+        tidied.summary,
+        "removed 2 sockets nothing uses: base.spot, pole.spot"
+    );
+    for kept in [
+        "spot_2 = ",
+        "knob = ",
+        "spotty = ",
+        "pole = { on = \"top\" }",
+    ] {
+        assert!(tidied.text.contains(kept), "{kept} went:\n{}", tidied.text);
+    }
+    assert_eq!(tidied.text.matches("spot = ").count(), 0, "{}", tidied.text);
+    // Again there is nothing to do, and nothing changes.
+    let again = done(&tidied.text, Syntax::Toml, &Edit::TidySockets);
+    assert_eq!(again.text, tidied.text);
+    assert_eq!(
+        again.summary,
+        "found no sockets to tidy away: every \"spot\" socket is in use"
+    );
+    // The same in JSON.
+    let json = to_json(&text);
+    let tidied = done(&json, Syntax::Json, &Edit::TidySockets);
+    assert_eq!(
+        tidied.summary,
+        "removed 2 sockets nothing uses: base.spot, pole.spot"
+    );
+    assert!(tidied.model.is_some());
+}
+
+#[test]
 fn a_part_inside_a_definition_is_edited_there_and_the_others_are_named() {
     let edit = set_with(
         "left_bulb/glass",
@@ -780,11 +1095,12 @@ fn a_part_inside_a_definition_is_edited_there_and_the_others_are_named() {
     let edit = Edit::Add {
         name: "ring".into(),
         made: Made::Shape("cylinder".into()),
-        to: "left_bulb/cap.bottom".into(),
+        to: Some("left_bulb/cap.bottom".into()),
         attach: None,
         sizes: Sizes::default(),
         color: None,
         twist: None,
+        free: Free::default(),
     };
     let applied = done(LAMP, Syntax::Toml, &edit);
     assert!(applied.text.contains("to = \"glass.bottom\"\n\n[[define.bulb.parts]]\nname = \"ring\"\nshape = \"cylinder\"\nattach = \"top\"\nto = \"cap.bottom\"\n\n# The stand."));
@@ -906,11 +1222,16 @@ fn describe_reads_what_the_recipe_says_about_a_part() {
     assert_eq!(base.shape.as_deref(), Some("cylinder"));
     assert_eq!(
         base.sizes,
+        // What a cylinder has, with the default for what the recipe
+        // leaves out: no bevel, and straight sides.
         Sizes {
-            size: None,
             radius: Some(0.3),
             height: Some(0.05),
             segments: Some(16),
+            bevel: Some(0.0),
+            bevel_steps: Some(1),
+            taper: Some([1.0; 2]),
+            ..Sizes::default()
         }
     );
     assert_eq!(base.color.as_deref(), Some("steel"));
@@ -1090,6 +1411,699 @@ fn the_recipes_definitions_and_free_names_are_listed() {
     let taken = ["box".to_owned(), "box_2".to_owned()];
     assert_eq!(unused_name("cone", &taken), "cone");
     assert_eq!(unused_name("box", &taken), "box_3");
+}
+
+// ---- Phase 3, step 1: free parts ---------------------------------------------
+
+fn robot() -> String {
+    std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/robot.toml"))
+        .unwrap()
+}
+
+/// Every corner of two models, compared.
+fn same_shape(a: &Model, b: &Model) -> bool {
+    a.faces.len() == b.faces.len()
+        && a.faces.iter().zip(&b.faces).all(|(a, b)| {
+            a.corners.len() == b.corners.len()
+                && a.corners
+                    .iter()
+                    .zip(&b.corners)
+                    .all(|(a, b)| (*a - *b).length() < 1e-3)
+        })
+}
+
+#[test]
+fn a_free_part_is_moved_turned_and_scaled() {
+    // The pole stands free on the base: give it a place of its own first.
+    let free = LAMP.replace("attach = \"bottom\"\nto = \"base.pole\"\ntwist = 15\n", "");
+    let edit = set_with(
+        "pole",
+        Changes {
+            move_to: Some([0.5, 1.0, -0.25]),
+            rotate: Some([0.0, 45.0, 0.0]),
+            scale: Some([2.0, 2.0, 2.0]),
+            ..Changes::default()
+        },
+    );
+    let applied = done(&free, Syntax::Toml, &edit);
+    let (gone, new) = changed(&free, &applied.text);
+    assert!(gone.is_empty(), "{gone:?}");
+    // In the order a recipe usually has them; one number for a scale
+    // that is the same each way.
+    assert_eq!(
+        new,
+        ["rotate = [0, 45, 0]", "move = [0.5, 1, -0.25]", "scale = 2"]
+    );
+    assert_eq!(
+        applied.summary,
+        "set \"pole\": move [0.5, 1, -0.25], rotate [0, 45, 0], scale 2"
+    );
+    // Changing them again changes the numbers where they stand.
+    let again = done(
+        &applied.text,
+        Syntax::Toml,
+        &set_with(
+            "pole",
+            Changes {
+                move_to: Some([0.5, 1.0, 0.75]),
+                scale: Some([1.0, 2.0, 1.0]),
+                ..Changes::default()
+            },
+        ),
+    );
+    assert_eq!(
+        changed(&applied.text, &again.text),
+        (
+            vec!["move = [0.5, 1, -0.25]", "scale = 2"],
+            vec!["move = [0.5, 1, 0.75]", "scale = [1, 2, 1]"]
+        )
+    );
+    // The part is where the recipe says, measured from the recipe's own
+    // zero, wherever the model's zero point is.
+    let model = again.model.unwrap();
+    let pole = part(&model, "pole");
+    let at = pole.local.shift - model.zero;
+    assert!((at - vec3(0.5, 1.0, 0.75)).length() < 1e-9, "{at:?}");
+
+    // The same in JSON.
+    let json = to_json(&free);
+    let applied = done(&json, Syntax::Json, &edit);
+    assert!(
+        applied.text.contains("\"move\": [0.5, 1, -0.25]"),
+        "{}",
+        applied.text
+    );
+}
+
+/// A box to add with no socket: 0.2 wide, 0.4 tall.
+fn add_free(name: &str, free: Free) -> Edit {
+    Edit::Add {
+        name: name.into(),
+        made: Made::Shape("box".into()),
+        to: None,
+        attach: None,
+        sizes: Sizes {
+            size: Some([0.2, 0.4, 0.2]),
+            ..Sizes::default()
+        },
+        color: Some("steel".into()),
+        twist: None,
+        free,
+    }
+}
+
+#[test]
+fn a_part_added_without_a_socket_stands_free_on_the_ground() {
+    let before = done(LAMP, Syntax::Toml, &add_colour_x()).model.unwrap();
+    // The lamp's base is 0.05 thick round the recipe's zero, so the
+    // ground is at -0.025, and the middle of a box 0.4 tall is 0.2 above.
+    let applied = done(LAMP, Syntax::Toml, &add_free("crate", Free::default()));
+    assert!(
+        applied.text.ends_with(
+            "to = \"pole.right\"\n\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.2, 0.4, 0.2]\ncolor = \"steel\"\nmove = [0, 0.175, 0]\n"
+        ),
+        "{}",
+        applied.text
+    );
+    assert!(applied.text.starts_with(LAMP));
+    assert_eq!(applied.summary, "added \"crate\" (box), standing free");
+    let model = applied.model.unwrap();
+    let new = part(&model, "crate");
+    assert_eq!(new.attached_to, None);
+    // It stands on the same ground as the lamp, and the lamp hasn't moved.
+    let (low, ground) = (new.bounds.unwrap().min.y, model.bounds().unwrap().min.y);
+    assert!((low - ground).abs() < 1e-9, "{low} {ground}");
+    for name in ["base", "pole", "left_bulb", "right_bulb"] {
+        assert_eq!(
+            part(&model, name).bounds,
+            part(&before, name).bounds,
+            "{name}"
+        );
+    }
+
+    // Somewhere else on the ground: its middle is over the place.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &add_free(
+            "crate",
+            Free {
+                stand: Some([1.0, -0.5]),
+                ..Free::default()
+            },
+        ),
+    );
+    assert!(
+        applied.text.contains("move = [1, 0.175, -0.5]\n"),
+        "{}",
+        applied.text
+    );
+
+    // Turned on its side and twice as big, it still stands on the ground.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &add_free(
+            "crate",
+            Free {
+                rotate: Some([0.0, 0.0, 90.0]),
+                scale: Some([2.0; 3]),
+                ..Free::default()
+            },
+        ),
+    );
+    assert!(
+        applied
+            .text
+            .ends_with("rotate = [0, 0, 90]\nmove = [0, 0.175, 0]\nscale = 2\n"),
+        "{}",
+        applied.text
+    );
+    let model = applied.model.unwrap();
+    let low = part(&model, "crate").bounds.unwrap().min.y;
+    assert!((low - model.bounds().unwrap().min.y).abs() < 1e-9, "{low}");
+
+    // An exact place is written as it is given.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &add_free(
+            "crate",
+            Free {
+                move_to: Some([0.5, 2.0, 0.0]),
+                ..Free::default()
+            },
+        ),
+    );
+    assert!(
+        applied.text.ends_with("move = [0.5, 2, 0]\n"),
+        "{}",
+        applied.text
+    );
+
+    // The same in JSON.
+    let applied = done(
+        &to_json(LAMP),
+        Syntax::Json,
+        &add_free("crate", Free::default()),
+    );
+    assert!(
+        applied.text.contains("\"move\": [0, 0.175, 0]"),
+        "{}",
+        applied.text
+    );
+    assert!(applied.model.is_some());
+}
+
+#[test]
+fn the_first_part_of_an_empty_recipe_makes_its_own_ground() {
+    let empty = "version = 0\nname = \"empty\"\n\n[palette]\nsteel = \"#8A939B\"\n";
+    let applied = done(empty, Syntax::Toml, &add_free("crate", Free::default()));
+    assert!(
+        applied.text.ends_with(
+            "\n[[parts]]\nname = \"crate\"\nshape = \"box\"\nsize = [0.2, 0.4, 0.2]\ncolor = \"steel\"\nmove = [0, 0, 0]\n"
+        ),
+        "{}",
+        applied.text
+    );
+    assert_eq!(applied.model.unwrap().parts.len(), 1);
+    // The same in JSON, where the list is started on one line.
+    let applied = done(
+        &to_json(empty),
+        Syntax::Json,
+        &add_free("crate", Free::default()),
+    );
+    assert!(
+        applied.text.contains("\"parts\": [{ \"name\": \"crate\", "),
+        "{}",
+        applied.text
+    );
+    assert_eq!(applied.model.unwrap().parts.len(), 1);
+}
+
+#[test]
+fn a_free_part_and_a_join_dont_mix() {
+    // A join's words on a part that stands free.
+    let mut edit = add_free("crate", Free::default());
+    if let Edit::Add { attach, .. } = &mut edit {
+        *attach = Some("top".into());
+    }
+    let report = refused(LAMP, &edit).report();
+    assert_eq!(report.errors[0].code, Code::Conflict);
+    assert!(
+        report.errors[0].message.contains("--to"),
+        "{}",
+        report.errors[0].message
+    );
+    // A place on a part that is joined.
+    let mut edit = add_free(
+        "crate",
+        Free {
+            stand: Some([1.0, 0.0]),
+            ..Free::default()
+        },
+    );
+    if let Edit::Add { to, .. } = &mut edit {
+        *to = Some("pole.top".into());
+    }
+    let report = refused(LAMP, &edit).report();
+    assert_eq!(report.errors[0].code, Code::Conflict);
+    // A name the model's list already has.
+    let report = refused(LAMP, &add_free("pole", Free::default())).report();
+    assert_eq!(report.errors[0].code, Code::DuplicateName);
+    // A joined part can be given a scale, though.
+    let mut edit = add_free(
+        "crate",
+        Free {
+            scale: Some([1.0, 2.0, 1.0]),
+            ..Free::default()
+        },
+    );
+    if let Edit::Add { to, .. } = &mut edit {
+        *to = Some("pole.top".into());
+    }
+    let applied = done(LAMP, Syntax::Toml, &edit);
+    assert!(
+        applied
+            .text
+            .ends_with("attach = \"bottom\"\nto = \"pole.top\"\nscale = [1, 2, 1]\n"),
+        "{}",
+        applied.text
+    );
+}
+
+#[test]
+fn cut_edges_and_a_narrowed_top_are_set_and_taken_away() {
+    let sizes = |sizes: Sizes| {
+        set_with(
+            "pole",
+            Changes {
+                sizes,
+                ..Changes::default()
+            },
+        )
+    };
+    // The pole is a box: its edges are cut, in two flat cuts, and its
+    // top made half as wide.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &sizes(Sizes {
+            bevel: Some(0.01),
+            bevel_steps: Some(2),
+            taper: Some([0.5, 0.5]),
+            ..Sizes::default()
+        }),
+    );
+    let (gone, new) = changed(LAMP, &applied.text);
+    assert!(gone.is_empty(), "{gone:?}");
+    // After the size, in the order a recipe has them.
+    assert_eq!(new, ["bevel = 0.01", "bevel_steps = 2", "taper = 0.5"]);
+    assert_eq!(
+        applied.summary,
+        "set \"pole\": bevel 0.01, bevel_steps 2, taper 0.5"
+    );
+    let cut = applied.model.as_ref().unwrap();
+    assert!(part(cut, "pole").faces.len() > 6);
+    // The recipe says so when asked.
+    let facts = describe(&applied.text, Syntax::Toml, applied.model.as_ref(), "pole").unwrap();
+    assert_eq!(
+        (
+            facts.sizes.bevel,
+            facts.sizes.bevel_steps,
+            facts.sizes.taper
+        ),
+        (Some(0.01), Some(2), Some([0.5, 0.5]))
+    );
+
+    // A top that is narrowed one way only is two numbers.
+    let two = done(
+        &applied.text,
+        Syntax::Toml,
+        &sizes(Sizes {
+            taper: Some([0.5, 1.0]),
+            ..Sizes::default()
+        }),
+    );
+    assert!(two.text.contains("taper = [0.5, 1]\n"), "{}", two.text);
+    let facts = describe(&two.text, Syntax::Toml, two.model.as_ref(), "pole").unwrap();
+    assert_eq!(facts.sizes.taper, Some([0.5, 1.0]));
+
+    // No bevel takes its steps away with it; straight sides take the
+    // taper away. The file is as it was.
+    let plain = done(
+        &two.text,
+        Syntax::Toml,
+        &sizes(Sizes {
+            bevel: Some(0.0),
+            taper: Some([1.0, 1.0]),
+            ..Sizes::default()
+        }),
+    );
+    assert_eq!(plain.text, LAMP);
+    assert_eq!(plain.summary, "set \"pole\": no bevel, no taper");
+
+    // One cut is what a bevel has when nothing is said: it isn't written.
+    let one = done(
+        &applied.text,
+        Syntax::Toml,
+        &sizes(Sizes {
+            bevel_steps: Some(1),
+            ..Sizes::default()
+        }),
+    );
+    assert!(!one.text.contains("bevel_steps"), "{}", one.text);
+    assert!(one.text.contains("bevel = 0.01\n"));
+
+    // Changing the shape to one that has no edges to cut drops both.
+    let ball = done(
+        &applied.text,
+        Syntax::Toml,
+        &set_with(
+            "pole",
+            Changes {
+                shape: Some("sphere".into()),
+                ..Changes::default()
+            },
+        ),
+    );
+    for gone in ["bevel", "taper", "size"] {
+        assert!(
+            !ball.text.contains(&format!("\n{gone}")),
+            "{gone} is still there:\n{}",
+            ball.text
+        );
+    }
+    // A cut too deep for the shape is refused, with why.
+    let report = refused(
+        LAMP,
+        &sizes(Sizes {
+            bevel: Some(0.03),
+            ..Sizes::default()
+        }),
+    )
+    .report();
+    assert_eq!(report.errors[0].code, Code::OutOfRange);
+    assert!(
+        report.errors[0].message.contains("must be less than 0.025"),
+        "{}",
+        report.errors[0].message
+    );
+}
+
+#[test]
+fn the_newer_shapes_are_added_set_and_described() {
+    let add = |name: &str, shape: &str, sizes: Sizes| Edit::Add {
+        name: name.into(),
+        made: Made::Shape(shape.into()),
+        to: Some("pole.top".into()),
+        attach: None,
+        sizes,
+        color: Some("glow".into()),
+        twist: None,
+        free: Free::default(),
+    };
+    // A ring.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &add(
+            "halo",
+            "torus",
+            Sizes {
+                radius: Some(0.2),
+                tube: Some(0.03),
+                ..Sizes::default()
+            },
+        ),
+    );
+    assert!(
+        applied.text.ends_with(
+            "name = \"halo\"\nshape = \"torus\"\nradius = 0.2\ntube = 0.03\ncolor = \"glow\"\nattach = \"bottom\"\nto = \"pole.top\"\n"
+        ),
+        "{}",
+        applied.text
+    );
+    let facts = describe(&applied.text, Syntax::Toml, applied.model.as_ref(), "halo").unwrap();
+    assert_eq!(
+        facts.sizes,
+        Sizes {
+            radius: Some(0.2),
+            tube: Some(0.03),
+            segments: Some(16),
+            ..Sizes::default()
+        }
+    );
+    // Thicker than its hole is wide: refused.
+    let report = refused(
+        &applied.text,
+        &set_with(
+            "halo",
+            Changes {
+                sizes: Sizes {
+                    tube: Some(0.25),
+                    ..Sizes::default()
+                },
+                ..Changes::default()
+            },
+        ),
+    )
+    .report();
+    assert!(
+        report.errors[0].message.contains("close its own hole"),
+        "{}",
+        report.errors[0].message
+    );
+
+    // Stairs, an arch and a tube, with what each leaves out filled in.
+    for (shape, given, described) in [
+        (
+            "stairs",
+            Sizes {
+                size: Some([0.2, 0.2, 0.4]),
+                steps: Some(5),
+                ..Sizes::default()
+            },
+            Sizes {
+                size: Some([0.2, 0.2, 0.4]),
+                steps: Some(5),
+                ..Sizes::default()
+            },
+        ),
+        (
+            "arch",
+            Sizes {
+                size: Some([1.0, 1.0, 0.2]),
+                ..Sizes::default()
+            },
+            Sizes {
+                size: Some([1.0, 1.0, 0.2]),
+                wall: Some(0.2),
+                segments: Some(8),
+                ..Sizes::default()
+            },
+        ),
+        (
+            "tube",
+            Sizes {
+                wall: Some(0.05),
+                ..Sizes::default()
+            },
+            Sizes {
+                radius: Some(0.5),
+                wall: Some(0.05),
+                height: Some(1.0),
+                segments: Some(16),
+                taper: Some([1.0, 1.0]),
+                ..Sizes::default()
+            },
+        ),
+        (
+            "capsule",
+            Sizes::default(),
+            Sizes {
+                radius: Some(0.25),
+                height: Some(1.0),
+                segments: Some(16),
+                ..Sizes::default()
+            },
+        ),
+        (
+            "pyramid",
+            Sizes::default(),
+            Sizes {
+                size: Some([1.0; 3]),
+                ..Sizes::default()
+            },
+        ),
+    ] {
+        let applied = done(LAMP, Syntax::Toml, &add("new", shape, given));
+        let facts = describe(&applied.text, Syntax::Toml, applied.model.as_ref(), "new").unwrap();
+        assert_eq!(facts.shape.as_deref(), Some(shape));
+        assert_eq!(facts.sizes, described, "{shape}");
+        assert!(applied.model.is_some(), "{shape}");
+    }
+
+    // A size the shape doesn't have is refused, naming the ones it has.
+    let report = refused(
+        LAMP,
+        &add(
+            "new",
+            "prism",
+            Sizes {
+                wall: Some(0.1),
+                ..Sizes::default()
+            },
+        ),
+    )
+    .report();
+    assert!(
+        report.errors[0]
+            .message
+            .contains("a prism has no \"wall\": its size is given by \"size\""),
+        "{}",
+        report.errors[0].message
+    );
+}
+
+#[test]
+fn a_joined_part_isnt_moved_or_turned_but_says_how() {
+    let failure = refused(
+        LAMP,
+        &set_with(
+            "pole",
+            Changes {
+                move_to: Some([1.0, 0.0, 0.0]),
+                ..Changes::default()
+            },
+        ),
+    );
+    assert_eq!(failure.exit_code(), 2);
+    assert_eq!(
+        failure.report().errors[0].message,
+        "\"pole\" is joined to base.pole, so it goes where that socket is. Slide the socket with set-socket, or make the part free first with unjoin"
+    );
+    let failure = refused(
+        LAMP,
+        &set_with(
+            "pole",
+            Changes {
+                rotate: Some([0.0, 90.0, 0.0]),
+                ..Changes::default()
+            },
+        ),
+    );
+    assert!(failure.report().errors[0].message.contains("with --twist"));
+    // Scale is the part's own, joined or not.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &set_with(
+            "pole",
+            Changes {
+                scale: Some([1.0, 0.5, 1.0]),
+                ..Changes::default()
+            },
+        ),
+    );
+    assert!(
+        applied.text.contains("twist = 15\nscale = [1, 0.5, 1]\n"),
+        "{}",
+        applied.text
+    );
+}
+
+#[test]
+fn unjoin_leaves_the_part_exactly_where_it_stood() {
+    let recipe = robot();
+    let before = done(&recipe, Syntax::Toml, &add_colour_x()).model.unwrap();
+    // A plain part, a twisted one, a part made of parts, a mirrored one,
+    // and a part inside a definition.
+    for name in [
+        "head",
+        "panel",
+        "antenna_tip",
+        "left_arm",
+        "right_arm",
+        "left_leg/foot",
+    ] {
+        let applied = done(&recipe, Syntax::Toml, &Edit::Unjoin { part: name.into() });
+        let after = applied.model.unwrap();
+        assert!(
+            same_shape(&before, &after),
+            "{name} moved when it was unjoined"
+        );
+        let free = part(&after, name);
+        assert_eq!(free.attached_to, None, "{name}");
+        // Only that part's lines changed: its join became a place. (A
+        // line that is in both lists only moved past the new ones.)
+        let (gone, new) = changed(&recipe, &applied.text);
+        for line in gone.iter().filter(|line| !new.contains(line)) {
+            assert!(
+                line.starts_with("attach = ") || line.starts_with("to = "),
+                "{name}: lost {line}"
+            );
+        }
+        let added: Vec<&&str> = new.iter().filter(|line| !gone.contains(line)).collect();
+        assert!(
+            added.iter().any(|line| line.starts_with("move = [")),
+            "{name}: {added:?}"
+        );
+        for line in added {
+            assert!(
+                line.starts_with("move = [") || line.starts_with("rotate = ["),
+                "{name}: gained {line}"
+            );
+        }
+    }
+    // What hung from the head still hangs from it.
+    let applied = done(
+        &recipe,
+        Syntax::Toml,
+        &Edit::Unjoin {
+            part: "head".into(),
+        },
+    );
+    assert!(applied.text.contains("to = \"head.antenna\""));
+    assert_eq!(
+        applied.summary,
+        "unjoined \"head\" from body.neck: it is free, where it stood"
+    );
+
+    // A twisted part keeps its turn, as `rotate`.
+    let applied = done(
+        LAMP,
+        Syntax::Toml,
+        &Edit::Unjoin {
+            part: "pole".into(),
+        },
+    );
+    let (gone, new) = changed(LAMP, &applied.text);
+    assert_eq!(
+        gone,
+        ["attach = \"bottom\"", "to = \"base.pole\"", "twist = 15"]
+    );
+    assert_eq!(new[0], "rotate = [0, 15, 0]");
+    assert!(new[1].starts_with("move = [0, 0.525, 0]"), "{new:?}");
+
+    // A part that is free already says so.
+    let failure = refused(
+        &recipe,
+        &Edit::Unjoin {
+            part: "body".into(),
+        },
+    );
+    assert_eq!(
+        failure.report().errors[0].message,
+        "\"body\" isn't joined to anything: it is free already"
+    );
+}
+
+fn add_colour_x() -> Edit {
+    Edit::AddColor {
+        name: "x".into(),
+        hex: "#000000".into(),
+    }
 }
 
 #[test]
@@ -1347,7 +2361,8 @@ fn windows_line_endings_and_the_invisible_mark_survive() {
 fn examples() -> Vec<(String, String)> {
     let folder = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     [
-        "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck",
+        "crate", "table", "tree", "house", "robot", "snowman", "desk", "duck", "dog", "doughnut",
+        "mug", "temple", "barn", "slide", "gate",
     ]
     .into_iter()
     .map(|name| {
@@ -1417,7 +2432,7 @@ fn edits_leave_the_rest_of_every_example_untouched() {
                 &Edit::Add {
                     name: "edit_test_part".into(),
                     made: Made::Shape("box".into()),
-                    to: format!("{target}.top"),
+                    to: Some(format!("{target}.top")),
                     attach: None,
                     sizes: Sizes {
                         size: Some([0.1, 0.1, 0.1]),
@@ -1425,6 +2440,7 @@ fn edits_leave_the_rest_of_every_example_untouched() {
                     },
                     color: Some("edit_test".into()),
                     twist: Some(10.0),
+                    free: Free::default(),
                 },
             );
             let mut after = added.text.lines();
@@ -1599,6 +2615,10 @@ fn every_kind_of_edit_has_a_name() {
             name: String::new(),
             hex: String::new(),
         },
+        Edit::RemoveColor {
+            name: String::new(),
+            replace_with: None,
+        },
         Edit::AddSocket {
             part: String::new(),
             name: String::new(),
@@ -1609,6 +2629,17 @@ fn every_kind_of_edit_has_a_name() {
             socket: String::new(),
             on: None,
             shift: None,
+        },
+        Edit::RenameSocket {
+            socket: String::new(),
+            new_name: String::new(),
+        },
+        Edit::RemoveSocket {
+            socket: String::new(),
+        },
+        Edit::TidySockets,
+        Edit::Unjoin {
+            part: String::new(),
         },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
