@@ -19,6 +19,7 @@
 //! empty placeholder so that nothing is complained about twice.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use crate::issue::{Code, Issue};
 use crate::load::Loaded;
@@ -29,6 +30,7 @@ use crate::recipe::{
     SocketKind, SocketRef, Source, hex, rgb_of,
 };
 use crate::shapes::{self, Landing, Polygon};
+use crate::shaping::{self, Shaped};
 
 /// The socket a wedge has built in besides the seven every part has: the
 /// middle of its slope, facing out of it.
@@ -162,6 +164,8 @@ struct Body {
     /// The names a recipe's `colors` can give its own faces, by the
     /// group each face is in.
     names: Vec<String>,
+    /// For a shaped box: its faces, edges and corners, by name.
+    shaped: Option<Arc<Shaped>>,
 }
 
 /// A part placed in the list it belongs to.
@@ -182,6 +186,7 @@ impl Body {
                 shape: "nothing".to_owned(),
                 uses: None,
                 file: None,
+                changes: 0,
             },
             faces: Vec::new(),
             colors: Vec::new(),
@@ -192,6 +197,7 @@ impl Body {
             whole: false,
             zero: Vec3::ZERO,
             names: Vec::new(),
+            shaped: None,
         }
     }
 
@@ -208,6 +214,7 @@ impl Body {
                 shape: shape.to_owned(),
                 uses: None,
                 file,
+                changes: 0,
             },
             faces,
             colors,
@@ -218,6 +225,7 @@ impl Body {
             whole: false,
             zero: Vec3::ZERO,
             names,
+            shaped: None,
         };
         body.measure();
         body
@@ -233,6 +241,7 @@ impl Body {
                 shape: "assembly".to_owned(),
                 uses: None,
                 file,
+                changes: 0,
             },
             faces: Vec::new(),
             colors: Vec::new(),
@@ -243,6 +252,7 @@ impl Body {
             whole: false,
             zero: Vec3::ZERO,
             names: Vec::new(),
+            shaped: None,
         };
         body.measure();
         body
@@ -455,12 +465,16 @@ struct Layer {
     painted: bool,
     /// The part's `colors`: face name, palette colour (`None` if the
     /// name isn't in the palette), and where it was written.
-    faces: Vec<(String, Option<usize>, Loc)>,
+    faces: Vec<FaceColorLayer>,
     /// True once a shape or mesh looked at `faces`.
     reached: bool,
     /// True for an assembly.
     wall: bool,
 }
+
+/// One of a layer's face colours: the face name, the palette colour
+/// (`None` if the name isn't in the palette), and where it was written.
+type FaceColorLayer = (String, Option<usize>, Loc);
 
 /// A part's `color`.
 #[derive(Clone, Copy)]
@@ -717,8 +731,16 @@ impl Assembler<'_> {
                 break;
             }
             layer.reached = true;
-            for (face, color, loc) in &layer.faces {
-                match groups_of(face) {
+            // A name for fewer faces comes first, so that `front` beats
+            // `sides`, whichever is written first.
+            let mut named: Vec<(Option<Vec<usize>>, &FaceColorLayer)> = layer
+                .faces
+                .iter()
+                .map(|entry| (groups_of(&entry.0), entry))
+                .collect();
+            named.sort_by_key(|(groups, _)| groups.as_ref().map_or(0, Vec::len));
+            for (groups, (face, color, loc)) in named {
+                match groups {
                     Some(groups) => {
                         for group in groups {
                             by_group.entry(group).or_insert(*color);
@@ -780,6 +802,9 @@ impl Assembler<'_> {
 
     fn source(&mut self, part: &PartDef, scope: &Scope<'_>) -> Body {
         match &part.source {
+            Source::Shape(Shape::Box { size }) if !part.changes.is_empty() => {
+                self.shaped(part, *size)
+            }
             Source::Shape(shape) => {
                 let faces = shapes::build_trimmed(shape, &part.trim);
                 if !self.count(&faces, &part.loc) {
@@ -906,6 +931,44 @@ impl Assembler<'_> {
             // already reported.
             Source::File(_) | Source::Broken => Body::broken(),
         }
+    }
+
+    /// A box with changes made to it: built, checked, and coloured by the
+    /// names of its faces.
+    fn shaped(&mut self, part: &PartDef, size: [f64; 3]) -> Body {
+        let changes: Vec<shaping::Change> = part
+            .changes
+            .iter()
+            .map(|change| change.change.clone())
+            .collect();
+        let shaped = match shaping::shape_box(size, part.trim.taper, &changes, part.name.as_deref())
+        {
+            Ok(shaped) => shaped,
+            Err(mistake) => {
+                let loc = &part.changes[mistake.change].loc;
+                let mut issue = loc.error(mistake.code, mistake.message);
+                if let Some((written, names)) = mistake.unknown {
+                    issue = issue.got(written.as_str()).one_of(&written, names);
+                }
+                self.issues.push(issue);
+                return Body::broken();
+            }
+        };
+        let out = shaped.polygons();
+        if !self.count(&out.polygons, &part.loc) {
+            return Body::broken();
+        }
+        let words = shaped.names();
+        let colors = self.paint_faces(
+            &out.polygons,
+            &|name| shaped.groups_of(&out.names, name),
+            &words,
+            &|_| false,
+        );
+        let mut body = Body::solid("box", None, out.polygons, colors, out.names);
+        body.kind.changes = part.changes.len();
+        body.shaped = Some(Arc::new(shaped));
+        body
     }
 
     /// Adds to the count of triangles. False, with one error, once there
@@ -1412,6 +1475,7 @@ fn emit(
                 parts,
                 face_names: node.body.names.clone(),
                 face_groups,
+                shaped: node.body.shaped.clone(),
             }
         })
         .collect()

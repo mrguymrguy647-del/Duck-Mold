@@ -174,6 +174,65 @@ side it leans with the side, and at the very edge of a bevelled face it
 is on the cut and leans with that. Give such a socket a `facing` of its
 own (`facing = "front"`) where it should look straight out.
 
+**Shaping a box: `changes`.** A `box` (with or without `taper`, without
+`bevel`) can have a list of changes, made to it after it is built, one
+after the other, in the order they are written:
+
+```toml
+[[parts]]
+name = "wall"
+shape = "box"
+size = [3, 2.4, 0.2]
+color = "plaster"
+changes = [
+  { inset = "front", by = 0.6, name = "window" },
+  { inset = "window", by = 0.06, name = "glass" },
+  { pull = "glass", by = -0.08 },
+]
+colors = { window = "wood", glass = "sky" }
+```
+
+Each change is a table with one of these, and the fields it takes:
+
+| Change | Fields | What it does |
+|---|---|---|
+| `pull` | `pull` (a face name, or a list of them), `by` (metres, not 0: -1000 to 1000), `name` (optional) | Pulls the faces out the way they face by `by`, and fills the gap with new walls. A negative `by` pushes them in, making a hollow. Faces in the list that share an edge are pulled as one piece, with walls only round its outside, the way the faces face together. |
+| `inset` | `inset` (a face name, or a list), `by` (metres, above 0), `name` (optional) | Makes a smaller face inside each face, `by` in from every edge, with a ring of four-sided faces round it. `by` must be less than half the face's width. Nothing moves: there are just more faces. |
+
+Amounts are metres, in the part's own directions, before its `scale`,
+`mirror`, `rotate` and `move`. Resizing the box keeps them: a frame
+6 cm wide stays 6 cm wide.
+
+**Names.** Every face has a name made of words, never a number, and no
+size or amount changes it:
+
+| Change | The face it is made to | The new faces |
+|---|---|---|
+| `pull` | Keeps its name: it is the end of what was pulled. | One wall along each edge, `<face>_side_<side>`, where the side is the edge's side of the face (`top_side_front`). With `name = "leg"`: `leg_front`, `leg_left`... `<face>_side`, or the `name`, stands for all the walls. |
+| `inset` | Its name now stands for the ring left round the new face. | The face in the middle: `<face>_inset`, or the `name`. The ring's pieces: `<middle>_rim_<side>` (`window_rim_top`). |
+
+The side words (`top`, `left`, `front`...) are passed down from the
+box's faces to the faces the changes make, not measured, so a turned
+face keeps them. A name can stand for several faces: walls along the
+same side share one, and `sides`, a pull's name and an inset face's old
+name stand for groups. Such names work wherever a face name does, in
+`colors` and in later changes. In `colors`, a name for fewer faces wins
+over one for more (`front` over `sides`), whichever is written first.
+A name a change would make that an earlier change made already gets a
+number: `top_side_front_2`, `top_inset_2`. A `name` you give is used as
+it is.
+
+`duck-mold inspect <recipe> --faces` lists every face of every shaped
+part: its name, the way it faces, its size, and the faces next to it.
+
+**Mistakes.** A change that names a face that isn't there
+(`unknown_face`, with the closest name), an inset wider than the face
+allows (`out_of_range`, saying how wide it may be), or a change that
+would squeeze a face flat, turn the shape inside out or make it pass
+through itself (`bad_shape`) is an error on that change's line. Nothing
+is built. `changes` on any other shape, on a bevelled box, or on a part
+that `use`s a definition (shape the definition instead) is an error too.
+
 A round shape's first flat side faces right (+x). When `segments` is a
 multiple of 4, flat sides face left, right, front and back, and a
 `radius` of 0.5 is exactly 1 wide.
@@ -196,6 +255,7 @@ multiple of 4, flat sides face left, right, front and back, and a
 | `arch` | `front`, `back`, `left`, `right`, `top`, `bottom` (under its two feet), `inside` (the doorway) | 4 × segments + 24 |
 | a bevelled `box` | the box's, and `bevel` | 12 + 24 × steps + 8 × steps × steps: 44 for one step |
 | a bevelled `cylinder` | the cylinder's, and `bevel` | 4 × segments × steps more than the cylinder |
+| a `box` with `changes` | the box's, and those the changes make (above) | 2 for each four-sided face: a pull adds a wall for each edge round the outside, an inset a ring of as many faces as the face has edges |
 | an `.obj` file | its material names (`default` for faces before any material) | as in the file |
 | a `.gltf` or `.glb` file | its material names (`material_N` for one with no name, `default` for faces with no material); for a `.glb` Duck Mold wrote, its palette names | as in the file |
 

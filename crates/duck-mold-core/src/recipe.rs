@@ -15,6 +15,7 @@ use std::sync::Arc;
 
 use crate::issue::{Code, Issue};
 use crate::mesh::MeshFile;
+use crate::shaping::Change;
 use crate::source::{Entry, Node, Pos, Value};
 
 /// Where something was written, kept so that a problem found later can
@@ -152,6 +153,18 @@ pub struct PartDef {
     pub sockets: Vec<SocketDef>,
     /// A shape's cut edges and narrowed top, if it has them.
     pub trim: Trim,
+    /// Changes made to its shape once it is built: pulls, insets...
+    /// Only a box has them.
+    pub changes: Vec<ChangeDef>,
+}
+
+/// One change to a shaped part's shape, and where it was written.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChangeDef {
+    /// Where it was written: `parts[0].changes[2]`.
+    pub loc: Loc,
+    /// What it does.
+    pub change: Change,
 }
 
 /// The two things that can be done to a shape after it is built: its
@@ -540,6 +553,19 @@ impl Side {
         Side::ALL.into_iter().find(|side| side.name() == name)
     }
 
+    /// The side across from this one. The middle is its own.
+    pub fn opposite(self) -> Side {
+        match self {
+            Side::Top => Side::Bottom,
+            Side::Bottom => Side::Top,
+            Side::Left => Side::Right,
+            Side::Right => Side::Left,
+            Side::Front => Side::Back,
+            Side::Back => Side::Front,
+            Side::Center => Side::Center,
+        }
+    }
+
     /// Where the side is from the middle of the box: one step along one
     /// direction. The middle itself is `[0, 0, 0]`.
     pub fn offset(self) -> [f64; 3] {
@@ -575,7 +601,7 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-pub(crate) const PART_FIELDS: [&str; 26] = [
+pub(crate) const PART_FIELDS: [&str; 27] = [
     "name",
     "shape",
     "use",
@@ -592,6 +618,7 @@ pub(crate) const PART_FIELDS: [&str; 26] = [
     "bevel_steps",
     "taper",
     "color",
+    "changes",
     "colors",
     "attach",
     "to",
@@ -603,6 +630,18 @@ pub(crate) const PART_FIELDS: [&str; 26] = [
     "sockets",
     "note",
 ];
+
+/// The fields a change can have.
+const CHANGE_FIELDS: [&str; 4] = ["pull", "inset", "by", "name"];
+
+/// "a cylinder", "an arch".
+fn a_shape(name: &str) -> String {
+    if name.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        format!("an {name}")
+    } else {
+        format!("a {name}")
+    }
+}
 
 /// The fields at the top of a recipe.
 pub(crate) const TOP_FIELDS: [&str; 9] = [
@@ -1144,6 +1183,7 @@ impl Decoder<'_> {
             mirror: None,
             sockets: Vec::new(),
             trim: Trim::default(),
+            changes: Vec::new(),
         };
         let Some(mut fields) = self.table(node, path, "a part: a table of fields") else {
             return part;
@@ -1251,6 +1291,15 @@ impl Decoder<'_> {
             part.trim = trim;
         }
 
+        // ---- changes to the shape
+        if let Some(entry) = fields.take("changes") {
+            let changes_path = fields.sub("changes");
+            part.changes = self.changes(&entry.node, &changes_path);
+            if !part.changes.is_empty() && !self.can_be_shaped(&part, &changes_path, entry) {
+                part.changes.clear();
+            }
+        }
+
         // ---- colour
         if let Some(entry) = fields.take("color") {
             let color_path = fields.sub("color");
@@ -1324,6 +1373,222 @@ impl Decoder<'_> {
 
         self.finish(fields, &PART_FIELDS);
         part
+    }
+
+    /// Whether the part can have `changes`: only a box, with no bevel,
+    /// can. Says why not.
+    fn can_be_shaped(&mut self, part: &PartDef, path: &str, entry: &Entry) -> bool {
+        let who = match &part.name {
+            Some(name) => format!("\"{name}\""),
+            None => "this part".to_owned(),
+        };
+        let (code, message) = match &part.source {
+            Source::Shape(Shape::Box { .. }) if part.trim.is_bevelled() => (
+                Code::Conflict,
+                "a box with \"changes\" can't have a \"bevel\" in this version: remove one of them"
+                    .to_owned(),
+            ),
+            Source::Shape(Shape::Box { .. }) | Source::Broken => return true,
+            Source::Shape(shape) => (
+                Code::Unsupported,
+                format!(
+                    "only a box can be shaped in this version: {who} is {}",
+                    a_shape(shape.name())
+                ),
+            ),
+            Source::Use(named) => (
+                Code::Conflict,
+                format!(
+                    "a part made from a definition is shaped in the definition: move \"changes\" to [define.{}]",
+                    named.text
+                ),
+            ),
+            Source::Parts(_) => (
+                Code::Unsupported,
+                format!("only a box can be shaped in this version: {who} is made of other parts"),
+            ),
+            Source::File(_) | Source::Recipe(_) | Source::Mesh(_) => (
+                Code::Unsupported,
+                format!("only a box can be shaped in this version: {who} comes from a file"),
+            ),
+        };
+        self.error(code, path, entry.key_pos, message);
+        false
+    }
+
+    /// The list of changes to a shape.
+    fn changes(&mut self, node: &Node, path: &str) -> Vec<ChangeDef> {
+        let Value::Array(items) = &node.value else {
+            let message = format!(
+                "this needs a list of changes, like [{{ pull = \"top\", by = 0.5 }}], not {}",
+                node.value.describe()
+            );
+            self.error(Code::TypeMismatch, path, node.pos, message).got = Some(node.value.to_got());
+            return Vec::new();
+        };
+        let mut changes = Vec::new();
+        for (at, item) in items.iter().enumerate() {
+            let item_path = format!("{path}[{at}]");
+            if let Some(change) = self.change(item, &item_path) {
+                changes.push(ChangeDef {
+                    loc: self.loc(&item_path, item.pos),
+                    change,
+                });
+            }
+        }
+        changes
+    }
+
+    /// One change: `{ pull = "top", by = 0.5 }`.
+    fn change(&mut self, node: &Node, path: &str) -> Option<Change> {
+        let mut fields = self.table(
+            node,
+            path,
+            "a change: a table like { pull = \"top\", by = 0.5 }",
+        )?;
+        let actions: Vec<&Entry> = Change::WORDS
+            .iter()
+            .filter_map(|word| fields.take(word))
+            .collect();
+        let action = match actions.as_slice() {
+            [] => {
+                // What else it says is fine: only the action is missing.
+                fields.take("by");
+                fields.take("name");
+                self.error(
+                    Code::MissingField,
+                    path,
+                    fields.pos,
+                    "a change needs one of \"pull\" or \"inset\" to say what it does, like { pull = \"top\", by = 0.5 }",
+                );
+                self.finish(fields, &CHANGE_FIELDS);
+                return None;
+            }
+            [only] => *only,
+            [first, rest @ ..] => {
+                for extra in rest {
+                    let message = format!(
+                        "a change does one thing: this one is a \"{}\" already, so make the \"{}\" a change of its own",
+                        first.key, extra.key
+                    );
+                    self.error(
+                        Code::Conflict,
+                        &fields.sub(&extra.key),
+                        extra.key_pos,
+                        message,
+                    );
+                }
+                fields.take("by");
+                fields.take("name");
+                self.finish(fields, &CHANGE_FIELDS);
+                return None;
+            }
+        };
+        let word = action.key.as_str();
+        let faces = self.face_list(&action.node, &fields.sub(word), word);
+        let by = match fields.take("by") {
+            Some(entry) => self.change_amount(entry, &fields.sub("by"), word),
+            None => {
+                let message = format!(
+                    "a {word} needs \"by\": how far, in metres, like {{ {word} = \"top\", by = {} }}",
+                    if word == "pull" { "0.5" } else { "0.1" }
+                );
+                self.error(Code::MissingField, path, fields.pos, message);
+                None
+            }
+        };
+        let name = fields
+            .take("name")
+            .and_then(|entry| self.name(&entry.node, &fields.sub("name")));
+        self.finish(fields, &CHANGE_FIELDS);
+        let (faces, by) = (faces?, by?);
+        Some(match word {
+            "pull" => Change::Pull { faces, by, name },
+            _ => Change::Inset { faces, by, name },
+        })
+    }
+
+    /// A change's `by`, checked for what the change can take.
+    fn change_amount(&mut self, entry: &Entry, path: &str, word: &str) -> Option<f64> {
+        let by = self.number(&entry.node, path, "0.5")?;
+        let pos = entry.node.pos;
+        match word {
+            "pull" if by == 0.0 => {
+                let issue = self.error(
+                    Code::OutOfRange,
+                    path,
+                    pos,
+                    "a pull of 0 changes nothing: pull out with a number above 0, or in with one below 0",
+                );
+                issue.got = Some(by.into());
+                None
+            }
+            "pull" => self.check_range(by, pos, path, (-SIZE_RANGE.1, SIZE_RANGE.1)),
+            _ if by <= 0.0 => {
+                let issue = self.error(
+                    Code::OutOfRange,
+                    path,
+                    pos,
+                    "an inset is measured in from the edges: it needs a number above 0",
+                );
+                issue.got = Some(by.into());
+                None
+            }
+            _ => self.check_range(by, pos, path, (0.0, SIZE_RANGE.1)),
+        }
+    }
+
+    /// The faces a change is made to: one name, or a list of them.
+    fn face_list(&mut self, node: &Node, path: &str, word: &str) -> Option<Vec<String>> {
+        let items: Vec<(&Node, String)> = match &node.value {
+            Value::Str(_) => vec![(node, path.to_owned())],
+            Value::Array(items) if !items.is_empty() => items
+                .iter()
+                .enumerate()
+                .map(|(at, item)| (item, format!("{path}[{at}]")))
+                .collect(),
+            other => {
+                let found = match other {
+                    Value::Array(_) => "an empty list".to_owned(),
+                    other => other.describe(),
+                };
+                let message = format!(
+                    "this needs a face's name, like \"top\", or a list of them, like [\"top\", \"front\"], not {found}"
+                );
+                self.error(Code::TypeMismatch, path, node.pos, message).got = Some(other.to_got());
+                return None;
+            }
+        };
+        let mut faces = Vec::new();
+        let mut good = true;
+        for (item, item_path) in items {
+            let Some(text) = self.text(item, &item_path, "top") else {
+                good = false;
+                continue;
+            };
+            if text.contains('+') {
+                let what = if text.matches('+').count() == 1 {
+                    "an edge"
+                } else {
+                    "a corner"
+                };
+                let message =
+                    format!("\"{text}\" is {what}: a {word} is made to faces, like \"top\"");
+                self.error(Code::TypeMismatch, &item_path, item.pos, message)
+                    .got = Some(text.into());
+                good = false;
+            } else if !is_name(&text) {
+                let message = format!(
+                    "\"{text}\" can't be a face's name: use letters, digits, \"_\" and \"-\" only"
+                );
+                self.error(Code::TypeMismatch, &item_path, item.pos, message)
+                    .got = Some(text.into());
+                good = false;
+            } else {
+                faces.push(text);
+            }
+        }
+        good.then_some(faces)
     }
 
     fn defined_has_no(&mut self, path: &str, entry: &Entry, field: &str) {

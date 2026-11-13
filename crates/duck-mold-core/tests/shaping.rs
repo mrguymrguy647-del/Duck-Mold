@@ -1,0 +1,860 @@
+//! Phase 4, step 1: shaping a box with `changes`. Pulls and insets are
+//! read from the recipe, made in order, named with words, and checked:
+//! every shape that is built is closed, faces out everywhere, holds room
+//! and doesn't pass through itself; anything else is a mistake that
+//! names the change.
+
+use std::collections::HashMap;
+use std::path::Path;
+
+use duck_mold_core::assemble::assemble;
+use duck_mold_core::edit::{Applied, Edit, apply};
+use duck_mold_core::inspect::face_report;
+use duck_mold_core::issue::{Code, Issue, Report};
+use duck_mold_core::load::load_text;
+use duck_mold_core::math::Vec3;
+use duck_mold_core::model::{Model, Part};
+use duck_mold_core::shaping::{Change, Shaped, shape_box};
+use duck_mold_core::source::Syntax;
+
+fn build(text: &str) -> (Option<Model>, Report) {
+    let mut issues = Vec::new();
+    let loaded = load_text(text, Syntax::Toml, "test.toml", Path::new("."), &mut issues);
+    let model = assemble(&loaded, &mut issues);
+    (model, Report::from_issues(issues))
+}
+
+/// Builds a recipe that must have no errors. (The palette's colours
+/// aren't all used everywhere: those warnings are fine.)
+fn built(text: &str) -> Model {
+    let (model, report) = build(text);
+    assert_eq!(report.errors, Vec::new());
+    assert!(
+        report
+            .warnings
+            .iter()
+            .all(|warning| warning.code == Code::Unused),
+        "{:#?}",
+        report.warnings
+    );
+    model.unwrap()
+}
+
+fn errors(text: &str) -> Vec<Issue> {
+    let (model, report) = build(text);
+    assert!(model.is_none(), "this should not build:\n{text}");
+    report.errors
+}
+
+fn one_error(text: &str) -> Issue {
+    let errors = errors(text);
+    assert_eq!(errors.len(), 1, "{errors:#?}");
+    errors.into_iter().next().unwrap()
+}
+
+const PALETTE: &str =
+    "version = 0\n\n[palette]\nplaster = \"#E8E0D0\"\nwood = \"#8B5A2B\"\nsky = \"#9FD3F0\"\n\n";
+
+/// A recipe with one part, `wall`, with these extra lines.
+fn wall(lines: &str) -> String {
+    format!(
+        "{PALETTE}[[parts]]\nname = \"wall\"\nshape = \"box\"\nsize = [3, 2.4, 0.2]\ncolor = \"plaster\"\n{lines}\n"
+    )
+}
+
+/// The design's wall, with a framed window, and its colours.
+const WINDOW: &str = r#"changes = [
+  { inset = "front", by = 0.6, name = "window" },
+  { inset = "window", by = 0.06, name = "glass" },
+  { pull = "glass", by = -0.08 },
+]
+colors = { window = "wood", glass = "sky", glass_side = "wood" }"#;
+
+fn first_part(model: &Model) -> &Part {
+    &model.parts[0]
+}
+
+fn triangles_by_colour(model: &Model) -> Vec<(String, usize)> {
+    let mut counts: Vec<(String, usize)> = model
+        .palette
+        .iter()
+        .map(|color| (color.name.clone(), 0))
+        .collect();
+    for face in &model.faces {
+        counts[face.color.unwrap()].1 += face.triangle_count();
+    }
+    counts.retain(|(_, count)| *count > 0);
+    counts
+}
+
+// ---- reading and building -------------------------------------------------
+
+#[test]
+fn the_designs_wall_is_built_with_a_framed_window() {
+    let model = built(&wall(WINDOW));
+    let part = first_part(&model);
+    assert_eq!(part.kind.shape, "box");
+    assert_eq!(part.kind.changes, 3);
+    assert_eq!(part.kind.label(), "box, 3 changes");
+    // 6 box faces, 4 + 4 ring pieces, 4 walls: 18 four-cornered faces.
+    assert_eq!(model.triangle_count(), 36);
+    assert_eq!(
+        triangles_by_colour(&model),
+        vec![
+            ("plaster".to_owned(), 18),
+            ("wood".to_owned(), 16),
+            ("sky".to_owned(), 2)
+        ]
+    );
+    // The glass is pushed 8 cm into the 20 cm wall.
+    let glass = part.faces_named("glass");
+    assert_eq!(glass.len(), 1);
+    let glass = &model.faces[glass[0]];
+    let z = glass.corners[0].z - model.zero.z;
+    assert!(
+        glass
+            .corners
+            .iter()
+            .all(|corner| (corner.z - glass.corners[0].z).abs() < 1e-9)
+    );
+    assert!((z - 0.02).abs() < 1e-9, "{z}");
+    // A shaped part keeps what it is made of, by name.
+    let shaped = part.shaped.as_ref().unwrap();
+    assert_eq!(shaped.faces.len(), 18);
+    assert_eq!(shaped.faces_named("front").len(), 4);
+}
+
+#[test]
+fn a_box_with_no_changes_is_built_as_before() {
+    let plain = built(&wall(""));
+    let empty = built(&wall("changes = []"));
+    assert_eq!(plain.faces, empty.faces);
+    assert_eq!(first_part(&empty).kind.changes, 0);
+    assert!(first_part(&empty).shaped.is_none());
+}
+
+#[test]
+fn a_name_for_fewer_faces_beats_one_for_more() {
+    for colors in [
+        "colors = { sides = \"wood\", front = \"sky\" }",
+        "colors = { front = \"sky\", sides = \"wood\" }",
+    ] {
+        let model = built(&wall(&format!(
+            "changes = [{{ inset = \"front\", by = 0.5 }}]\n{colors}"
+        )));
+        // The front's ring is sky; the inset in the middle is one of the
+        // sides (wood), and so are the three other sides.
+        assert_eq!(
+            triangles_by_colour(&model),
+            vec![
+                ("plaster".to_owned(), 4),
+                ("wood".to_owned(), 6 + 2),
+                ("sky".to_owned(), 8)
+            ],
+            "{colors}"
+        );
+    }
+}
+
+#[test]
+fn a_defined_part_is_shaped_once_and_used_twice() {
+    let text = format!(
+        "{PALETTE}[define.post]\nshape = \"box\"\nsize = [0.2, 1, 0.2]\ncolor = \"wood\"\nchanges = [{{ pull = \"top\", by = 0.3, name = \"tip\" }}]\n\n[[parts]]\nname = \"a\"\nuse = \"post\"\n\n[[parts]]\nname = \"b\"\nuse = \"post\"\nmove = [1, 0.65, 0]\n"
+    );
+    let model = built(&text);
+    for part in &model.parts {
+        assert_eq!(part.kind.label(), "post (box, 1 change)");
+        let bounds = part.bounds.unwrap();
+        assert!((bounds.size().y - 1.3).abs() < 1e-9);
+    }
+}
+
+#[test]
+fn mistakes_in_a_change_say_what_and_where() {
+    let cases: [(&str, Code, &str, &str); 9] = [
+        (
+            "changes = { pull = \"top\", by = 1 }",
+            Code::TypeMismatch,
+            "parts[0].changes",
+            "this needs a list of changes, like [{ pull = \"top\", by = 0.5 }], not a table",
+        ),
+        (
+            "changes = [{ by = 1 }]",
+            Code::MissingField,
+            "parts[0].changes[0]",
+            "a change needs one of \"pull\" or \"inset\" to say what it does, like { pull = \"top\", by = 0.5 }",
+        ),
+        (
+            "changes = [{ pull = \"top\", inset = \"top\", by = 1 }]",
+            Code::Conflict,
+            "parts[0].changes[0].inset",
+            "a change does one thing: this one is a \"pull\" already, so make the \"inset\" a change of its own",
+        ),
+        (
+            "changes = [{ pull = \"top\" }]",
+            Code::MissingField,
+            "parts[0].changes[0]",
+            "a pull needs \"by\": how far, in metres, like { pull = \"top\", by = 0.5 }",
+        ),
+        (
+            "changes = [{ pull = \"top\", by = 0 }]",
+            Code::OutOfRange,
+            "parts[0].changes[0].by",
+            "a pull of 0 changes nothing: pull out with a number above 0, or in with one below 0",
+        ),
+        (
+            "changes = [{ inset = \"top\", by = -0.1 }]",
+            Code::OutOfRange,
+            "parts[0].changes[0].by",
+            "an inset is measured in from the edges: it needs a number above 0",
+        ),
+        (
+            "changes = [{ pull = \"top+front\", by = 1 }]",
+            Code::TypeMismatch,
+            "parts[0].changes[0].pull",
+            "\"top+front\" is an edge: a pull is made to faces, like \"top\"",
+        ),
+        (
+            "changes = [{ pull = [], by = 1 }]",
+            Code::TypeMismatch,
+            "parts[0].changes[0].pull",
+            "this needs a face's name, like \"top\", or a list of them, like [\"top\", \"front\"], not an empty list",
+        ),
+        (
+            "changes = [{ pull = \"top\", by = 1, nam = \"x\" }]",
+            Code::UnknownField,
+            "parts[0].changes[0].nam",
+            "there is no field \"nam\" here",
+        ),
+    ];
+    for (lines, code, path, message) in cases {
+        let error = one_error(&wall(lines));
+        assert_eq!(
+            (error.code, error.path.as_str(), error.message.as_str()),
+            (code, path, message),
+            "{lines}"
+        );
+    }
+    let error = one_error(&wall("changes = [{ pull = \"top\", by = 1, nam = \"x\" }]"));
+    assert_eq!(error.suggestion.as_deref(), Some("name"));
+}
+
+#[test]
+fn only_a_box_without_a_bevel_can_be_shaped() {
+    let text = format!(
+        "{PALETTE}[[parts]]\nname = \"post\"\nshape = \"cylinder\"\ncolor = \"wood\"\nchanges = [{{ pull = \"top\", by = 1 }}]\n"
+    );
+    let error = one_error(&text);
+    assert_eq!(error.code, Code::Unsupported);
+    assert_eq!(
+        error.message,
+        "only a box can be shaped in this version: \"post\" is a cylinder"
+    );
+    let text = format!(
+        "{PALETTE}[[parts]]\nshape = \"arch\"\ncolor = \"wood\"\nchanges = [{{ pull = \"top\", by = 1 }}]\n"
+    );
+    assert_eq!(
+        one_error(&text).message,
+        "only a box can be shaped in this version: this part is an arch"
+    );
+    let error = one_error(&wall(
+        "bevel = 0.02\nchanges = [{ pull = \"top\", by = 1 }]",
+    ));
+    assert_eq!(error.code, Code::Conflict);
+    assert_eq!(error.path, "parts[0].changes");
+    let text = format!(
+        "{PALETTE}[define.post]\nshape = \"box\"\ncolor = \"wood\"\n\n[[parts]]\nuse = \"post\"\nchanges = [{{ pull = \"top\", by = 1 }}]\n"
+    );
+    assert_eq!(
+        one_error(&text).message,
+        "a part made from a definition is shaped in the definition: move \"changes\" to [define.post]"
+    );
+}
+
+#[test]
+fn a_change_that_breaks_the_shape_is_named_with_its_line() {
+    // The design's messages.
+    let cases = [
+        (
+            "changes = [\n  { inset = \"front\", by = 0.6, name = \"window\" },\n  { inset = \"window\", by = 0.06, name = \"glass\" },\n  { pull = \"glas\", by = -0.08 },\n]",
+            Code::UnknownFace,
+            "parts[0].changes[2]",
+            "there is no face \"glas\" on \"wall\"",
+            Some("glass"),
+        ),
+        (
+            "changes = [\n  { inset = \"front\", by = 0.6, name = \"window\" },\n  { inset = \"window\", by = 0.8 },\n]",
+            Code::OutOfRange,
+            "parts[0].changes[1]",
+            "an inset of 0.8 m is too wide for \"window\": it is 1.2 m across, so the inset must be less than 0.6 m",
+            None,
+        ),
+        (
+            "changes = [\n  { inset = \"front\", by = 0.6, name = \"glass\" },\n  { pull = \"glass\", by = -0.3 },\n]",
+            Code::BadShape,
+            "parts[0].changes[1]",
+            "pulling \"glass\" in by 0.3 makes \"glass_side_bottom\" pass through \"back\"",
+            None,
+        ),
+        (
+            "changes = [\n  { inset = \"front\", by = 0.6, name = \"glass\" },\n  { pull = \"glass\", by = -0.2 },\n]",
+            Code::BadShape,
+            "parts[0].changes[1]",
+            "pulling \"glass\" in by 0.2 makes \"glass\" pass through \"back\"",
+            None,
+        ),
+    ];
+    for (lines, code, path, message, suggestion) in cases {
+        let error = one_error(&wall(lines));
+        assert_eq!(
+            (error.code, error.path.as_str(), error.message.as_str()),
+            (code, path, message)
+        );
+        assert_eq!(error.suggestion.as_deref(), suggestion);
+        // The line of the change itself.
+        let line = error.line.unwrap();
+        let text = wall(lines);
+        let written = text.lines().nth(line - 1).unwrap();
+        let number: usize = path
+            .rsplit('[')
+            .next()
+            .unwrap()
+            .trim_end_matches(']')
+            .parse()
+            .unwrap();
+        let lines: Vec<&str> = lines.lines().skip(1).collect();
+        assert_eq!(written, lines[number], "{message}");
+    }
+}
+
+#[test]
+fn colours_name_faces_the_changes_made() {
+    let error = one_error(&wall(
+        "changes = [{ inset = \"front\", by = 0.5, name = \"window\" }]\ncolors = { windw = \"sky\" }",
+    ));
+    assert_eq!(error.code, Code::UnknownFace);
+    assert_eq!(error.suggestion.as_deref(), Some("window"));
+}
+
+// ---- names ------------------------------------------------------------------
+
+fn pull(faces: &[&str], by: f64, name: Option<&str>) -> Change {
+    Change::Pull {
+        faces: faces.iter().map(|face| (*face).to_owned()).collect(),
+        by,
+        name: name.map(str::to_owned),
+    }
+}
+
+fn inset(faces: &[&str], by: f64, name: Option<&str>) -> Change {
+    Change::Inset {
+        faces: faces.iter().map(|face| (*face).to_owned()).collect(),
+        by,
+        name: name.map(str::to_owned),
+    }
+}
+
+fn own_names(shaped: &Shaped) -> Vec<&str> {
+    shaped.faces.iter().map(|face| face.name.as_str()).collect()
+}
+
+#[test]
+fn each_change_names_its_faces_as_the_design_says() {
+    // A pull: the face keeps its name; walls by side.
+    let shaped = shape_box([1.0; 3], [1.0; 2], &[pull(&["top"], 0.5, None)], None).unwrap();
+    assert_eq!(
+        own_names(&shaped),
+        [
+            "top",
+            "bottom",
+            "left",
+            "right",
+            "front",
+            "back",
+            "top_side_left",
+            "top_side_front",
+            "top_side_right",
+            "top_side_back"
+        ]
+    );
+    // With a name.
+    let shaped = shape_box(
+        [1.0; 3],
+        [1.0; 2],
+        &[pull(&["front"], 0.5, Some("nose"))],
+        None,
+    )
+    .unwrap();
+    assert_eq!(
+        own_names(&shaped)[6..],
+        ["nose_bottom", "nose_right", "nose_top", "nose_left"]
+    );
+    assert_eq!(shaped.faces_named("nose").len(), 4);
+    // An inset: the middle takes the face's place; the old name is the
+    // ring.
+    let shaped = shape_box([1.0; 3], [1.0; 2], &[inset(&["front"], 0.1, None)], None).unwrap();
+    assert_eq!(
+        own_names(&shaped),
+        [
+            "top",
+            "bottom",
+            "left",
+            "right",
+            "front_inset",
+            "back",
+            "front_inset_rim_bottom",
+            "front_inset_rim_right",
+            "front_inset_rim_top",
+            "front_inset_rim_left"
+        ]
+    );
+    assert_eq!(shaped.faces_named("front").len(), 4);
+    // `sides` still stands for the four sides, the inset among them.
+    assert_eq!(shaped.faces_named("sides").len(), 3 + 1 + 4);
+}
+
+#[test]
+fn pulled_walls_along_one_side_share_a_name() {
+    let shaped = shape_box(
+        [3.0, 1.0, 1.0],
+        [1.0; 2],
+        &[
+            inset(&["top"], 0.1, Some("seat")),
+            pull(&["seat"], 0.5, Some("back")),
+        ],
+        None,
+    )
+    .unwrap();
+    assert_eq!(shaped.faces_named("back_front").len(), 1);
+    assert_eq!(
+        shaped.faces_named("back").len(),
+        5,
+        "the box's back, and 4 walls"
+    );
+}
+
+/// Names after the same changes on many boxes, and with other amounts.
+#[test]
+fn names_last_through_sizes_and_amounts() {
+    let changes = |by: f64| {
+        vec![
+            inset(&["front"], 0.05, Some("window")),
+            pull(&["window"], -by / 4.0, None),
+            pull(&["top"], by, Some("chimney")),
+            inset(&["chimney_front", "chimney_back"], 0.02, None),
+            pull(&["left", "back"], by / 2.0, None),
+        ]
+    };
+    let mut first: Option<Vec<String>> = None;
+    for size in [[1.0, 1.0, 1.0], [2.5, 0.6, 1.5], [0.4, 3.0, 0.8]] {
+        for by in [0.1, 0.25, 0.4] {
+            let shaped = shape_box(size, [1.0; 2], &changes(by), None).unwrap();
+            let names = shaped.names();
+            match &first {
+                None => first = Some(names),
+                Some(first) => assert_eq!(first, &names, "{size:?}, {by}"),
+            }
+        }
+    }
+}
+
+// ---- every shape stays whole ------------------------------------------------
+
+/// A small random number maker, the same every run.
+struct Dice(u64);
+
+impl Dice {
+    fn next(&mut self) -> u64 {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        self.0
+    }
+
+    fn below(&mut self, count: usize) -> usize {
+        (self.next() % count as u64) as usize
+    }
+
+    fn between(&mut self, low: f64, high: f64) -> f64 {
+        let share = (self.next() >> 11) as f64 / (1u64 << 53) as f64;
+        low + (high - low) * share
+    }
+}
+
+/// Checks a built shape without trusting the checks it was built with:
+/// every edge of every polygon is met by exactly one edge going the
+/// other way (closed, and facing one way everywhere), it holds room (so
+/// that way is out), and no edge pierces a polygon it isn't next to.
+fn whole(shaped: &Shaped) -> Result<(), String> {
+    let out = shaped.polygons();
+    let key = |p: Vec3| (p.x.to_bits(), p.y.to_bits(), p.z.to_bits());
+    let mut edges: HashMap<_, usize> = HashMap::new();
+    for polygon in &out.polygons {
+        if polygon.normal().is_none() {
+            return Err("a face with no room".into());
+        }
+        let count = polygon.corners.len();
+        for at in 0..count {
+            let edge = (
+                key(polygon.corners[at]),
+                key(polygon.corners[(at + 1) % count]),
+            );
+            *edges.entry(edge).or_default() += 1;
+        }
+    }
+    for (&(a, b), &count) in &edges {
+        if count != 1 || edges.get(&(b, a)) != Some(&1) {
+            return Err("not closed".into());
+        }
+    }
+    let mut volume = 0.0;
+    let mut triangles: Vec<[Vec3; 3]> = Vec::new();
+    for polygon in &out.polygons {
+        for [a, b, c] in polygon.triangles() {
+            volume += a.dot(b.cross(c)) / 6.0;
+            triangles.push([a, b, c]);
+        }
+    }
+    if volume <= 0.0 {
+        return Err(format!("holds {volume}"));
+    }
+    // An edge of one triangle going right through another, where the
+    // two have no corner in the same place.
+    let near = 1e-7;
+    for one in &triangles {
+        for two in &triangles {
+            if one
+                .iter()
+                .any(|p| two.iter().any(|q| (*p - *q).length() < near))
+            {
+                continue;
+            }
+            let normal = (two[1] - two[0]).cross(two[2] - two[0]);
+            let Some(normal) = normal.normalized() else {
+                continue;
+            };
+            for at in 0..3 {
+                let (p, q) = (one[at], one[(at + 1) % 3]);
+                let (dp, dq) = (normal.dot(p - two[0]), normal.dot(q - two[0]));
+                if dp * dq >= 0.0 || dp.abs() < near || dq.abs() < near {
+                    continue;
+                }
+                let hit = p + (q - p) * (dp / (dp - dq));
+                let inside = (0..3).all(|side| {
+                    let (a, b) = (two[side], two[(side + 1) % 3]);
+                    (b - a).cross(hit - a).dot(normal) > near
+                });
+                if inside {
+                    return Err(format!("{one:?} goes through {two:?}"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn every_list_of_changes_gives_a_whole_shape_or_names_the_change_that_broke_it() {
+    let mut dice = Dice(0x9E37_79B9_7F4A_7C15);
+    let (mut made, mut refused) = (0, 0);
+    for _ in 0..250 {
+        let size = [
+            dice.between(0.2, 3.0),
+            dice.between(0.2, 3.0),
+            dice.between(0.2, 3.0),
+        ];
+        let taper = if dice.below(4) == 0 {
+            [dice.between(0.3, 1.5), dice.between(0.3, 1.5)]
+        } else {
+            [1.0; 2]
+        };
+        let mut changes: Vec<Change> = Vec::new();
+        let mut shaped = shape_box(size, taper, &[], None).unwrap();
+        for _ in 0..6 {
+            let names = shaped.names();
+            let mut faces = vec![names[dice.below(names.len())].clone()];
+            if dice.below(3) == 0 {
+                faces.push(names[dice.below(names.len())].clone());
+            }
+            let small = size[0].min(size[1]).min(size[2]);
+            let change = if dice.below(2) == 0 {
+                let mut by = dice.between(-small, small);
+                if by.abs() < 0.01 {
+                    by = 0.05;
+                }
+                Change::Pull {
+                    faces,
+                    by,
+                    name: None,
+                }
+            } else {
+                Change::Inset {
+                    faces,
+                    by: dice.between(0.001, small / 2.0),
+                    name: None,
+                }
+            };
+            changes.push(change);
+            match shape_box(size, taper, &changes, None) {
+                Ok(next) => {
+                    if let Err(why) = whole(&next) {
+                        panic!("{size:?} {taper:?} {changes:#?}: {why}");
+                    }
+                    shaped = next;
+                    made += 1;
+                }
+                Err(mistake) => {
+                    assert_eq!(mistake.change, changes.len() - 1, "{mistake:?}");
+                    assert!(
+                        matches!(mistake.code, Code::BadShape | Code::OutOfRange),
+                        "{mistake:?}"
+                    );
+                    changes.pop();
+                    refused += 1;
+                }
+            }
+        }
+    }
+    // Both happen, plenty.
+    assert!(
+        made > 600 && refused > 100,
+        "{made} made, {refused} refused"
+    );
+}
+
+// ---- inspect --faces ----------------------------------------------------------
+
+#[test]
+fn inspect_lists_each_face_its_way_its_size_and_its_neighbours() {
+    let model = built(&wall(WINDOW));
+    let report = face_report(&model);
+    assert_eq!(report.len(), 1);
+    let wall = &report[0];
+    assert_eq!(
+        (wall.part.as_str(), wall.changes, wall.face_count),
+        ("wall", 3, 18)
+    );
+    let glass = wall.faces.iter().find(|face| face.name == "glass").unwrap();
+    assert_eq!(glass.facing, "front");
+    assert_eq!(glass.size, Some([1.68, 1.08]));
+    assert_eq!(
+        glass.next_to,
+        [
+            "glass_side_bottom",
+            "glass_side_right",
+            "glass_side_top",
+            "glass_side_left"
+        ]
+    );
+    // A wall of the hollow faces into it.
+    let floor = wall
+        .faces
+        .iter()
+        .find(|face| face.name == "glass_side_bottom")
+        .unwrap();
+    assert_eq!(floor.facing, "up");
+    let front = wall.names.iter().find(|name| name.name == "front").unwrap();
+    assert_eq!(
+        front.faces,
+        [
+            "window_rim_bottom",
+            "window_rim_right",
+            "window_rim_top",
+            "window_rim_left"
+        ]
+    );
+}
+
+// ---- the edits -----------------------------------------------------------------
+
+fn done(text: &str, syntax: Syntax, edit: &Edit) -> Applied {
+    let path = match syntax {
+        Syntax::Toml => Path::new("test.toml"),
+        Syntax::Json => Path::new("test.json"),
+    };
+    apply(text, syntax, path, &path.to_string_lossy(), edit)
+        .unwrap_or_else(|failure| panic!("{edit:?} was refused: {:#?}", failure.report()))
+}
+
+fn edit_pull(part: &str, faces: &[&str], by: f64, name: Option<&str>) -> Edit {
+    Edit::Pull {
+        part: part.to_owned(),
+        faces: faces.iter().map(|face| (*face).to_owned()).collect(),
+        by,
+        name: name.map(str::to_owned),
+    }
+}
+
+fn edit_inset(part: &str, faces: &[&str], by: f64, name: Option<&str>) -> Edit {
+    Edit::Inset {
+        part: part.to_owned(),
+        faces: faces.iter().map(|face| (*face).to_owned()).collect(),
+        by,
+        name: name.map(str::to_owned),
+    }
+}
+
+#[test]
+fn edits_write_the_designs_wall_line_by_line() {
+    let start = format!("{}# the end\n", wall("colors = { window = \"wood\" }"));
+    let one = done(
+        &start,
+        Syntax::Toml,
+        &edit_inset("wall", &["front"], 0.6, Some("window")),
+    );
+    assert_eq!(
+        one.summary,
+        "inset \"front\" of \"wall\" by 0.6, naming the new faces \"window\""
+    );
+    assert_eq!(
+        one.text,
+        start.replace(
+            "color = \"plaster\"\n",
+            "color = \"plaster\"\nchanges = [\n  { inset = \"front\", by = 0.6, name = \"window\" },\n]\n"
+        )
+    );
+    let two = done(
+        &one.text,
+        Syntax::Toml,
+        &edit_inset("wall", &["window"], 0.06, Some("glass")),
+    );
+    let three = done(
+        &two.text,
+        Syntax::Toml,
+        &edit_pull("wall", &["glass"], -0.08, None),
+    );
+    assert_eq!(three.summary, "pulled \"glass\" of \"wall\" in by 0.08");
+    assert_eq!(
+        three.text,
+        start.replace(
+            "color = \"plaster\"\n",
+            "color = \"plaster\"\nchanges = [\n  { inset = \"front\", by = 0.6, name = \"window\" },\n  { inset = \"window\", by = 0.06, name = \"glass\" },\n  { pull = \"glass\", by = -0.08 },\n]\n"
+        )
+    );
+    assert_eq!(three.lines, Some([16, 16]));
+    let model = three.model.unwrap();
+    assert_eq!(model.triangle_count(), 36);
+}
+
+#[test]
+fn a_list_is_added_to_the_way_it_is_written() {
+    let lump = "{ pull = [\"top\", \"front\"], by = 0.1, name = \"lump\" }";
+    let cases = [
+        // On one line, it stays on one line.
+        (
+            "changes = [{ pull = \"top\", by = 0.5 }]".to_owned(),
+            format!("changes = [{{ pull = \"top\", by = 0.5 }}, {lump}]"),
+        ),
+        // Empty, it becomes a list of lines.
+        (
+            "changes = []".to_owned(),
+            format!("changes = [\n  {lump},\n]"),
+        ),
+        // With no comma after the last item, one goes there (before its
+        // comment), and none after the new one.
+        (
+            "changes = [\n    { inset = \"top\", by = 0.05 }  # a rim\n]".to_owned(),
+            format!("changes = [\n    {{ inset = \"top\", by = 0.05 }},  # a rim\n    {lump}\n]"),
+        ),
+        // With one, the new item gets one too.
+        (
+            "changes = [\n    { inset = \"top\", by = 0.05 },  # a rim\n]".to_owned(),
+            format!("changes = [\n    {{ inset = \"top\", by = 0.05 }},  # a rim\n    {lump},\n]"),
+        ),
+    ];
+    for (before, after) in cases {
+        let result = done(
+            &wall(&before),
+            Syntax::Toml,
+            &edit_pull("wall", &["top", "front"], 0.1, Some("lump")),
+        );
+        assert_eq!(result.text, wall(&after), "{before}");
+    }
+}
+
+#[test]
+fn json_recipes_get_the_change_on_a_line_of_its_own() {
+    let text = r##"{
+  "version": 0,
+  "palette": { "wood": "#8B5A2B" },
+  "parts": [
+    {
+      "name": "crate",
+      "shape": "box",
+      "color": "wood"
+    }
+  ]
+}
+"##;
+    let one = done(
+        text,
+        Syntax::Json,
+        &edit_pull("crate", &["top"], 0.25, None),
+    );
+    assert_eq!(
+        one.text,
+        text.replace(
+            "      \"color\": \"wood\"\n",
+            "      \"color\": \"wood\",\n      \"changes\": [\n        { \"pull\": \"top\", \"by\": 0.25 }\n      ]\n"
+        )
+    );
+    let two = done(
+        &one.text,
+        Syntax::Json,
+        &edit_inset("crate", &["top"], 0.1, Some("lid")),
+    );
+    assert_eq!(
+        two.text,
+        text.replace(
+            "      \"color\": \"wood\"\n",
+            "      \"color\": \"wood\",\n      \"changes\": [\n        { \"pull\": \"top\", \"by\": 0.25 },\n        { \"inset\": \"top\", \"by\": 0.1, \"name\": \"lid\" }\n      ]\n"
+        )
+    );
+    assert_eq!(first_part(two.model.as_ref().unwrap()).kind.changes, 2);
+}
+
+#[test]
+fn a_part_made_from_a_definition_is_shaped_there() {
+    let text = format!(
+        "{PALETTE}[define.post]\nshape = \"box\"\nsize = [0.2, 1, 0.2]\ncolor = \"wood\"\n\n[[parts]]\nname = \"a\"\nuse = \"post\"\n\n[[parts]]\nname = \"b\"\nuse = \"post\"\nmove = [1, 0.5, 0]\n"
+    );
+    let result = done(&text, Syntax::Toml, &edit_pull("b", &["top"], 0.3, None));
+    assert_eq!(
+        result.summary,
+        "pulled \"top\" of \"b\" out by 0.3 (in the definition \"post\")"
+    );
+    assert!(result.text.contains(
+        "color = \"wood\"\nchanges = [\n  { pull = \"top\", by = 0.3 },\n]\n\n[[parts]]\nname = \"a\""
+    ));
+    let shared = result.shared.unwrap();
+    assert_eq!(shared.definition, "post");
+    assert_eq!(shared.also_changes, ["a"]);
+}
+
+#[test]
+fn an_edit_that_breaks_the_shape_writes_nothing() {
+    let text = wall("");
+    for edit in [
+        edit_pull("wall", &["glass"], 0.1, None),
+        edit_inset("wall", &["front"], 2.0, None),
+        edit_pull("wall", &["front"], -0.5, None),
+        edit_pull("wall", &["top+front"], 0.5, None),
+    ] {
+        let failure = apply(&text, Syntax::Toml, Path::new("t.toml"), "t.toml", &edit);
+        assert!(failure.is_err(), "{edit:?}");
+    }
+    let cylinder =
+        format!("{PALETTE}[[parts]]\nname = \"post\"\nshape = \"cylinder\"\ncolor = \"wood\"\n");
+    let failure = apply(
+        &cylinder,
+        Syntax::Toml,
+        Path::new("t.toml"),
+        "t.toml",
+        &edit_pull("post", &["top"], 0.5, None),
+    )
+    .unwrap_err();
+    assert_eq!(
+        failure.report().errors[0].message,
+        "only a box can be shaped in this version: \"post\" is a cylinder"
+    );
+}

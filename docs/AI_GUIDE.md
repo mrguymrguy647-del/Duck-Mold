@@ -195,6 +195,7 @@ Its other fields:
 | `name` | Letters, digits, `_`, `-`. Needed if another part attaches to it. |
 | `color` | A palette name: the colour of the whole part. |
 | `colors` | Colours for single faces: `{ top = "grass", sides = "dirt" }`. |
+| `changes` | A box only: changes made to its shape once it is built, in order. See "Shaping a box" below. |
 | `attach`, `to` | Join my socket `attach` to `to = "part.socket"`, a socket of another part in the same list. Always both. |
 | `twist` | Attached part only: one number, degrees to twist it around the join. |
 | `rotate` | Free part only: `[x, y, z]` degrees, around x, then y, then z. |
@@ -235,6 +236,46 @@ Two options:
   narrows x and z differently.
 
 Use them sparingly: a bevel on every box multiplies the triangles.
+
+**Shaping a box: `changes`.** A box (with or without `taper`, without
+`bevel`) can have a list of changes, made to it one after the other:
+
+```toml
+[[parts]]
+name = "wall"
+shape = "box"
+size = [3, 2.4, 0.2]
+color = "plaster"
+changes = [
+  { inset = "front", by = 0.6, name = "window" },   # a face 0.6 m in from every edge of the front
+  { inset = "window", by = 0.06, name = "glass" },  # the window's frame: 6 cm
+  { pull = "glass", by = -0.08 },                   # the glass pushed 8 cm in
+]
+colors = { window = "wood", glass = "sky" }
+```
+
+| Change | What it does | New faces |
+|---|---|---|
+| `{ pull = "top", by = 0.5 }` | Pulls the face out the way it faces, by `by` metres, with new walls round it. A negative `by` pushes it in (a hollow). Several faces, `pull = ["a", "b"]`, that touch are pulled as one piece. | The face keeps its name. Walls `<face>_side_<side>` (`top_side_front`...); with `name = "leg"`: `leg_front`..., and `leg` for all of them. |
+| `{ inset = "front", by = 0.1 }` | A smaller face inside the face, `by` metres in from every edge (less than half its width). The shape doesn't change: there are more faces to work with. | The middle: `<face>_inset`, or `name`. The ring round it: `<middle>_rim_<side>`; the face's old name now stands for the ring. |
+
+- **Names are words, never numbers**, and never change when the size or
+  an amount does. `duck-mold inspect <recipe> --faces` lists every face
+  of every shaped part: its name, which way it faces, its size and the
+  faces next to it, and the names that stand for several faces.
+- A name can stand for several faces, and works wherever a face name
+  does: in `colors`, and in later changes. A name for fewer faces beats
+  one for more in `colors` (`front` beats `sides`).
+- A name a change would make that an earlier change made already gets a
+  number: `top_side_front_2`. A `name` you give is used as it is.
+- **Amounts are metres**, in the part's own directions, before its
+  `scale`, `mirror`, `rotate` and `move`.
+- **A change that would break the shape is an error naming it**: a face
+  that isn't there (`unknown_face`), an inset too wide (`out_of_range`,
+  with the widest that fits), or a shape squeezed flat, turned inside out
+  or passing through itself (`bad_shape`). Nothing is built.
+- Only a box can be shaped in this version; a part that `use`s a
+  definition is shaped in the definition.
 
 Use few segments: 8 is usually enough for a game model. A 4-sided cone
 is a square pyramid; a 4-sided cylinder is a box. A round shape's radius
@@ -440,6 +481,7 @@ As JSON (`"ok": false`, with `errors` and `warnings`), each is:
 | `unsupported` | Not available: see-through colours, compressed glTF. |
 | `file_not_found` | A file the recipe names can't be read. Paths start from the recipe's folder. |
 | `bad_mesh` | A mistake inside a mesh file (an `.obj`'s with its line). |
+| `bad_shape` | A change in a part's `changes` would squeeze a face flat, turn the shape inside out, or make it pass through itself. Use a smaller `by`, or change other faces. |
 | `io` | The file on the command line can't be read or written. |
 
 Warnings (the model is still built; exit code 0):
@@ -549,6 +591,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
+| `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
+| `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
 
 - **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,
   or `#2` for a part with no name. `--to` takes the same
@@ -583,6 +627,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   scale, colour, copy or remove them together. In the file that is
   the same edit, once for each part: run the command once for each.
   Hiding a part in the Studio changes nothing in the file.
+- **`pull` and `inset` on a part made from a defined part** change the
+  definition, like `set --shape`.
 - Not edits: `mirror` (except through `duplicate --mirror`), sockets
   written with `at` or `from`, and `define`. Type those in the recipe.
 

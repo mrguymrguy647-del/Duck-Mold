@@ -215,6 +215,52 @@ pub enum Change {
         #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
         shift: Option<String>,
     },
+    /// Pull faces of a box out the way they face, with new walls round
+    /// them (a negative --by pushes them in, making a hollow).
+    ///
+    /// Adds a pull to the part's "changes". Faces that touch are pulled
+    /// as one piece. `duck-mold inspect --faces` lists the face names.
+    Pull {
+        /// The part.
+        part: String,
+        /// The faces, by name: top, or several with commas, like
+        /// top_left,top,top_right.
+        faces: String,
+        /// How far, in metres. Below 0 pushes the faces in.
+        #[arg(long, allow_hyphen_values = true)]
+        by: f64,
+        /// What the new walls are called: <name>_front, <name>_left...
+        /// Without it: <face>_side_front...
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Make a smaller face inside each face of a box, --by metres in from
+    /// its edges, with a ring of faces round it.
+    ///
+    /// Adds an inset to the part's "changes". The face's old name then
+    /// stands for the ring.
+    Inset {
+        /// The part.
+        part: String,
+        /// The faces, by name: front, or several with commas.
+        faces: String,
+        /// How far in from the edges, in metres.
+        #[arg(long)]
+        by: f64,
+        /// What the face in the middle is called. Without it:
+        /// <face>_inset.
+        #[arg(long)]
+        name: Option<String>,
+    },
+}
+
+/// `top_left,top` as a list of names.
+fn face_list(written: &str) -> Vec<String> {
+    written
+        .split(',')
+        .map(|face| face.trim().to_owned())
+        .filter(|face| !face.is_empty())
+        .collect()
 }
 
 /// The sizes of a shape.
@@ -476,6 +522,28 @@ impl Change {
                     .map(|shift| three("--shift", shift))
                     .transpose()?
                     .unwrap_or([0.0; 3]),
+            },
+            Change::Pull {
+                part,
+                faces,
+                by,
+                name,
+            } => Edit::Pull {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: *by,
+                name: name.clone(),
+            },
+            Change::Inset {
+                part,
+                faces,
+                by,
+                name,
+            } => Edit::Inset {
+                part: part.clone(),
+                faces: face_list(faces),
+                by: *by,
+                name: name.clone(),
             },
             Change::SetSocket { socket, on, shift } => Edit::SetSocket {
                 socket: socket.clone(),

@@ -793,6 +793,7 @@ fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Fa
                 shape: if *assembly { "assembly" } else { "part" }.to_owned(),
                 uses: None,
                 file: None,
+                changes: 0,
             },
             attached_to: None,
             mirrored: false,
@@ -806,6 +807,7 @@ fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Fa
             ),
             face_names: Vec::new(),
             face_groups: Vec::new(),
+            shaped: None,
             faces: own.clone(),
             parts: if *assembly {
                 part_tree(name, entries, faces)

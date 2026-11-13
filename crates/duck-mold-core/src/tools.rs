@@ -13,7 +13,7 @@ use serde::Serialize;
 use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
 use crate::gltf::{is_duck_mold_glb, read_gltf};
-use crate::inspect::{Inspection, MaterialUse, inspect, socket_report};
+use crate::inspect::{Inspection, MaterialUse, face_report, inspect, socket_report};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
@@ -212,6 +212,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
             shape: "mesh".to_owned(),
             uses: None,
             file: None,
+            changes: 0,
         },
         attached_to: None,
         mirrored: false,
@@ -227,6 +228,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
             .iter()
             .map(|&material| material as u16)
             .collect(),
+        shaped: None,
     };
     Model {
         name,
@@ -266,10 +268,26 @@ pub fn inspect_file(path: &Path) -> Result<Inspection, Failure> {
 /// `duck-mold inspect --sockets`: [`inspect_file`], with every named
 /// socket listed too.
 pub fn inspect_file_with_sockets(path: &Path) -> Result<Inspection, Failure> {
+    inspect_file_listing(path, true, false)
+}
+
+/// `duck-mold inspect --sockets --faces`: [`inspect_file`], with every
+/// named socket listed if `sockets`, and every face of every shaped part
+/// if `faces`.
+pub fn inspect_file_listing(
+    path: &Path,
+    sockets: bool,
+    faces: bool,
+) -> Result<Inspection, Failure> {
     let built = build(path)?;
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
     inspection.materials = built.materials;
-    inspection.sockets = socket_report(&built.model);
+    if sockets {
+        inspection.sockets = socket_report(&built.model);
+    }
+    if faces {
+        inspection.shaped = face_report(&built.model);
+    }
     Ok(inspection)
 }
 

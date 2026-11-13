@@ -2641,6 +2641,18 @@ fn every_kind_of_edit_has_a_name() {
         Edit::Unjoin {
             part: String::new(),
         },
+        Edit::Pull {
+            part: String::new(),
+            faces: Vec::new(),
+            by: 0.0,
+            name: None,
+        },
+        Edit::Inset {
+            part: String::new(),
+            faces: Vec::new(),
+            by: 0.0,
+            name: None,
+        },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
     assert_eq!(names, Edit::COMMANDS);

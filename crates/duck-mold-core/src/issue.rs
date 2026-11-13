@@ -80,6 +80,9 @@ pub enum Code {
     OffGround,
     /// A note about a mesh file: something in it was skipped.
     Skipped,
+    /// A change to a shape that would squeeze a face flat, turn the
+    /// shape inside out or make it pass through itself.
+    BadShape,
 }
 
 impl Code {
@@ -111,6 +114,7 @@ impl Code {
             Code::Hidden => "hidden",
             Code::OffGround => "off_ground",
             Code::Skipped => "skipped",
+            Code::BadShape => "bad_shape",
         }
     }
 }

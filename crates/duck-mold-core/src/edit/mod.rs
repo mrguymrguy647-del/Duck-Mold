@@ -307,13 +307,37 @@ pub enum Edit {
         /// A new slide across the side.
         shift: Option<[f64; 3]>,
     },
+    /// Pulls faces of a box out the way they face (in, for a negative
+    /// `by`), with new walls round them: a `pull` in its `changes`.
+    Pull {
+        /// The part.
+        part: String,
+        /// The faces, by name. Faces that touch are pulled as one piece.
+        faces: Vec<String>,
+        /// How far, in metres.
+        by: f64,
+        /// What the new walls are called.
+        name: Option<String>,
+    },
+    /// Makes a smaller face inside each face of a box, `by` in from its
+    /// edges: an `inset` in its `changes`.
+    Inset {
+        /// The part.
+        part: String,
+        /// The faces, by name.
+        faces: Vec<String>,
+        /// How far in from the edges, in metres.
+        by: f64,
+        /// What the face in the middle is called.
+        name: Option<String>,
+    },
 }
 
 impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 15] = [
+    pub const COMMANDS: [&'static str; 17] = [
         "add",
         "remove",
         "rename",
@@ -329,6 +353,8 @@ impl Edit {
         "remove-socket",
         "tidy-sockets",
         "unjoin",
+        "pull",
+        "inset",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -349,6 +375,8 @@ impl Edit {
             Edit::RemoveSocket { .. } => "remove-socket",
             Edit::TidySockets => "tidy-sockets",
             Edit::Unjoin { .. } => "unjoin",
+            Edit::Pull { .. } => "pull",
+            Edit::Inset { .. } => "inset",
         }
     }
 }
@@ -1806,6 +1834,48 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 touched: Some(found),
             })
         }
+        Edit::Pull {
+            part,
+            faces,
+            by,
+            name,
+        }
+        | Edit::Inset {
+            part,
+            faces,
+            by,
+            name,
+        } => {
+            let pull = matches!(edit, Edit::Pull { .. });
+            let word = if pull { "pull" } else { "inset" };
+            let mut change = vec![
+                (word.to_owned(), faces_val(faces)?),
+                ("by".to_owned(), Val::Num(tidy_number(*by, 4))),
+            ];
+            if let Some(name) = name {
+                check_name(name)?;
+                change.push(("name".to_owned(), text(name)));
+            }
+            let (found, definition) = add_change(doc, part, change)?;
+            let faces = crate::shaping::quoted(faces);
+            let amount = doc::number_text(by.abs());
+            let mut summary = if pull {
+                let way = if *by < 0.0 { "in" } else { "out" };
+                format!("pulled {faces} of \"{part}\" {way} by {amount}")
+            } else {
+                format!("inset {faces} of \"{part}\" by {amount}")
+            };
+            if let Some(name) = name {
+                summary.push_str(&format!(", naming the new faces \"{name}\""));
+            }
+            if let Some(definition) = definition {
+                summary.push_str(&format!(" (in the definition \"{definition}\")"));
+            }
+            Ok(Outcome {
+                summary,
+                touched: Some(found),
+            })
+        }
         Edit::SetSocket { socket, on, shift } => {
             let (part, name) = split_socket(socket)?;
             if let Some(on) = on {
@@ -1862,6 +1932,64 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             })
         }
     }
+}
+
+/// Adds a change to the end of a part's `changes`, starting the list if
+/// there is none. For a part made with `use`, the definition is
+/// changed. Gives where it went, and the definition.
+fn add_change(
+    doc: &mut Doc,
+    part: &str,
+    change: Vec<(String, Val)>,
+) -> Result<(Found, Option<String>), Stop> {
+    let found = find(doc, part)?;
+    let (table, definition) = making(doc, &found);
+    let list = with(&table, key("changes"));
+    let change = Val::Table(change);
+    if doc.items(&list).is_some() {
+        doc.push_item(&list, &change).map_err(cant)?;
+    } else if doc.entry(&table, "changes").is_some() {
+        return Err(problem(
+            Code::TypeMismatch,
+            format!(
+                "\"{part}\" has \"changes\" that isn't a list: put it right in the recipe first"
+            ),
+        ));
+    } else {
+        doc.set_field(&table, "changes", &Val::Lines(vec![change]), &PART_FIELDS)
+            .map_err(cant)?;
+    }
+    // Shaping a definition changes every part that uses it.
+    let found = match &definition {
+        Some(definition) => Found {
+            definition: Some(definition.clone()),
+            inside: String::new(),
+            ..found
+        },
+        None => found,
+    };
+    Ok((found, definition))
+}
+
+/// The faces a change names, as it is written: one name, or a list.
+fn faces_val(faces: &[String]) -> Result<Val, Stop> {
+    if faces.is_empty() {
+        return Err(problem(Code::MissingField, "no face was named"));
+    }
+    for face in faces {
+        if face.contains('+') {
+            return Err(problem(
+                Code::TypeMismatch,
+                format!("\"{face}\" is an edge or a corner: this works on faces, like \"top\""),
+            )
+            .got(face.as_str()));
+        }
+        check_name(face)?;
+    }
+    Ok(match faces {
+        [one] => text(one),
+        many => Val::List(many.iter().map(|face| text(face)).collect()),
+    })
 }
 
 fn check_side(on: &str) -> Result<(), Stop> {
@@ -2221,7 +2349,9 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::Set { part, .. }
         | Edit::Duplicate { part, .. }
         | Edit::Unjoin { part }
-        | Edit::AddSocket { part, .. } => part,
+        | Edit::AddSocket { part, .. }
+        | Edit::Pull { part, .. }
+        | Edit::Inset { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }
         | Edit::RemoveSocket { socket } => socket.rsplit_once('.').map_or("", |(part, _)| part),

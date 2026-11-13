@@ -58,6 +58,11 @@ enum Command {
         /// can ask the .glb for, like head.top.
         #[arg(long)]
         sockets: bool,
+        /// Also list the faces of every shaped part (one with
+        /// "changes"): each name, the way it faces, its size and the
+        /// faces next to it. These are the names changes and colours use.
+        #[arg(long)]
+        faces: bool,
     },
     /// Build a recipe and write the model as a .glb file.
     ///
@@ -169,11 +174,8 @@ fn main() -> ExitCode {
             file,
             json,
             sockets,
-        } => match if sockets {
-            tools::inspect_file_with_sockets(&file)
-        } else {
-            tools::inspect_file(&file)
-        } {
+            faces,
+        } => match tools::inspect_file_listing(&file, sockets, faces) {
             Ok(inspection) => {
                 if json {
                     say_json(&inspection);
