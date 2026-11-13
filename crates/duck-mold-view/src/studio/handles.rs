@@ -26,6 +26,7 @@ use duck_mold_core::math::{Mat3, Vec3, vec3};
 use duck_mold_core::model::Part;
 use duck_mold_core::source::Syntax;
 
+use super::shape::{FaceTool, Mode};
 use super::viewport::{self, Mark};
 use super::{Studio, first_error, part_in, sockets};
 
@@ -60,6 +61,10 @@ pub enum Grip {
     Knob(usize),
     /// The part itself.
     Body,
+    /// In Face mode: the arrow out of the faces selected (Pull).
+    Pull,
+    /// In Face mode: the knob on an edge of a face selected (Inset).
+    Inset,
 }
 
 /// Red, green and blue for x, y and z, as in other 3D tools.
@@ -67,6 +72,8 @@ const AXIS_COLORS: [[u8; 3]; 3] = [[0xE5, 0x4B, 0x5F], [0x4C, 0xB8, 0x6A], [0x4A
 /// Duck yellow: the handle under the pointer, or in hand.
 const HOT: [u8; 3] = [0xFF, 0xCC, 0x2E];
 const MIDDLE: [u8; 3] = [0xE8, 0xE8, 0xF0];
+/// The Inset knob: the colour of the sockets' dots.
+const INSET: [u8; 3] = [0x6F, 0xD6, 0xC8];
 
 /// How long an arrow is on the screen, in pixels, whatever the zoom.
 const LENGTH: f64 = 84.0;
@@ -78,6 +85,8 @@ const RING_PIECES: usize = 48;
 pub const TURN_STEP: f64 = 15.0;
 /// The step scales snap to.
 const SCALE_STEP: f64 = 0.1;
+/// The step an inset snaps to, in metres: a frame is a few centimetres.
+pub const INSET_STEP: f64 = 0.01;
 
 /// One handle as it is drawn now.
 struct Handle {
@@ -124,6 +133,25 @@ struct Gizmo {
     knobs: Vec<Knob>,
     /// Set when several parts are selected: the handles hold them all.
     group: Option<Group>,
+    /// Set in Face mode: the faces in hand, and their handles.
+    face: Option<FaceGizmo>,
+}
+
+/// The handles of the faces selected in Face mode.
+#[derive(Debug, Clone, PartialEq)]
+struct FaceGizmo {
+    /// The faces, by name.
+    faces: Vec<String>,
+    /// The way they are pulled out, in the picture, 1 long.
+    out: Vec3,
+    /// How many metres of the picture one metre of the part's own is,
+    /// that way (its scale).
+    out_unit: f64,
+    /// The Inset knob: the middle of an edge of the first face.
+    knob: Vec3,
+    /// The way into that face from the edge, 1 long, and its unit.
+    inward: Vec3,
+    inward_unit: f64,
 }
 
 /// Several parts held together.
@@ -264,6 +292,13 @@ impl Studio {
 
     /// What the bottom of the viewport says about snapping.
     pub fn snap_text(&self) -> String {
+        if self.mode == Mode::Face {
+            let step = match self.face_tool {
+                FaceTool::Pull => self.snap_step(),
+                FaceTool::Inset => INSET_STEP,
+            };
+            return format!("Snap {} m  (Ctrl: off)", short(step));
+        }
         format!(
             "Snap {} m, {}°  (Ctrl: off)",
             short(self.snap_step()),
@@ -283,6 +318,9 @@ impl Studio {
     fn gizmo(&self) -> Option<Gizmo> {
         if self.look_only {
             return None;
+        }
+        if self.mode == Mode::Face {
+            return self.face_gizmo();
         }
         let path = self.selected.as_deref()?;
         let model = self.shown_model()?;
@@ -357,6 +395,7 @@ impl Studio {
                 joined: None,
                 knobs: Vec::new(),
                 group: Some(Group { moved, stayed }),
+                face: None,
             });
         }
         let joined = part.attached_to.as_deref().and_then(|to| {
@@ -413,6 +452,76 @@ impl Studio {
             joined,
             knobs,
             group: None,
+            face: None,
+        })
+    }
+
+    /// The handles in Face mode: around the faces selected, if any.
+    fn face_gizmo(&self) -> Option<Gizmo> {
+        if self.faces.is_empty() {
+            return None;
+        }
+        let (part, shaped) = self.shaped_selected()?;
+        let offset = self.offset();
+        let (middle, facing) = self.faces_middle(&shaped)?;
+        let way = part.place.turn * facing.normalized()?;
+        let out_unit = way.length().max(1e-9);
+        let out = way.normalized()?;
+        let centre = part.place.apply(middle) + offset;
+        // The Inset knob: on the middle of the first face's edge that is
+        // nearest the pointer (so it is where the hand is).
+        let first = *shaped.faces_named(&self.faces[0]).first()?;
+        let corners: Vec<Vec3> = shaped.faces[first]
+            .corners
+            .iter()
+            .map(|&corner| shaped.corners[corner])
+            .collect();
+        let normal = shaped.normal(first)?;
+        let count = corners.len();
+        let seen = |point: Vec3| {
+            self.orbit
+                .on_screen(part.place.apply(point) + offset, self.view.0, self.view.1)
+        };
+        let edge = (0..count)
+            .min_by(|&a, &b| {
+                let away = |at: usize| {
+                    let middle = (corners[at] + corners[(at + 1) % count]) * 0.5;
+                    match (seen(middle), self.pointer) {
+                        (Some(seen), Some(pointer)) => {
+                            (seen.0 - pointer.0).powi(2) + (seen.1 - pointer.1).powi(2)
+                        }
+                        // Without a pointer: the edge lowest on the
+                        // screen.
+                        (Some(seen), None) => -seen.1,
+                        (None, _) => f64::INFINITY,
+                    }
+                };
+                away(a).total_cmp(&away(b))
+            })
+            .unwrap_or(0);
+        let (from, to) = (corners[edge], corners[(edge + 1) % count]);
+        let inward_own = normal.cross(to - from).normalized()?;
+        let inward_way = part.place.turn * inward_own;
+        let away = self.orbit.to_view(centre).z.max(0.05);
+        Some(Gizmo {
+            part: part.path.clone(),
+            centre,
+            reach: LENGTH * away / viewport::focal(self.view.1.max(1)),
+            list: [Vec3::ZERO; 3],
+            units: [1.0; 3],
+            own: [Vec3::ZERO; 3],
+            sense: 1.0,
+            joined: None,
+            knobs: Vec::new(),
+            group: None,
+            face: Some(FaceGizmo {
+                faces: self.faces.clone(),
+                out,
+                out_unit,
+                knob: part.place.apply((from + to) * 0.5) + offset,
+                inward: inward_way.normalized()?,
+                inward_unit: inward_way.length().max(1e-9),
+            }),
         })
     }
 
@@ -501,6 +610,21 @@ impl Studio {
         };
         let arrow = |along: Vec3| vec![centre + along * (reach * 0.3), centre + along * reach];
         let mut handles = Vec::new();
+        if let Some(face) = &gizmo.face {
+            match self.face_tool {
+                FaceTool::Pull => handles.push(Handle {
+                    grip: Grip::Pull,
+                    points: vec![centre, centre + face.out * reach],
+                    color: MIDDLE,
+                }),
+                FaceTool::Inset => handles.push(Handle {
+                    grip: Grip::Inset,
+                    points: vec![face.knob],
+                    color: INSET,
+                }),
+            }
+            return handles;
+        }
         if gizmo.group.is_some() {
             // Several parts: arrows and rings along the list's own
             // directions, and one box for bigger or smaller all round.
@@ -618,7 +742,7 @@ impl Studio {
         Some(match grip {
             // The box at the end of its line; the middle of an arrow.
             Grip::Box(_) => *handle.points.last()?,
-            Grip::Arrow(_) => {
+            Grip::Arrow(_) | Grip::Pull => {
                 let (from, to) = (*handle.points.first()?, *handle.points.last()?);
                 from + (to - from) * 0.6
             }
@@ -662,7 +786,7 @@ impl Studio {
             .filter_map(|handle| {
                 let distance = match handle.grip {
                     // Only the box itself, not the line it stands on.
-                    Grip::Box(_) | Grip::Middle | Grip::Knob(_) => {
+                    Grip::Box(_) | Grip::Middle | Grip::Knob(_) | Grip::Inset => {
                         away(seen(*handle.points.last()?)?) - 2.0
                     }
                     _ => handle
@@ -699,9 +823,14 @@ impl Studio {
                 handle.color
             };
             match handle.grip {
-                Grip::Arrow(_) => marks.push(Mark::Arrow {
+                Grip::Arrow(_) | Grip::Pull => marks.push(Mark::Arrow {
                     from: handle.points[0],
                     to: handle.points[1],
+                    color,
+                }),
+                Grip::Inset => marks.push(Mark::Disc {
+                    at: handle.points[0],
+                    radius: 6.0,
                     color,
                 }),
                 Grip::Box(_) => {
@@ -769,13 +898,26 @@ impl Studio {
                         let knob = gizmo.knobs.get(which)?;
                         nearest_on_line(knob.at, knob.out, eye, ray)?
                     }
+                    Grip::Pull => {
+                        let face = gizmo.face.as_ref()?;
+                        nearest_on_line(gizmo.centre, face.out, eye, ray)?
+                    }
+                    Grip::Inset => {
+                        let face = gizmo.face.as_ref()?;
+                        nearest_on_line(face.knob, face.inward, eye, ray)?
+                    }
                     _ => 0.0,
                 };
                 (grip, hold, gizmo.centre)
             }
             None => {
-                // The part itself, with the Move tool, if it has a name.
-                if self.tool != Tool::Move || gizmo.part.rsplit('/').next()?.starts_with('#') {
+                // The part itself, with the Move tool, if it has a name
+                // (not in Face mode: there a drag off a handle turns the
+                // view).
+                if gizmo.face.is_some()
+                    || self.tool != Tool::Move
+                    || gizmo.part.rsplit('/').next()?.starts_with('#')
+                {
                     return None;
                 }
                 let model = self.model()?;
@@ -818,6 +960,12 @@ impl Studio {
     /// The handle in hand, if one is.
     pub fn grabbed(&self) -> Option<Grip> {
         self.grab.as_ref().map(|grab| grab.grip)
+    }
+
+    /// Why the drag in hand can't be made as it stands, if it can't:
+    /// then its label is shown in red, and letting go writes nothing.
+    pub fn drag_problem(&self) -> Option<&str> {
+        self.grab.as_ref().and_then(|grab| grab.problem.as_deref())
     }
 
     /// What the drag has done so far, in a few words, to show by the
@@ -1030,6 +1178,58 @@ impl Studio {
                         )
                     }
                     (_, Some(_)) => (Vec::new(), String::new()),
+                }
+            }
+            // ---- faces of a box pulled out or pushed in (Face mode)
+            (Grip::Pull, _) => {
+                let Some(face) = &gizmo.face else {
+                    return;
+                };
+                let Some(now) = nearest_on_line(gizmo.centre, face.out, eye, ray) else {
+                    return;
+                };
+                let by = snapped((now - grab.hold) / face.out_unit, step, free);
+                let by = (by * 10_000.0).round() / 10_000.0 + 0.0;
+                if by == 0.0 {
+                    (Vec::new(), "pull 0 m".to_owned())
+                } else {
+                    (
+                        vec![Edit::Pull {
+                            part: part.clone(),
+                            faces: face.faces.clone(),
+                            by,
+                            name: None,
+                        }],
+                        format!(
+                            "{} {} m",
+                            if by < 0.0 { "in" } else { "out" },
+                            short(by.abs())
+                        ),
+                    )
+                }
+            }
+            // ---- a smaller face inside each face (Face mode)
+            (Grip::Inset, _) => {
+                let Some(face) = &gizmo.face else {
+                    return;
+                };
+                let Some(now) = nearest_on_line(face.knob, face.inward, eye, ray) else {
+                    return;
+                };
+                let by = snapped((now - grab.hold) / face.inward_unit, INSET_STEP, free);
+                let by = (by * 10_000.0).round() / 10_000.0 + 0.0;
+                if by <= 0.0 {
+                    (Vec::new(), "inset 0 m".to_owned())
+                } else {
+                    (
+                        vec![Edit::Inset {
+                            part: part.clone(),
+                            faces: face.faces.clone(),
+                            by,
+                            name: None,
+                        }],
+                        format!("inset {} m", short(by)),
+                    )
                 }
             }
             // ---- a face of a shape, pulled out or in
@@ -1395,6 +1595,27 @@ impl Studio {
                 ));
             }
             return Some(self.apply_as(&grab.edits, Some(said)));
+        }
+        if grab.grip == Grip::Inset {
+            // The new faces in the middle are what is in hand next.
+            let before: Vec<String> = self
+                .shaped_selected()
+                .map(|(_, shaped)| shaped.own_names())
+                .unwrap_or_default();
+            let done = self.apply_all(&grab.edits);
+            if done.is_ok()
+                && let Some((_, shaped)) = self.shaped_selected()
+            {
+                let middles: Vec<String> = shaped
+                    .own_names()
+                    .into_iter()
+                    .filter(|name| !before.contains(name) && !name.contains("_rim_"))
+                    .collect();
+                if !middles.is_empty() {
+                    self.faces = middles;
+                }
+            }
+            return Some(done);
         }
         let done = self.apply_all(&grab.edits);
         if done.is_ok()

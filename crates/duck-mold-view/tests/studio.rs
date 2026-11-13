@@ -3257,3 +3257,260 @@ fn a_socket_the_studio_made_goes_when_its_part_does() {
     assert_eq!(said, "Removed 1 socket nothing uses: post.spot_3");
     assert!(file(&recipe).contains("lid = "));
 }
+
+// ---- Phase 4, step 2: Face mode --------------------------------------------------
+
+use duck_mold_view::studio::{FaceTool, Mode};
+
+#[test]
+fn face_mode_shapes_one_box_and_says_why_not_for_anything_else() {
+    let (_, mut studio) = boxes("face_mode");
+    assert_eq!(studio.mode(), Mode::Part);
+    // Tab: into Face mode, and back.
+    let said = studio.toggle_face_mode().unwrap();
+    assert!(
+        said.starts_with("Shaping \"crate\": click a face"),
+        "{said}"
+    );
+    assert_eq!(studio.mode(), Mode::Face);
+    assert_eq!(studio.face_tool, FaceTool::Pull);
+    // No face yet: no handles.
+    assert!(studio.grips().is_empty());
+    studio.toggle_face_mode().unwrap();
+    assert_eq!(studio.mode(), Mode::Part);
+
+    // Nothing selected, several parts, a cylinder, a bevelled box.
+    studio.select(None);
+    assert_eq!(
+        studio.face_mode().unwrap_err(),
+        "Select a box first: Face mode shapes the selected part"
+    );
+    studio.select_all();
+    assert!(
+        studio
+            .face_mode()
+            .unwrap_err()
+            .starts_with("Select one part")
+    );
+    let recipe = folder("face_mode_not").join("post.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\n[palette]\nwood = \"#B07A3F\"\n[[parts]]\nname = \"post\"\nshape = \"cylinder\"\ncolor = \"wood\"\n\n[[parts]]\nname = \"bevelled\"\nshape = \"box\"\nbevel = 0.05\ncolor = \"wood\"\nmove = [2, 0.5, 0]\n",
+    )
+    .unwrap();
+    let mut other = Studio::open(&recipe, false);
+    other.select(Some("post"));
+    assert_eq!(
+        other.face_mode().unwrap_err(),
+        "Only a box can be shaped in this version: \"post\" is a cylinder"
+    );
+    assert_eq!(other.mode(), Mode::Part);
+    other.select(Some("bevelled"));
+    assert!(other.face_mode().unwrap_err().starts_with("A bevelled box"));
+    // Looking only: no shaping.
+    let mut looking = Studio::open(examples().join("table.toml"), true);
+    looking.select(Some("top"));
+    assert!(looking.face_mode().is_err());
+}
+
+#[test]
+fn a_click_picks_a_face_by_name_and_escape_steps_back() {
+    let (_, mut studio) = boxes("face_click");
+    studio.face_mode().unwrap();
+    let top = studio.face_point("top").unwrap();
+    assert_eq!(studio.face_at(VIEW, top).as_deref(), Some("top"));
+    assert_eq!(studio.click_face(VIEW, top, false).as_deref(), Some("top"));
+    assert_eq!(studio.selected_faces(), ["top"]);
+    assert_eq!(studio.grips(), [Grip::Pull]);
+    // Shift+click adds a face, and takes it out again.
+    let front = studio.face_point("front").unwrap();
+    studio.click_face(VIEW, front, true);
+    assert_eq!(studio.selected_faces(), ["top", "front"]);
+    studio.click_face(VIEW, front, true);
+    assert_eq!(studio.selected_faces(), ["top"]);
+    // Off the box: nothing.
+    studio.click_face(VIEW, (5.0, 5.0), false);
+    assert!(studio.selected_faces().is_empty());
+    // Escape: the faces, then Face mode, then the part.
+    studio.click_face(VIEW, top, false);
+    assert!(studio.escape());
+    assert!(studio.selected_faces().is_empty());
+    assert_eq!(studio.mode(), Mode::Face);
+    assert!(studio.escape());
+    assert_eq!(studio.mode(), Mode::Part);
+    assert_eq!(studio.selected(), Some("crate"));
+    assert!(studio.escape());
+    assert_eq!(studio.selected(), None);
+    assert!(!studio.escape());
+}
+
+#[test]
+fn the_pull_arrow_pulls_a_face_and_writes_once_when_let_go() {
+    let (recipe, mut studio) = boxes("face_pull");
+    studio.face_mode().unwrap();
+    let top = studio.face_point("top").unwrap();
+    studio.click_face(VIEW, top, false);
+    check_picture("studio-face-mode", &studio.picture(VIEW.0, VIEW.1));
+
+    // Pulled up 0.3 m: shown while held, written when let go.
+    pull(
+        &mut studio,
+        Grip::Pull,
+        |from| from + vec3(0.0, 0.3, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("out 0.3 m"));
+    assert_eq!(studio.drag_problem(), None);
+    assert_eq!(file(&recipe), BOXES, "nothing is written while it is held");
+    let held = studio.shown_model().unwrap();
+    let crate_held = held.parts.iter().find(|part| part.name == "crate").unwrap();
+    assert!((crate_held.bounds.unwrap().size().y - 0.8).abs() < 1e-9);
+    check_picture("studio-face-pulling", &studio.picture(VIEW.0, VIEW.1));
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Pulled \"top\" of \"crate\" out by 0.3");
+    // Three lines, right under the crate's colour.
+    assert_eq!(
+        changed(BOXES, &file(&recipe)),
+        (
+            vec![],
+            vec!["changes = [", "  { pull = \"top\", by = 0.3 },", "]"]
+        )
+    );
+    assert!(file(&recipe).contains("color = \"red\"\nchanges = [\n"));
+    // The face is still selected, by the same name.
+    assert_eq!(studio.selected_faces(), ["top"]);
+    assert_eq!(studio.part("crate").unwrap().kind.changes, 1);
+
+    // One step to undo, and to redo, byte for byte.
+    let pulled = file(&recipe);
+    studio.undo().unwrap();
+    assert_eq!(file(&recipe), BOXES);
+    studio.redo().unwrap();
+    assert_eq!(file(&recipe), pulled);
+
+    // Snapped to 0.1 m; with Ctrl, not.
+    pull(
+        &mut studio,
+        Grip::Pull,
+        |from| from + vec3(0.0, 0.234, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("out 0.2 m"));
+    studio.drag(
+        VIEW,
+        at_screen(&studio, studio.grip_at(Grip::Pull).unwrap()),
+        false,
+    );
+    pull(
+        &mut studio,
+        Grip::Pull,
+        |from| from + vec3(0.0, 0.234, 0.0),
+        true,
+    );
+    let free = studio.drag_label().unwrap().to_owned();
+    assert!(free.starts_with("out 0.23"), "{free}");
+    // Escape lets go and writes nothing.
+    studio.cancel_drag();
+    assert_eq!(file(&recipe), pulled);
+}
+
+#[test]
+fn a_pull_that_would_break_the_shape_is_red_and_writes_nothing() {
+    let (recipe, mut studio) = boxes("face_pull_bad");
+    studio.face_mode().unwrap();
+    let top = studio.face_point("top").unwrap();
+    studio.click_face(VIEW, top, false);
+    // Pushed down 0.7 m into a box 0.5 m tall: through the bottom.
+    pull(
+        &mut studio,
+        Grip::Pull,
+        |from| from - vec3(0.0, 0.7, 0.0),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("in 0.7 m"));
+    let why = studio.drag_problem().unwrap().to_owned();
+    assert!(why.contains("pulling \"top\" in by 0.7"), "{why}");
+    let said = studio.release().unwrap().unwrap_err();
+    assert!(said.starts_with("Not changed: "), "{said}");
+    assert_eq!(file(&recipe), BOXES);
+    assert!(studio.can_undo().is_none());
+}
+
+#[test]
+fn the_inset_knob_makes_a_face_inside_and_selects_it() {
+    let (recipe, mut studio) = boxes("face_inset");
+    studio.face_mode().unwrap();
+    let front = studio.face_point("front").unwrap();
+    studio.click_face(VIEW, front, false);
+    studio.face_tool = FaceTool::Inset;
+    assert_eq!(studio.grips(), [Grip::Inset]);
+    assert_eq!(studio.snap_text(), "Snap 0.01 m  (Ctrl: off)");
+    // The knob is on an edge of the front; dragged towards the face's
+    // middle by 0.1 m.
+    let knob = studio.grip_at(Grip::Inset).unwrap();
+    let middle = {
+        let model = studio.model().unwrap();
+        let part = model
+            .parts
+            .iter()
+            .find(|part| part.name == "crate")
+            .unwrap();
+        let faces = part.faces_named("front");
+        let face = &model.faces[faces[0]];
+        let sum = face.corners.iter().fold(Vec3::ZERO, |sum, &c| sum + c);
+        sum * (1.0 / face.corners.len() as f64) + studio.offset()
+    };
+    let inward = (middle - knob).normalized().unwrap();
+    pull(&mut studio, Grip::Inset, |from| from + inward * 0.1, false);
+    assert_eq!(studio.drag_label(), Some("inset 0.1 m"));
+    check_picture("studio-face-inset", &studio.picture(VIEW.0, VIEW.1));
+    let said = studio.release().unwrap().unwrap();
+    assert_eq!(said, "Inset \"front\" of \"crate\" by 0.1");
+    assert!(file(&recipe).contains("changes = [\n  { inset = \"front\", by = 0.1 },\n]\n"));
+    // The new face in the middle is in hand, ready to pull.
+    assert_eq!(studio.selected_faces(), ["front_inset"]);
+    studio.face_tool = FaceTool::Pull;
+    pull(
+        &mut studio,
+        Grip::Pull,
+        |from| from - vec3(0.0, 0.0, 0.1),
+        false,
+    );
+    assert_eq!(studio.drag_label(), Some("in 0.1 m"));
+    studio.release().unwrap().unwrap();
+    assert!(file(&recipe).contains("  { pull = \"front_inset\", by = -0.1 },\n"));
+
+    // What the panel lists, and its edits.
+    let facts = studio.facts().unwrap();
+    assert_eq!(facts.changes.len(), 2);
+    assert_eq!(facts.changes[1].word, "pull");
+    assert_eq!(facts.changes[1].faces, ["front_inset"]);
+    assert_eq!(facts.changes[1].by, Some(-0.1));
+    studio
+        .apply(&Edit::SetChange {
+            part: "crate".into(),
+            number: 2,
+            by: Some(-0.05),
+            at: None,
+        })
+        .unwrap();
+    assert!(file(&recipe).contains("  { pull = \"front_inset\", by = -0.05 },\n"));
+    // Taking the inset away would leave the pull with no face: refused.
+    let why = studio
+        .apply(&Edit::RemoveChange {
+            part: "crate".into(),
+            number: Some(1),
+        })
+        .unwrap_err();
+    assert!(why.contains("there is no face \"front_inset\""), "{why}");
+    studio
+        .apply(&Edit::RemoveChange {
+            part: "crate".into(),
+            number: None,
+        })
+        .unwrap();
+    assert_eq!(file(&recipe), BOXES);
+    // Its faces are gone, so none is selected; the box's own still are.
+    assert!(studio.selected_faces().is_empty());
+    assert_eq!(studio.mode(), Mode::Face);
+}

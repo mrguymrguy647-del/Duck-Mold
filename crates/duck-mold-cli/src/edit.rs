@@ -5,8 +5,10 @@
 use clap::{Args, Subcommand};
 use duck_mold_core::edit::{Changes, Edit, Free, Made, Sizes};
 
-/// One change to a recipe.
+/// One change to a recipe. (Each variant's name is the command's, so
+/// `set-change` is `SetChange`.)
 #[derive(Subcommand)]
+#[allow(clippy::enum_variant_names)]
 pub enum Change {
     /// Add a part: joined to a socket (--to), or standing free.
     ///
@@ -251,6 +253,31 @@ pub enum Change {
         /// <face>_inset.
         #[arg(long)]
         name: Option<String>,
+    },
+    /// Change the amount of one of a box's changes, counted from 1 as
+    /// they are written.
+    SetChange {
+        /// The part.
+        part: String,
+        /// Which change: 1 is the first.
+        number: usize,
+        /// Its new amount, in metres.
+        #[arg(long, allow_hyphen_values = true)]
+        by: Option<f64>,
+    },
+    /// Take one of a box's changes away (or, with --all, every one).
+    ///
+    /// Refused if a later change, or a colour, names a face only that
+    /// change made: the mistakes it would cause are listed.
+    RemoveChange {
+        /// The part.
+        part: String,
+        /// Which change: 1 is the first.
+        #[arg(required_unless_present = "all")]
+        number: Option<usize>,
+        /// Take away every change: the part is a plain box again.
+        #[arg(long, conflicts_with = "number")]
+        all: bool,
     },
 }
 
@@ -544,6 +571,16 @@ impl Change {
                 faces: face_list(faces),
                 by: *by,
                 name: name.clone(),
+            },
+            Change::SetChange { part, number, by } => Edit::SetChange {
+                part: part.clone(),
+                number: *number,
+                by: *by,
+                at: None,
+            },
+            Change::RemoveChange { part, number, .. } => Edit::RemoveChange {
+                part: part.clone(),
+                number: *number,
             },
             Change::SetSocket { socket, on, shift } => Edit::SetSocket {
                 socket: socket.clone(),

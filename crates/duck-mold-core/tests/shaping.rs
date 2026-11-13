@@ -858,3 +858,192 @@ fn an_edit_that_breaks_the_shape_writes_nothing() {
         "only a box can be shaped in this version: \"post\" is a cylinder"
     );
 }
+
+#[test]
+fn a_change_is_set_and_taken_away_by_its_number() {
+    let text = wall(WINDOW);
+    // One number changes, where it stands.
+    let set = done(
+        &text,
+        Syntax::Toml,
+        &Edit::SetChange {
+            part: "wall".into(),
+            number: 3,
+            by: Some(-0.12),
+            at: None,
+        },
+    );
+    assert_eq!(
+        set.summary,
+        "set change 3 of \"wall\" (pull \"glass\"): by -0.12"
+    );
+    assert_eq!(
+        set.text,
+        text.replace(
+            "{ pull = \"glass\", by = -0.08 }",
+            "{ pull = \"glass\", by = -0.12 }"
+        )
+    );
+    // The last change can't go while a colour names the walls only it
+    // made...
+    let remove_last = Edit::RemoveChange {
+        part: "wall".into(),
+        number: Some(3),
+    };
+    let failure = apply(
+        &text,
+        Syntax::Toml,
+        Path::new("t.toml"),
+        "t.toml",
+        &remove_last,
+    )
+    .unwrap_err();
+    assert_eq!(
+        failure.report().errors[0].path,
+        "parts[0].colors.glass_side"
+    );
+    // ...and goes with its line once none does.
+    let text = text.replace(", glass_side = \"wood\"", "");
+    let taken = done(&text, Syntax::Toml, &remove_last);
+    assert_eq!(
+        taken.summary,
+        "took away change 3 of \"wall\" (pull \"glass\")"
+    );
+    assert_eq!(
+        taken.text,
+        text.replace("  { pull = \"glass\", by = -0.08 },\n", "")
+    );
+    // One a later change needs is refused, with the mistake it would
+    // make.
+    let failure = apply(
+        &text,
+        Syntax::Toml,
+        Path::new("t.toml"),
+        "t.toml",
+        &Edit::RemoveChange {
+            part: "wall".into(),
+            number: Some(2),
+        },
+    )
+    .unwrap_err();
+    let report = failure.report();
+    assert_eq!(report.errors[0].path, "parts[0].changes[1]");
+    assert_eq!(
+        report.errors[0].message,
+        "there is no face \"glass\" on \"wall\""
+    );
+    // Numbers that aren't there.
+    for (number, by) in [(0, Some(1.0)), (4, Some(1.0)), (1, None)] {
+        assert!(
+            apply(
+                &text,
+                Syntax::Toml,
+                Path::new("t.toml"),
+                "t.toml",
+                &Edit::SetChange {
+                    part: "wall".into(),
+                    number,
+                    by,
+                    at: None,
+                },
+            )
+            .is_err()
+        );
+    }
+    // All of them, with the colours that name what they made.
+    let plain = wall("changes = [{ pull = \"top\", by = 0.5 }]");
+    let all = done(
+        &plain,
+        Syntax::Toml,
+        &Edit::RemoveChange {
+            part: "wall".into(),
+            number: None,
+        },
+    );
+    assert_eq!(all.text, format!("{}\n", wall("").trim_end()));
+    assert_eq!(
+        all.summary,
+        "took away the only change of \"wall\": it is a plain box again"
+    );
+}
+
+#[test]
+fn json_changes_are_set_and_taken_away_too() {
+    let text = r##"{
+  "version": 0,
+  "palette": { "wood": "#8B5A2B" },
+  "parts": [
+    {
+      "name": "crate",
+      "shape": "box",
+      "color": "wood",
+      "changes": [
+        { "pull": "top", "by": 0.25 },
+        { "inset": "top", "by": 0.1 }
+      ]
+    }
+  ]
+}
+"##;
+    let set = done(
+        text,
+        Syntax::Json,
+        &Edit::SetChange {
+            part: "crate".into(),
+            number: 1,
+            by: Some(0.5),
+            at: None,
+        },
+    );
+    assert_eq!(set.text, text.replace("\"by\": 0.25", "\"by\": 0.5"));
+    let taken = done(
+        text,
+        Syntax::Json,
+        &Edit::RemoveChange {
+            part: "crate".into(),
+            number: Some(2),
+        },
+    );
+    assert_eq!(
+        taken.text,
+        text.replace(
+            "        { \"pull\": \"top\", \"by\": 0.25 },\n        { \"inset\": \"top\", \"by\": 0.1 }\n",
+            "        { \"pull\": \"top\", \"by\": 0.25 }\n"
+        )
+    );
+}
+
+#[test]
+fn another_shape_drops_the_changes_and_says_so() {
+    use duck_mold_core::edit::Changes;
+    let text = wall(WINDOW);
+    let sphere = done(
+        &text,
+        Syntax::Toml,
+        &Edit::Set {
+            part: "wall".into(),
+            changes: Changes {
+                shape: Some("sphere".into()),
+                ..Changes::default()
+            },
+        },
+    );
+    assert_eq!(
+        sphere.summary,
+        "set \"wall\": shape sphere, dropped 3 changes: only a box can be shaped"
+    );
+    assert!(!sphere.text.contains("changes"));
+    // Still a box: they stay.
+    let box_again = done(
+        &text,
+        Syntax::Toml,
+        &Edit::Set {
+            part: "wall".into(),
+            changes: Changes {
+                shape: Some("box".into()),
+                ..Changes::default()
+            },
+        },
+    );
+    assert!(box_again.text.contains("changes = ["));
+}

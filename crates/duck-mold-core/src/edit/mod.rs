@@ -319,6 +319,24 @@ pub enum Edit {
         /// What the new walls are called.
         name: Option<String>,
     },
+    /// Changes the amount of one of a box's changes.
+    SetChange {
+        /// The part.
+        part: String,
+        /// Which change, counted from 1.
+        number: usize,
+        /// Its new `by`.
+        by: Option<f64>,
+        /// Its new `at` (a cut's).
+        at: Option<f64>,
+    },
+    /// Takes one of a box's changes away, or all of them.
+    RemoveChange {
+        /// The part.
+        part: String,
+        /// Which change, counted from 1. `None`: every one.
+        number: Option<usize>,
+    },
     /// Makes a smaller face inside each face of a box, `by` in from its
     /// edges: an `inset` in its `changes`.
     Inset {
@@ -337,7 +355,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 17] = [
+    pub const COMMANDS: [&'static str; 19] = [
         "add",
         "remove",
         "rename",
@@ -355,6 +373,8 @@ impl Edit {
         "unjoin",
         "pull",
         "inset",
+        "set-change",
+        "remove-change",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -377,6 +397,8 @@ impl Edit {
             Edit::Unjoin { .. } => "unjoin",
             Edit::Pull { .. } => "pull",
             Edit::Inset { .. } => "inset",
+            Edit::SetChange { .. } => "set-change",
+            Edit::RemoveChange { .. } => "remove-change",
         }
     }
 }
@@ -1204,6 +1226,18 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                     doc.remove_field(&table, "colors").map_err(cant)?;
                 }
                 said.push(format!("shape {shape}"));
+                // Only a box can be shaped: another shape loses its
+                // changes (and Undo brings them back).
+                let changes = doc
+                    .items(&with(&table, key("changes")))
+                    .map_or(0, <[_]>::len);
+                if shape != "box" && doc.entry(&table, "changes").is_some() {
+                    doc.remove_field(&table, "changes").map_err(cant)?;
+                    said.push(match changes {
+                        1 => "dropped 1 change: only a box can be shaped".to_owned(),
+                        count => format!("dropped {count} changes: only a box can be shaped"),
+                    });
+                }
             }
             for (name, value) in sizes.fields() {
                 made_changed = true;
@@ -1876,6 +1910,102 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 touched: Some(found),
             })
         }
+        Edit::SetChange {
+            part,
+            number,
+            by,
+            at,
+        } => {
+            let (found, list, count, definition) = changes_of(doc, part)?;
+            if *number == 0 || *number > count {
+                return Err(problem(
+                    Code::OutOfRange,
+                    if count == 1 {
+                        format!("\"{part}\" has 1 change: it is number 1")
+                    } else {
+                        format!(
+                            "\"{part}\" has {count} changes: they are numbered from 1 to {count}"
+                        )
+                    },
+                )
+                .got(*number));
+            }
+            if by.is_none() && at.is_none() {
+                return Err(problem(Code::MissingField, "nothing to set: give --by"));
+            }
+            let change = with(&list, Step::Index(number - 1));
+            let words = change_words(doc, &change);
+            const ORDER: [&str; 3] = ["by", "at", "name"];
+            let mut said = Vec::new();
+            for (field, value) in [("by", by), ("at", at)] {
+                let Some(value) = value else {
+                    continue;
+                };
+                if doc.entry(&change, field).is_none() {
+                    return Err(problem(
+                        Code::UnknownField,
+                        format!("change {number} of \"{part}\" ({words}) has no \"{field}\""),
+                    ));
+                }
+                let value = tidy_number(*value, 4);
+                doc.set_field(&change, field, &Val::Num(value), &ORDER)
+                    .map_err(cant)?;
+                said.push(format!("{field} {}", doc::number_text(value)));
+            }
+            let mut summary = format!(
+                "set change {number} of \"{part}\" ({words}): {}",
+                said.join(", ")
+            );
+            if let Some(definition) = definition {
+                summary.push_str(&format!(" (in the definition \"{definition}\")"));
+            }
+            Ok(Outcome {
+                summary,
+                touched: Some(found),
+            })
+        }
+        Edit::RemoveChange { part, number } => {
+            let (found, list, count, definition) = changes_of(doc, part)?;
+            let table = list[..list.len() - 1].to_vec();
+            let mut summary = match number {
+                None => {
+                    doc.remove_field(&table, "changes").map_err(cant)?;
+                    if count == 1 {
+                        format!("took away the only change of \"{part}\": it is a plain box again")
+                    } else {
+                        format!(
+                            "took away all {count} changes of \"{part}\": it is a plain box again"
+                        )
+                    }
+                }
+                Some(number) if *number == 0 || *number > count => {
+                    return Err(problem(
+                        Code::OutOfRange,
+                        format!(
+                            "\"{part}\" has {count} changes: they are numbered from 1 to {count}"
+                        ),
+                    )
+                    .got(*number));
+                }
+                Some(number) => {
+                    let change = with(&list, Step::Index(number - 1));
+                    let words = change_words(doc, &change);
+                    if count == 1 {
+                        doc.remove_field(&table, "changes").map_err(cant)?;
+                    } else {
+                        doc.remove_item(&list, number - 1).map_err(cant)?;
+                    }
+                    format!("took away change {number} of \"{part}\" ({words})")
+                }
+            };
+            if let Some(definition) = definition {
+                summary.push_str(&format!(" (in the definition \"{definition}\")"));
+            }
+            Ok(Outcome {
+                summary,
+                touched: Some(found),
+            })
+        }
         Edit::SetSocket { socket, on, shift } => {
             let (part, name) = split_socket(socket)?;
             if let Some(on) = on {
@@ -1969,6 +2099,58 @@ fn add_change(
         None => found,
     };
     Ok((found, definition))
+}
+
+/// Where a part's changes are written, and how many there are, with the
+/// definition they are in. Refused, saying so, if it has none.
+fn changes_of(doc: &Doc, part: &str) -> Result<(Found, TreePath, usize, Option<String>), Stop> {
+    let found = find(doc, part)?;
+    let (table, definition) = making(doc, &found);
+    let list = with(&table, key("changes"));
+    let count = doc.items(&list).map_or(0, <[_]>::len);
+    if count == 0 {
+        return Err(problem(
+            Code::UnknownField,
+            format!("\"{part}\" has no changes: pull or inset one of its faces first"),
+        ));
+    }
+    let found = match &definition {
+        Some(definition) => Found {
+            definition: Some(definition.clone()),
+            inside: String::new(),
+            ..found
+        },
+        None => found,
+    };
+    Ok((found, list, count, definition))
+}
+
+/// One change as it is written, in a few words: `pull "glass"`.
+fn change_words(doc: &Doc, change: &[Step]) -> String {
+    let Some(Value::Table(entries)) = doc.node(change).map(|node| &node.value) else {
+        return "the change".to_owned();
+    };
+    for entry in entries {
+        if entry.key == "by" || entry.key == "name" || entry.key == "at" {
+            continue;
+        }
+        let faces = match &entry.node.value {
+            Value::Str(face) => format!("\"{face}\""),
+            Value::Array(items) => {
+                let names: Vec<String> = items
+                    .iter()
+                    .filter_map(|item| match &item.value {
+                        Value::Str(face) => Some(face.clone()),
+                        _ => None,
+                    })
+                    .collect();
+                crate::shaping::quoted(&names)
+            }
+            _ => String::new(),
+        };
+        return format!("{} {faces}", entry.key);
+    }
+    "the change".to_owned()
 }
 
 /// The faces a change names, as it is written: one name, or a list.
@@ -2103,6 +2285,9 @@ pub struct Facts {
     /// it (parts joined to it, its own join, a socket that passes it
     /// on).
     pub sockets: Vec<(String, usize)>,
+    /// The changes made to its shape, its own or its definition's, in
+    /// order.
+    pub changes: Vec<ChangeFact>,
     /// The socket it is joined to: `body.neck`.
     pub to: Option<String>,
     /// Its own socket that joins there.
@@ -2125,6 +2310,19 @@ pub struct Facts {
     /// or colours changes the definition, and so the other parts named
     /// here.
     pub uses: Option<Shared>,
+}
+
+/// One change to a shape, as the recipe writes it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ChangeFact {
+    /// What it does: `pull`, `inset`.
+    pub word: String,
+    /// The faces it names.
+    pub faces: Vec<String>,
+    /// Its `by`.
+    pub by: Option<f64>,
+    /// The name it gives what it makes, if it has one.
+    pub name: Option<String>,
 }
 
 /// Reads what the recipe says about a part. `None` if the text can't be
@@ -2278,6 +2476,36 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
                 (socket, uses)
             })
             .collect(),
+        changes: doc
+            .items(&with(&made_at, key("changes")))
+            .unwrap_or_default()
+            .iter()
+            .filter_map(|item| {
+                let Value::Table(entries) = &item.value else {
+                    return None;
+                };
+                let action = entries
+                    .iter()
+                    .find(|entry| !["by", "at", "name"].contains(&entry.key.as_str()))?;
+                let faces = match &action.node.value {
+                    Value::Str(face) => vec![face.clone()],
+                    Value::Array(items) => items
+                        .iter()
+                        .filter_map(|item| match &item.value {
+                            Value::Str(face) => Some(face.clone()),
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Vec::new(),
+                };
+                Some(ChangeFact {
+                    word: action.key.clone(),
+                    faces,
+                    by: number(item, "by"),
+                    name: text_of(item, "name").map(str::to_owned),
+                })
+            })
+            .collect(),
         to: text_of(own, "to").map(str::to_owned),
         attach: text_of(own, "attach").map(str::to_owned),
         twist: number(own, "twist").unwrap_or(0.0),
@@ -2351,7 +2579,9 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::Unjoin { part }
         | Edit::AddSocket { part, .. }
         | Edit::Pull { part, .. }
-        | Edit::Inset { part, .. } => part,
+        | Edit::Inset { part, .. }
+        | Edit::SetChange { part, .. }
+        | Edit::RemoveChange { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }
         | Edit::RemoveSocket { socket } => socket.rsplit_once('.').map_or("", |(part, _)| part),

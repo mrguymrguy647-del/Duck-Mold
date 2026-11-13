@@ -8,9 +8,9 @@
 use std::path::{Path, PathBuf};
 
 use duck_mold_core::tools;
-use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::handles::Tool;
 use duck_mold_view::studio::viewport::Viewpoint;
+use duck_mold_view::studio::{FaceTool, Mode, Studio};
 use eframe::egui::{self, Rect, RichText, Sense};
 
 use crate::actions::{self, Action};
@@ -46,6 +46,9 @@ pub struct StudioApp {
     /// Where a copy of an example goes: the person's own
     /// `Documents\Duck Mold` folder.
     models_folder: PathBuf,
+    /// Set when Tab was pressed while nothing was being typed: taken
+    /// before egui could move the focus with it.
+    tab: bool,
 }
 
 /// The folder a person's own models go in: `Duck Mold` in their
@@ -92,6 +95,7 @@ impl StudioApp {
             showing: None,
             gallery: gallery::Gallery::default(),
             models_folder: own_models_folder(),
+            tab: false,
             tour: None,
             add_button: None,
         }
@@ -223,6 +227,16 @@ impl StudioApp {
             self.start_page(ui);
             return;
         };
+
+        // Tab shapes the selected box. Taken before anything is drawn, so
+        // that egui doesn't also move the focus from widget to widget with
+        // it (unless something is being typed: then it is the typing's).
+        if !ui.ctx().egui_wants_keyboard_input()
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Tab))
+        {
+            ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+            self.tab = true;
+        }
 
         // Twice a second, see if the file was saved by something else.
         let seconds = f64::from(ui.input(|input| input.stable_dt)).min(1.0);
@@ -422,17 +436,36 @@ impl StudioApp {
             if redo {
                 asked = Some(Action::Redo);
             }
-            // The tools' keys, as in other 3D programs.
-            for (key, tool) in [
-                (egui::Key::G, Tool::Move),
-                (egui::Key::R, Tool::Rotate),
-                (egui::Key::S, Tool::Scale),
-                (egui::Key::T, Tool::Size),
-                (egui::Key::P, Tool::Paint),
-            ] {
-                if ui.input(|input| input.modifiers.is_none() && input.key_pressed(key)) {
-                    studio.tool = tool;
+            // The tools' keys, as in other 3D programs. Shaping has
+            // tools of its own.
+            let key = |key: egui::Key| {
+                ui.input(|input| input.modifiers.is_none() && input.key_pressed(key))
+            };
+            if studio.mode() == Mode::Face {
+                for (pressed, tool) in [
+                    (egui::Key::T, FaceTool::Pull),
+                    (egui::Key::I, FaceTool::Inset),
+                ] {
+                    if key(pressed) {
+                        studio.face_tool = tool;
+                    }
                 }
+            } else {
+                for (pressed, tool) in [
+                    (egui::Key::G, Tool::Move),
+                    (egui::Key::R, Tool::Rotate),
+                    (egui::Key::S, Tool::Scale),
+                    (egui::Key::T, Tool::Size),
+                    (egui::Key::P, Tool::Paint),
+                ] {
+                    if key(pressed) {
+                        studio.tool = tool;
+                    }
+                }
+            }
+            // Tab: shape the selected box, or back to parts.
+            if std::mem::take(&mut self.tab) {
+                asked = Some(Action::Shape);
             }
             if let Some(action) = actions::keys(ui) {
                 asked = Some(action);
@@ -522,11 +555,21 @@ impl StudioApp {
                         self.draft.rename();
                     }
                 }
+                Action::Remove if studio.mode() == Mode::Face => {
+                    studio.say_why(
+                        "Faces can't be removed: a shape must stay closed. To take a change back, Undo, or remove it from the Changes list",
+                    );
+                }
                 Action::Remove => {
                     if !studio.selection().is_empty() {
                         self.draft.remove(studio);
                     }
                 }
+                Action::Shape => {
+                    // What it did, or why not, is in the status line.
+                    let _ = studio.toggle_face_mode();
+                }
+                Action::FaceTool(tool) => studio.face_tool = tool,
                 Action::Unjoin => {
                     let _ = studio.unjoin_selected();
                 }
@@ -574,10 +617,10 @@ impl StudioApp {
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
             if self.view.is_adding() {
                 self.view.stop_adding();
-            } else if studio.dragging().is_some() {
-                // The viewport lets go of the part it was dragging.
-            } else if studio.selected().is_some() {
-                studio.select(None);
+            } else if studio.dragging().is_some() || studio.grabbed().is_some() {
+                // The viewport lets go of what it was dragging.
+            } else if studio.escape() {
+                // A step back: the faces, Face mode, then the selection.
             } else if studio.look_only() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }

@@ -181,6 +181,37 @@ part:
 
 ![A crate with the Move tool's arrows on it](docs/studio-handles.png)
 
+**Shaping a box.** Select a box and press **Tab** (or click **Face**,
+above the tools): the Studio is in Face mode. The other parts fade, the
+box's faces are outlined, and a click picks a face, by the name the
+recipe calls it (`top`, `front`...). Shift+click adds a face.
+
+| Tool | Key | Handle | Dragging it |
+|---|---|---|---|
+| Pull | T | An arrow out of the faces selected | Pulls them out the way they face, with new walls round them, or pushes them in to make a hollow. Steps of 10 cm (1 cm close up); Ctrl: free. |
+| Inset | I | A knob on the middle of an edge | Dragged in, makes a smaller face inside each face: a frame round it, in steps of 1 cm. The new face in the middle is selected, ready to pull. |
+
+- What you do is a list of **changes** under the box in the recipe
+  (`changes = [ { inset = "front", by = 0.6 }, ... ]`), and the panel
+  lists them: change a number to change that step, or click **x** to
+  take it away. The box keeps its size, so make it wider and the
+  window stays 60 cm in from the sides.
+- A drag that would turn the shape inside out, or push a face through
+  another, shows its label in red, saying why, and nothing is written
+  when you let go.
+- Faces can't be deleted (a shape must stay closed): Undo, or the
+  Changes list, takes a change back.
+- Escape lets go of the faces, then leaves Face mode. Tab goes back to
+  parts too.
+- Only a box can be shaped in this version (with or without a taper,
+  without a bevel). Changing its shape to another drops its changes,
+  and says so; Undo brings them back.
+
+In the file these are `pull`, `inset`, `set-change` and `remove-change`
+edits; `duck-mold inspect <recipe> --faces` lists every face's name.
+
+![A wall in Face mode: the glass of its framed window selected, with the Changes list on the right](docs/studio-shaping.png)
+
 **Adding parts.** There are two ways.
 
 - **Add**, in the top bar, lists the shapes, the parts the recipe
@@ -279,6 +310,8 @@ keys, About). Every line shows its key.
 | Key | Does |
 |---|---|
 | G, R, S, T, P | The Move, Rotate, Scale, Size and Paint tools |
+| Tab | Shape the selected box: Face mode. Tab again: back to parts |
+| T, I (shaping) | The Pull and Inset tools |
 | Ctrl held while dragging | No snapping |
 | Delete or Backspace | Remove what is selected |
 | Ctrl+D | Duplicate it. A copy of a free part stands beside it; a copy of a joined part is on the same socket |
@@ -291,7 +324,7 @@ keys, About). Every line shows its key.
 | Shift+A | Add a part on the ground |
 | Shift+click | Add a part to the selection, or take it out |
 | Ctrl+A | Select every part |
-| Escape | Let go: of a drag, then of a list, then of the selection |
+| Escape | Let go: of a drag, then of a list, the faces, Face mode, then of the selection |
 | Ctrl+N, Ctrl+O, Ctrl+E | New model, Open, Export |
 
 Keys don't fire while you are typing in a field.

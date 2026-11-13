@@ -7,9 +7,11 @@
 //! it to the recipe file. The fields are then read from the file again.
 
 use duck_mold_core::edit::{Changes, Edit, Facts, Made, Sizes};
+use duck_mold_core::math::Vec3;
 use duck_mold_core::model::Part;
 use duck_mold_core::recipe::Shape;
-use duck_mold_view::studio::Studio;
+use duck_mold_core::shaping::facing_word;
+use duck_mold_view::studio::{Mode, Studio};
 use eframe::egui::{self, Color32, DragValue, RichText, TextEdit};
 
 use crate::theme;
@@ -54,6 +56,8 @@ pub struct Draft {
     focus_name: bool,
     /// The names of the part's sockets, as they are being typed.
     socket_names: Vec<String>,
+    /// The amount of each of the part's changes, as it is being typed.
+    change_by: Vec<f64>,
 }
 
 impl Draft {
@@ -76,6 +80,114 @@ impl Draft {
         self.recolor = None;
         self.confirm_remove = None;
         self.socket_names = facts.sockets.iter().map(|(name, _)| name.clone()).collect();
+        self.change_by = facts
+            .changes
+            .iter()
+            .map(|change| change.by.unwrap_or(0.0))
+            .collect();
+    }
+}
+
+/// In Face mode: the faces selected, each with the way it faces and how
+/// big it is.
+fn faces_section(ui: &mut egui::Ui, studio: &Studio) {
+    let Some((_, shaped)) = studio.shaped_selected() else {
+        return;
+    };
+    ui.label(RichText::new("Shaping: Face mode").strong())
+        .on_hover_text("Tab, or Part above the tools, goes back to parts");
+    let faces = studio.selected_faces();
+    if faces.is_empty() {
+        ui.label(RichText::new("Click a face of the box to select it.").weak());
+        ui.add_space(6.0);
+        return;
+    }
+    egui::Grid::new("duck_mold_faces_grid")
+        .num_columns(3)
+        .spacing([8.0, 4.0])
+        .show(ui, |ui| {
+            for name in faces {
+                let these = shaped.faces_named(name);
+                let facing = these.iter().fold(Vec3::ZERO, |sum, &face| {
+                    sum + shaped.normal(face).unwrap_or(Vec3::ZERO) * shaped.area(face)
+                });
+                ui.label(RichText::new(name).monospace());
+                ui.label(format!("faces {}", facing_word(facing)));
+                match these.as_slice() {
+                    [one] => {
+                        let [wide, tall] = shaped.extent(*one);
+                        ui.label(format!("{wide:.2} x {tall:.2} m"));
+                    }
+                    many => {
+                        ui.label(format!("{} faces", many.len()));
+                    }
+                }
+                ui.end_row();
+            }
+        });
+    ui.add_space(6.0);
+}
+
+/// The changes made to a box's shape, in order: each amount can be
+/// changed, and each change taken away.
+fn changes_section(
+    ui: &mut egui::Ui,
+    facts: &Facts,
+    draft: &mut Draft,
+    path: &str,
+    edits: &mut Vec<Edit>,
+) {
+    if facts.changes.is_empty() || draft.change_by.len() != facts.changes.len() {
+        return;
+    }
+    ui.add_space(8.0);
+    ui.label(RichText::new("Changes").strong()).on_hover_text(
+        "What has been done to the box's shape, in order. Change an amount, or take a change away (Undo brings it back)",
+    );
+    for (at, change) in facts.changes.iter().enumerate() {
+        let number = at + 1;
+        ui.horizontal(|ui| {
+            let mut words = format!("{number}. {} {}", change.word, change.faces.join(", "));
+            if let Some(name) = &change.name {
+                words.push_str(&format!(" ({name})"));
+            }
+            ui.label(words);
+            let range = if change.word == "pull" {
+                -1000.0..=1000.0
+            } else {
+                0.001..=1000.0
+            };
+            let field = ui
+                .add(
+                    DragValue::new(&mut draft.change_by[at])
+                        .speed(0.01)
+                        .range(range)
+                        .max_decimals(3)
+                        .suffix(" m"),
+                )
+                .on_hover_text("How far, in metres");
+            if (field.drag_stopped() || field.lost_focus())
+                && Some(draft.change_by[at]) != change.by
+                && draft.change_by[at] != 0.0
+            {
+                edits.push(Edit::SetChange {
+                    part: path.to_owned(),
+                    number,
+                    by: Some(draft.change_by[at]),
+                    at: None,
+                });
+            }
+            if ui
+                .small_button("x")
+                .on_hover_text("Take this change away")
+                .clicked()
+            {
+                edits.push(Edit::RemoveChange {
+                    part: path.to_owned(),
+                    number: Some(number),
+                });
+            }
+        });
     }
 }
 
@@ -346,6 +458,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     }
 
     definition_notice(ui, &facts);
+    if studio.mode() == Mode::Face {
+        faces_section(ui, studio);
+    }
 
     let set = |changes: Changes| Edit::Set {
         part: path.clone(),
@@ -852,6 +967,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     ui.end_row();
                 }
             });
+
+        // ---- the changes to its shape
+        changes_section(ui, &facts, draft, &path, &mut edits);
 
         // ---- the sockets it declares
         if !facts.sockets.is_empty() && draft.socket_names.len() == facts.sockets.len() {

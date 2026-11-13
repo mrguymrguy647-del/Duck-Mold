@@ -2653,6 +2653,16 @@ fn every_kind_of_edit_has_a_name() {
             by: 0.0,
             name: None,
         },
+        Edit::SetChange {
+            part: String::new(),
+            number: 1,
+            by: None,
+            at: None,
+        },
+        Edit::RemoveChange {
+            part: String::new(),
+            number: None,
+        },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
     assert_eq!(names, Edit::COMMANDS);

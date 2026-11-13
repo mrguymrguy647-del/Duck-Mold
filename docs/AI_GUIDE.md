@@ -593,6 +593,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
 | `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
 | `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
+| `duck-mold edit <recipe> set-change <part> <number> --by <metres>` | Changes the amount of one change, counted from 1 as they are written. Later changes, and every name, stay. |
+| `duck-mold edit <recipe> remove-change <part> <number>` | Takes one change away (`--all`: every one, and the part is a plain box again). Refused if a later change or a colour names a face only that change made: the mistakes it would cause are listed. |
 
 - **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,
   or `#2` for a part with no name. `--to` takes the same
@@ -627,8 +629,14 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   scale, colour, copy or remove them together. In the file that is
   the same edit, once for each part: run the command once for each.
   Hiding a part in the Studio changes nothing in the file.
-- **`pull` and `inset` on a part made from a defined part** change the
-  definition, like `set --shape`.
+- In the Studio, Face mode (Tab) shapes a box by hand: a drag of its
+  Pull arrow is a `pull`, of its Inset knob an `inset`, and the panel's
+  Changes list is `set-change` and `remove-change`. Read the result
+  with `inspect --faces`.
+- **`pull`, `inset`, `set-change` and `remove-change` on a part made
+  from a defined part** change the definition, like `set --shape`.
+- **`set --shape` to anything but a box drops a box's changes** (only a
+  box can be shaped), and says so: `dropped 3 changes`.
 - Not edits: `mirror` (except through `duplicate --mirror`), sockets
   written with `at` or `from`, and `define`. Type those in the recipe.
 

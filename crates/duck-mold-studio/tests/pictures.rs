@@ -56,6 +56,28 @@ fn robot() -> Harness<'static, StudioApp> {
     screen
 }
 
+/// A wall with a framed window, shaped from one box.
+const WALL: &str = r##"version = 0
+name = "wall"
+
+[palette]
+plaster = "#E8E0D0"
+wood = "#8B5A2B"
+sky = "#9FD3F0"
+
+[[parts]]
+name = "wall"
+shape = "box"
+size = [3, 2.4, 0.2]
+color = "plaster"
+changes = [
+  { inset = "front", by = 0.6, name = "window" },
+  { inset = "window", by = 0.06, name = "glass" },
+  { pull = "glass", by = -0.08 },
+]
+colors = { window = "wood", glass = "sky", glass_side = "wood" }
+"##;
+
 #[test]
 fn the_screens_look_as_they_did() {
     let mut wrong: Vec<String> = Vec::new();
@@ -374,6 +396,55 @@ fn the_screens_look_as_they_did() {
         assert!(screen.state_mut().studio_mut().unwrap().check_files());
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "mistake"));
+    }
+
+    // Shaping: a wall with a framed window, in Face mode with the glass
+    // selected and the Changes list in the panel; then a pull of the
+    // glass held too far in, its label red with why.
+    {
+        let recipe = folder("pictures_shaping").join("wall.toml");
+        std::fs::write(&recipe, WALL).unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("wall"));
+            studio.face_mode().unwrap();
+            studio.look_from(duck_mold_view::studio::viewport::Viewpoint::ThreeQuarter);
+        }
+        screen.run_steps(2);
+        let glass = face_on_screen(&screen, "glass");
+        click_at(&mut screen, glass);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "shape-face"));
+
+        use duck_mold_view::studio::handles::Grip;
+        let from = screen
+            .state()
+            .studio()
+            .unwrap()
+            .grip_at(Grip::Pull)
+            .unwrap();
+        let start = point_on_screen(&screen, from);
+        let end = point_on_screen(&screen, from + duck_mold_core::math::vec3(0.0, 0.0, -0.3));
+        screen.hover_at(start);
+        screen.step();
+        screen.drag_at(start);
+        screen.step();
+        for part in 1..=4 {
+            screen.hover_at(start + (end - start) * (part as f32 / 4.0));
+            screen.step();
+        }
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "shape-refused"));
+        screen.event(egui::Event::PointerButton {
+            pos: end,
+            button: egui::PointerButton::Primary,
+            pressed: false,
+            modifiers: egui::Modifiers::NONE,
+        });
+        screen.run_steps(2);
+        assert_eq!(std::fs::read_to_string(&recipe).unwrap(), WALL);
     }
 
     assert!(

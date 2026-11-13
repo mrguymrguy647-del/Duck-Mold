@@ -6,8 +6,8 @@
 //! agent can run too: this only chooses which.
 
 use duck_mold_core::edit::Made;
-use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::viewport::Viewpoint;
+use duck_mold_view::studio::{FaceTool, Mode, Studio};
 use eframe::egui::{self, RichText};
 
 use crate::library::Thumbs;
@@ -77,14 +77,23 @@ pub enum Action {
     ShowKeys,
     /// Show what this program is.
     About,
+    /// Shape the selected box: Face mode, or back to Part mode (Tab).
+    Shape,
+    /// Take this tool in hand in Face mode.
+    FaceTool(FaceTool),
 }
 
 /// Every key and what it does, for Help's list and the README's.
-pub const KEYS: [(&str, &str); 21] = [
+pub const KEYS: [(&str, &str); 23] = [
     (
         "G, R, S, T, P",
         "The Move, Rotate, Scale, Size and Paint tools",
     ),
+    (
+        "Tab",
+        "Shape the selected box: click its faces. Tab again: back to parts",
+    ),
+    ("T, I (shaping)", "The Pull and Inset tools"),
     ("Ctrl held while dragging", "No snapping"),
     ("Delete or Backspace", "Remove what is selected"),
     ("Ctrl+D", "Duplicate what is selected"),
@@ -105,7 +114,10 @@ pub const KEYS: [(&str, &str); 21] = [
     ("Shift+A", "Add a part on the ground"),
     ("Shift+click", "Add a part to the selection, or take it out"),
     ("Ctrl+A", "Select every part"),
-    ("Escape", "Let go: of a drag, a list, then the selection"),
+    (
+        "Escape",
+        "Let go: of a drag, a list, the faces, Face mode, then the selection",
+    ),
     ("Ctrl+N", "New model"),
     ("Ctrl+O", "Open"),
     ("Ctrl+E", "Export the .glb"),
@@ -251,6 +263,26 @@ pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) ->
         (None, count) => format!("{count} parts"),
     };
     ui.label(RichText::new(title).weak().small());
+    // Shaping: the tools, and the way back.
+    if studio.mode() == Mode::Face {
+        if line(ui, true, "Pull", "T") {
+            chosen = Some(Action::FaceTool(FaceTool::Pull));
+        }
+        if line(ui, true, "Inset", "I") {
+            chosen = Some(Action::FaceTool(FaceTool::Inset));
+        }
+        ui.separator();
+        if line(ui, true, "Back to Part", "Tab") {
+            chosen = Some(Action::Shape);
+        }
+        if chosen.is_some() {
+            ui.close();
+        }
+        return chosen;
+    }
+    if line(ui, edits && one.is_some(), "Shape", "Tab") {
+        chosen = Some(Action::Shape);
+    }
     if line(ui, edits, "Duplicate", "Ctrl+D") {
         chosen = Some(Action::Duplicate);
     }

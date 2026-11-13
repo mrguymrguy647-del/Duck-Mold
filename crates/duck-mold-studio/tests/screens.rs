@@ -2164,3 +2164,119 @@ fn skipped_tips_stay_away_and_looking_only_has_none() {
     // With the tip up, the Studio still works: nothing is in the way.
     assert!(folder.join("settings/tips-seen").is_file());
 }
+
+#[test]
+fn tab_shapes_the_selected_box_with_the_pull_arrow_and_the_changes_list() {
+    use duck_mold_view::studio::handles::Grip;
+    use duck_mold_view::studio::{FaceTool, Mode};
+    use egui::Key;
+    let (recipe, mut screen) = yard("screens_shaping");
+    let mode = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().mode();
+
+    // A cylinder can't be shaped: the status line says why.
+    let post = on_screen(&screen, "post");
+    click_at(&mut screen, post);
+    screen.key_press(Key::Tab);
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+    screen.get_by_label_contains("Only a box can be shaped in this version");
+
+    // The crate can: Tab, or the Face button.
+    let crate_at = on_screen(&screen, "crate");
+    click_at(&mut screen, crate_at);
+    screen.key_press(Key::Tab);
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Face);
+    screen.get_by_label("Shaping: Face mode");
+    screen.get_by_label("Click a face of the box to select it.");
+    for tool in ["Pull", "Inset"] {
+        screen.get_by_label(tool);
+    }
+    // Part's tools are gone while shaping.
+    assert_eq!(screen.query_all_by_label("Rotate").count(), 0);
+    screen.get_by_label("Part").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+    screen.get_by_label("Face").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Face);
+
+    // A click picks the top; the panel says what it is.
+    let top = face_on_screen(&screen, "top");
+    click_at(&mut screen, top);
+    assert_eq!(screen.state().studio().unwrap().selected_faces(), ["top"]);
+    screen.get_by_label("faces up");
+    screen.get_by_label("0.50 x 0.50 m");
+
+    // The arrow pulls it up 0.4 m: one write.
+    let from = screen
+        .state()
+        .studio()
+        .unwrap()
+        .grip_at(Grip::Pull)
+        .unwrap();
+    let (start, end) = (
+        point_on_screen(&screen, from),
+        point_on_screen(&screen, from + duck_mold_core::math::vec3(0.0, 0.4, 0.0)),
+    );
+    drag(&mut screen, start, end);
+    let pulled = text_of(&recipe);
+    assert!(
+        pulled.contains("color = \"red\"\nchanges = [\n  { pull = \"top\", by = 0.4 },\n]\n"),
+        "{pulled}"
+    );
+    screen.get_by_label_contains("Pulled \"top\" of \"crate\" out by 0.4");
+    // The Changes list shows it.
+    screen.get_by_label("Changes");
+    screen.get_by_label("1. pull top");
+
+    // I and T change the tool.
+    screen.key_press(Key::I);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().face_tool, FaceTool::Inset);
+    screen.key_press(Key::T);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().face_tool, FaceTool::Pull);
+
+    // Delete removes no face, and says why.
+    screen.key_press(Key::Delete);
+    screen.run_steps(2);
+    screen.get_by_label_contains("Faces can't be removed: a shape must stay closed");
+    assert_eq!(text_of(&recipe), pulled);
+
+    // The right-click menu has the tools and the way back.
+    let top = face_on_screen(&screen, "top");
+    right_click_at(&mut screen, top);
+    screen.get_by_label_contains("Back to Part").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+    // And in Part mode, Shape.
+    let crate_at = on_screen(&screen, "crate");
+    right_click_at(&mut screen, crate_at);
+    screen.get_by_label_contains("Shape").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Face);
+
+    // The change taken away from the list: the crate is a box again.
+    screen.get_by_label("x").click();
+    screen.run_steps(3);
+    assert_eq!(text_of(&recipe), YARD);
+    // Undo brings it back.
+    screen.get_by_label("Undo").click();
+    screen.run_steps(2);
+    assert_eq!(text_of(&recipe), pulled);
+
+    // Escape: the faces, Face mode, then the part.
+    let top = face_on_screen(&screen, "top");
+    click_at(&mut screen, top);
+    for (mode_after, selected_after) in [
+        (Mode::Face, Some("crate")),
+        (Mode::Part, Some("crate")),
+        (Mode::Part, None),
+    ] {
+        screen.key_press(Key::Escape);
+        screen.run_steps(2);
+        assert_eq!(mode(&screen), mode_after);
+        assert_eq!(selected(&screen).as_deref(), selected_after);
+    }
+}

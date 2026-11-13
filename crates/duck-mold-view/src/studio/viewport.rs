@@ -248,6 +248,15 @@ pub const MARKER_REACH: f64 = 8.0;
 /// [`Look::offset`] already).
 #[derive(Debug, Clone, PartialEq)]
 pub enum Mark {
+    /// A line one pixel thick: the outline of a face.
+    Thin {
+        /// Where it starts.
+        from: Vec3,
+        /// Where it ends.
+        to: Vec3,
+        /// Red, green and blue.
+        color: [u8; 3],
+    },
     /// A line, three pixels thick.
     Line {
         /// Where it starts.
@@ -302,6 +311,9 @@ pub struct Look<'a> {
     pub lit: &'a [Range<usize>],
     /// The faces that aren't drawn: those of hidden parts.
     pub hidden: &'a [Range<usize>],
+    /// When set, only these faces are drawn in full: the rest are faded
+    /// towards the background (Face mode, shaping one part).
+    pub focus: Option<Range<usize>>,
     /// Whether only the outline of each face is drawn, so that the
     /// model can be seen through.
     pub wire: bool,
@@ -505,10 +517,17 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
                 if look.hidden.iter().any(|hidden| hidden.contains(&at)) {
                     continue;
                 }
-                let rgb = face
+                let mut rgb = face
                     .color
                     .and_then(|color| model.palette.get(color))
                     .map_or(UNCOLOURED, |color| color.rgb);
+                if look
+                    .focus
+                    .as_ref()
+                    .is_some_and(|focus| !focus.contains(&at))
+                {
+                    rgb = faded(rgb);
+                }
                 let bright = lit.iter().any(|lit| lit.contains(&at));
                 let lighter = |channel: u8| {
                     let once = channel + (255 - channel) / 3;
@@ -525,7 +544,7 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
                 }
             }
         } else {
-            let mesh = mesh_of(model, orbit, offset, &lit, look.hidden);
+            let mesh = mesh_of(model, orbit, offset, &lit, look.hidden, look.focus.as_ref());
             // The light comes from over the viewer's left shoulder,
             // whichever way the model is turned.
             canvas.set_lighting(Lighting {
@@ -572,6 +591,7 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
 
     for mark in look.marks {
         match mark {
+            Mark::Thin { from, to, color } => line(&mut canvas, *from, *to, paint(*color)),
             Mark::Line { from, to, color } => thick(&mut canvas, *from, *to, paint(*color)),
             Mark::Arrow { from, to, color } => {
                 thick(&mut canvas, *from, *to, paint(*color));
@@ -743,6 +763,7 @@ fn mesh_of(
     offset: Vec3,
     lit: &[Range<usize>],
     hidden: &[Range<usize>],
+    focus: Option<&Range<usize>>,
 ) -> Mesh {
     let mut mesh = Mesh::new();
     for (at, face) in model.faces.iter().enumerate() {
@@ -756,6 +777,9 @@ fn mesh_of(
         if lit.iter().any(|lit| lit.contains(&at)) {
             rgb = rgb.map(|channel| channel + (255 - channel) / 3);
         }
+        if focus.is_some_and(|focus| !focus.contains(&at)) {
+            rgb = faded(rgb);
+        }
         let color = Color::rgb(rgb[0], rgb[1], rgb[2]);
         let first = mesh.vertices.len();
         for &corner in &face.corners {
@@ -766,6 +790,17 @@ fn mesh_of(
         }
     }
     mesh
+}
+
+/// A colour most of the way to the background: a part that isn't being
+/// shaped.
+fn faded(rgb: [u8; 3]) -> [u8; 3] {
+    let back = [BACKGROUND.r, BACKGROUND.g, BACKGROUND.b];
+    let mut out = [0; 3];
+    for at in 0..3 {
+        out[at] = ((u16::from(rgb[at]) + 2 * u16::from(back[at])) / 3) as u8;
+    }
+    out
 }
 
 /// What the pointer is on.

@@ -11,6 +11,10 @@
 //! - A drag that starts on a handle, or on the selected part, moves,
 //!   turns or sizes the part. While it lasts the picture shows what the
 //!   recipe would build; the file is written when the mouse is let go.
+//! - In Face mode (Tab, or the Face button above the tools) a click
+//!   picks a face of the selected box, and the handles shape it: the
+//!   Pull arrow, the Inset knob. A drag that would break the shape shows
+//!   its label in red, and letting go writes nothing.
 //!
 //! The picture is drawn by Duck Forge's CPU renderer
 //! ([`Studio::picture`]) and shown as one image.
@@ -21,7 +25,7 @@ use duck_mold_core::edit::{Made, Spot};
 use duck_mold_core::recipe::Shape;
 use duck_mold_view::studio::handles::Tool;
 use duck_mold_view::studio::viewport::Orbit;
-use duck_mold_view::studio::{Clicked, Studio};
+use duck_mold_view::studio::{Clicked, FaceTool, Mode, Studio};
 use eframe::egui::{
     self, Color32, ColorImage, PointerButton, Rect, RichText, Sense, TextureHandle, TextureOptions,
     pos2,
@@ -47,6 +51,9 @@ struct Drawn {
     selected: Vec<String>,
     hidden: Vec<String>,
     tool: Tool,
+    mode: Mode,
+    face_tool: FaceTool,
+    faces: Vec<String>,
     size: [usize; 2],
     /// Where the pointer is, when that changes what is drawn (a part is
     /// selected, so markers show).
@@ -215,7 +222,12 @@ pub fn show(
     if response.clicked()
         && let Some(pointer) = response.interact_pointer_pos()
     {
-        if studio.tool == Tool::Paint && !studio.look_only() {
+        if studio.mode() == Mode::Face {
+            // Face mode: the face under the pointer is selected; with
+            // Shift, added or taken out.
+            studio.click_face(size, in_picture(pointer), shift);
+            view.adding = None;
+        } else if studio.tool == Tool::Paint && !studio.look_only() {
             // The Paint tool: the face under the pointer gets the colour
             // in hand; with Shift, the whole part does. What it did, or
             // why not, is in the status line.
@@ -260,7 +272,8 @@ pub fn show(
         }
     }
 
-    let shows_markers = studio.selected().is_some() && !studio.look_only();
+    let shaping = studio.mode() == Mode::Face;
+    let shows_markers = (studio.selected().is_some() && !studio.look_only()) || shaping;
     let now = Drawn {
         builds: studio.builds(),
         orbit: studio.orbit,
@@ -270,6 +283,9 @@ pub fn show(
         selected: studio.selection().into_iter().map(str::to_owned).collect(),
         hidden: studio.hidden().to_vec(),
         tool: studio.tool,
+        mode: studio.mode(),
+        face_tool: studio.face_tool,
+        faces: studio.selected_faces().to_vec(),
         size: [size.0, size.1],
         pointer: pointer
             .filter(|_| shows_markers || studio.tool == Tool::Paint)
@@ -313,9 +329,16 @@ pub fn show(
 
     // What the mouse does here, in a line at the bottom, and how moves
     // snap.
-    let handles = shows_markers && studio.facts().is_some();
+    let handles = (shows_markers && studio.facts().is_some() && !shaping)
+        || (shaping && !studio.selected_faces().is_empty());
     let hint = if view.moving {
         "Let go to make the change. Escape lets go without changing anything."
+    } else if shaping && studio.selected_faces().is_empty() {
+        "Click a face of the box to shape it. Shift+click adds a face. Tab goes back to parts."
+    } else if shaping && studio.face_tool == FaceTool::Inset {
+        "Drag the knob in to make a smaller face inside: a frame round it. Shift+click adds a face."
+    } else if shaping {
+        "Drag the arrow to pull the face out, or push it in. Shift+click adds a face. I insets."
     } else if studio.tool == Tool::Paint && !studio.look_only() {
         "Click a face to colour it. Shift+click colours the whole part. Pick the colour in the palette."
     } else if studio.selection().len() > 1 {
@@ -343,27 +366,100 @@ pub fn show(
             quiet,
         );
     }
-    // What the drag has done so far, beside the pointer.
+    // What the drag has done so far, beside the pointer: in red, with
+    // why, when letting go would change nothing.
     if let (Some(label), Some(pointer)) = (studio.drag_label(), pointer) {
         let at = pointer + egui::vec2(16.0, -18.0);
-        let text = painter.layout_no_wrap(
-            label.to_owned(),
-            egui::FontId::proportional(13.0),
-            Color32::WHITE,
-        );
+        let (words, color) = match studio.drag_problem() {
+            Some(why) => (
+                format!("{label}: {why}"),
+                Color32::from_rgb(0xFF, 0x7A, 0x7A),
+            ),
+            None => (label.to_owned(), Color32::WHITE),
+        };
+        let text = painter.layout(words, egui::FontId::proportional(13.0), color, 320.0);
         let back = Rect::from_min_size(at, text.size()).expand(4.0);
         painter.rect_filled(back, 4.0, Color32::from_black_alpha(200));
-        painter.galley(at, text, Color32::WHITE);
+        painter.galley(at, text, color);
     }
 
+    mode_row(ui, studio, rect);
     tool_strip(ui, studio, rect);
     add_list(ui, studio, view, thumbs, rect);
     asked
 }
 
+/// Where the tools start, under the mode row.
+const TOOLS_TOP: f32 = 44.0;
+
+/// Part and Face, above the tools: what a click picks.
+fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
+    if studio.look_only() {
+        return;
+    }
+    let modes = [
+        (
+            Mode::Part,
+            "Part",
+            "Click parts, and move, turn and size them (Tab)",
+        ),
+        (
+            Mode::Face,
+            "Face",
+            "Shape the selected box: click its faces, pull them out, inset them (Tab)",
+        ),
+    ];
+    for (at, (mode, name, tip)) in modes.into_iter().enumerate() {
+        let place = Rect::from_min_size(
+            within.left_top() + egui::vec2(8.0 + at as f32 * 52.0, 8.0),
+            egui::vec2(48.0, 24.0),
+        );
+        ui.painter_at(within)
+            .rect_filled(place, 4.0, Color32::from_black_alpha(150));
+        let button = egui::Button::selectable(studio.mode() == mode, name);
+        if ui.put(place, button).on_hover_text(tip).clicked() && studio.mode() != mode {
+            // Why not, if it can't, is in the status line.
+            let _ = studio.toggle_face_mode();
+        }
+    }
+}
+
 /// The tools, down the left edge of the viewport: one is in hand.
 fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
     if studio.look_only() {
+        return;
+    }
+    if studio.mode() == Mode::Face {
+        let tools = [
+            (
+                FaceTool::Pull,
+                "Pull",
+                "T",
+                "An arrow out of the faces selected: drag it to pull them out, or push them in",
+            ),
+            (
+                FaceTool::Inset,
+                "Inset",
+                "I",
+                "A knob on an edge: drag it in to make a smaller face inside, with a frame round it",
+            ),
+        ];
+        for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {
+            let place = Rect::from_min_size(
+                within.left_top() + egui::vec2(8.0, TOOLS_TOP + row as f32 * 30.0),
+                egui::vec2(76.0, 24.0),
+            );
+            ui.painter_at(within)
+                .rect_filled(place, 4.0, Color32::from_black_alpha(150));
+            let button = egui::Button::selectable(studio.face_tool == tool, name);
+            if ui
+                .put(place, button)
+                .on_hover_text(format!("{tip} ({key})"))
+                .clicked()
+            {
+                studio.face_tool = tool;
+            }
+        }
         return;
     }
     let tools = [
@@ -395,7 +491,7 @@ fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
     ];
     for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {
         let place = Rect::from_min_size(
-            within.left_top() + egui::vec2(8.0, 8.0 + row as f32 * 30.0),
+            within.left_top() + egui::vec2(8.0, TOOLS_TOP + row as f32 * 30.0),
             egui::vec2(76.0, 24.0),
         );
         // A dark plate behind it, so it reads over the picture.

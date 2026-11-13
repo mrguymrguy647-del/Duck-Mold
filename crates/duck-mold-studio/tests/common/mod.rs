@@ -195,3 +195,24 @@ pub fn selection(screen: &Harness<'static, StudioApp>) -> Vec<String> {
     let studio = screen.state().studio().unwrap();
     studio.selection().into_iter().map(str::to_owned).collect()
 }
+
+/// Where a pixel of the viewport's picture is on the screen.
+pub fn picture_on_screen(screen: &Harness<'static, StudioApp>, at: (f64, f64)) -> egui::Pos2 {
+    let (rect, [width, height]) = screen.state().viewport().unwrap();
+    rect.min
+        + egui::vec2(
+            at.0 as f32 * rect.width() / width as f32,
+            at.1 as f32 * rect.height() / height as f32,
+        )
+}
+
+/// Where the middle of a face of the box being shaped is on the screen.
+pub fn face_on_screen(screen: &Harness<'static, StudioApp>, face: &str) -> egui::Pos2 {
+    let at = screen
+        .state()
+        .studio()
+        .unwrap()
+        .face_point(face)
+        .unwrap_or_else(|| panic!("no face {face} in view"));
+    picture_on_screen(screen, at)
+}
