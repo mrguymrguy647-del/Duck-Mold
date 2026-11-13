@@ -370,20 +370,22 @@ fn the_gap_is_measured_between_the_surfaces_not_the_boxes() {
     let found = report(&boxes(&part("b", "shape = \"box\"", [1.3, 1.4, 0.0])));
     assert_eq!(found.floating[0].gap, 0.5);
 
-    // A ball beside a box: nearer than their boxes' corners suggest.
+    // A ball beside a box (a little up, off the ground): nearer than
+    // their boxes' corners suggest.
     let found = report(&boxes(&part(
         "ball",
         "shape = \"sphere\"\nradius = 0.5",
-        [1.25, 0.0, 0.0],
+        [1.25, 0.1, 0.0],
     )));
     assert_eq!(found.floating[0].gap, 0.25);
 }
 
 #[test]
 fn parts_within_a_millimetre_touch() {
-    let near = report(&boxes(&part("b", "shape = \"box\"", [1.0005, 0.0, 0.0])));
+    // (A little up, off the ground, where standing would count.)
+    let near = report(&boxes(&part("b", "shape = \"box\"", [1.0005, 0.1, 0.0])));
     assert_eq!(near.floating, Vec::new());
-    let apart = report(&boxes(&part("b", "shape = \"box\"", [1.002, 0.0, 0.0])));
+    let apart = report(&boxes(&part("b", "shape = \"box\"", [1.002, 0.1, 0.0])));
     assert_eq!(apart.floating.len(), 1);
     assert_eq!(apart.floating[0].gap, 0.002);
     // Parts that share only an edge or a corner touch too.
@@ -391,6 +393,17 @@ fn parts_within_a_millimetre_touch() {
     assert_eq!(edge.floating, Vec::new());
     let corner = report(&boxes(&part("b", "shape = \"box\"", [1.0, 1.0, 1.0])));
     assert_eq!(corner.floating, Vec::new());
+}
+
+#[test]
+fn a_part_standing_on_the_ground_does_not_float() {
+    // Two boxes side by side on the floor: neither floats.
+    let found = report(&boxes(&part("b", "shape = \"box\"", [2.0, 0.0, 0.0])));
+    assert_eq!(found.floating, Vec::new());
+    // Up in the air, touching nothing, it does.
+    let found = report(&boxes(&part("b", "shape = \"box\"", [2.0, 0.5, 0.0])));
+    assert_eq!(found.floating.len(), 1);
+    assert_eq!(found.floating[0].part, "b");
 }
 
 #[test]

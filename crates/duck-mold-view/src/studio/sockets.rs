@@ -12,7 +12,7 @@
 //! All of it becomes `add`, `join`, `add-socket` and `set-socket` edits.
 
 use duck_mold_core::edit::{self, Edit, Free, Made, Sizes, Spot};
-use duck_mold_core::math::Vec3;
+use duck_mold_core::math::{Bounds, Vec3};
 use duck_mold_core::model::Part;
 use duck_mold_core::source::Syntax;
 
@@ -444,37 +444,19 @@ impl Studio {
             .map(|bounds| bounds.half());
         if let (Some(room), Some(model)) = (room, self.model()) {
             let offset = self.offset();
-            let others: Vec<_> = model.parts.iter().filter_map(|part| part.bounds).collect();
-            let clear = |at: [f64; 2]| {
-                others.iter().all(|other| {
-                    let (low, high) = (other.min + offset, other.max + offset);
-                    low.y >= room.y * 2.0
-                        || at[0] + room.x + step <= low.x + 1e-9
-                        || at[0] - room.x - step >= high.x - 1e-9
-                        || at[1] + room.z + step <= low.z + 1e-9
-                        || at[1] - room.z - step >= high.z - 1e-9
+            let others: Vec<_> = model
+                .parts
+                .iter()
+                .filter_map(|part| part.bounds)
+                .map(|other| Bounds {
+                    min: other.min + offset,
+                    max: other.max + offset,
                 })
-            };
+                .collect();
+            let ground = model.bounds().map_or(0.0, |all| all.min.y);
             // Towards the eye, along the ground.
             let eye = self.orbit.eye() - middle;
-            let flat = (eye.x * eye.x + eye.z * eye.z).sqrt();
-            let towards = if flat > 1e-6 {
-                [eye.x / flat, eye.z / flat]
-            } else {
-                [0.0, 1.0]
-            };
-            if let Some(free) = (0..2000)
-                .map(|nearer| {
-                    let nearer = f64::from(nearer) * step;
-                    snapped(
-                        middle.x + towards[0] * nearer,
-                        middle.z + towards[1] * nearer,
-                    )
-                })
-                .find(|at| clear(*at))
-            {
-                at = free;
-            }
+            at = edit::clear_spot(&others, room, ground, at, [eye.x, eye.z], step);
         }
         let said = self.apply(&add(at))?;
         self.tool = Tool::Move;

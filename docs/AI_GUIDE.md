@@ -424,9 +424,12 @@ What to check, in this order:
 1. **`ok` and `errors`.** Fix all errors first.
 2. **`size`.** Is the model the size you meant? A chair is about 1 tall;
    a 10-metre chair means a wrong `size`, `scale` or socket.
-3. **`floating`.** Each entry is a part that touches nothing:
-   `{ "part": "knob", "nearest": "peg", "gap": 0.1 }`. Almost always a
-   mistake: attach it to a socket, or move it by `gap`.
+3. **`floating`.** Each entry is a part up in the air that touches
+   nothing: `{ "part": "knob", "nearest": "peg", "gap": 0.1 }`. Almost
+   always a mistake: attach it to a socket, or move it by `gap`. A part
+   standing on the ground (its lowest point within a millimetre of the
+   model's), and everything touching it, never floats: two things side
+   by side on a floor are fine.
 4. **`overlapping`.** Each entry is one part poking into another:
    `{ "a": "peg", "b": "base", "depth": 0.3, "hidden": false }` means
    `peg` is 0.3 deep inside `base`. Overlap is often meant (a nose
@@ -585,20 +588,21 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | Command | What it does |
 |---|---|
 | `duck-mold edit <recipe> add <name> --to <part.socket>` | Adds a part joined to a socket. Made of `--shape box` (or any other shape's name), `--use <defined part>` or `--file <recipe or mesh>`. Also takes `--attach <own socket>`, the shape's sizes (`--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`), its options (`--bevel`, `--bevel-steps`, `--taper n` or `--taper x,z`), `--color`, `--twist`. |
-| `duck-mold edit <recipe> add <name>` (no `--to`) | Adds a part joined to nothing, in the model's own list. It is stood on the ground: at the recipe's zero, or at `--stand x,z`. Or give its middle exactly with `--move x,y,z`. Also takes `--rotate x,y,z` and `--scale n` (or `x,y,z`), and what it is made of, its sizes and `--color` as above. Move it later with `set <name> --move`. |
+| `duck-mold edit <recipe> add <name>` (no `--to`) | Adds a part joined to nothing, in the model's own list. It is stood on the ground, clear of the other parts: from the middle of the model towards its front (+z), 10 cm at a time, until 10 cm separates it from everything else; or exactly at `--stand x,z`. Or give its middle exactly with `--move x,y,z`. Also takes `--rotate x,y,z` and `--scale n` (or `x,y,z`), and what it is made of, its sizes and `--color` as above. Move it later with `set <name> --move`. |
 | `duck-mold edit <recipe> remove <part>` | Removes a part. Refused, with their names, if other parts hang from it; `--with-attached` removes those too. |
 | `duck-mold edit <recipe> rename <part> <new-name>` | Renames a part, and every `to`, `from` and `origin` that names it. |
 | `duck-mold edit <recipe> join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes its own socket. A part placed with `move` loses it. |
 | `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`, `--bevel` (`0` makes the edges sharp again), `--bevel-steps`, `--taper n` or `--taper x,z` (`1` makes the sides straight again), `--color`, `--face-color top=plank` (repeatable; `top=none` takes the face's own colour away again), `--twist`. Several at once are one edit. A new shape drops the sizes, options and face colours it doesn't have. |
 | `duck-mold edit <recipe> set <part> --move x,y,z` | Puts a **free** part (one that isn't joined) there: its middle, in metres, measured from the recipe's own zero. Also `--rotate x,y,z` (degrees around x, then y, then z) and `--scale n` or `--scale x,y,z`. A joined part refuses `--move` and `--rotate`, and says what to do instead; `--scale` works on any part. |
 | `duck-mold edit <recipe> unjoin <part>` | Makes a joined part free, exactly where it stands: its `attach`, `to` and `twist` become a `move` and a `rotate`. The model doesn't change; the part can then be moved anywhere. |
-| `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. |
+| `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. A copy of a joined part, with no `--to`, never sits on the part it copies: it goes to the next socket of the same part that nothing is joined to and that faces the same way (in the order they are written: the next table leg's socket); else to a new socket (`spot`) made beside the original's, 10 cm past it on the same side, if there is room; else (in the model's own list) it stands free on clear ground in front of the model. The summary says which. |
 | `duck-mold edit <recipe> duplicate <part> --mirror` | A mirror image: a right arm from a left arm. The copy gets `mirror = "x"`, its twist is reversed, and `left` and `right` are swapped in its name and in the socket it joins (`body.left_arm` becomes `body.right_arm`), unless `--name` and `--to` say otherwise. |
 | `duck-mold edit <recipe> add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
 | `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
 | `duck-mold edit <recipe> remove-color <name>` | Takes a colour out of the palette. Refused if anything is painted with it, naming what; `--replace-with <other colour>` paints those with the other colour first. |
 | `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
 | `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared that way: `--shift x,y,z`, `--on <side>`. Whatever is joined to it moves with it. |
+| `duck-mold edit <recipe> set-socket <part.socket> --facing <way>` | Turns a socket declared that way: `up`, `down`, `left`, `right`, `front`, `back` writes `facing`; `out` takes it away, so the socket faces straight out of its side again. Whatever is joined to it turns to match. |
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |

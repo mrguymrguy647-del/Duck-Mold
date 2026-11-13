@@ -205,8 +205,8 @@ pub enum Change {
         #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
         shift: Option<String>,
     },
-    /// Move a socket that add-socket (or the recipe) put on a side of a
-    /// part. Whatever is joined to it moves with it.
+    /// Move or turn a socket that add-socket (or the recipe) put on a
+    /// side of a part. Whatever is joined to it moves with it.
     SetSocket {
         /// The socket, like body.badge.
         socket: String,
@@ -216,6 +216,10 @@ pub enum Change {
         /// A new slide across the side: x,y,z.
         #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
         shift: Option<String>,
+        /// Which way it faces: up, down, left, right, front, back, or out
+        /// (straight out of its side, as it faces when nothing says).
+        #[arg(long, value_name = "WAY")]
+        facing: Option<String>,
     },
     /// Pull faces of a box out the way they face, with new walls round
     /// them (a negative --by pushes them in, making a hollow).
@@ -742,13 +746,19 @@ impl Change {
                 part: part.clone(),
                 number: *number,
             },
-            Change::SetSocket { socket, on, shift } => Edit::SetSocket {
+            Change::SetSocket {
+                socket,
+                on,
+                shift,
+                facing,
+            } => Edit::SetSocket {
                 socket: socket.clone(),
                 on: on.clone(),
                 shift: shift
                     .as_deref()
                     .map(|shift| three("--shift", shift))
                     .transpose()?,
+                facing: facing.clone(),
             },
         })
     }

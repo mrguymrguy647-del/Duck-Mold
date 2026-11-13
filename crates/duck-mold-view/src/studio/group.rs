@@ -183,6 +183,26 @@ impl Studio {
         chosen.len()
     }
 
+    /// Hides again the parts that were hidden when the file was last
+    /// open: those of `paths` that are still in it. Says so, if any were.
+    pub fn hide_again(&mut self, paths: &[String]) -> usize {
+        for path in paths {
+            if self.part(path).is_some() && !self.hidden.contains(path) {
+                self.hidden.push(path.clone());
+            }
+        }
+        let count = self.hidden.len();
+        if count > 0 {
+            self.say(match count {
+                1 => "1 part is hidden, as it was when this file was last open: View > Show all draws it again".to_owned(),
+                count => format!(
+                    "{count} parts are hidden, as they were when this file was last open: View > Show all draws them again"
+                ),
+            });
+        }
+        count
+    }
+
     /// Draws every hidden part again. Says how many there were.
     pub fn show_all(&mut self) -> usize {
         let count = self.hidden.len();

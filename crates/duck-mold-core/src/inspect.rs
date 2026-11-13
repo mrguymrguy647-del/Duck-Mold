@@ -382,7 +382,8 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
     // ---- floating and overlapping parts
     let leaves = model.leaves();
     let solids: Vec<Solid> = leaves.iter().map(|leaf| Solid::of(model, leaf)).collect();
-    let (floating, overlapping, by_box) = compare(&solids);
+    let ground_y = model.bounds().map(|all| all.min.y);
+    let (floating, overlapping, by_box) = compare(&solids, ground_y);
     for float in &floating {
         let part = leaves.iter().find(|leaf| leaf.path == float.part);
         warnings.push(warning_at(
@@ -927,10 +928,15 @@ impl Solid {
     }
 }
 
+/// How near the ground a part's lowest point must be for it to stand
+/// there: a millimetre, as for the model.
+const GROUND_NEAR: f64 = 0.001;
+
 /// Compares every pair of parts. Returns the floating parts, the
 /// overlapping pairs, and whether any pair was too big to compare
-/// exactly.
-fn compare(solids: &[Solid]) -> (Vec<Floating>, Vec<Overlap>, bool) {
+/// exactly. `ground` is the height of the model's lowest point: parts
+/// standing there stand on the ground, and don't float.
+fn compare(solids: &[Solid], ground: Option<f64>) -> (Vec<Floating>, Vec<Overlap>, bool) {
     let count = solids.len();
     let mut by_box = false;
     let mut overlapping = Vec::new();
@@ -988,13 +994,24 @@ fn compare(solids: &[Solid]) -> (Vec<Floating>, Vec<Overlap>, bool) {
         }
     }
 
-    // Everything joined to the first part is the body. The rest floats.
+    // What stands on the ground, and everything joined to it, stands.
+    // So does everything joined to the first part (the body), if nothing
+    // stands on the ground. The rest floats.
     let mut floating = Vec::new();
     if count > 0 {
-        let body = root(&mut group, 0);
+        let on_ground = |solid: &Solid| {
+            ground.is_some_and(|ground| (solid.bounds.min.y - ground).abs() <= GROUND_NEAR)
+        };
+        let mut standing: Vec<usize> = (0..count)
+            .filter(|&at| on_ground(&solids[at]))
+            .map(|at| root(&mut group, at))
+            .collect();
+        if standing.is_empty() {
+            standing.push(root(&mut group, 0));
+        }
         for at in 0..count {
             let own = root(&mut group, at);
-            if own == body {
+            if standing.contains(&own) {
                 continue;
             }
             // The nearest part that isn't joined to this one. Parts are

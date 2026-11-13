@@ -1703,6 +1703,7 @@ impl Studio {
                 socket: format!("{onto}.{socket}"),
                 on: Some(spot.on.clone()),
                 shift: Some(spot.shift),
+                facing: None,
             }];
             // A built-in socket (`top`) can't be moved: then a new one
             // is made.

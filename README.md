@@ -246,11 +246,13 @@ every face's name.
 
 **Adding parts.** There are two ways.
 
-- **Add**, in the top bar, lists the shapes, the parts the recipe
-  defines and the library. Pick one and it stands on the ground in the
-  middle of what you are looking at, or just in front of whatever
-  already stands there, joined to nothing. It is selected, with the
-  Move arrows on it, so you can drag it straight away.
+- **Add**, in the top bar, lists the shapes (each with a small
+  picture), the parts the recipe defines and the library. Pick one and
+  it stands on the ground in the middle of what you are looking at, or
+  just in front of whatever already stands there, joined to nothing.
+  It is selected, with the Move arrows on it, so you can drag it
+  straight away. (`duck-mold edit <recipe> add <name>` with no place
+  does the same, walking towards the model's front.)
 - The selected part's sockets show as small round dots. Click a dot
   and pick what to add there: one of the twelve shapes, or a
   part the recipe defines. The new part is about half the size of the
@@ -265,6 +267,18 @@ every face's name.
 Each of these is a `set`, `add`, `join`, `unjoin`, `add-socket` or
 `set-socket` edit in the recipe file, the same ones `duck-mold edit`
 makes.
+
+**Sockets.** The panel lists the sockets the selected part declares.
+Type over a name to rename it (whatever is joined to it follows); pick
+which way it faces (`out` of its side, or `up`, `down`, `left`,
+`right`, `front`, `back`: what is joined to it turns to match); "x"
+removes one nothing uses.
+
+**Copies.** Duplicate (Ctrl+D) puts a copy of a free part beside it. A
+copy of a joined part goes to the next free socket of the same part
+facing the same way (the next table leg's socket), or else to a new
+socket beside the original, or, with no room there either, stands on
+the ground in front of the model. The status line says which.
 
 **Several parts at once.** Shift+click a part, in the picture or in
 the list, to add it to the selection (or take it out); Ctrl+A selects
@@ -286,7 +300,9 @@ Hide.
 it. Nothing else changes: the recipe doesn't know, and a hidden part
 is exported like any other. The top bar says how many are hidden;
 click that, or the "show" at the end of the part's line in the list,
-to bring them back.
+to bring them back. The Studio remembers which parts were hidden in
+each of the models opened lately (in its settings, beside that list),
+and hides them again when the file is next opened.
 
 **Colour.** Under the properties is the **palette**: the recipe's
 colours, each a square with its name.
@@ -451,7 +467,8 @@ ok: no problems found
 - **ground**: whether it stands on the ground.
 - **colours**: how much of it each palette colour paints.
 - **parts**: every part, what it is and what it is joined to.
-- **floating**: parts that touch nothing. Almost always a mistake.
+- **floating**: parts up in the air that touch nothing. Almost always a
+  mistake. (A part standing on the ground never floats.)
 - **overlapping**: parts that poke into other parts, and how deep.
   Sometimes meant (a nose pushed into a head), sometimes not.
 

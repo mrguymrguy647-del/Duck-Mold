@@ -1824,19 +1824,11 @@ fn the_panel_lists_a_parts_sockets_to_rename_and_remove() {
     screen.get_by_label("1 use");
     screen.get_by_label("not used");
     // The one in use can't be removed; the other can.
-    assert_eq!(screen.query_all_by_label("remove socket").count(), 2);
-    screen
-        .query_all_by_label("remove socket")
-        .next()
-        .unwrap()
-        .click();
+    assert_eq!(screen.query_all_by_label("x").count(), 2);
+    screen.query_all_by_label("x").next().unwrap().click();
     screen.run_steps(3);
     assert!(text_of(&recipe).contains("spot = { on = \"top\" }"));
-    screen
-        .query_all_by_label("remove socket")
-        .nth(1)
-        .unwrap()
-        .click();
+    screen.query_all_by_label("x").nth(1).unwrap().click();
     screen.run_steps(3);
     let now = text_of(&recipe);
     assert!(!now.contains("spot_2"), "{now}");
@@ -1869,6 +1861,46 @@ fn the_panel_lists_a_parts_sockets_to_rename_and_remove() {
     assert!(now.contains("lid = { on = \"top\" }"), "{now}");
     assert!(now.contains("to = \"crate.lid\""), "{now}");
     assert!(!screen.state().studio().unwrap().has_mistakes());
+
+    // Which way it faces is a choice: "out" is what it was; the cap
+    // turns to face the front, and back.
+    let choice = |screen: &Harness<'static, StudioApp>, now: &str| {
+        screen
+            .query_all_by_value(now)
+            .find(|node| node.accesskit_node().role() == egui::accesskit::Role::ComboBox)
+            .expect("the socket's facing")
+            .rect()
+            .center()
+    };
+    let at = choice(&screen, "out");
+    click_at(&mut screen, at);
+    screen.run_steps(3);
+    screen.get_by_label("front").click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(
+        now.contains("lid = { on = \"top\", facing = \"front\" }"),
+        "{now}"
+    );
+    screen.get_by_label_contains("Turned the socket crate.lid to face front");
+    let bounds = |screen: &Harness<'static, StudioApp>, part: &str| {
+        screen
+            .state()
+            .studio()
+            .unwrap()
+            .part(part)
+            .unwrap()
+            .bounds
+            .unwrap()
+    };
+    let (cap, held) = (bounds(&screen, "cap"), bounds(&screen, "crate"));
+    assert!(cap.min.z >= held.center().z, "{cap:?} {held:?}");
+    let at = choice(&screen, "front");
+    click_at(&mut screen, at);
+    screen.run_steps(3);
+    screen.get_by_label("out").click();
+    screen.run_steps(3);
+    assert!(text_of(&recipe).contains("lid = { on = \"top\" }"));
 
     // Edit > Tidy sockets takes the Studio's unused ones.
     screen
@@ -1988,6 +2020,58 @@ fn an_example_on_the_start_page_opens_a_copy_of_your_own() {
     assert!(models.join("parts/crate.glb").is_file());
     assert!(!screen.state().studio().unwrap().has_mistakes());
     assert!(screen.state().studio().unwrap().part("lamp").is_some());
+}
+
+#[test]
+fn hidden_parts_are_hidden_again_when_the_file_is_next_opened() {
+    use duck_mold_studio::recent::Recent;
+    let folder = folder("screens_hidden_kept");
+    let list = folder.join("settings/recent.txt");
+    let robot = folder.join("robot.toml");
+    std::fs::copy(examples().join("robot.toml"), &robot).unwrap();
+    let open = || {
+        let mut screen = harness(
+            StudioApp::with_file(&robot, false).remembering(Recent::kept_in(list.clone())),
+            false,
+        );
+        screen.run_steps(2);
+        screen
+    };
+    let mut screen = open();
+    for part in ["head", "left_arm"] {
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .set_hidden(part, true);
+    }
+    screen.run_steps(2);
+    drop(screen);
+    // Kept beside the list of files, not in the recipe.
+    let kept = std::fs::read_to_string(folder.join("settings/hidden.txt")).unwrap();
+    assert!(kept.ends_with("robot.toml\n\thead\n\tleft_arm\n"), "{kept}");
+    assert_eq!(
+        std::fs::read_to_string(&robot).unwrap(),
+        std::fs::read_to_string(examples().join("robot.toml")).unwrap()
+    );
+
+    // Opened again, they are hidden again, and the status line says so.
+    let mut screen = open();
+    assert_eq!(
+        screen.state().studio().unwrap().hidden(),
+        ["head", "left_arm"]
+    );
+    screen.get_by_label_contains("2 parts are hidden, as they were when this file was last open");
+    // Shown again, nothing is remembered.
+    screen.state_mut().studio_mut().unwrap().show_all();
+    screen.run_steps(2);
+    drop(screen);
+    let screen = open();
+    assert!(screen.state().studio().unwrap().hidden().is_empty());
+    assert_eq!(
+        std::fs::read_to_string(folder.join("settings/hidden.txt")).unwrap(),
+        ""
+    );
 }
 
 #[test]

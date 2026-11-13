@@ -457,7 +457,9 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
         );
         ui.painter_at(within)
             .rect_filled(place, 4.0, Color32::from_black_alpha(150));
-        let button = egui::Button::selectable(studio.mode() == mode, name);
+        // On one line, however narrow the button.
+        let button = egui::Button::selectable(studio.mode() == mode, name)
+            .wrap_mode(egui::TextWrapMode::Extend);
         if ui.put(place, button).on_hover_text(tip).clicked() && studio.mode() != mode {
             // Why not, if it can't, is in the status line.
             let _ = match mode {
@@ -610,9 +612,9 @@ fn add_list(
     let mut open = true;
     // Kept inside the viewport, beside the click.
     let at = pos2(
-        (adding.at.x + 12.0).min(within.right() - 190.0),
+        (adding.at.x + 12.0).min(within.right() - 330.0),
         (adding.at.y + 12.0)
-            .min(within.bottom() - 400.0)
+            .min(within.bottom() - 420.0)
             .max(within.top() + 8.0),
     );
     egui::Window::new(title)
@@ -636,14 +638,19 @@ fn add_list(
     }
 }
 
+/// How big the Add menu's pictures of the shapes are, in points.
+const SHAPE_SIDE: f32 = 22.0;
+
 /// The things a new part can be made of, as buttons: the shapes, the
 /// parts this recipe defines, and the library. Gives the one clicked.
 pub fn choices(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) -> Option<Made> {
     let mut chosen = None;
-    // The shapes, in two columns so the list stays short.
+    // The shapes, each with its picture, in three columns so the list
+    // stays short.
+    let ctx = ui.ctx().clone();
     egui::Grid::new("duck_mold_shape_choices")
-        .num_columns(2)
-        .spacing([6.0, 4.0])
+        .num_columns(3)
+        .spacing([4.0, 4.0])
         .show(ui, |ui| {
             for (at, shape) in Shape::NAMES.into_iter().enumerate() {
                 // "Box", "Cylinder"...
@@ -651,13 +658,18 @@ pub fn choices(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) -> O
                 if let Some(first) = label.get_mut(0..1) {
                     first.make_ascii_uppercase();
                 }
-                if ui
-                    .add_sized([78.0, 20.0], egui::Button::new(label))
-                    .clicked()
-                {
+                let button = match thumbs.shapes.get(&ctx, shape) {
+                    Some(picture) => egui::Button::image_and_text(
+                        egui::Image::from_texture(picture)
+                            .fit_to_exact_size(egui::vec2(SHAPE_SIDE, SHAPE_SIDE)),
+                        label,
+                    ),
+                    None => egui::Button::new(label),
+                };
+                if ui.add_sized([96.0, SHAPE_SIDE + 6.0], button).clicked() {
                     chosen = Some(Made::Shape(shape.to_owned()));
                 }
-                if at % 2 == 1 {
+                if at % 3 == 2 {
                     ui.end_row();
                 }
             }

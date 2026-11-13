@@ -2987,6 +2987,16 @@ The three fixes:
    Only a part up in the air that touches nothing floats. (No example's
    report changes: none has a floating part.)
 
+*As built (step 8):* as above, with these differences. A copy goes
+only to a free socket that faces the same way as the one it copies
+(so a copied leg doesn't land on a socket meant for a lamp on the
+top). With no room beside, the copy stands free in front of the model
+(towards +z, the way `add` walks), not beside it. `add-socket` has no
+`--facing`: add the socket, then `set-socket --facing`; the word `out`
+takes `facing` away again. The socket row in the panel got narrower to
+make room for the list ("x" removes a socket), so the panel keeps its
+width. The hidden parts are kept in `hidden.txt` beside `recent.txt`.
+
 ### Examples (step 9)
 
 Four, each with its stored model, report and picture:

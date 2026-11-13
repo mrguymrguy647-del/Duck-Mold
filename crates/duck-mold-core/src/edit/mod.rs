@@ -28,7 +28,7 @@ use crate::assemble::assemble;
 use crate::inspect::{Inspection, inspect};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
-use crate::math::Mat3;
+use crate::math::{Bounds, Mat3, Vec3};
 use crate::model::{Model, Part};
 use crate::recipe::{PART_FIELDS, Shape, Side, rgb_of};
 use crate::source::{Node, Syntax, Value};
@@ -167,7 +167,8 @@ pub struct Free {
     /// the ground.
     pub move_to: Option<[f64; 3]>,
     /// Where on the ground it is stood, when `move_to` isn't given: x
-    /// and z, in the recipe's own measurements. Without it: at zero.
+    /// and z, in the recipe's own measurements. Without it: on clear
+    /// ground, from the middle of the model towards its front.
     pub stand: Option<[f64; 2]>,
     /// How it is turned: `rotate = [x, y, z]`.
     pub rotate: Option<[f64; 3]>,
@@ -306,6 +307,10 @@ pub enum Edit {
         on: Option<String>,
         /// A new slide across the side.
         shift: Option<[f64; 3]>,
+        /// Which way it faces: `up`, `down`, `left`, `right`, `front`,
+        /// `back`, or `out` (straight out of its side, as a socket faces
+        /// when nothing says otherwise).
+        facing: Option<String>,
     },
     /// Pulls faces of a box out the way they face (in, for a negative
     /// `by`), with new walls round them: a `pull` in its `changes`.
@@ -834,6 +839,26 @@ fn declared(doc: &Doc, part: &str, name: &str) -> Result<Found, Stop> {
     )
     .got(name)
     .one_of(name, names))
+}
+
+/// The ways a socket on a side can face, as `set-socket --facing` takes
+/// them: `out` is straight out of its side, the others are the words a
+/// recipe writes in `facing`.
+pub const FACINGS: [&str; 7] = ["out", "up", "down", "left", "right", "front", "back"];
+
+/// Which way a declared socket faces, as one of [`FACINGS`], for a socket
+/// on a side or a face; `None` for one written with `at` or `from`, or
+/// with three numbers in `facing`.
+fn facing_word(doc: &Doc, found: &Found, socket: &str) -> Option<String> {
+    let place = with(&with(&found.path(), key("sockets")), key(socket));
+    doc.entry(&place, "on")?;
+    match doc.entry(&place, "facing") {
+        None => Some("out".to_owned()),
+        Some(entry) => match &entry.node.value {
+            Value::Str(word) if FACINGS.contains(&word.as_str()) => Some(word.clone()),
+            _ => None,
+        },
+    }
 }
 
 /// True for the names the Studio gives the sockets it makes: `spot`,
@@ -1667,6 +1692,9 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                         where_to = format!(", on {swapped}");
                     }
                 }
+                (None, Some(old_to)) => {
+                    where_to = place_copy(doc, &found, &copy, part, old_to, model)?;
+                }
                 _ => {}
             }
             if *mirror {
@@ -1924,39 +1952,7 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             on,
             shift,
         } => {
-            check_name(name)?;
-            check_side(on)?;
-            let found = find(doc, part)?;
-            let table = found.path();
-            let mut socket = vec![("on".to_owned(), text(on))];
-            if *shift != [0.0; 3] {
-                socket.push(("shift".to_owned(), Val::three(*shift)));
-            }
-            let sockets = with(&table, key("sockets"));
-            match doc.entries(&sockets) {
-                Some(entries) => {
-                    if entries.iter().any(|entry| entry.key == *name) {
-                        return Err(problem(
-                            Code::DuplicateName,
-                            format!(
-                                "\"{part}\" already has a socket called \"{name}\": move it with set-socket, or choose another name"
-                            ),
-                        )
-                        .got(name.as_str()));
-                    }
-                    doc.set_field(&sockets, name, &Val::Table(socket), &[])
-                        .map_err(cant)?;
-                }
-                None => {
-                    doc.add_table(
-                        &table,
-                        "sockets",
-                        &[(name.clone(), Val::Table(socket))],
-                        &PART_FIELDS,
-                    )
-                    .map_err(cant)?;
-                }
-            }
+            let found = add_socket(doc, part, name, on, *shift)?;
             Ok(Outcome {
                 summary: format!("added the socket \"{name}\" on the {on} of \"{part}\""),
                 touched: Some(found),
@@ -2300,10 +2296,25 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 touched: Some(found),
             })
         }
-        Edit::SetSocket { socket, on, shift } => {
+        Edit::SetSocket {
+            socket,
+            on,
+            shift,
+            facing,
+        } => {
             let (part, name) = split_socket(socket)?;
             if let Some(on) = on {
                 check_side(on)?;
+            }
+            if let Some(facing) = facing
+                && !FACINGS.contains(&facing.as_str())
+            {
+                return Err(problem(
+                    Code::TypeMismatch,
+                    format!("there is no direction \"{facing}\""),
+                )
+                .got(facing.as_str())
+                .one_of(facing, FACINGS));
             }
             let found = find(doc, part)?;
             let sockets = with(&found.path(), key("sockets"));
@@ -2331,14 +2342,14 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 return Err(problem(
                     Code::Conflict,
                     format!(
-                        "the socket \"{name}\" isn't on a side of the part (it is written with \"at\" or \"from\"), so it can't be slid"
+                        "the socket \"{name}\" isn't on a side of the part (it is written with \"at\" or \"from\"), so it can't be slid or turned with set-socket: change it in the recipe"
                     ),
                 ));
             }
-            if on.is_none() && shift.is_none() {
+            if on.is_none() && shift.is_none() && facing.is_none() {
                 return Err(problem(
                     Code::MissingField,
-                    "nothing to set: give --shift, --on, or both",
+                    "nothing to set: give --shift, --on, --facing, or more than one",
                 ));
             }
             const ORDER: [&str; 3] = ["on", "shift", "facing"];
@@ -2350,8 +2361,32 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 doc.set_field(&place, "shift", &Val::three(*shift), &ORDER)
                     .map_err(cant)?;
             }
+            match facing.as_deref() {
+                Some("out") => {
+                    if doc.entry(&place, "facing").is_some() {
+                        doc.remove_field(&place, "facing").map_err(cant)?;
+                    }
+                }
+                Some(facing) => {
+                    doc.set_field(&place, "facing", &text(facing), &ORDER)
+                        .map_err(cant)?;
+                }
+                None => {}
+            }
+            let summary = match (facing, on.is_some() || shift.is_some()) {
+                (Some(facing), false) if facing == "out" => {
+                    format!("turned the socket {part}.{name} to face straight out")
+                }
+                (Some(facing), false) => {
+                    format!("turned the socket {part}.{name} to face {facing}")
+                }
+                (Some(facing), true) => {
+                    format!("moved the socket {part}.{name}, facing {facing}")
+                }
+                (None, _) => format!("moved the socket {part}.{name}"),
+            };
             Ok(Outcome {
-                summary: format!("moved the socket {part}.{name}"),
+                summary,
                 touched: Some(found),
             })
         }
@@ -2795,6 +2830,9 @@ pub struct Facts {
     /// it (parts joined to it, its own join, a socket that passes it
     /// on).
     pub sockets: Vec<(String, usize)>,
+    /// Which way each of `sockets` faces, as one of [`FACINGS`]: `None`
+    /// for one written with `at` or `from`, or with three numbers.
+    pub socket_facings: Vec<Option<String>>,
     /// The changes made to its shape, its own or its definition's, in
     /// order.
     pub changes: Vec<ChangeFact>,
@@ -2990,6 +3028,10 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
                 (socket, uses)
             })
             .collect(),
+        socket_facings: declared_sockets(&doc, &found)
+            .iter()
+            .map(|socket| facing_word(&doc, &found, socket))
+            .collect(),
         changes: doc
             .items(&with(&made_at, key("changes")))
             .unwrap_or_default()
@@ -3115,15 +3157,282 @@ fn part_of(edit: &Edit) -> &str {
     }
 }
 
+/// How far apart a new part stands from the others when no place is
+/// given, and the steps it walks in to get clear: 10 cm.
+pub const CLEAR_STEP: f64 = 0.1;
+
+/// Where on the ground a new part stands clear of the others: from
+/// `from` (x and z), a `step` at a time `towards` a flat direction (x
+/// and z, any length), until its footprint, `half` as wide and deep as
+/// it is plus a `step` round it, misses every one of `others` (boxes,
+/// in the same measurements, standing on `ground`). A box wholly above
+/// the new part's height doesn't count. The spot is a whole number of
+/// `step`s. Gives up after 2000 steps, where it is.
+pub fn clear_spot(
+    others: &[Bounds],
+    half: Vec3,
+    ground: f64,
+    from: [f64; 2],
+    towards: [f64; 2],
+    step: f64,
+) -> [f64; 2] {
+    let snapped =
+        |x: f64, z: f64| [x, z].map(|number| ((number / step).round() * step * 1e6).round() / 1e6);
+    let clear = |at: [f64; 2]| {
+        others.iter().all(|other| {
+            other.min.y - ground >= half.y * 2.0
+                || at[0] + half.x + step <= other.min.x + 1e-9
+                || at[0] - half.x - step >= other.max.x - 1e-9
+                || at[1] + half.z + step <= other.min.z + 1e-9
+                || at[1] - half.z - step >= other.max.z - 1e-9
+        })
+    };
+    let flat = (towards[0] * towards[0] + towards[1] * towards[1]).sqrt();
+    let towards = if flat > 1e-6 {
+        [towards[0] / flat, towards[1] / flat]
+    } else {
+        [0.0, 1.0]
+    };
+    (0..2000)
+        .map(|nearer| {
+            let nearer = f64::from(nearer) * step;
+            snapped(from[0] + towards[0] * nearer, from[1] + towards[1] * nearer)
+        })
+        .find(|at| clear(*at))
+        .unwrap_or_else(|| snapped(from[0], from[1]))
+}
+
+/// Declares the socket `name` on `part`, on a side (or a face of a
+/// shaped box), slid across it by `shift`: what `add-socket` does.
+fn add_socket(
+    doc: &mut Doc,
+    part: &str,
+    name: &str,
+    on: &str,
+    shift: [f64; 3],
+) -> Result<Found, Stop> {
+    check_name(name)?;
+    check_side(on)?;
+    let found = find(doc, part)?;
+    let table = found.path();
+    let mut socket = vec![("on".to_owned(), text(on))];
+    if shift != [0.0; 3] {
+        socket.push(("shift".to_owned(), Val::three(shift)));
+    }
+    let sockets = with(&table, key("sockets"));
+    match doc.entries(&sockets) {
+        Some(entries) => {
+            if entries.iter().any(|entry| entry.key == *name) {
+                return Err(problem(
+                    Code::DuplicateName,
+                    format!(
+                        "\"{part}\" already has a socket called \"{name}\": move it with set-socket, or choose another name"
+                    ),
+                )
+                .got(name));
+            }
+            doc.set_field(&sockets, name, &Val::Table(socket), &[])
+                .map_err(cant)?;
+        }
+        None => {
+            doc.add_table(
+                &table,
+                "sockets",
+                &[(name.to_owned(), Val::Table(socket))],
+                &PART_FIELDS,
+            )
+            .map_err(cant)?;
+        }
+    }
+    Ok(found)
+}
+
+/// Where the copy of a joined part goes, when no socket is given: not
+/// on top of the part it copies. In turn:
+///
+/// 1. the next socket of the same part that nothing is joined to and
+///    that faces the same way, in the order they are written;
+/// 2. a new socket (`spot`, `spot_2`...) on the same side, beside the
+///    socket of the part it copies, 10 cm past it, if the side has room
+///    and nothing else stands there;
+/// 3. for a part in the model's own list, free, standing on clear ground
+///    in front of the model.
+///
+/// Otherwise (a part inside another part with no room), on the same
+/// socket. `copy` is the copy, already in `doc`; `old_to` is the socket
+/// both are joined to. Says where, for the summary.
+fn place_copy(
+    doc: &mut Doc,
+    found: &Found,
+    copy: &[Step],
+    part: &str,
+    old_to: &str,
+    model: Option<&Model>,
+) -> Result<String, Stop> {
+    let same = format!(", on {old_to}, the same socket: nothing else was free");
+    let Some((target, socket)) = old_to.rsplit_once('.') else {
+        return Ok(same);
+    };
+    let target_path = match part.rsplit_once('/') {
+        Some((around, _)) => format!("{around}/{target}"),
+        None => target.to_owned(),
+    };
+    let Some((model, aim, original)) =
+        model.and_then(|model| Some((model, part_in(model, &target_path)?, part_in(model, part)?)))
+    else {
+        return Ok(same);
+    };
+    let Some(joined) = aim.sockets.iter().find(|known| known.name == socket) else {
+        return Ok(same);
+    };
+    // 1. A free socket facing the same way.
+    let taken: Vec<String> = doc
+        .items(&found.list)
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|item| text_of(item, "to"))
+        .filter_map(|to| to.rsplit_once('.'))
+        .filter(|(on, _)| *on == target)
+        .map(|(_, name)| name.to_owned())
+        .collect();
+    let built_in = |name: &str| name == "slope" || Side::ALL.iter().any(|side| side.name() == name);
+    let declared: Vec<_> = aim
+        .sockets
+        .iter()
+        .filter(|known| !built_in(&known.name))
+        .collect();
+    let after = declared
+        .iter()
+        .position(|known| known.name == socket)
+        .map_or(0, |at| at + 1);
+    let next = declared[after..]
+        .iter()
+        .chain(&declared[..after])
+        .find(|known| !taken.contains(&known.name) && known.facing.dot(joined.facing) > 0.999);
+    if let Some(next) = next {
+        let to = format!("{target}.{}", next.name);
+        set(doc, copy, "to", text(&to))?;
+        return Ok(format!(", on {to}, the next free socket"));
+    }
+    // 2. A new socket beside, on the same side.
+    let siblings: &[Part] = match part.rsplit_once('/') {
+        Some((around, _)) => part_in(model, around).map_or(&[], |around| &around.parts),
+        None => &model.parts,
+    };
+    if let (Some(own), Some(room)) = (original.bounds, aim.bounds) {
+        let facing = joined.facing;
+        let axes = [
+            [1.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [0.0, 0.0, -1.0],
+            [0.0, 1.0, 0.0],
+            [0.0, -1.0, 0.0],
+        ]
+        .map(Vec3::from);
+        let beside = axes
+            .into_iter()
+            .filter(|axis| axis.dot(facing).abs() < 1e-3)
+            .find_map(|axis| {
+                let width = own
+                    .size()
+                    .dot(Vec3::from([axis.x.abs(), axis.y.abs(), axis.z.abs()]));
+                let by = axis * (width + CLEAR_STEP);
+                let at = joined.at + by;
+                // Still on the side: inside the part's box across it.
+                let across = |at: f64, low: f64, high: f64, along: f64| {
+                    along.abs() > 0.5 || (at >= low - 1e-6 && at <= high + 1e-6)
+                };
+                let on_side = across(at.x, room.min.x, room.max.x, facing.x)
+                    && across(at.y, room.min.y, room.max.y, facing.y)
+                    && across(at.z, room.min.z, room.max.z, facing.z);
+                let moved = Bounds {
+                    min: own.min + by,
+                    max: own.max + by,
+                };
+                let crowded = siblings
+                    .iter()
+                    .filter(|other| other.path != aim.path)
+                    .any(|other| {
+                        other.bounds.is_some_and(|other| {
+                            moved.min.x < other.max.x - 1e-6
+                                && moved.max.x > other.min.x + 1e-6
+                                && moved.min.y < other.max.y - 1e-6
+                                && moved.max.y > other.min.y + 1e-6
+                                && moved.min.z < other.max.z - 1e-6
+                                && moved.max.z > other.min.z + 1e-6
+                        })
+                    });
+                (on_side && !crowded).then_some(at)
+            })
+            .and_then(|at| spot(model, aim, at, facing));
+        if let Some(beside) = beside {
+            let names: Vec<String> = aim.sockets.iter().map(|known| known.name.clone()).collect();
+            let name = unused_name("spot", &names);
+            add_socket(doc, &target_path, &name, &beside.on, beside.shift)?;
+            let to = format!("{target}.{name}");
+            set(doc, copy, "to", text(&to))?;
+            return Ok(format!(", on {to}, a new socket beside {old_to}"));
+        }
+    }
+    // 3. Free, in front of the model.
+    if part.contains('/') {
+        return Ok(same);
+    }
+    let Some(own) = original.bounds else {
+        return Ok(same);
+    };
+    let stretch = stretch_of(doc.node(copy).expect("the copy was made"));
+    let Some(unstretch) = stretch.inverse() else {
+        return Ok(same);
+    };
+    let turn = (original.local.turn * unstretch)
+        .to_rotate()
+        .map(|degrees| tidy_number(degrees, 2));
+    let ground = model.bounds().map_or(own.min.y, |all| all.min.y);
+    let others: Vec<Bounds> = model
+        .parts
+        .iter()
+        .filter_map(|other| other.bounds)
+        .collect();
+    let from = model.bounds().map_or(own.center(), |all| all.center());
+    let spot = clear_spot(
+        &others,
+        own.half(),
+        ground,
+        [from.x, from.z],
+        [0.0, 1.0],
+        CLEAR_STEP,
+    );
+    let middle = own.center();
+    let at = original.local.shift - model.zero
+        + Vec3::from([spot[0] - middle.x, ground - own.min.y, spot[1] - middle.z]);
+    for field in ["attach", "to", "twist"] {
+        doc.remove_field(copy, field).map_err(cant)?;
+    }
+    if turn != [0.0; 3] {
+        set(doc, copy, "rotate", Val::three(turn))?;
+    }
+    set(
+        doc,
+        copy,
+        "move",
+        Val::three(at.to_array().map(|number| tidy_number(number, 4))),
+    )?;
+    Ok(", standing free in front of the model: no socket beside it was free".to_owned())
+}
+
 /// Gives the new free part `name` the `move` that stands it on the
 /// ground with its middle over `at` (x and z, in the recipe's own
-/// measurements). `built` is the recipe with the part in it at zero;
-/// `before` is the model without it, whose ground is the ground. If the
-/// recipe doesn't build, the part stays at zero.
+/// measurements), or, with no `at`, on clear ground: from the middle of
+/// the model towards its front until it stands clear of the other
+/// parts ([`clear_spot`]). `built` is the recipe with the part in it at
+/// zero; `before` is the model without it, whose ground is the ground.
+/// If the recipe doesn't build, the part stays at zero.
 fn stand_on_ground(
     doc: &mut Doc,
     name: &str,
-    at: [f64; 2],
+    at: Option<[f64; 2]>,
     built: Option<&Model>,
     before: Option<&Model>,
 ) -> Result<(), Stop> {
@@ -3145,6 +3454,31 @@ fn stand_on_ground(
     let ground = before
         .and_then(|model| model.bounds().map(|all| all.min.y - model.zero.y))
         .unwrap_or(low.y);
+    let at = at.unwrap_or_else(|| {
+        let Some(model) = before else {
+            return [0.0; 2];
+        };
+        let others: Vec<Bounds> = model
+            .parts
+            .iter()
+            .filter_map(|part| part.bounds)
+            .map(|other| Bounds {
+                min: other.min - model.zero,
+                max: other.max - model.zero,
+            })
+            .collect();
+        let from = model
+            .bounds()
+            .map_or(Vec3::ZERO, |all| all.center() - model.zero);
+        clear_spot(
+            &others,
+            bounds.half(),
+            ground,
+            [from.x, from.z],
+            [0.0, 1.0],
+            CLEAR_STEP,
+        )
+    });
     let to =
         [at[0] - middle.x, ground - low.y, at[1] - middle.z].map(|number| tidy_number(number, 4));
     let found = find(doc, name)?;
@@ -3188,7 +3522,7 @@ pub fn apply_many(
             stand_on_ground(
                 &mut doc,
                 name,
-                free.stand.unwrap_or([0.0; 2]),
+                free.stand,
                 built.as_ref(),
                 old_model.as_ref(),
             )

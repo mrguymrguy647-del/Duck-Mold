@@ -109,8 +109,9 @@ impl StudioApp {
     /// the start page.
     pub fn remembering(mut self, recent: Recent) -> StudioApp {
         self.recent = recent;
-        if let Some(studio) = &self.studio {
+        if let Some(studio) = &mut self.studio {
             self.recent.opened(studio.path());
+            studio.hide_again(self.recent.hidden_in(studio.path()));
         }
         self
     }
@@ -127,7 +128,9 @@ impl StudioApp {
     pub fn open(&mut self, path: PathBuf, look_only: bool) {
         if path.is_file() {
             self.recent.opened(&path);
-            self.studio = Some(Studio::open(path, look_only));
+            let mut studio = Studio::open(path, look_only);
+            studio.hide_again(self.recent.hidden_in(studio.path()));
+            self.studio = Some(studio);
             self.notice = None;
             // The first model a person opens to work on gets the tips.
             self.tour = (!look_only && !self.recent.tips_seen()).then_some(0);
@@ -245,6 +248,8 @@ impl StudioApp {
         // Twice a second, see if the file was saved by something else.
         let seconds = f64::from(ui.input(|input| input.stable_dt)).min(1.0);
         studio.tick(seconds);
+        // Which parts are hidden is remembered for next time.
+        self.recent.keep_hidden(studio.path(), studio.hidden());
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(250));
 
@@ -1067,6 +1072,10 @@ impl eframe::App for StudioApp {
             self.open(path, false);
         }
         StudioApp::ui(self, ui);
+        // (Kept again after the frame, in case the window closes next.)
+        if let Some(studio) = &self.studio {
+            self.recent.keep_hidden(studio.path(), studio.hidden());
+        }
         let title = self.title();
         if title != self.titled {
             ui.ctx()

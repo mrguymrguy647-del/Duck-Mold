@@ -2790,14 +2790,18 @@ fn a_selection_is_copied_removed_coloured_and_unjoined_in_one_step() {
     studio.undo().unwrap();
     assert_eq!(file(&recipe), YARD);
 
-    // A copy of a joined part is joined to the same socket.
+    // A copy of a joined part doesn't sit on the part it copies: the
+    // post's top has no other socket and no room beside the cap, so the
+    // copy stands free, in front of the model.
     studio.select(Some("cap"));
-    studio.duplicate_selected(false).unwrap();
-    assert_eq!(studio.selection(), ["cap_2"]);
-    assert_eq!(
-        studio.part("cap_2").unwrap().attached_to.as_deref(),
-        Some("post.top")
+    let said = studio.duplicate_selected(false).unwrap();
+    assert!(
+        said.contains("standing free in front of the model"),
+        "{said}"
     );
+    assert_eq!(studio.selection(), ["cap_2"]);
+    assert_eq!(studio.part("cap_2").unwrap().attached_to, None);
+    assert!(middle(&studio, "cap_2").z > middle(&studio, "cap").z);
     studio.undo().unwrap();
 
     // Two at once: both copies are selected, beside the two.

@@ -6,7 +6,7 @@
 //! [`Edit`], the same one `duck-mold edit` makes, and the Studio applies
 //! it to the recipe file. The fields are then read from the file again.
 
-use duck_mold_core::edit::{Changes, Edit, Facts, Made, Sizes};
+use duck_mold_core::edit::{Changes, Edit, FACINGS, Facts, Made, Sizes};
 use duck_mold_core::math::Vec3;
 use duck_mold_core::model::Part;
 use duck_mold_core::recipe::Shape;
@@ -797,7 +797,16 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                                 draft.bevel > 0.0,
                                 DragValue::new(&mut draft.bevel_steps)
                                     .range(1..=4)
-                                    .suffix(" cuts"),
+                                    .custom_formatter(|steps, _| {
+                                        if steps == 1.0 {
+                                            "1 cut".to_owned()
+                                        } else {
+                                            format!("{steps} cuts")
+                                        }
+                                    })
+                                    .custom_parser(|typed| {
+                                        typed.split_whitespace().next()?.parse().ok()
+                                    }),
                             )
                             .on_hover_text("How many flat cuts go round each edge");
                         if settled(&cuts) && Some(draft.bevel_steps) != facts.sizes.bevel_steps {
@@ -1110,7 +1119,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 ui.horizontal(|ui| {
                     let field = ui
                         .add(
-                            TextEdit::singleline(&mut draft.socket_names[at]).desired_width(100.0),
+                            TextEdit::singleline(&mut draft.socket_names[at]).desired_width(76.0),
                         )
                         .on_hover_text("Type a new name: everything joined to it follows");
                     if field.lost_focus()
@@ -1122,6 +1131,30 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                             new_name: draft.socket_names[at].clone(),
                         });
                     }
+                    // Which way it faces: a choice for one on a side.
+                    if let Some(Some(facing)) = facts.socket_facings.get(at) {
+                        let mut chosen = facing.clone();
+                        egui::ComboBox::from_id_salt(("socket facing", at))
+                            .selected_text(chosen.clone())
+                            .width(52.0)
+                            .show_ui(ui, |ui| {
+                                for way in FACINGS {
+                                    ui.selectable_value(&mut chosen, way.to_owned(), way);
+                                }
+                            })
+                            .response
+                            .on_hover_text(
+                                "Which way it faces: what joins it turns to match. \"out\" is straight out of its side",
+                            );
+                        if chosen != *facing {
+                            edits.push(Edit::SetSocket {
+                                socket: format!("{path}.{name}"),
+                                on: None,
+                                shift: None,
+                                facing: Some(chosen),
+                            });
+                        }
+                    }
                     ui.label(
                         RichText::new(match uses {
                             0 => "not used".to_owned(),
@@ -1132,11 +1165,8 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                         .small(),
                     );
                     let remove = ui
-                        .add_enabled(
-                            *uses == 0,
-                            egui::Button::new(RichText::new("remove socket").small()),
-                        )
-                        .on_hover_text("Take this socket away")
+                        .add_enabled(*uses == 0, egui::Button::new(RichText::new("x").small()))
+                        .on_hover_text("Remove this socket")
                         .on_disabled_hover_text(
                             "Something is joined to it: move that away first, or remove it",
                         );
