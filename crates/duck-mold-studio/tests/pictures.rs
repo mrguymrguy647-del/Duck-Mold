@@ -275,6 +275,31 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "hidden"));
     }
 
+    // The first run's tips: the first, the one that points at an arrow,
+    // the one that points at a dot, and the one that points at Add.
+    {
+        use duck_mold_studio::recent::Recent;
+        let folder = folder("pictures_tour");
+        let mut screen = harness(
+            StudioApp::new()
+                .remembering(Recent::kept_in(folder.join("recent.txt")))
+                .keeping_models_in("Documents/Duck Mold"),
+            true,
+        );
+        screen
+            .state_mut()
+            .open(examples().join("robot.toml"), false);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "tour-1"));
+        for name in ["tour-2", "tour-3", "tour-4", "tour-5"] {
+            screen.get_by_label("Next").click();
+            screen.run_steps(3);
+            if name != "tour-2" {
+                wrong.extend(check(&mut screen, name));
+            }
+        }
+    }
+
     // Colour: the palette with a colour picked and the Paint tool in
     // hand, over a face that lights up; a face painted; and the question
     // asked when a colour in use is removed.

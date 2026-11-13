@@ -2046,3 +2046,121 @@ fn models_opened_lately_have_pictures_and_are_in_the_file_menu() {
     assert_eq!(screen.state().title(), "broken.toml - Duck Mold Studio");
     assert!(screen.state().studio().unwrap().has_mistakes());
 }
+
+// ---- the first run's tips -----------------------------------------------------------
+
+#[test]
+fn the_first_model_opened_gets_five_tips_once() {
+    use duck_mold_studio::recent::Recent;
+    use duck_mold_studio::tour::TIPS;
+    use duck_mold_view::studio::handles::Tool;
+    let folder = folder("screens_tour");
+    let settings = folder.join("settings/recent.txt");
+    let recipe = folder.join("robot.toml");
+    std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+    let before = text_of(&recipe);
+    let fresh = || {
+        harness(
+            StudioApp::new()
+                .remembering(Recent::kept_in(settings.clone()))
+                .keeping_models_in(folder.join("models")),
+            false,
+        )
+    };
+
+    // Nothing on the start page.
+    let mut screen = fresh();
+    screen.run_steps(2);
+    assert!(screen.query_by_label_contains("Tip 1 of 5").is_none());
+
+    // The first model opened: the first tip, about the picture.
+    screen.state_mut().open(recipe.clone(), false);
+    screen.run_steps(3);
+    screen.get_by_label("Tip 1 of 5");
+    screen.get_by_label(TIPS[0]);
+    assert_eq!(
+        TIPS[0],
+        "Drag to look around. Roll the wheel to come closer."
+    );
+    // Next goes through them. The third selects a part, so that there
+    // are arrows to point at; the fourth points at one of its dots.
+    for (at, tip) in TIPS.iter().enumerate().skip(1) {
+        screen.get_by_label("Next").click();
+        screen.run_steps(3);
+        screen.get_by_label(format!("Tip {} of 5", at + 1).as_str());
+        // (The properties panel can say the same words as a tip.)
+        assert!(screen.query_all_by_label(tip).count() >= 1, "{tip}");
+        if at >= 2 {
+            let studio = screen.state().studio().unwrap();
+            assert!(studio.selected().is_some(), "tip {}", at + 1);
+        }
+        if at == 2 {
+            assert_eq!(screen.state().studio().unwrap().tool, Tool::Move);
+        }
+    }
+    // The last has Done, and no Skip.
+    assert!(screen.query_by_label("Skip the tips").is_none());
+    screen.get_by_label("Done").click();
+    screen.run_steps(3);
+    assert!(screen.query_by_label_contains("Tip ").is_none());
+    // Looking at tips changed nothing in the model.
+    assert_eq!(text_of(&recipe), before);
+
+    // They were seen: the next model, and the next start of the Studio,
+    // get none.
+    screen.state_mut().open(recipe.clone(), false);
+    screen.run_steps(3);
+    assert!(screen.query_by_label_contains("Tip ").is_none());
+    let mut screen = fresh();
+    screen.state_mut().open(recipe.clone(), false);
+    screen.run_steps(3);
+    assert!(screen.query_by_label_contains("Tip ").is_none());
+
+    // Help > Show the tips again brings them back; Skip ends them.
+    screen.get_by_label("Help").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("Show the tips again")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    screen.get_by_label("Tip 1 of 5");
+    screen.get_by_label("Skip the tips").click();
+    screen.run_steps(3);
+    assert!(screen.query_by_label_contains("Tip ").is_none());
+}
+
+#[test]
+fn skipped_tips_stay_away_and_looking_only_has_none() {
+    use duck_mold_studio::recent::Recent;
+    let folder = folder("screens_tour_skip");
+    let settings = folder.join("settings/recent.txt");
+    let recipe = folder.join("house.toml");
+    std::fs::copy(examples().join("house.toml"), &recipe).unwrap();
+    let fresh = || {
+        harness(
+            StudioApp::new().remembering(Recent::kept_in(settings.clone())),
+            false,
+        )
+    };
+    // Only looking: there is nothing to learn to do.
+    let mut screen = fresh();
+    screen.state_mut().open(recipe.clone(), true);
+    screen.run_steps(3);
+    assert!(screen.query_by_label_contains("Tip ").is_none());
+    // To work on: the tips; skipped at the first.
+    let mut screen = fresh();
+    screen.state_mut().open(recipe.clone(), false);
+    screen.run_steps(3);
+    screen.get_by_label("Tip 1 of 5");
+    screen.get_by_label("Skip the tips").click();
+    screen.run_steps(3);
+    assert!(screen.query_by_label_contains("Tip ").is_none());
+    let mut screen = fresh();
+    screen.state_mut().open(recipe, false);
+    screen.run_steps(3);
+    assert!(screen.query_by_label_contains("Tip ").is_none());
+    // With the tip up, the Studio still works: nothing is in the way.
+    assert!(folder.join("settings/tips-seen").is_file());
+}

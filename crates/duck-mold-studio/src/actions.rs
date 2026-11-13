@@ -71,6 +71,8 @@ pub enum Action {
     OpenFile(std::path::PathBuf),
     /// Open a copy of this example.
     OpenExample(&'static str),
+    /// Show the first run's tips again.
+    ShowTips,
     /// Show the list of keys.
     ShowKeys,
     /// Show what this program is.
@@ -219,6 +221,7 @@ pub fn menus(ui: &mut egui::Ui, studio: &Studio, recent: &[std::path::PathBuf]) 
         );
     });
     ui.menu_button("Help", |ui| {
+        pick(ui, true, "Show the tips again", "", Action::ShowTips);
         pick(ui, true, "The keys", "", Action::ShowKeys);
         pick(ui, true, "About Duck Mold Studio", "", Action::About);
     });

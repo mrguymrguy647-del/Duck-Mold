@@ -16,6 +16,7 @@ pub mod palette;
 pub mod properties;
 pub mod recent;
 pub mod theme;
+pub mod tour;
 pub mod view;
 
 pub use app::StudioApp;

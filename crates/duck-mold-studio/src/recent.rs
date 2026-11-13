@@ -3,8 +3,9 @@
 //! They are kept in a small text file, one path to a line, the newest
 //! first, in the folder the system gives programs for their settings:
 //! `%APPDATA%\Duck Mold\recent.txt` on Windows, `~/.config/duck-mold/`
-//! elsewhere. Nothing else is stored there, and a model is never kept
-//! anywhere but in its own recipe file.
+//! elsewhere. Beside it, an empty file `tips-seen` says that the first
+//! run's tips have been shown. Nothing else is stored there, and a model
+//! is never kept anywhere but in its own recipe file.
 
 use std::path::{Path, PathBuf};
 
@@ -80,6 +81,30 @@ impl Recent {
         self.files.insert(0, file);
         self.files.truncate(MOST);
         self.save();
+    }
+
+    /// The file that says the first run's tips have been shown.
+    fn tips_file(&self) -> Option<PathBuf> {
+        self.kept_in
+            .as_ref()
+            .map(|kept_in| kept_in.with_file_name("tips-seen"))
+    }
+
+    /// Whether the first run's tips have been shown, or skipped. Where
+    /// nothing is kept (as in the tests), they count as seen: there
+    /// would be no way to stop showing them.
+    pub fn tips_seen(&self) -> bool {
+        self.tips_file().is_none_or(|file| file.exists())
+    }
+
+    /// Notes that the tips have been shown, so they aren't again.
+    pub fn saw_tips(&self) {
+        if let Some(file) = self.tips_file() {
+            if let Some(folder) = file.parent() {
+                let _ = std::fs::create_dir_all(folder);
+            }
+            let _ = std::fs::write(file, "");
+        }
     }
 
     /// Writes the list down. If it can't be written, it is only

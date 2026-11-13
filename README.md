@@ -127,6 +127,13 @@ and the example stays as it is. The examples are inside the program, so
 they are there wherever it was started from. File > Open an example and
 File > Opened lately offer the same lists once a model is open.
 
+![The start page: models opened lately and the twelve examples, each with its picture](docs/studio-start.png)
+
+The first model you open to work on gets **five small tips**, one at a
+time, each pointing at what it is about: the picture, a part, the
+arrows, a dot, the Add button. Next goes on; Skip the tips ends them.
+They are shown once; Help > Show the tips again brings them back.
+
 Drag with the left mouse button to turn the model, with the right one
 to slide it, and roll the wheel to come closer. The parts are listed on
 the left, and what is wrong with the recipe (if anything) at the bottom.
@@ -264,8 +271,8 @@ these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
 **The menus.** File (New model, Open, Open an example, Opened lately,
 Export, Render picture, Back to the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
 Unjoin, Remove, Tidy sockets, Select all), View (the four views, Frame, Grid,
-Wireframe, Shadow, Hide, Show everything hidden) and Help (The keys,
-About). Every line shows its key.
+Wireframe, Shadow, Hide, Show everything hidden) and Help (Show the tips again, The
+keys, About). Every line shows its key.
 
 **The keys.** (Help > The keys shows this list in the Studio.)
 

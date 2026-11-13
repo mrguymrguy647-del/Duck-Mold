@@ -15,7 +15,7 @@ use eframe::egui::{self, Rect, RichText, Sense};
 
 use crate::actions::{self, Action};
 use crate::recent::Recent;
-use crate::{gallery, library, palette, properties, theme, view};
+use crate::{gallery, library, palette, properties, theme, tour, view};
 
 /// The Studio's window: a file that is open, or the start page.
 pub struct StudioApp {
@@ -39,6 +39,10 @@ pub struct StudioApp {
     showing: Option<Showing>,
     /// The start page's pictures.
     gallery: gallery::Gallery,
+    /// Which of the first run's tips is showing, if one is.
+    tour: Option<usize>,
+    /// Where the Add button is on the screen, for the tip about it.
+    add_button: Option<Rect>,
     /// Where a copy of an example goes: the person's own
     /// `Documents\Duck Mold` folder.
     models_folder: PathBuf,
@@ -88,6 +92,8 @@ impl StudioApp {
             showing: None,
             gallery: gallery::Gallery::default(),
             models_folder: own_models_folder(),
+            tour: None,
+            add_button: None,
         }
     }
 
@@ -115,6 +121,8 @@ impl StudioApp {
             self.recent.opened(&path);
             self.studio = Some(Studio::open(path, look_only));
             self.notice = None;
+            // The first model a person opens to work on gets the tips.
+            self.tour = (!look_only && !self.recent.tips_seen()).then_some(0);
         } else {
             self.notice = Some(format!("There is no file \"{}\".", path.display()));
         }
@@ -271,15 +279,17 @@ impl StudioApp {
                     // A new part that is joined to nothing: it stands on
                     // the ground where the view looks, ready to be moved.
                     let thumbs = &mut self.thumbs;
-                    ui.menu_button("Add", |ui| {
-                        ui.label(RichText::new("A new part, on the ground").weak().small());
-                        if let Some(made) = view::choices(ui, studio, thumbs) {
-                            asked = Some(Action::AddFree(made));
-                            ui.close();
-                        }
-                    })
-                    .response
-                    .on_hover_text(
+                    let add = ui
+                        .menu_button("Add", |ui| {
+                            ui.label(RichText::new("A new part, on the ground").weak().small());
+                            if let Some(made) = view::choices(ui, studio, thumbs) {
+                                asked = Some(Action::AddFree(made));
+                                ui.close();
+                            }
+                        })
+                        .response;
+                    self.add_button = Some(add.rect);
+                    add.on_hover_text(
                         "Add a part that stands on the ground, joined to nothing (Shift+A). To add one joined to another part, click a dot on that part.",
                     );
                     ui.separator();
@@ -470,6 +480,7 @@ impl StudioApp {
                         | Action::RenderPicture
                         | Action::StartPage
                         | Action::ShowKeys
+                        | Action::ShowTips
                         | Action::About
                         | Action::OpenFile(_)
                         | Action::OpenExample(_)
@@ -497,6 +508,7 @@ impl StudioApp {
                 Action::StartPage => to_start = true,
                 Action::OpenFile(file) => open_file = Some(file),
                 Action::OpenExample(name) => open_example = Some(name),
+                Action::ShowTips => self.tour = Some(0),
                 Action::ShowKeys => self.showing = Some(Showing::Keys),
                 Action::About => self.showing = Some(Showing::About),
                 Action::Duplicate => {
@@ -568,6 +580,20 @@ impl StudioApp {
                 studio.select(None);
             } else if studio.look_only() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+        // The first run's tips, one at a time.
+        if let Some(tip) = self.tour
+            && let Some(viewport) = self.view.place()
+        {
+            tour::prepare(studio, tip);
+            match tour::show(ui.ctx(), studio, tip, viewport, self.add_button) {
+                tour::Answer::Reading => {}
+                tour::Answer::Next if tip + 1 < tour::TIPS.len() => self.tour = Some(tip + 1),
+                tour::Answer::Next | tour::Answer::Skip => {
+                    self.tour = None;
+                    self.recent.saw_tips();
+                }
             }
         }
         self.help_window(ui);

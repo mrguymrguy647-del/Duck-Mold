@@ -1730,6 +1730,24 @@ The four rules stay:
 3. An edit changes only what it has to in the file.
 4. The viewport is Duck Forge's CPU renderer.
 
+*As built (step 10):* the first-run tour, as designed, with these
+things settled in the building:
+
+- **Each tip is a small box beside what it is about**, with a ring
+  round the thing and a line to it. It is not in the way: the Studio
+  works as usual while a tip is up.
+- **The tips about the arrows and the dots need a part selected**, so
+  from the third tip on the tour selects the first part if none is
+  (selecting changes nothing in the model), and the third takes the
+  Move tool.
+- **Shown once** means once for the person, not once for each model:
+  an empty file `tips-seen` beside the list of models opened lately
+  says they were shown, or skipped. Where there is nowhere to keep
+  that (the tests), no tips are shown.
+- **Not when only looking** (`duck-mold preview`, a model file):
+  there is nothing there to learn to do.
+- The last tip's button says Done, and has no Skip beside it.
+
 *As built (step 9):* the start page, as designed, with these things
 settled in the building:
 
