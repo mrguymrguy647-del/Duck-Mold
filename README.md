@@ -574,6 +574,7 @@ see the handoff note.
 | [PHASE1_REPORT.md](PHASE1_REPORT.md) | Phase 1: pictures, the preview window, sockets on surfaces and in the `.glb`, `twist`, glTF import. |
 | [PHASE2_REPORT.md](PHASE2_REPORT.md) | Phase 2: the Studio, the edit commands, undo, the parts library, the Windows download. |
 | [PHASE3_REPORT.md](PHASE3_REPORT.md) | Phase 3: handles, twelve shapes with bevel and taper, several parts, views, colour, the start page and the tour, with a picture of each. |
+| [PHASE4_REPORT.md](PHASE4_REPORT.md) | Phase 4: shaping a box by hand (faces, edges, corners, cuts), shaped parts used again, and the chair, wall and rock examples, with a picture of each screen. |
 
 ## Project layout
 

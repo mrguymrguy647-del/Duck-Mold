@@ -520,6 +520,45 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "shape-cut"));
     }
 
+    // Using a shaped part again: the part's menu, the window that makes
+    // a definition of it, and the library once it is saved there.
+    {
+        let recipe = copy_of("chair.toml", "pictures_reuse");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        // (Where the seat is, found in Face mode, then back to parts.)
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("chair"));
+            studio.face_mode().unwrap();
+        }
+        screen.run_steps(2);
+        let seat = face_on_screen(&screen, "top");
+        screen.state_mut().studio_mut().unwrap().part_mode();
+        screen.run_steps(2);
+        right_click_at(&mut screen, seat);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "reuse-menu"));
+        screen
+            .query_all_by_label_contains("Make a definition")
+            .next()
+            .unwrap()
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "reuse-define"));
+        screen.get_by_label("Cancel").click();
+        screen.run_steps(2);
+        right_click_at(&mut screen, seat);
+        screen.run_steps(2);
+        screen
+            .query_all_by_label_contains("Save to the library")
+            .next()
+            .unwrap()
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "reuse-library"));
+    }
+
     assert!(
         wrong.is_empty(),
         "{} of the screens changed:\n{}\nIf the change is meant, store the new pictures with: UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures",
