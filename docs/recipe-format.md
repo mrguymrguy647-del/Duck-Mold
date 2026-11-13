@@ -339,6 +339,8 @@ around it: they say how big it is and where the ground is.
 | On a side | `on` | `top`, `bottom`, `left`, `right`, `front`, `back` or `center`. |
 | | `shift` (default `[0, 0, 0]`) | Slides the socket across the side of the box: each number from -1 (the left, bottom or back edge) to 1 (the right, top or front edge). The number for the direction the side faces must be 0. With `center`, all three are free. Then, on a shape, the socket moves straight in onto the surface, as above; a shift that puts it beside the shape, where there is nothing to sit on, is an error. |
 | | `facing` (default: out of the surface) | A direction. Given, it wins over the surface's. |
+| On a face of a shaped box | `on` | Any face name of a box with `changes` (`glass`, `backrest_front`), or a name for several faces: the socket is at the middle of the faces with that name, facing out of them. It moves with them when a change moves them. |
+| | `shift` (default `[0, 0, 0]`) | Slides it across the face: each number from -1 to 1, a share of how wide, tall and deep the faces are from their middle. It stays on the face's plane, so the number along the way the face faces does nothing. |
 | At a point | `at` | `[x, y, z]` in the part's own space. For a shape, zero is its middle. For an assembly, zero is where a part of its list goes when it is neither attached nor moved. For a recipe used as a part, zero is its `origin`. |
 | | `facing` (default `"up"`) | A direction. |
 | Passed on | `from` | `"part.socket"`: a socket of a part inside this assembly, offered to the outside under a new name. |

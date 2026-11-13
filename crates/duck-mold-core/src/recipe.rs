@@ -487,6 +487,20 @@ pub enum SocketKind {
         /// The direction it faces, when that isn't straight out of the side.
         facing: Option<[f64; 3]>,
     },
+    /// On a face of a shaped box, by the face's name: at the middle of
+    /// the faces with that name, facing out of them.
+    OnFace {
+        /// The face's name.
+        face: String,
+        /// How far it is slid across the face: -1 to 1 for x, y and z,
+        /// shares of how wide, tall and deep the face is.
+        shift: [f64; 3],
+        /// The direction it faces, when that isn't straight out.
+        facing: Option<[f64; 3]>,
+        /// Where `on` was written, for a name that turns out to be no
+        /// face.
+        on_loc: Loc,
+    },
     /// At an exact point, in the part's own units.
     At {
         /// The point.
@@ -697,13 +711,21 @@ pub fn is_name(text: &str) -> bool {
 /// A recipe always comes back, however broken, so that later checks can
 /// still run on what could be read.
 pub fn decode(root: &Node, file: &str, default_name: &str, issues: &mut Vec<Issue>) -> Recipe {
-    let mut decoder = Decoder { file, issues };
+    let mut decoder = Decoder {
+        file,
+        issues,
+        faces_ok: false,
+    };
     decoder.recipe(root, default_name)
 }
 
 /// Reads a palette file: a plain table of `name = "#RRGGBB"`.
 pub fn decode_palette_file(root: &Node, file: &str, issues: &mut Vec<Issue>) -> Vec<PaletteColor> {
-    let mut decoder = Decoder { file, issues };
+    let mut decoder = Decoder {
+        file,
+        issues,
+        faces_ok: false,
+    };
     decoder.palette_table(root, "")
 }
 
@@ -752,6 +774,10 @@ fn join(path: &str, key: &str) -> String {
 struct Decoder<'a> {
     file: &'a str,
     issues: &'a mut Vec<Issue>,
+    /// True while the sockets of a part that may be a shaped box (one
+    /// with `changes`, or one made from a definition) are read: there
+    /// `on` can name one of its faces.
+    faces_ok: bool,
 }
 
 impl Decoder<'_> {
@@ -1372,7 +1398,9 @@ impl Decoder<'_> {
         }
 
         if let Some(entry) = fields.take("sockets") {
+            self.faces_ok = !part.changes.is_empty() || matches!(part.source, Source::Use(_));
             part.sockets = self.sockets(&entry.node, &fields.sub("sockets"));
+            self.faces_ok = false;
         }
         fields.take("note");
 
@@ -2346,6 +2374,29 @@ impl Decoder<'_> {
     ) -> Option<SocketKind> {
         let on_path = fields.sub("on");
         let side_name = self.text(&on.node, &on_path, "top")?;
+        if self.faces_ok && Side::from_name(&side_name).is_none() && is_name(&side_name) {
+            // A face of a shaped box, by name: checked once the shape is
+            // built.
+            let shift = match shift {
+                None => Some([0.0; 3]),
+                Some(entry) => self.three(
+                    &entry.node,
+                    &fields.sub("shift"),
+                    (-1.0, 1.0),
+                    "[0.5, 0, 0]",
+                ),
+            };
+            let facing = match facing {
+                None => Some(None),
+                Some(entry) => self.facing(&entry.node, &fields.sub("facing")).map(Some),
+            };
+            return shift.zip(facing).map(|(shift, facing)| SocketKind::OnFace {
+                face: side_name.clone(),
+                shift,
+                facing,
+                on_loc: self.loc(&on_path, on.node.pos),
+            });
+        }
         let Some(side) = Side::from_name(&side_name) else {
             let message = format!("there is no side \"{side_name}\"");
             let issue = Issue::error(Code::TypeMismatch, on_path, message)

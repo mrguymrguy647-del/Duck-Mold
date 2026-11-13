@@ -427,6 +427,33 @@ fn placed_socket(body: &Body, place: &Transform, name: &str) -> Option<Socket> {
     })
 }
 
+/// Where a socket `on` a face of a shaped box is, and the way it faces:
+/// the middle of the faces with that name, slid by `shift` (shares of
+/// how wide, tall and deep they are), kept on their plane. `None` if no
+/// face has that name.
+pub fn on_face(shaped: &Shaped, face: &str, shift: [f64; 3]) -> Option<(Vec3, Vec3)> {
+    let faces = shaped.faces_named(face);
+    if faces.is_empty() {
+        return None;
+    }
+    let middle = shaped.middle_of(&faces);
+    let normal = faces
+        .iter()
+        .fold(Vec3::ZERO, |sum, &one| {
+            sum + shaped.normal(one).unwrap_or(Vec3::ZERO) * shaped.area(one)
+        })
+        .normalized()
+        .unwrap_or(Vec3::UP);
+    let bounds = Bounds::around(
+        faces
+            .iter()
+            .flat_map(|&one| shaped.faces[one].corners.iter().map(|&c| shaped.corners[c])),
+    )?;
+    let point = middle + Vec3::from(shift).times(bounds.half());
+    let point = point - normal * (point - middle).dot(normal);
+    Some((point, normal))
+}
+
 /// The flip and stretch a part asks for with `mirror` and `scale`. Done
 /// to the part before it is turned or moved.
 fn mirror_and_scale(part: &PartDef) -> Mat3 {
@@ -1045,6 +1072,45 @@ impl Assembler<'_> {
                         }
                     }
                 }),
+                SocketKind::OnFace {
+                    face,
+                    shift,
+                    facing,
+                    on_loc,
+                } => {
+                    let sides = Side::ALL.map(Side::name);
+                    match &body.shaped {
+                        None => {
+                            let issue = on_loc
+                                .error(Code::TypeMismatch, format!("there is no side \"{face}\""))
+                                .got(face.as_str())
+                                .one_of(face, sides);
+                            self.issues.push(issue);
+                            None
+                        }
+                        Some(shaped) => match on_face(shaped, face, *shift) {
+                            Some((at, normal)) => {
+                                Some((at, facing.map(Vec3::from).unwrap_or(normal)))
+                            }
+                            None => {
+                                let mut names: Vec<String> =
+                                    sides.iter().map(|side| (*side).to_owned()).collect();
+                                names.extend(shaped.names());
+                                let issue = on_loc
+                                    .error(
+                                        Code::UnknownFace,
+                                        format!(
+                                            "\"{face}\" is neither a side nor a face of this part"
+                                        ),
+                                    )
+                                    .got(face.as_str())
+                                    .one_of(face, names);
+                                self.issues.push(issue);
+                                None
+                            }
+                        },
+                    }
+                }
                 SocketKind::At { at, facing } => Some((Vec3::from(*at), Vec3::from(*facing))),
                 SocketKind::From { part, socket } => {
                     if body.nodes.is_empty() {

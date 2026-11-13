@@ -2549,9 +2549,11 @@ fn faces_val(faces: &[String]) -> Result<Val, Stop> {
     })
 }
 
+/// A side of a part (`top`...), or a face of a shaped box by its name:
+/// that is checked when the recipe is built.
 fn check_side(on: &str) -> Result<(), Stop> {
     let sides: Vec<&str> = Side::ALL.map(Side::name).to_vec();
-    if sides.contains(&on) {
+    if sides.contains(&on) || crate::recipe::is_name(on) {
         Ok(())
     } else {
         Err(problem(

@@ -3715,3 +3715,49 @@ fn a_corner_is_picked_as_a_dot_and_moved_with_its_arrows() {
     studio.toggle_corner_mode().unwrap();
     assert_eq!(studio.mode(), Mode::Part);
 }
+
+// ---- Phase 4, step 6: new faces work like old ones -----------------------------------
+
+#[test]
+fn a_part_is_added_on_a_new_face_and_the_new_face_is_painted() {
+    let recipe = folder("new_faces").join("wall.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\n\n[palette]\nplaster = \"#E8E0D0\"\nsky = \"#9FD3F0\"\n\n[[parts]]\nname = \"wall\"\nshape = \"box\"\nsize = [3, 2.4, 0.2]\ncolor = \"plaster\"\nchanges = [\n  { inset = \"front\", by = 0.6, name = \"window\" },\n  { pull = \"window\", by = -0.05 },\n]\n",
+    )
+    .unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    assert!(studio.select(Some("wall")));
+    // A point on the window, right of its middle.
+    let part = studio.part("wall").unwrap();
+    let model = studio.model().unwrap();
+    let face = &model.faces[part.faces_named("window")[0]];
+    let middle = face.corners.iter().fold(Vec3::ZERO, |sum, &c| sum + c) * 0.25;
+    let point = middle + vec3(0.45, 0.0, 0.0) + studio.offset();
+    let (on, spot) = studio.spot_at(VIEW, seen(&studio, point)).unwrap();
+    assert_eq!((on.as_str(), spot.on.as_str()), ("wall", "window"));
+    assert!((spot.shift[0] - 0.5).abs() < 0.02, "{spot:?}");
+    let said = studio
+        .add_to_surface("wall", &spot, &Made::Shape("sphere".into()))
+        .unwrap();
+    assert!(said.contains("on the window of \"wall\""), "{said}");
+    assert!(file(&recipe).contains("spot = { on = \"window\", shift = ["));
+    // The ball sits in the window, pushed in with it.
+    let ball = studio.part("sphere").unwrap().bounds.unwrap();
+    assert!(
+        ((ball.min.z - studio.model().unwrap().zero.z) - 0.05).abs() < 0.01,
+        "{ball:?}"
+    );
+
+    // The Paint tool colours the window by its name.
+    studio.select(Some("wall"));
+    studio.pick_colour(Some("sky"));
+    let window = seen(&studio, middle + studio.offset());
+    studio.paint_at(VIEW, window, false).unwrap();
+    assert!(
+        file(&recipe).contains("colors = { window = \"sky\" }"),
+        "{}",
+        file(&recipe)
+    );
+}

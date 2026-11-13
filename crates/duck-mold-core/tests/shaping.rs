@@ -1672,3 +1672,141 @@ fn a_corner_is_moved_by_its_edit_and_a_second_move_adds_to_it() {
     };
     assert!(apply(&start, Syntax::Toml, Path::new("t.toml"), "t.toml", &bad).is_err());
 }
+
+// ---- Phase 4, step 6: new faces work like old ones --------------------------------------
+
+#[test]
+fn a_socket_sits_on_a_face_a_change_made_and_moves_with_it() {
+    let text = wall(&format!(
+        "{WINDOW}\n\n[parts.sockets]\nlamp = {{ on = \"glass\" }}\nhook = {{ on = \"window_rim_top\", shift = [0.5, 0, 0] }}"
+    ));
+    let model = built(&text);
+    let part = first_part(&model);
+    let socket = |name: &str| {
+        part.sockets
+            .iter()
+            .find(|socket| socket.name == name)
+            .unwrap()
+            .clone()
+    };
+    // The glass's middle, 8 cm into the 20 cm wall, facing out.
+    let lamp = socket("lamp");
+    assert!(
+        ((lamp.at - model.zero).z - 0.02).abs() < 1e-9,
+        "{:?}",
+        lamp.at
+    );
+    assert!((lamp.at - model.zero).x.abs() < 1e-9);
+    assert!((lamp.facing - Vec3::FORWARD).length() < 1e-9);
+    // Slid half way to the right of the frame's top piece.
+    let hook = socket("hook");
+    assert!(
+        ((hook.at - model.zero).x - 0.75).abs() < 1e-9,
+        "{:?}",
+        hook.at
+    );
+    // Pushed further in, the lamp's socket goes with the glass.
+    let deeper = built(&text.replace("by = -0.08", "by = -0.12"));
+    let lamp = first_part(&deeper)
+        .sockets
+        .iter()
+        .find(|socket| socket.name == "lamp")
+        .unwrap()
+        .clone();
+    assert!(
+        ((lamp.at - deeper.zero).z + 0.02).abs() < 1e-9,
+        "{:?}",
+        lamp.at
+    );
+    // A part joined to it sits on the glass.
+    let joined = format!(
+        "{text}\n[[parts]]\nname = \"bulb\"\nshape = \"sphere\"\nradius = 0.1\ncolor = \"sky\"\nattach = \"back\"\nto = \"wall.lamp\"\n"
+    );
+    let model = built(&joined);
+    let bulb = model.parts.iter().find(|part| part.name == "bulb").unwrap();
+    let bounds = bulb.bounds.unwrap();
+    assert!(
+        ((bounds.min.z - model.zero.z) - 0.02).abs() < 1e-6,
+        "{bounds:?}"
+    );
+}
+
+#[test]
+fn a_socket_on_a_face_that_isnt_there_is_a_mistake_with_the_closest() {
+    let error = one_error(&wall(&format!(
+        "{WINDOW}\n\n[parts.sockets]\nlamp = {{ on = \"glas\" }}"
+    )));
+    assert_eq!(error.code, Code::UnknownFace);
+    assert_eq!(error.path, "parts[0].sockets.lamp.on");
+    assert_eq!(
+        error.message,
+        "\"glas\" is neither a side nor a face of this part"
+    );
+    assert_eq!(error.suggestion.as_deref(), Some("glass"));
+    // On a part that isn't shaped, it is no side, as before.
+    let error = one_error(&wall("\n[parts.sockets]\nlamp = { on = \"tp\" }"));
+    assert_eq!(error.code, Code::TypeMismatch);
+    assert_eq!(error.message, "there is no side \"tp\"");
+    assert_eq!(error.suggestion.as_deref(), Some("top"));
+}
+
+#[test]
+fn a_click_on_a_new_face_makes_a_socket_named_by_it() {
+    use duck_mold_core::edit::spot;
+    let model = built(&wall(WINDOW));
+    let part = first_part(&model);
+    // A point on the glass, a little right of its middle.
+    let glass = part.faces_named("glass")[0];
+    let face = &model.faces[glass];
+    let middle = face.corners.iter().fold(Vec3::ZERO, |sum, &c| sum + c) * 0.25;
+    let at = middle + duck_mold_core::math::vec3(0.42, 0.0, 0.0);
+    let spot = spot(&model, part, at, face.normal().unwrap()).unwrap();
+    assert_eq!(spot.on, "glass");
+    assert_eq!(spot.shift, [0.5, 0.0, 0.0]);
+    // The edit writes it, and the socket is there.
+    let text = wall(WINDOW);
+    let added = done(
+        &text,
+        Syntax::Toml,
+        &Edit::AddSocket {
+            part: "wall".into(),
+            name: "lamp".into(),
+            on: spot.on.clone(),
+            shift: spot.shift,
+        },
+    );
+    assert!(
+        added
+            .text
+            .contains("lamp = { on = \"glass\", shift = [0.5, 0, 0] }")
+    );
+    let lamp = first_part(added.model.as_ref().unwrap())
+        .sockets
+        .iter()
+        .find(|socket| socket.name == "lamp")
+        .unwrap()
+        .clone();
+    assert!((lamp.at - at).length() < 1e-9);
+}
+
+#[test]
+fn a_new_face_is_painted_by_its_name() {
+    use duck_mold_core::edit::Changes;
+    let text = wall("changes = [{ inset = \"front\", by = 0.5, name = \"window\" }]");
+    let painted = done(
+        &text,
+        Syntax::Toml,
+        &Edit::Set {
+            part: "wall".into(),
+            changes: Changes {
+                face_colors: vec![("window".into(), "sky".into())],
+                ..Changes::default()
+            },
+        },
+    );
+    assert!(painted.text.contains("colors = { window = \"sky\" }"));
+    assert_eq!(
+        triangles_by_colour(painted.model.as_ref().unwrap()),
+        vec![("plaster".to_owned(), 18), ("sky".to_owned(), 2)]
+    );
+}

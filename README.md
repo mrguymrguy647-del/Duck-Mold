@@ -218,6 +218,10 @@ recipe calls it (`top`, `front`...). Shift+click adds a face.
 - A drag that would turn the shape inside out, or push a face through
   another, shows its label in red, saying why, and nothing is written
   when you let go.
+- **New faces work like old ones.** The Paint tool paints them by
+  their names (`colors = { glass = "sky" }`), and in Part mode a click
+  on one makes a socket on it (`on = "glass"`), so a part can be added
+  there; the socket moves with the face.
 - Faces can't be deleted (a shape must stay closed): Undo, or the
   Changes list, takes a change back.
 - Escape lets go of the faces, then leaves Face mode. Tab goes back to

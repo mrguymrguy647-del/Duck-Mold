@@ -280,6 +280,11 @@ colors = { window = "wood", glass = "sky" }
   that isn't there (`unknown_face`), an inset too wide (`out_of_range`,
   with the widest that fits), or a shape squeezed flat, turned inside out
   or passing through itself (`bad_shape`). Nothing is built.
+- **New faces work like old ones**: `colors = { glass = "sky" }`, and
+  sockets on them: `lamp = { on = "glass" }` sits at the middle of the
+  glass, facing out of it, and moves with it (`shift` slides it across
+  the face, -1 to 1 each way). `add-socket <part> <name> --on glass`
+  writes one.
 - Only a box can be shaped in this version; a part that `use`s a
   definition is shaped in the definition.
 
@@ -592,7 +597,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
 | `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
 | `duck-mold edit <recipe> remove-color <name>` | Takes a colour out of the palette. Refused if anything is painted with it, naming what; `--replace-with <other colour>` paints those with the other colour first. |
-| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
+| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
 | `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared that way: `--shift x,y,z`, `--on <side>`. Whatever is joined to it moves with it. |
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
