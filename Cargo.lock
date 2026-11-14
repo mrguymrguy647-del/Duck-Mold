@@ -963,7 +963,7 @@ dependencies = [
 [[package]]
 name = "duckforge"
 version = "0.1.0"
-source = "git+https://github.com/mrguymrguy647-del/Duck-Forge?rev=06acd2720ab43ffffdf5282e5d68640741ff445a#06acd2720ab43ffffdf5282e5d68640741ff445a"
+source = "git+https://github.com/mrguymrguy647-del/Duck-Forge?rev=b83b396b6ac4a9833fb5f3eb077f56cfe9db52c3#b83b396b6ac4a9833fb5f3eb077f56cfe9db52c3"
 dependencies = [
  "gif",
  "png",
