@@ -83,16 +83,28 @@ pub fn directions(axes: &Mat3) -> Mat3 {
 /// model, before what it hangs from moves it further: a turn about the
 /// part's pivot, then a move.
 pub fn own_motion(part: &Part, joint: &Joint) -> Transform {
-    let directions = directions(&part.axes);
-    // The turn is written in the list's directions; in the model's it is
-    // the same turn seen from there. (`directions` is square, so turning
-    // its rows into columns undoes it.)
-    let turn = directions * Mat3::from_rotate(joint.turn) * directions.transposed();
-    let moved = part.axes * Vec3::from(joint.move_by);
+    let turn = own_turn(part, joint.turn);
+    let moved = own_move(part, joint.move_by);
     Transform {
         turn,
         shift: part.pivot + moved - turn * part.pivot,
     }
+}
+
+/// A part's turn (degrees around x, then y, then z, in the directions
+/// of the list it is written in) as a turn in the model's directions.
+pub fn own_turn(part: &Part, turn: [f64; 3]) -> Mat3 {
+    let directions = directions(&part.axes);
+    // The turn is written in the list's directions; in the model's it is
+    // the same turn seen from there. (`directions` is square, so turning
+    // its rows into columns undoes it.)
+    directions * Mat3::from_rotate(turn) * directions.transposed()
+}
+
+/// A part's move (metres, in the directions of the list it is written
+/// in) as a move in the model's directions.
+pub fn own_move(part: &Part, move_by: [f64; 3]) -> Vec3 {
+    part.axes * Vec3::from(move_by)
 }
 
 /// Where a pose puts every part: for each part of the model, in the

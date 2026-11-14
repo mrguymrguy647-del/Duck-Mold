@@ -1,7 +1,7 @@
 # Duck Mold models in Duck Forge
 
-Duck Forge loads Duck Mold's `.glb` files with `Mesh::load_glb`, in its
-`src/glb.rs`. This note says exactly what that loader supports, and how
+Duck Forge loads Duck Mold's `.glb` files with `Mesh::load_glb`, and
+plays their animations with `AnimatedModel`, both in its `src/glb.rs`. This note says exactly what that loader supports, and how
 to keep it in step with Duck Mold. It was first written for the session
 that added the loader; what that session found is folded in below.
 
@@ -18,8 +18,8 @@ Duck Forge's `src/glb.rs` holds the same lines, byte for byte. Each
 project keeps its own introduction and imports above the markers, and
 Duck Forge its own functions below them (`GlbModel::load`, `to_mesh`,
 `part`, `socket`, `GlbPart::range`, `GlbSocket::position` and
-`direction`, `Mesh::load_glb`). The first marker says the reader's
-version; this note describes **version 4**.
+`direction`, `Mesh::load_glb`, and `AnimatedModel`). The first marker
+says the reader's version; this note describes **version 5**.
 
 To change the reader: change it here, raise the version in both marker
 lines, run Duck Mold's tests, then copy the lines between the markers
@@ -36,13 +36,16 @@ diff <(sed -n '/^\/\/ ==== Duck Mold/,/^\/\/ ==== end of Duck Mold/p' Duck-Mold/
 | 2 | Assemblies (below). Sizes read from the file are checked before they are added or multiplied, so a damaged file that claims more numbers or triangles than it holds is refused with a sentence instead of overflowing (which a debug build turns into a crash). |
 | 3 | Sockets (below): `GlbModel.sockets`, so a game can ask where `head.top` is. Duck Mold's Phase 1. |
 | 4 | Files laid out as a **tree of parts** (below): `GlbModel.joins` (what every part turns about and hangs from) and `GlbSocket.join` (the part that carries a socket). Files from before are read exactly as they were. A file from a newer Duck Mold than the reader knows is refused with a sentence that says to update Duck Forge. Duck Mold's Phase 5, step 1. |
+| 5 | **Animations and poses** (below): `GlbModel.animations` and `poses`, each join's `turns_in`, and what it takes to play them: `GlbAnimation::at` (how an animation has every join at a time), `GlbPlace` (how a join stands, and `towards`, a place between two), `GlbModel::stands` and `posed` (where that puts every corner and socket) and `turn_by` (a join's turn from degrees). Duck Mold's Phase 5, step 5. |
 
 **Which Duck Forge reads which file.** The file says how it is laid out
 in `extras.duck_mold.version`: 0 for one object with one list of
 triangles (Duck Mold up to 0.4), 1 for a tree (Duck Mold 0.5). Reader
-version 4 reads both. A reader from before refuses a tree with a
+versions 4 and 5 read both. A reader from before refuses a tree with a
 sentence, rather than drawing one part of it, so **update Duck Forge
-before exporting with Duck Mold 0.5**.
+before exporting with Duck Mold 0.5**. Animations and poses didn't
+change that number: they are added beside the model, so reader version
+4 loads a file that has them as the same model, standing still.
 
 ## What a Duck Mold `.glb` is
 
@@ -124,6 +127,47 @@ One file, glTF 2.0 binary. Always the same narrow shape:
      `node`: the node that carries it when the model moves (0, the
      model, for a socket no part carries). A socket an arm passes on
      from its hand (`left_arm.grip`) is carried by the hand.
+   - `turns_in`, on an entry of `parts` or `assemblies`, when it is
+     there: `[[x, y, z], [x, y, z], [x, y, z]]`, the three directions
+     the part's turns are measured around (what x, y and z mean in a
+     pose's `[x, y, z]` for that part), in glTF's directions: **negate
+     x** of each. Absent, they are the model's own right, up and
+     forward. It is there for a part inside one that is turned or a
+     mirror image (the robot's right arm).
+   - `animations`: `[{ "name": "walk", "animation": 1, "loop": true, "length": 0.8 }, ...]`:
+     the model's animations in the recipe's order. `animation` picks an
+     entry of the file's own `animations` (below); it is absent for an
+     animation that moves nothing. `length` is in seconds.
+   - `poses`: `[{ "name": "wave", "joints": [{ "node": 8, "rotation": [x, y, z, w], "translation": [x, y, z] }, ...] }, ...]`:
+     each named pose, as the nodes that aren't as they are at rest.
+     `rotation` and `translation` are written as an animation writes
+     them (below), and either can be absent. `rest` isn't listed: it is
+     every node as the file has it.
+5. **The file's `animations`** (standard glTF; absent in a model that
+   doesn't move). Each has `samplers` and `channels`.
+   - A channel's `target` is a `node` and a `path`: `"rotation"` or
+     `"translation"`. Nothing else is written. Its `sampler` picks a
+     sampler.
+   - A sampler has `input` (an accessor: `SCALAR` of 5126, the times in
+     seconds, from 0, thirty a second and the animation's very end),
+     `output` (an accessor: `VEC4` of 5126 for a rotation, `VEC3` of
+     5126 for a translation, one for each time) and `interpolation`,
+     always `"LINEAR"`: between two times, go straight from one value
+     to the next. Every sampler of an animation has the same `input`.
+   - A **rotation** is a unit quaternion `[x, y, z, w]`: how the node
+     is turned about its own origin, which is the part's pivot. In
+     Duck Forge's directions it is `[x, -y, -z, w]`. Consecutive
+     samples are written alike (their dot product isn't negative), so
+     going "the short way" between two is right. A wheel can turn at
+     most half round between two samples, 15 turns a second.
+   - A **translation** is the node's whole place, measured from the
+     node it hangs from: its `translation` at rest plus how far the
+     pose moves it. Take the node's rest `translation` away (as 32-bit
+     numbers) and negate x to get the move.
+   - A node turned and moved carries the nodes under it, as in any
+     glTF file: a corner of a part is at `parent's place + parent's turn
+     × (own translation + own turn × corner)`, all the way up to the
+     model.
 
 Sizes and counts come from the file, so check them before adding or
 multiplying them.
@@ -176,8 +220,9 @@ file from before has no joins: it can be drawn, not posed.
 `NORMAL` (Duck Forge works out a face's direction from its corners),
 `materials` (one plain matt material, always the same), `asset`,
 `scenes`, the accessors' `min` and `max`, the views' `byteStride`, and
-anything else. There are no textures, UVs, cameras, lights or skins,
-and no animations yet.
+anything else. There are no textures, UVs, cameras, lights or skins.
+A reader that only draws the model can ignore `animations`, `poses`
+and `turns_in` too.
 
 ## What a model is, once loaded
 
@@ -210,12 +255,43 @@ in the model's own space, so a hat goes at
 lists every name. A file that isn't a Duck Mold model is a one-sentence
 `LoadError`.
 
+A model that moves:
+
+```rust
+let mut robot = AnimatedModel::load("assets/robot.glb")?; // in new()
+robot.play("idle");
+if walking { robot.play("walk") } else { robot.play("idle") } // in update()
+robot.update(ctx.dt());
+canvas.draw_mesh(robot.mesh(), &Transform::at(position), &camera); // in draw()
+```
+
+`play`, `play_once`, `play_looping`, `restart`, `stop`, `resume`,
+`rest`, `set_pose`, `set_speed`, `set_blend`, `turn`, `release`,
+`update`, `mesh`, `socket` (where a socket is now), `is_playing`,
+`finished`, `playing`, `time`, `animations` and `poses`: Duck Forge's
+README and guide say what each does. `examples/robot_walk/` is the
+robot standing idle, walking and waving, with a hat on.
+
+**Which half is whose.** Where an animation has a join at a time, and
+where that puts the model's corners and sockets, is in the shared
+reader (`GlbAnimation::at`, `GlbModel::stands`, `posed`, `turn_by`,
+`GlbPlace::towards`): Duck Mold's tests (`tests/glb_motion.rs`) check
+it against Duck Mold's own posing, corner by corner, for every pose
+and every sample of every animation. What is playing, how fast, the
+change-over from one animation to another and the game's own turns are
+`AnimatedModel`, Duck Forge's own, below the markers.
+
 ## Files to test with
 
 `tests/golden/*.glb` in this repository, all laid out as a tree: crate
 (12 triangles), table (60), tree (70), house (120, with one assembly,
-its roof), robot (384, with four: its arms and legs), snowman (600),
-and the other examples. `tests/before-phase5/` holds the crate, the
+its roof), robot (384, with four: its arms and legs; three animations,
+`idle`, `walk` and `wave`, and six poses), snowman (600),
+and the other examples. For each of the robot's animations there is a
+`robot.<animation>.inspect.json` (what `duck-mold inspect --animation
+<name> --json` says: its length, whether it loops, how many frames, how
+far the lowest point leaves the ground) and a `robot.<animation>.strip.png`
+(eight frames of it, side by side). `tests/before-phase5/` holds the crate, the
 house and the robot as Duck Mold 0.4 wrote them, one list of triangles
 each, to test that files from before still load as the same models;
 Duck Forge keeps the same three in `tests/fixtures/duck_mold_before_tree/`.

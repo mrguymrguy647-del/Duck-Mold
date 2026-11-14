@@ -3583,6 +3583,24 @@ is carried by the part it came from. The reader is version 4 after this
 step; animations (step 5) will make it version 5, because Duck Forge's
 first pull request is opened before they exist.
 
+*As built (step 5):* animations and poses are in the file as above.
+Each animation's samples are at thirty a second from 0, and its very
+end; all of an animation's parts share one list of times. A part gets
+a list of turns only if the animation turns it, and a list of places
+only if it moves it. An animation that moves nothing (every key at
+rest) is named in Duck Mold's corner of the file with its length, and
+isn't in glTF's own list, which has no way to write it; one with no
+keys isn't written at all. A pose is written as an animation would
+write one moment of it. Each part that isn't in the model's own list
+(a part inside a part that is turned or a mirror image) also says the
+three directions its turns are measured around, so that game code can
+turn a join by degrees and get what a pose with the same numbers gets.
+The format's number stays 1: nothing a version 4 reader reads has
+changed, so it loads a file with animations as the same model,
+standing still. The robot's three animations (4.3 seconds in all) and
+six poses take its file from 64 KB to 78 KB. The official validator
+reports nothing on it.
+
 ### Playing them in Duck Forge
 
 A new type beside `Mesh` and `GlbModel`: **`AnimatedModel`**. It is a
@@ -3636,6 +3654,28 @@ Duck Forge gets an example, `examples/robot_walk/`: the robot idles;
 the arrow keys walk it about; a key makes it wave; its hat stays on.
 Duck Forge's tests play every animation of every example file, on the
 CPU renderer, with stored pictures.
+
+*As built (step 5):* as above, with these details. The reader is in
+two halves. Where an animation has a join at a time, and where that
+puts every corner and socket, is in the shared reader, so that Duck
+Mold's tests can check it against Duck Mold's own posing: at every
+sample of every animation, and in every pose, the two put every corner
+of the test model in the same place to the last digits a file keeps
+(a few millionths of a metre). Between two samples the reader goes
+straight where Duck Mold follows its curve; they differ most where a
+motion starts from a stop, by about a degree for a thirtieth of a
+second. What is playing, speed, blending and the game's own turns are
+`AnimatedModel`, Duck Forge's own. Added to the list: `restart()`
+(play what is playing from its start again, since `play` of the same
+name changes nothing), `time()`, `mesh_mut()` and `model()`. A join the
+game turns is the game's until it is released: the animation's turn
+for that join is replaced, not added to. Played backwards, an
+animation starts from its end. A model at rest is, bit for bit, the
+mesh `Mesh::load_glb` gives. Duck Forge's tests play the robot's three
+animations frame by frame and check each against Duck Mold's report on
+it (how far its lowest point leaves the ground), and compare fourteen
+stored pictures pixel for pixel. Working out one frame of the robot
+takes about 2.5 millionths of a second.
 
 ### Reusing animations: one walk for every character
 

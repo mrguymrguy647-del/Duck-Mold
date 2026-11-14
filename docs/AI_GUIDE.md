@@ -901,6 +901,27 @@ Renaming a pose renames it in every key that uses it. A pose that keys
 use can't be removed from under them: change the keys, or
 `remove-pose <pose> --with-keys`.
 
+### In a game
+
+`duck-mold export` writes the animations and the poses into the `.glb`
+(as standard glTF animations, thirty samples a second, so other glTF
+programs play them too). Nothing extra to ask for. In Duck Forge:
+
+```rust
+let mut robot = AnimatedModel::load("assets/robot.glb")?; // duckforge::glb::AnimatedModel
+robot.play("idle");                                       // by the animation's name
+if walking { robot.play("walk") } else { robot.play("idle") } // every frame is fine
+robot.update(ctx.dt());
+canvas.draw_mesh(robot.mesh(), &Transform::at(position), &camera);
+```
+
+`play_once`, `play_looping`, `stop`, `resume`, `rest`, `set_speed`,
+`set_pose("wave")`, `turn("head", vec3(0.0, 30.0, 0.0))` and
+`socket("head.top")` (where it is now) are there too. So the names you
+give animations, poses and parts are the names game code uses: keep
+them plain (`idle`, `walk`, `wave`, `jump`, `open`). `examples/robot.toml`
+has limits, six poses and three animations to copy from.
+
 ## 12. Mistakes to avoid
 
 - **Typing positions when a socket would do.** A part placed with

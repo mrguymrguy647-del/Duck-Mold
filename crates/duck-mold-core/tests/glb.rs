@@ -16,6 +16,7 @@ use duck_mold_core::source::Syntax;
 
 /// The reader written for Duck Forge, exactly as it will be copied there.
 #[path = "../../../docs/forge/duck_mold_glb.rs"]
+#[allow(dead_code)]
 mod forge;
 
 fn model_from(text: &str, syntax: Syntax) -> Model {

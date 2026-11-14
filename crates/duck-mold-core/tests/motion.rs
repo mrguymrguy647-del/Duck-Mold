@@ -2519,3 +2519,127 @@ fn animation_edits_work_on_json_too() {
     );
     assert_eq!(gone.text, json);
 }
+
+// ---- parts and poses added and removed beside a banner comment ------------------------
+
+use duck_mold_core::edit::{Free, Made, Sizes};
+
+/// The puppet with its motion under banners, as a person lays a recipe
+/// out: a comment that stands apart, over what comes next.
+fn with_banners() -> String {
+    format!(
+        "{PUPPET}\n# ---- how it moves ----\n#\n# Poses first.\n\n# Its arm up.\n[poses.up]\nleft_arm = [0, 0, -100]\n\n# ---- and its animations ----\n\n[animations.raise]\nkeys = [\n  {{ at = 0, pose = \"rest\" }},\n  {{ at = 1, pose = \"up\" }},\n]\n"
+    )
+}
+
+#[test]
+fn a_banner_comment_stays_over_what_it_is_about() {
+    let text = with_banners();
+    let poses_banner =
+        "\n# ---- how it moves ----\n#\n# Poses first.\n\n# Its arm up.\n[poses.up]\n";
+    let animations_banner = "\n# ---- and its animations ----\n\n[animations.raise]\n";
+    assert!(text.contains(poses_banner) && text.contains(animations_banner));
+    let last_part = "attach = \"shoulder\"\nto = \"body.right_arm\"\n";
+
+    // A new part goes under the last part, above the banner.
+    let added_part = done(
+        &text,
+        &Edit::Add {
+            name: "hat".into(),
+            made: Made::Shape("box".into()),
+            to: Some("head.top".into()),
+            attach: None,
+            sizes: Sizes::default(),
+            color: None,
+            twist: None,
+            free: Free::default(),
+        },
+    );
+    assert!(
+        added_part.text.contains(&format!(
+            "{last_part}\n[[parts]]\nname = \"hat\"\nshape = \"box\"\nattach = \"bottom\"\nto = \"head.top\"\n{poses_banner}"
+        )),
+        "{}",
+        added_part.text
+    );
+    assert_eq!(added_part.text.len(), text.len() + "\n[[parts]]\nname = \"hat\"\nshape = \"box\"\nattach = \"bottom\"\nto = \"head.top\"\n".len());
+
+    // A copy of the last part goes there too, and the banner isn't
+    // copied with it.
+    let copied = done(
+        &text,
+        &Edit::Duplicate {
+            part: "right_arm".into(),
+            name: Some("third_arm".into()),
+            to: None,
+            mirror: false,
+        },
+    );
+    assert_eq!(copied.text.matches("# ---- how it moves ----").count(), 1);
+    assert!(
+        copied
+            .text
+            .contains(&format!("{last_part}\n[[parts]]\nname = \"third_arm\"\n")),
+        "{}",
+        copied.text
+    );
+    let after_copy = &copied.text[copied.text.find("name = \"third_arm\"").unwrap()..];
+    assert!(
+        after_copy.contains(&format!("\n{}", &poses_banner[1..]))
+            && after_copy.find("[[parts]]").is_none(),
+        "{after_copy}"
+    );
+    // Taking the copy away again gives the recipe back, banner and all.
+    let removed = done(
+        &copied.text,
+        &Edit::Remove {
+            part: "third_arm".into(),
+            with_attached: false,
+        },
+    );
+    assert_eq!(removed.text, text);
+    let removed = done(
+        &added_part.text,
+        &Edit::Remove {
+            part: "hat".into(),
+            with_attached: false,
+        },
+    );
+    assert_eq!(removed.text, text);
+
+    // A new pose goes under the last pose, above the animations' banner;
+    // removed, the recipe is as it was.
+    let posed = done(&text, &set_pose("down", "left_arm", [0.0, 0.0, 20.0]));
+    assert!(
+        posed.text.contains(&format!(
+            "[poses.up]\nleft_arm = [0, 0, -100]\n\n[poses.down]\nleft_arm = [0, 0, 20]\n{animations_banner}"
+        )),
+        "{}",
+        posed.text
+    );
+    let unposed = done(
+        &posed.text,
+        &Edit::RemovePose {
+            pose: "down".into(),
+            with_keys: false,
+        },
+    );
+    assert_eq!(unposed.text, text);
+    // The last pose taken away (with the key that uses it): its own
+    // comment goes with it, and both banners stay.
+    let gone = done(
+        &text,
+        &Edit::RemovePose {
+            pose: "up".into(),
+            with_keys: true,
+        },
+    );
+    assert!(
+        gone.text.contains(
+            "\n# ---- how it moves ----\n#\n# Poses first.\n\n# ---- and its animations ----\n\n[animations.raise]\n"
+        ),
+        "{}",
+        gone.text
+    );
+    assert!(!gone.text.contains("Its arm up"));
+}

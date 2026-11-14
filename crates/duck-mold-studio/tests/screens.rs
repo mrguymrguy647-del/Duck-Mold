@@ -476,6 +476,7 @@ fn duplicate_mirror_copy_and_remove_are_buttons() {
             "attach = \"hip\"",
             "to = \"body.right_leg\"",
             "mirror = \"x\"",
+            "limits = { x = [-60, 60] }",
             "",
             "[[parts]]"
         ]
@@ -529,7 +530,6 @@ fn a_click_on_a_socket_offers_what_to_add_there() {
     assert_eq!(
         new_lines(&recipe),
         [
-            "",
             "[[parts]]",
             "name = \"sphere\"",
             "shape = \"sphere\"",
@@ -537,6 +537,7 @@ fn a_click_on_a_socket_offers_what_to_add_there() {
             "color = \"steel\"",
             "attach = \"left\"",
             "to = \"head.right\"",
+            "",
         ]
     );
 
@@ -917,12 +918,12 @@ fn a_library_part_is_chosen_in_the_add_list() {
     assert_eq!(
         new_lines(&recipe),
         [
-            "",
             "[[parts]]",
             "name = \"hat\"",
             "file = \"parts/hat.toml\"",
             "attach = \"bottom\"",
             "to = \"head.top\"",
+            "",
         ]
     );
     // It built; and inspect noticed that the hat covers the antenna.

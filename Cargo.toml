@@ -46,7 +46,7 @@ clap = { version = "4", features = ["derive"] }
 # Pinned to one commit on its main branch, so a picture can't change unless
 # this line does; that commit has Duck Forge's loader for Duck Mold's .glb
 # files (reader version 3). Its graphics-card and sound features are off.
-duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "bb032ca0902d3368ab69c95dc853b6a1574dd0bc", default-features = false }
+duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "06acd2720ab43ffffdf5282e5d68640741ff445a", default-features = false }
 # Writes the PNG pictures. The same library (and version) Duck Forge uses.
 png = "0.18"
 # The Studio's window: egui is the interface library, eframe opens the

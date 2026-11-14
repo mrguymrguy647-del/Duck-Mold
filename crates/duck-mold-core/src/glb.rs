@@ -32,6 +32,7 @@ use serde::Serialize;
 use crate::issue::{Code, Issue};
 use crate::math::{Bounds, Mat3, Transform, Vec3, tidy, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
+use crate::motion::{self, Motion};
 use crate::recipe::{Loc, PaletteColor, hex, rgb_of};
 
 /// The grey of a face nobody coloured: `#B4B4B4`.
@@ -107,7 +108,40 @@ struct Gltf {
     #[serde(rename = "bufferViews")]
     buffer_views: Vec<BufferView>,
     buffers: Vec<Buffer>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    animations: Vec<Animation>,
     extras: Extras,
+}
+
+/// One animation, as glTF keeps it: for every part it moves, where the
+/// part's object is turned to and moved to at each of a list of times,
+/// with straight steps between.
+#[derive(Serialize)]
+struct Animation {
+    name: String,
+    samplers: Vec<Sampler>,
+    channels: Vec<Channel>,
+}
+
+/// A list of times and what something is at each of them.
+#[derive(Serialize)]
+struct Sampler {
+    input: u32,
+    interpolation: &'static str,
+    output: u32,
+}
+
+/// What a sampler's values are for: an object's turn or its place.
+#[derive(Serialize)]
+struct Channel {
+    sampler: u32,
+    target: Target,
+}
+
+#[derive(Serialize)]
+struct Target {
+    node: u32,
+    path: &'static str,
 }
 
 #[derive(Serialize)]
@@ -188,9 +222,9 @@ struct Accessor {
     #[serde(rename = "type")]
     kind: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
-    min: Option<[f32; 3]>,
+    min: Option<Vec<f32>>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    max: Option<[f32; 3]>,
+    max: Option<Vec<f32>>,
 }
 
 #[derive(Serialize)]
@@ -204,7 +238,10 @@ struct BufferView {
     /// (glTF wants it said then). Not for the triangles' corners.
     #[serde(rename = "byteStride", skip_serializing_if = "Option::is_none")]
     stride: Option<usize>,
-    target: u32,
+    /// What a graphics card uses it for. Not said for an animation's
+    /// numbers, which it never sees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    target: Option<u32>,
 }
 
 fn is_zero(number: &usize) -> bool {
@@ -238,6 +275,46 @@ struct DuckMold {
     /// directions like the corners: `head.top`, where it is and the way
     /// it faces, so a game can put a hat there.
     sockets: Vec<SocketEntry>,
+    /// The animations, in the recipe's order: what glTF's own list
+    /// doesn't say about each.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    animations: Vec<AnimationEntry>,
+    /// The named poses, so that a game can hold one.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    poses: Vec<PoseEntry>,
+}
+
+/// What Duck tools want to know of an animation.
+#[derive(Serialize)]
+struct AnimationEntry {
+    name: String,
+    /// Its place in the file's `animations`. None for one that moves
+    /// nothing (every key at rest): glTF has no way to write that.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    animation: Option<usize>,
+    /// True if it starts again after its end.
+    #[serde(rename = "loop")]
+    looping: bool,
+    /// How long it lasts, in seconds.
+    length: f64,
+}
+
+/// A named pose: the objects that aren't as they are at rest.
+#[derive(Serialize)]
+struct PoseEntry {
+    name: String,
+    joints: Vec<PoseJoint>,
+}
+
+/// One object in a pose, written as an animation would write it: its
+/// turn, and its place measured from the object it hangs from.
+#[derive(Serialize)]
+struct PoseJoint {
+    node: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    rotation: Option<[f32; 4]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    translation: Option<[f32; 3]>,
 }
 
 #[derive(Serialize)]
@@ -269,6 +346,22 @@ struct PartEntry {
     triangles: usize,
     /// Its object: a place in `nodes`.
     node: usize,
+    /// The three directions its turns are measured around (a pose's
+    /// `[x, y, z]`), in glTF's directions like the corners, when they
+    /// aren't the model's own: a part inside a part that is turned or a
+    /// mirror image. With them a game can turn a join by degrees.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    turns_in: Option<[[f64; 3]; 3]>,
+}
+
+/// The directions a part's turns are measured around, for the file:
+/// `None` when they are the model's own x, y and z.
+fn turns_in(part: &Part) -> Option<[[f64; 3]; 3]> {
+    let directions = motion::directions(&part.axes);
+    if directions == Mat3::IDENTITY {
+        return None;
+    }
+    Some([0, 1, 2].map(|axis| to_gltf(directions.column(axis)).map(tidy)))
 }
 
 /// A point as the nearest 32-bit numbers to it, which is how a file
@@ -329,6 +422,7 @@ fn assembly_entries(
             first_triangle: mine.first().map_or(0, |leaf| leaf.first_triangle),
             triangles: mine.iter().map(|leaf| leaf.triangles).sum(),
             node: node_of(&part.path),
+            turns_in: turns_in(part),
         });
         entries.extend(assembly_entries(&part.parts, leaves, node_of));
     }
@@ -433,6 +527,7 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
             first_triangle,
             triangles,
             node,
+            turns_in: turns_in(leaf),
         });
         if triangles == 0 {
             continue;
@@ -455,8 +550,8 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
                 component_type: FLOAT,
                 count: own.len(),
                 kind: "VEC3",
-                min,
-                max,
+                min: min.map(Vec::from),
+                max: max.map(Vec::from),
             });
         }
         accessors.push(Accessor {
@@ -500,7 +595,7 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
             offset,
             length: bin.len() - offset,
             stride: Some(12),
-            target: ARRAY_BUFFER,
+            target: Some(ARRAY_BUFFER),
         });
     }
     let offset = bin.len();
@@ -512,8 +607,21 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
         offset,
         length: bin.len() - offset,
         stride: None,
-        target: ELEMENT_ARRAY_BUFFER,
+        target: Some(ELEMENT_ARRAY_BUFFER),
     });
+
+    // The animations and the poses: their numbers go after the model's.
+    let moving = motions(
+        model,
+        &all,
+        &nodes,
+        &mut accessors,
+        &mut bin,
+        views.len() as u32,
+    );
+    if let Some(view) = moving.view {
+        views.push(view);
+    }
 
     let gltf = Gltf {
         asset: Asset {
@@ -536,6 +644,7 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
         accessors,
         buffer_views: views,
         buffers: vec![Buffer { length: bin.len() }],
+        animations: moving.animations,
         extras: Extras {
             duck_mold: DuckMold {
                 version: EXTRAS_VERSION,
@@ -562,6 +671,8 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
                         facing: to_gltf(socket.facing),
                     })
                     .collect(),
+                animations: moving.entries,
+                poses: moving.poses,
             },
         },
     };
@@ -584,6 +695,256 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
     glb.extend(b"BIN\0");
     glb.extend(bin);
     glb
+}
+
+/// The animations and poses of a model, as the file keeps them.
+struct Motions {
+    animations: Vec<Animation>,
+    entries: Vec<AnimationEntry>,
+    poses: Vec<PoseEntry>,
+    /// The stretch of the block of numbers that holds the animations'.
+    view: Option<BufferView>,
+}
+
+/// A turn as glTF writes it: four numbers (a "quaternion": x, y, z, w),
+/// 1 long. glTF's right is -x, which turns the y and z of it round.
+fn quaternion(turn: &Mat3) -> [f64; 4] {
+    let m = turn.rows;
+    let trace = m[0][0] + m[1][1] + m[2][2];
+    // The biggest of the four is worked out from the diagonal, and the
+    // other three from it: that way nothing small is divided by.
+    let [x, y, z, w] = if trace > 0.0 {
+        let s = (trace + 1.0).sqrt() * 2.0;
+        [
+            (m[2][1] - m[1][2]) / s,
+            (m[0][2] - m[2][0]) / s,
+            (m[1][0] - m[0][1]) / s,
+            s / 4.0,
+        ]
+    } else if m[0][0] > m[1][1] && m[0][0] > m[2][2] {
+        let s = (1.0 + m[0][0] - m[1][1] - m[2][2]).sqrt() * 2.0;
+        [
+            s / 4.0,
+            (m[0][1] + m[1][0]) / s,
+            (m[0][2] + m[2][0]) / s,
+            (m[2][1] - m[1][2]) / s,
+        ]
+    } else if m[1][1] > m[2][2] {
+        let s = (1.0 + m[1][1] - m[0][0] - m[2][2]).sqrt() * 2.0;
+        [
+            (m[0][1] + m[1][0]) / s,
+            s / 4.0,
+            (m[1][2] + m[2][1]) / s,
+            (m[0][2] - m[2][0]) / s,
+        ]
+    } else {
+        let s = (1.0 + m[2][2] - m[0][0] - m[1][1]).sqrt() * 2.0;
+        [
+            (m[0][2] + m[2][0]) / s,
+            (m[1][2] + m[2][1]) / s,
+            s / 4.0,
+            (m[1][0] - m[0][1]) / s,
+        ]
+    };
+    let long = (x * x + y * y + z * z + w * w).sqrt();
+    [x / long, -y / long, -z / long, w / long]
+}
+
+/// The same turn, written the way that is nearest to `before` (a turn
+/// can be written two ways, one the other with every sign changed; a
+/// program stepping from one sample to the next goes the short way only
+/// if they are written alike). The first is written with `w` not below
+/// zero.
+fn written_like(turn: [f64; 4], before: Option<[f64; 4]>) -> [f64; 4] {
+    let alike = match before {
+        Some(before) => turn.iter().zip(before).map(|(a, b)| a * b).sum::<f64>(),
+        None => turn[3],
+    };
+    if alike < 0.0 {
+        turn.map(|number| -number + 0.0)
+    } else {
+        turn.map(|number| number + 0.0)
+    }
+}
+
+/// Works out the animations (thirty samples a second, with straight
+/// steps between) and the named poses. The samples are added to `bin`,
+/// and the lists that find them to `accessors`; `view` is the number
+/// the stretch of `bin` that holds them will have.
+fn motions(
+    model: &Model,
+    all: &[&Part],
+    nodes: &[Node],
+    accessors: &mut Vec<Accessor>,
+    bin: &mut Vec<u8>,
+    view: u32,
+) -> Motions {
+    let node_of = |path: &str| {
+        all.iter()
+            .position(|part| part.path == path)
+            .map(|at| at + 1)
+    };
+    // Where a part's object is when the part is moved: its place at
+    // rest, and the move, in glTF's directions.
+    let place = |node: usize, part: &Part, move_by: [f64; 3]| -> [f32; 3] {
+        let rest = nodes[node].translation.unwrap_or([0.0; 3]);
+        let moved = to_gltf(motion::own_move(part, move_by));
+        [0, 1, 2].map(|axis| (rest[axis] + moved[axis]) as f32 + 0.0)
+    };
+    let turn = |part: &Part, turn: [f64; 3], before: Option<[f64; 4]>| {
+        written_like(quaternion(&motion::own_turn(part, turn)), before)
+    };
+
+    let start = bin.len();
+    let mut animations = Vec::new();
+    let mut entries = Vec::new();
+    for animation in &model.animations {
+        // One with no keys does nothing, and isn't written.
+        if animation.keys.is_empty() {
+            continue;
+        }
+        let moving = Motion::of(model, animation);
+        let times = motion::frame_times(animation.length());
+        let frames: Vec<Vec<motion::Joint>> =
+            times.iter().map(|&at| moving.joints_at(at)).collect();
+        let mut list = |bin: &mut Vec<u8>,
+                        numbers: &[f32],
+                        kind: &'static str,
+                        count: usize,
+                        ends: Option<(f32, f32)>| {
+            let offset = bin.len() - start;
+            for number in numbers {
+                bin.extend(number.to_le_bytes());
+            }
+            accessors.push(Accessor {
+                buffer_view: view,
+                offset,
+                component_type: FLOAT,
+                count,
+                kind,
+                min: ends.map(|(first, _)| vec![first]),
+                max: ends.map(|(_, last)| vec![last]),
+            });
+            accessors.len() as u32 - 1
+        };
+        let seconds: Vec<f32> = times.iter().map(|&at| at as f32).collect();
+        let input = list(
+            bin,
+            &seconds,
+            "SCALAR",
+            seconds.len(),
+            Some((seconds[0], seconds[seconds.len() - 1])),
+        );
+        let mut samplers = Vec::new();
+        let mut channels = Vec::new();
+        for (track, path) in moving.parts().into_iter().enumerate() {
+            let (Some(node), Some(part)) = (node_of(path), model.part(path)) else {
+                continue;
+            };
+            let joints: Vec<&motion::Joint> = frames.iter().map(|frame| &frame[track]).collect();
+            if joints.iter().any(|joint| joint.turn != [0.0; 3]) {
+                let mut numbers = Vec::with_capacity(joints.len() * 4);
+                let mut before = None;
+                for joint in &joints {
+                    let now = turn(part, joint.turn, before);
+                    numbers.extend(now.map(|number| number as f32));
+                    before = Some(now);
+                }
+                let output = list(bin, &numbers, "VEC4", joints.len(), None);
+                channels.push(Channel {
+                    sampler: samplers.len() as u32,
+                    target: Target {
+                        node: node as u32,
+                        path: "rotation",
+                    },
+                });
+                samplers.push(Sampler {
+                    input,
+                    interpolation: "LINEAR",
+                    output,
+                });
+            }
+            if joints.iter().any(|joint| joint.move_by != [0.0; 3]) {
+                let numbers: Vec<f32> = joints
+                    .iter()
+                    .flat_map(|joint| place(node, part, joint.move_by))
+                    .collect();
+                let output = list(bin, &numbers, "VEC3", joints.len(), None);
+                channels.push(Channel {
+                    sampler: samplers.len() as u32,
+                    target: Target {
+                        node: node as u32,
+                        path: "translation",
+                    },
+                });
+                samplers.push(Sampler {
+                    input,
+                    interpolation: "LINEAR",
+                    output,
+                });
+            }
+        }
+        // (An animation that moves nothing, every key at rest, has no
+        // channels, which glTF doesn't allow: it is known by its name
+        // and length alone.)
+        let place_in_file = if channels.is_empty() {
+            // Its list of times isn't needed either.
+            accessors.pop();
+            bin.truncate(bin.len() - seconds.len() * 4);
+            None
+        } else {
+            animations.push(Animation {
+                name: animation.name.clone(),
+                samplers,
+                channels,
+            });
+            Some(animations.len() - 1)
+        };
+        entries.push(AnimationEntry {
+            name: animation.name.clone(),
+            animation: place_in_file,
+            looping: animation.looping,
+            length: animation.length(),
+        });
+    }
+
+    let poses = model
+        .poses
+        .iter()
+        .map(|pose| PoseEntry {
+            name: pose.name.clone(),
+            joints: pose
+                .joints
+                .iter()
+                .filter_map(|joint| {
+                    let (node, part) = (node_of(&joint.part)?, model.part(&joint.part)?);
+                    if joint.is_rest() {
+                        return None;
+                    }
+                    Some(PoseJoint {
+                        node,
+                        rotation: (joint.turn != [0.0; 3])
+                            .then(|| turn(part, joint.turn, None).map(|number| number as f32)),
+                        translation: (joint.move_by != [0.0; 3])
+                            .then(|| place(node, part, joint.move_by)),
+                    })
+                })
+                .collect(),
+        })
+        .collect();
+
+    Motions {
+        animations,
+        entries,
+        poses,
+        view: (bin.len() > start).then(|| BufferView {
+            buffer: 0,
+            offset: start,
+            length: bin.len() - start,
+            stride: None,
+            target: None,
+        }),
+    }
 }
 
 // ---- reading ----------------------------------------------------------------

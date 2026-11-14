@@ -762,7 +762,6 @@ fn a_click_on_a_socket_is_a_place_to_add_a_part() {
     assert_eq!(
         new,
         [
-            "",
             "[[parts]]",
             "name = \"cylinder\"",
             "shape = \"cylinder\"",
@@ -771,6 +770,7 @@ fn a_click_on_a_socket_is_a_place_to_add_a_part() {
             "color = \"steel\"",
             "attach = \"left\"",
             "to = \"head.right\"",
+            "",
         ]
     );
     assert_eq!(studio.selected(), Some("cylinder"));
@@ -1315,12 +1315,12 @@ fn a_library_part_is_added_to_a_socket_like_a_shape() {
     assert_eq!(
         new,
         [
-            "",
             "[[parts]]",
             "name = \"hat\"",
             "file = \"parts/hat.toml\"",
             "attach = \"bottom\"",
             "to = \"head.top\"",
+            "",
         ]
     );
     assert_eq!(studio.selected(), Some("hat"));
@@ -2308,7 +2308,7 @@ fn a_part_from_the_library_or_a_definition_stands_free_too() {
     let (gone, new) = changed(&before, &now);
     assert!(gone.is_empty(), "{gone:?}");
     assert_eq!(
-        new[1..4],
+        new[0..3],
         [
             "[[parts]]",
             "name = \"crate\"",

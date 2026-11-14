@@ -451,13 +451,15 @@ robot  (examples/robot.toml)
   colours      4:  steel 96, dark 180, red 84, glow 24  (triangles each)
   parts        19
     body          box              12 triangles
-    panel         box              12 triangles   on body.chest
-    head          box              12 triangles   on body.neck
+    panel         box              12 triangles   on body.chest, fixed
+    head          box              12 triangles   on body.neck, turns x -30..30, y -80..80
     ...
-    right_arm     arm (assembly)   84 triangles   on body.right_arm, mirrored
+    right_arm     arm (assembly)   84 triangles   on body.right_arm, mirrored, turns x -90..180, z -60..60
     ...
   floating     none
   overlapping  none
+  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out
+  animations   idle (2 s, loops), walk (0.8 s, loops), wave (1.5 s)
 ok: no problems found
 ```
 
@@ -471,6 +473,11 @@ ok: no problems found
   mistake. (A part standing on the ground never floats.)
 - **overlapping**: parts that poke into other parts, and how deep.
   Sometimes meant (a nose pushed into a head), sometimes not.
+- **poses** and **animations**: for a model that moves (like the robot:
+  it stands idle, walks and waves), the names of its poses and
+  animations. `duck-mold export` puts them in the `.glb`, and a Duck
+  Forge game plays them by name: `robot.play("walk")`. Beside a part, `turns x -30..30` is how far
+  it may turn, in degrees, and `fixed` means it doesn't.
 
 So you can tell whether a model came out right without opening it.
 

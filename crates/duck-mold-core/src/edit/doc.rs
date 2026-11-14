@@ -437,6 +437,65 @@ impl Doc {
         start
     }
 
+    /// Where to put a new block after one that ends at `end`. That is
+    /// `end`, unless the block is followed by comments that stand apart
+    /// from it, after a blank line: a banner over what comes next
+    /// (`# ---- how it moves ----`). Then the new block goes above the
+    /// banner, straight under the block's own lines.
+    fn before_a_banner(&self, end: usize) -> usize {
+        if end >= self.text.len() {
+            return end;
+        }
+        // Back over the blank lines and comments the block ends with, to
+        // its last line that is neither.
+        let mut own = end;
+        let mut comments = false;
+        while own > 0 {
+            let above = self.line_start(own - 1);
+            let line = self.text[above..own].trim();
+            if line.is_empty() {
+                own = above;
+            } else if line.starts_with('#') {
+                comments = true;
+                own = above;
+            } else {
+                break;
+            }
+        }
+        if !comments {
+            return end;
+        }
+        // Forward again over the comments straight under that line:
+        // they are notes on the block itself.
+        while own < end {
+            let below = self.line_end(own);
+            if self.text[own..below].trim().starts_with('#') {
+                own = below;
+            } else {
+                break;
+            }
+        }
+        // (If nothing but those notes followed, there is no banner.)
+        if self.text[own..end]
+            .lines()
+            .any(|line| line.trim().starts_with('#'))
+        {
+            own
+        } else {
+            end
+        }
+    }
+
+    /// Just past the blank line at `at`, if there is one there.
+    fn past_a_blank_line(&self, at: usize) -> usize {
+        let end = self.line_end(at);
+        if self.text[at..end].trim().is_empty() {
+            end
+        } else {
+            at
+        }
+    }
+
     /// Where the lines under a header end: at the next header (with its
     /// comments), or the end of the file.
     fn body_end(&self, header_start: usize, headers: &[(usize, TreePath)]) -> usize {
@@ -765,14 +824,14 @@ impl Doc {
             .filter(|(_, other)| other.starts_with(&group_path))
             .map(|(_, other)| self.block_end(other, &headers))
             .max();
-        let at = last.unwrap_or(self.text.len());
+        let at = last.map_or(self.text.len(), |end| self.before_a_banner(end));
         let mut block = self.gap_before(at);
         block.push_str(&format!("[{}]{newline}", Self::header_name(&path)));
         for (field, value) in fields {
             block.push_str(&field_text(field, value, Syntax::Toml));
             block.push_str(newline);
         }
-        if at < self.text.len() {
+        if at < self.text.len() && !self.text[at..].starts_with(['\n', '\r']) {
             block.push_str(newline);
         }
         self.splice(at..at, &block)
@@ -808,6 +867,12 @@ impl Doc {
             // The last thing in the file: nothing follows to keep a
             // blank line for.
             return self.splice(start..end, "");
+        }
+        // A banner under it stays, with the blank line above the table
+        // (taken out with it, above) made up for by the one under it.
+        let own = self.before_a_banner(end);
+        if own < end {
+            return self.splice(start..own, "");
         }
         while end > start {
             if self.text[..end].ends_with("\r\n\r\n") {
@@ -889,14 +954,16 @@ impl Doc {
         match self.form(list) {
             Form::Header => {
                 let headers = self.headers();
-                let at = self.block_end(&with(list, Step::Index(count - 1)), &headers);
+                let end = self.block_end(&with(list, Step::Index(count - 1)), &headers);
+                let at = self.before_a_banner(end);
                 let mut block = self.gap_before(at);
                 block.push_str(&format!("[[{}]]{newline}", Self::header_name(list)));
                 for (name, value) in fields {
                     block.push_str(&field_text(name, value, Syntax::Toml));
                     block.push_str(newline);
                 }
-                if at < self.text.len() {
+                // A blank line before what follows, unless one is there.
+                if at < self.text.len() && !self.text[at..].starts_with(['\n', '\r']) {
                     block.push_str(newline);
                 }
                 self.splice(at..at, &block)?;
@@ -1043,6 +1110,12 @@ impl Doc {
                 let headers = self.headers();
                 let mut start = self.lead(item.span.start);
                 let end = self.block_end(&with(list, Step::Index(at)), &headers);
+                // A banner under it stays; the blank line between the
+                // two goes instead.
+                let own = self.before_a_banner(end);
+                if own < end {
+                    return Ok(start..self.past_a_blank_line(own));
+                }
                 if end == self.text.len() {
                     // The last block of the file: the blank line above
                     // it goes too.
@@ -1083,11 +1156,13 @@ impl Doc {
                 let headers = self.headers();
                 let start = self.lead(item.span.start);
                 let end = self.block_end(&with(list, Step::Index(at)), &headers);
+                // (A banner under it isn't the item's, and isn't copied.)
+                let end = self.before_a_banner(end);
                 let copy = self.text[start..end].trim_end().to_owned();
                 let mut block = self.gap_before(end);
                 block.push_str(&copy);
                 block.push_str(newline);
-                if end < self.text.len() {
+                if end < self.text.len() && !self.text[end..].starts_with(['\n', '\r']) {
                     block.push_str(newline);
                 }
                 self.splice(end..end, &block)
