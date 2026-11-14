@@ -75,7 +75,7 @@ pub const STARTERS: [Starter; 6] = [
     Starter {
         name: "roll",
         made_for: "four wheels",
-        does: "Each wheel turns once round a second, steadily. Loops.",
+        does: "Each wheel turns once round a second, steadily, rolling forward. Loops.",
         parts: &[
             "wheel_front_left",
             "wheel_front_right",

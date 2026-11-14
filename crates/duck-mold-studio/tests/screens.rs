@@ -2782,7 +2782,7 @@ fn the_play_button_in_the_view_plays_an_animation_in_part_mode() {
 
 #[test]
 fn the_animations_list_adds_a_starter_and_saves_an_animation() {
-    let recipe = copy_of("robot.toml", "screens_animations");
+    let recipe = copy_of("gnome.toml", "screens_animations");
     let mut screen = harness(StudioApp::with_file(&recipe, false), false);
     screen.run_steps(2);
     screen.get_by_label("Animations").click();
@@ -2790,7 +2790,7 @@ fn the_animations_list_adds_a_starter_and_saves_an_animation() {
     screen.get_by_label("Starters");
     screen.get_by_label("Saved, in animations/");
     screen.get_by_label_contains("None yet.");
-    // The door's and the wheels' can't be added to a robot.
+    // The door's and the wheels' can't be added to a gnome.
     assert!(
         screen
             .get_by_label("Add open")

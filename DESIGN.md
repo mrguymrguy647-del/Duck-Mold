@@ -3878,7 +3878,11 @@ with Add, greyed out (with why) when the model has none of its parts;
 an Add with some missing leaves those out and says so. Add chooses the
 new animation for the timeline. Save writes the timeline's animation,
 or the one picked beside it, to `animations/<name>.toml`, numbered
-rather than written over.
+rather than written over. `roll` turns each wheel `[-360, 0, 0]`: a
+wheel joined to a side by the end of its cylinder turns around x, and
+minus is the way that rolls the model forward (a leg turned plus around
+x swings its foot forward, so a wheel turned plus moves its bottom
+forward and rolls back).
 
 ### Examples (step 9)
 
@@ -3893,6 +3897,48 @@ animation:
 
 The robot's and the dog's stored files change on purpose. `door` and
 `cart` join the start page.
+
+*As built (step 9):* as approved for 5b: a door that opens, a cart
+whose wheels turn, a second character that uses the robot's walk, and
+the robot gets `jump`. The dog's walk, in the list above, was left out
+(it wasn't in 5b's list), and is a first thing for later.
+
+- **`robot.toml`** gets `jump`: the starter, fitted. In the crouch its
+  feet turn back as far as its legs turn, as in its walk, and the body
+  sinks 2.5 cm, not the starter's 3, so the feet never dig in more
+  than 4 mm on the way down. It is 1.3 seconds and rises 39 cm.
+- **`door.toml`** (new): two posts and a lintel, a door and a brass
+  handle. The hinge is a socket at a point (`at`), given its facing
+  with `set-socket --facing right`, the first of this half's two
+  fixes; the door is joined by a socket on the back edge of its own
+  left side, so it turns about that edge and stays against the post
+  (joined by the middle of its side, it either floated 2 cm from the
+  post mid-swing or cut into it). `open` is the starter, fitted: the
+  door stops at 90 degrees (at 100 it swings back into the post's
+  face), and a key at 0.25 s turns the handle down before the door
+  moves. No handle on the door's back, no stops on the frame.
+- **`cart.toml`** (new): a bed on four wheels, each a `wheel` assembly
+  (a tyre, a red hub and one iron spoke from the hub to the rim), a
+  pole and a grip. `roll` is the starter as it is. One spoke, not a bar
+  across: a bar looks the same after half a turn, so a strip (and
+  Duck Forge's pictures) couldn't show it turning.
+- **`gnome.toml`** (new): a body, a round head with a cone hat, a nose
+  and a beard, arms of a sleeve and a hand, legs of a `thigh` and a
+  `foot`: the robot's six names, and its leg's inner names, so the
+  whole walk fits. The robot's walk was saved to
+  `examples/animations/walk.toml` and copied in with `add-animation
+  --from`, then fitted: its legs are shorter, so each step sinks the
+  body 1.7 cm, not 4. It also waves, with the starter.
+- **The two fixes.** `set-socket` works on a socket written with `at`:
+  `--facing` (where `out` means as it faces when nothing says, up),
+  `--at x,y,z` to move it, `--on <side>` to put it on a side, and `--at`
+  turns one on a side into one at a point. `--shift` on a point is
+  refused with what to give instead. The Studio's socket list offers
+  the facing of one at a point too. `render --animation --view top`
+  draws a strip from straight above, the model's front at the bottom.
+- The start page has eighteen examples. Duck Forge's tests play all
+  eight animations of the four models that move, frame by frame, and
+  compare four stored pictures of each.
 
 ### Steps
 

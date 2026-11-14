@@ -1627,12 +1627,29 @@ fn animations_are_made_checked_and_drawn_from_the_command_line() {
     assert_eq!(report["strip"][1]["at"], 0.5);
     assert_eq!(report["strip"][1]["left"], 129);
     assert_eq!(report["animation"], "sway");
+    // From straight above, too.
+    let output = run(
+        &folder,
+        &[
+            "render",
+            "tree.toml",
+            "--animation",
+            "sway",
+            "--view",
+            "top",
+            "-o",
+            "top.png",
+            "--json",
+        ],
+    );
+    assert_eq!(json(&output)["view"], "top");
+    assert!(folder.join("top.png").is_file());
     for (words, said) in [
         (
             &["--frames", "1"][..],
             "a strip has from 2 to 60 frames, not 1",
         ),
-        (&["--view", "top"], "there is no view \"top\""),
+        (&["--view", "under"], "there is no view \"under\""),
     ] {
         let mut arguments = vec!["render", "tree.toml", "--animation", "sway"];
         arguments.extend_from_slice(words);
@@ -1921,7 +1938,7 @@ fn save_animation_and_add_animation_from_share_a_walk() {
             "edit",
             "robot_two.toml",
             "add-animation",
-            "jump",
+            "hop",
             "--starter",
             "jump",
         ],
@@ -1931,8 +1948,7 @@ fn save_animation_and_add_animation_from_share_a_walk() {
     for table in [
         "[animations.stroll]",
         "[animations.hello]",
-        "[animations.jump]",
-        "[poses.jump_up]",
+        "[animations.hop]",
     ] {
         assert!(text.contains(table), "{table}");
     }

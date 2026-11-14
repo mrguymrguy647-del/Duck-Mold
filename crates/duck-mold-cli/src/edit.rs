@@ -217,8 +217,14 @@ pub enum Change {
         /// A new slide across the side: x,y,z.
         #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
         shift: Option<String>,
+        /// An exact point in the part's own space instead of a side:
+        /// x,y,z. Moves a socket written with "at", or puts one that was
+        /// on a side there.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        at: Option<String>,
         /// Which way it faces: up, down, left, right, front, back, or out
-        /// (straight out of its side, as it faces when nothing says).
+        /// (as it faces when nothing says: straight out of its side, or
+        /// up for a socket at a point).
         #[arg(long, value_name = "WAY")]
         facing: Option<String>,
     },
@@ -1084,6 +1090,7 @@ impl Change {
                 socket,
                 on,
                 shift,
+                at,
                 facing,
             } => Edit::SetSocket {
                 socket: socket.clone(),
@@ -1092,6 +1099,7 @@ impl Change {
                     .as_deref()
                     .map(|shift| three("--shift", shift))
                     .transpose()?,
+                at: at.as_deref().map(|at| three("--at", at)).transpose()?,
                 facing: facing.clone(),
             },
         })

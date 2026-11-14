@@ -468,7 +468,7 @@ fn every_starter_names_the_parts_it_says_and_comes_in_whole() {
     )
     .unwrap();
     assert!(applied.text.ends_with(
-        "[poses.roll_round]\nwheel_front_left = [360, 0, 0]\nwheel_front_right = [360, 0, 0]\nwheel_back_left = [360, 0, 0]\nwheel_back_right = [360, 0, 0]\n\n[animations.roll]\nloop = true\nsmooth = false\nkeys = [\n  { at = 0, pose = \"rest\" },\n  { at = 1, pose = \"roll_round\" },\n]\n"
+        "[poses.roll_round]\nwheel_front_left = [-360, 0, 0]\nwheel_front_right = [-360, 0, 0]\nwheel_back_left = [-360, 0, 0]\nwheel_back_right = [-360, 0, 0]\n\n[animations.roll]\nloop = true\nsmooth = false\nkeys = [\n  { at = 0, pose = \"rest\" },\n  { at = 1, pose = \"roll_round\" },\n]\n"
     ), "{}", applied.text);
     assert_eq!(
         applied.summary,

@@ -112,7 +112,9 @@ fn pose_mode_shows_the_poses_and_stands_the_model_in_one() {
             "wave",
             "wave_out",
             "breathe_in",
-            "breathe_out"
+            "breathe_out",
+            "jump_crouch",
+            "jump_up",
         ]
     );
     assert_eq!(studio.pose(), "rest");

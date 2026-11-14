@@ -54,16 +54,23 @@ fn the_library_lists_the_six_starters_first() {
 fn adding_a_starter_copies_it_in_under_a_free_name_and_undo_takes_it_out() {
     let (recipe, mut studio) = open("shelf_add", "robot.toml");
     let before = file(&recipe);
+    // The robot has a jump already, made from this starter and then
+    // fitted: the copy is jump_2. Its crouch was changed, so the
+    // starter's comes in with a number; its leap wasn't, so it is used
+    // as it is.
     let jump = studio.animation_library()[3].clone();
     let said = studio.add_from_library(&jump).unwrap();
     assert_eq!(
         said,
-        "Added the animation \"jump\" from the starters, with 5 keys and the poses \"jump_crouch\" and \"jump_up\""
+        "Added the animation \"jump_2\", a copy of \"jump\" from the starters, with 5 keys and the pose \"jump_crouch_2\" (names taken by other poses here, so they came in as: \"jump_crouch\" as \"jump_crouch_2\"); it uses the pose \"jump_up\" already here, which says the same"
     );
-    assert!(file(&recipe).contains("[animations.jump]\nkeys = [\n  { at = 0, pose = \"rest\" },"));
+    assert!(file(&recipe).contains("  { at = 0.3, pose = \"jump_crouch_2\" },"));
     // It is the timeline's animation now.
-    assert_eq!(studio.animation(), Some("jump"));
-    assert_eq!(studio.animation_names(), ["idle", "walk", "wave", "jump"]);
+    assert_eq!(studio.animation(), Some("jump_2"));
+    assert_eq!(
+        studio.animation_names(),
+        ["idle", "walk", "wave", "jump", "jump_2"]
+    );
 
     // The robot has a walk already: the starter's comes in as walk_2,
     // with its own poses.

@@ -27,7 +27,7 @@ use std::process::Command;
 #[allow(dead_code)]
 mod forge;
 
-const EXAMPLES: [&str; 18] = [
+const EXAMPLES: [&str; 21] = [
     "crate",
     "table",
     "tree",
@@ -46,6 +46,9 @@ const EXAMPLES: [&str; 18] = [
     "chair",
     "window_wall",
     "rock",
+    "door",
+    "cart",
+    "gnome",
 ];
 
 /// The top of the repository.
@@ -148,14 +151,20 @@ fn every_example_inspects_to_its_golden_report() {
 
 /// The examples that move, each with its animations and the view its
 /// strips are drawn from.
-const MOVING: [(&str, &[(&str, &str)]); 1] = [(
-    "robot",
-    &[
-        ("idle", "three-quarter"),
-        ("walk", "right"),
-        ("wave", "front"),
-    ],
-)];
+const MOVING: [(&str, &[(&str, &str)]); 4] = [
+    (
+        "robot",
+        &[
+            ("idle", "three-quarter"),
+            ("walk", "right"),
+            ("wave", "front"),
+            ("jump", "right"),
+        ],
+    ),
+    ("door", &[("open", "top")]),
+    ("cart", &[("roll", "right")]),
+    ("gnome", &[("walk", "right"), ("wave", "front")]),
+];
 
 #[test]
 fn every_animation_renders_to_its_golden_strip_and_report() {
@@ -193,7 +202,8 @@ fn every_animation_renders_to_its_golden_strip_and_report() {
             check(&format!("{name}.{animation}.inspect.json"), &report);
             // An example's animation is a clean one: no limit broken, a
             // loop that ends as it starts, and feet that stay within
-            // half a centimetre of the ground.
+            // half a centimetre of the ground (a jump leaves it, on
+            // purpose).
             let report: serde_json::Value = serde_json::from_slice(&report).unwrap();
             assert_eq!(
                 report["limits_broken"],
@@ -203,7 +213,9 @@ fn every_animation_renders_to_its_golden_strip_and_report() {
             assert_eq!(report["floating"], serde_json::json!([]), "{animation}");
             assert_ne!(report["ends_as_it_starts"], false, "{animation}");
             assert!(report["ground"]["lowest_y"].as_f64().unwrap() > -0.005);
-            assert!(report["ground"]["highest_y"].as_f64().unwrap() < 0.005);
+            if *animation != "jump" {
+                assert!(report["ground"]["highest_y"].as_f64().unwrap() < 0.005);
+            }
             assert_eq!(report["warnings"], serde_json::json!([]), "{animation}");
         }
     }
@@ -259,10 +271,11 @@ fn every_example_is_a_clean_model() {
         // over its dough; the mug's handle is in its wall; the temple's
         // steps go through its ground and platform, and its tip is on
         // the roof's point; the barn's silo has half a ball in its top;
-        // and the gate's towers lean into its arch.
+        // and the gate's towers lean into its arch. The gnome's beard is
+        // in its head and over its chest.
         let overlaps = report["overlapping"].as_array().unwrap().len();
         let meant = match name {
-            "tree" | "duck" | "gate" => 2,
+            "tree" | "duck" | "gate" | "gnome" => 2,
             "snowman" => 5,
             "dog" => 7,
             "temple" => 3,

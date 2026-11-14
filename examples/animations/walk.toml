@@ -1,0 +1,33 @@
+# Saved by `duck-mold save-animation` from examples/robot.toml.
+# It moves: body, left_leg, left_leg/foot, right_leg, right_leg/foot, left_arm, right_arm.
+# To use it: duck-mold edit <recipe> add-animation walk --from <this file>
+version = 0
+name = "walk"
+
+[poses.step_left]
+body = { move = [0, -0.04, 0] }
+left_leg = [25, 0, 0]
+"left_leg/foot" = [-25, 0, 0]
+right_leg = [-25, 0, 0]
+"right_leg/foot" = [25, 0, 0]
+left_arm = [-25, 0, 0]
+right_arm = [25, 0, 0]
+
+[poses.step_right]
+body = { move = [0, -0.04, 0] }
+right_leg = [25, 0, 0]
+"right_leg/foot" = [-25, 0, 0]
+left_leg = [-25, 0, 0]
+"left_leg/foot" = [25, 0, 0]
+right_arm = [-25, 0, 0]
+left_arm = [25, 0, 0]
+
+[animations.walk]
+loop = true
+keys = [
+  { at = 0, pose = "step_left" },
+  { at = 0.2, pose = "rest" },
+  { at = 0.4, pose = "step_right" },
+  { at = 0.6, pose = "rest" },
+  { at = 0.8, pose = "step_left" },
+]

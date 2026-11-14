@@ -54,7 +54,7 @@ fn top_of(studio: &Studio, part: &str) -> f64 {
 #[test]
 fn an_animation_is_chosen_and_its_keys_are_on_the_timeline() {
     let (_, mut studio) = robot("timeline_keys");
-    assert_eq!(studio.animation_names(), ["idle", "walk", "wave"]);
+    assert_eq!(studio.animation_names(), ["idle", "walk", "wave", "jump"]);
     assert_eq!(studio.animation(), None);
     assert_eq!(studio.time(), None);
     assert!(studio.choose_animation(Some("wave")));
@@ -200,17 +200,17 @@ fn loop_smooth_and_the_keys_are_edits() {
     assert_eq!(file(&recipe), before);
     // + Key: the pose chosen, at the time shown.
     studio.choose_pose("step_left");
-    studio.set_time(1.3);
+    studio.set_time(1.25);
     // (Choosing a pose let go of the time; set it again, then choose
     // the pose to add.)
     studio.choose_pose("step_left");
     studio.choose_animation(Some("wave"));
-    studio.set_time(1.3);
+    studio.set_time(1.25);
     let pose_now = studio.pose().to_owned();
     studio.add_key_here().unwrap();
     assert_eq!(
         added(&before, &file(&recipe)),
-        [format!("  {{ at = 1.3, pose = \"{pose_now}\" }},").as_str()]
+        [format!("  {{ at = 1.25, pose = \"{pose_now}\" }},").as_str()]
     );
 }
 

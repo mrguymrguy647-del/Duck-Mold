@@ -611,8 +611,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
 | `duck-mold edit <recipe> remove-color <name>` | Takes a colour out of the palette. Refused if anything is painted with it, naming what; `--replace-with <other colour>` paints those with the other colour first. |
 | `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
-| `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared that way: `--shift x,y,z`, `--on <side>`. Whatever is joined to it moves with it. |
-| `duck-mold edit <recipe> set-socket <part.socket> --facing <way>` | Turns a socket declared that way: `up`, `down`, `left`, `right`, `front`, `back` writes `facing`; `out` takes it away, so the socket faces straight out of its side again. Whatever is joined to it turns to match. |
+| `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared on a side or at a point: `--shift x,y,z` and `--on <side>` for one on a side; `--at x,y,z` for an exact point in the part's own space (it also turns one on a side into one at a point, and `--on` does the opposite). Whatever is joined to it moves with it. |
+| `duck-mold edit <recipe> set-socket <part.socket> --facing <way>` | Turns a socket on a side or at a point: `up`, `down`, `left`, `right`, `front`, `back` writes `facing`; `out` takes it away, so the socket faces as it does when nothing says (straight out of its side; up, for one at a point). Whatever is joined to it turns to match: a door's hinge at a point, `--facing right`, stands the door out to the right. |
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
@@ -706,7 +706,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 - **`set --shape` to anything but a box drops a box's changes** (only a
   box can be shaped), and says so: `dropped 3 changes`.
 - Not edits: `mirror` (except through `duplicate --mirror`), sockets
-  written with `at` or `from`, and `define`. Type those in the recipe.
+  passed on with `from`, and `define`. Type those in the recipe.
 
 ## 11. Models that move
 
@@ -900,8 +900,8 @@ loop `ends_as_it_starts`. The plain `inspect --json` lists
 <name>`: a strip of 8 frames side by side, evenly spaced in time, all
 from the same place, each with its time in its corner, written as
 `<recipe>.<animation>.strip.png`. `--frames <2 to 60>` for another
-number; `--view front|right|back|three-quarter` for where they are
-drawn from (a walk shows best from `right`, a wave from `front`). Read
+number; `--view front|right|back|three-quarter|top` for where they are
+drawn from (a walk shows best from `right`, a wave from `front`, a door swinging from `top`, straight above with the front at the bottom). Read
 the picture to see the motion; `--json` says where each frame is
 (`strip`: `at`, `left`, `top`, `size`).
 
@@ -935,7 +935,7 @@ them so and the starters work at once.
 | `wave` | two legs (`right_arm`) | Raises the right arm, waves twice, lowers it. |
 | `jump` | two legs (`body`, both legs, both arms) | Crouches, rises 40 cm, lands, straightens. |
 | `open` | a part called `door` | Swings 100 degrees on its hinge in a second. Played backwards, it closes. |
-| `roll` | `wheel_front_left`, `wheel_front_right`, `wheel_back_left`, `wheel_back_right` | Each turns once round a second, steadily (`smooth = false`). Loops. |
+| `roll` | `wheel_front_left`, `wheel_front_right`, `wheel_back_left`, `wheel_back_right` | Each turns once round a second (`[-360, 0, 0]`), steadily (`smooth = false`), rolling forward. Loops. |
 
 ```bash
 duck-mold edit duck.toml add-animation walk --starter walk

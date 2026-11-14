@@ -1171,13 +1171,14 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                             })
                             .response
                             .on_hover_text(
-                                "Which way it faces: what joins it turns to match. \"out\" is straight out of its side",
+                                "Which way it faces: what joins it turns to match. \"out\" is straight out of its side (up, for a socket at a point)",
                             );
                         if chosen != *facing {
                             edits.push(Edit::SetSocket {
                                 socket: format!("{path}.{name}"),
                                 on: None,
                                 shift: None,
+                                at: None,
                                 facing: Some(chosen),
                             });
                         }

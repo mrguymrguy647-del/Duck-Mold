@@ -303,7 +303,7 @@ next to the recipe:
 | `wave` | two legs | Raises the right arm, waves twice, lowers it. |
 | `jump` | two legs | Crouches, rises 40 cm, lands, straightens. |
 | `open` | a door | The part called `door` swings 100 degrees. Backwards, it closes. |
-| `roll` | four wheels | Each wheel turns once round a second, steadily. Loops. |
+| `roll` | four wheels | Each wheel turns once round a second, steadily, rolling forward. Loops. |
 
 "Two legs" means parts called `body`, `head`, `left_arm`,
 `right_arm`, `left_leg` and `right_leg`, standing with the arms down:
@@ -499,7 +499,7 @@ only: nothing can be changed there.
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
-| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`): a copy of that example, with the files it uses. Never writes over a file. |
+| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
 | `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
 | `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |
 | `duck-mold guide` | Prints the guide for AI agents. |
@@ -535,8 +535,8 @@ robot  (examples/robot.toml)
     ...
   floating     none
   overlapping  none
-  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out
-  animations   idle (2 s, loops), walk (0.8 s, loops), wave (1.5 s)
+  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out, jump_crouch, jump_up
+  animations   idle (2 s, loops), walk (0.8 s, loops), wave (1.5 s), jump (1.3 s)
 ok: no problems found
 ```
 
@@ -604,7 +604,7 @@ A recipe can be written as TOML (the examples) or as JSON
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
 | [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, framed windows (one box inset to a frame and a pane, defined once) and a chimney placed by sockets, and a skylight on the roof's `slope`. |
-| [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
+| [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. It moves: limits on its joins, eight poses and four animations (`idle`, `walk`, `wave`, and `jump` from the starters). |
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
 | [duck.toml](examples/duck.toml) | A ball stretched into a body with a three-number `scale`, parts placed at points of a round surface, one wing used twice. Its picture is the Studio's icon. |
@@ -618,6 +618,9 @@ A recipe can be written as TOML (the examples) or as JSON
 | [chair.toml](examples/chair.toml) | Shaping: a chair from one box. Four cuts slice the seat's edges; four legs are pulled down from the corners and the back pulled up from the back strip. |
 | [window_wall.toml](examples/window_wall.toml) | Shaping: a wall with a framed window, made by two insets and a pull, painted by face name, with a socket on a face an inset made. |
 | [rock.toml](examples/rock.toml) | Shaping: a box cut three ways through its middle, so it has 26 corners, with its corners moved in and out by name. |
+| [door.toml](examples/door.toml) | A door that opens: a hinge socket at a point, turned with `set-socket --facing`, the starter `open` fitted to it, and a key that turns the handle first. |
+| [cart.toml](examples/cart.toml) | A hand cart whose wheels roll: a wheel defined once and used four times, and the starter `roll`. |
+| [gnome.toml](examples/gnome.toml) | A second character with the robot's six part names: it takes the robot's walk from [animations/walk.toml](examples/animations/walk.toml) (written by `save-animation`), fitted to its shorter legs, and waves with the starter `wave`. |
 
 Each is commented line by line.
 

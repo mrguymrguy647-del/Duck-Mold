@@ -14,7 +14,7 @@ pub const PICTURE_SIZE: usize = 192;
 
 /// The picture of each example, as a PNG file: drawn from its recipe by
 /// the same code as `duck-mold render` (a test keeps them so).
-pub const PICTURES: [(&str, &[u8]); 15] = [
+pub const PICTURES: [(&str, &[u8]); 18] = [
     ("robot", include_bytes!("../assets/examples/robot.png")),
     ("house", include_bytes!("../assets/examples/house.png")),
     ("snowman", include_bytes!("../assets/examples/snowman.png")),
@@ -36,6 +36,9 @@ pub const PICTURES: [(&str, &[u8]); 15] = [
         include_bytes!("../assets/examples/window_wall.png"),
     ),
     ("rock", include_bytes!("../assets/examples/rock.png")),
+    ("door", include_bytes!("../assets/examples/door.png")),
+    ("cart", include_bytes!("../assets/examples/cart.png")),
+    ("gnome", include_bytes!("../assets/examples/gnome.png")),
 ];
 
 /// How many pixels square a stored picture of a shape is (the Add menu

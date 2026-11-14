@@ -128,8 +128,9 @@ enum Command {
         #[arg(long, value_name = "NUMBER", default_value_t = render::DEFAULT_FRAMES, requires = "animation")]
         frames: usize,
         /// With --animation: where the frames are drawn from: front,
-        /// right, back or three-quarter (from the front right, a little
-        /// above; the default).
+        /// right, back, three-quarter (from the front right, a little
+        /// above; the default) or top (from straight above, the front at
+        /// the bottom).
         #[arg(long, value_name = "VIEW", requires = "animation")]
         view: Option<String>,
     },
