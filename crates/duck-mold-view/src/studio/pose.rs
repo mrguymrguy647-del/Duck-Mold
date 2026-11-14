@@ -150,6 +150,9 @@ impl Studio {
         }
         self.cancel_drag();
         self.pose = name.to_owned();
+        // The pose itself, not a time of the animation.
+        self.at_time = None;
+        self.playing = false;
         self.refresh_pose();
         self.say(if name == REST {
             "The model as it is built: a drag starts a new pose".to_owned()
@@ -184,11 +187,14 @@ impl Studio {
     }
 
     /// The joints of what the model shows now in Pose mode: the pose
-    /// chosen.
+    /// chosen, or the animation at the time shown on the timeline.
     pub(super) fn pose_joints(&self) -> Vec<Joint> {
         let Some(model) = self.model() else {
             return Vec::new();
         };
+        if let Some(joints) = self.timeline_joints() {
+            return joints;
+        }
         model
             .pose(&self.pose)
             .map(|pose| pose.joints)
@@ -200,7 +206,7 @@ impl Studio {
     /// the file changes.
     pub(super) fn refresh_pose(&mut self) {
         self.pose_problems.clear();
-        let showing = self.mode == Mode::Pose;
+        let showing = self.mode == Mode::Pose || self.playing;
         let Some(model) = self.model().filter(|_| showing) else {
             self.posed = None;
             return;
@@ -210,6 +216,8 @@ impl Studio {
         // A part that floats in the pose and doesn't at rest. (A limit
         // a pose breaks is a warning of the file already.)
         if self.mode == Mode::Pose
+            && !self.playing
+            && (self.at_time.is_none() || self.key_here().is_some())
             && self.pose != REST
             && let (Some(rest), Some(pose)) = (self.report(), model.pose(&self.pose))
         {
@@ -259,7 +267,7 @@ impl Studio {
 
     /// The handles of the selected part in Pose mode.
     fn pose_gizmo(&self) -> Option<PoseGizmo> {
-        if self.mode != Mode::Pose || self.look_only {
+        if self.mode != Mode::Pose || self.look_only || self.playing {
             return None;
         }
         let path = self.selected.as_deref()?;
@@ -674,6 +682,11 @@ impl Studio {
         self.preview = None;
         let (turn, move_by) = grab.now?;
         let part = grab.gizmo.part.clone();
+        // Between two keys of the animation: a new pose there, with a
+        // key.
+        if let Some(edits) = self.between_keys_edits(&part, turn, move_by) {
+            return Some(self.apply_between_keys(edits));
+        }
         let rest = turn == [0.0; 3] && move_by == [0.0; 3];
         // Only what is, or was, turned or moved is written.
         let (was_turn, was_move) = (grab.gizmo.turn, grab.gizmo.move_by);
@@ -688,9 +701,23 @@ impl Studio {
             if rest {
                 return None;
             }
-            // `rest` is the model itself: a drag there starts a pose.
-            let name = edit::unused_name("pose", &self.pose_names());
-            let done = self.apply(&set(&name));
+            // `rest` is the model itself: a drag there starts a pose. At
+            // a key of `rest`, the key takes the new pose.
+            let name = match (&self.animation, self.key_here()) {
+                (Some(animation), Some(key)) => {
+                    edit::unused_name(&format!("{animation}_{}", key.number), &self.pose_names())
+                }
+                _ => edit::unused_name("pose", &self.pose_names()),
+            };
+            let mut edits = vec![set(&name)];
+            if let (Some(animation), Some(key)) = (self.animation.clone(), self.key_here()) {
+                edits.push(Edit::SetKey {
+                    animation,
+                    key: key.number,
+                    pose: name.clone(),
+                });
+            }
+            let done = self.apply_all(&edits);
             if done.is_ok() {
                 self.pose = name.clone();
                 self.refresh_pose();
@@ -849,6 +876,7 @@ impl Studio {
         let done = self.apply(change);
         if done.is_ok() {
             self.pose = chosen.to_owned();
+            self.at_time = None;
             self.refresh_pose();
         }
         done
@@ -863,10 +891,11 @@ impl Studio {
         })
     }
 
-    /// The model the Studio shows in Pose mode, without a drag: the
-    /// pose chosen.
+    /// The model the Studio shows in Pose mode (or while an animation
+    /// plays), without a drag: the pose chosen, or the time on the
+    /// timeline.
     pub(super) fn posed_model(&self) -> Option<&Model> {
-        if self.mode == Mode::Pose {
+        if self.mode == Mode::Pose || self.playing {
             self.posed.as_ref()
         } else {
             None

@@ -3829,6 +3829,27 @@ not a line for every part.
 Every one of these is an edit command from the list above. Selecting,
 moving through time, playing and ghosts change nothing in the file.
 
+*As built (step 7):* as above, with these details. A turn between two
+keys doesn't ask: it makes the pose (`wave_7`, numbered by the keys
+there are), holding every part the animation moves as it is at that
+time (turns to a tenth of a degree) with the dragged part as dragged,
+and a key with it, as one step to undo; the status line says so. A
+turn at a key of `rest` makes a new pose (`wave_1`) and gives the key
+that pose. Between two keys the list of poses highlights none. A
+dragged key can't come within a hundredth of a second of its
+neighbours, and key 1 stays at 0. New makes an animation with a first
+key at 0 in `rest`, so it can be built on at once. The ghosts are
+outlines of the parts the animation moves (and what hangs from them),
+blue for the key before and orange for the key after; at a key, its
+neighbours. They aren't drawn while it plays. The timeline fits the
+whole animation to the window rather than scrolling. In Part mode a
+model with animations has a Play button in the view's top right, with
+the animation to play (the user's addition); playing in Part mode
+shows the model moving, and taking hold of anything stops it.
+Space plays and stops in either mode. Both the window and the engine
+are tested: keys clicked and dragged with the mouse, the ruler
+scrubbed, Loop, Space, Ghosts, and two screen pictures.
+
 ### Examples (step 9)
 
 Each with its stored model, report, picture, and a frame strip of each

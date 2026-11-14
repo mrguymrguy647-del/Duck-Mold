@@ -52,6 +52,8 @@ pub struct StudioApp {
     /// The part a definition is being made from, and the name being
     /// typed for it, while the window that asks is open.
     defining: Option<(String, String)>,
+    /// The timeline, in Pose mode.
+    timeline: crate::timeline::Timeline,
 }
 
 /// The folder a person's own models go in: `Duck Mold` in their
@@ -92,6 +94,7 @@ impl StudioApp {
             titled: String::new(),
             shown_selected: None,
             draft: properties::Draft::default(),
+            timeline: crate::timeline::Timeline::default(),
             colours: palette::Draft::default(),
             thumbs: library::Thumbs::default(),
             recent: Recent::nowhere(),
@@ -214,6 +217,11 @@ impl StudioApp {
         self.studio.as_mut()
     }
 
+    /// The timeline as it was last drawn: where its keys are, for tests.
+    pub fn timeline(&self) -> &crate::timeline::Timeline {
+        &self.timeline
+    }
+
     /// Where on the screen the viewport was last drawn, and how many
     /// pixels its picture has. The tests use it to click on a part.
     pub fn viewport(&self) -> Option<(Rect, [usize; 2])> {
@@ -252,6 +260,10 @@ impl StudioApp {
         self.recent.keep_hidden(studio.path(), studio.hidden());
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(250));
+        // A playing animation moves every frame.
+        if studio.is_playing() {
+            ui.ctx().request_repaint();
+        }
 
         // What a menu or a key asked for, carried out at the end.
         let mut asked: Option<Action> = None;
@@ -382,6 +394,15 @@ impl StudioApp {
             .min_size(56.0)
             .show(ui, |ui| problems(ui, studio));
 
+        // The timeline, in Pose mode, above the problems.
+        if studio.mode() == Mode::Pose {
+            egui::Panel::bottom("duck_mold_timeline")
+                .resizable(false)
+                .show(ui, |ui| {
+                    crate::timeline::show(ui, studio, &mut self.timeline)
+                });
+        }
+
         egui::Panel::left("duck_mold_parts")
             .resizable(true)
             .default_size(230.0)
@@ -511,6 +532,9 @@ impl StudioApp {
             if key(egui::Key::O) {
                 asked = Some(Action::PoseMode);
             }
+            if key(egui::Key::Space) {
+                asked = Some(Action::Play);
+            }
             if let Some(action) = actions::keys(ui) {
                 asked = Some(action);
             }
@@ -544,6 +568,7 @@ impl StudioApp {
                 || matches!(
                     action,
                     Action::Frame
+                        | Action::Play
                         | Action::Hide
                         | Action::ShowAll
                         | Action::SelectAll
@@ -631,6 +656,15 @@ impl StudioApp {
                     let _ = studio.toggle_pose_mode();
                 }
                 Action::PoseTool(tool) => studio.pose_tool = tool,
+                Action::Play => {
+                    // In Part mode with none chosen yet: the first.
+                    if studio.animation().is_none()
+                        && let Some(first) = studio.animation_names().first().cloned()
+                    {
+                        studio.choose_animation(Some(&first));
+                    }
+                    studio.toggle_play();
+                }
                 Action::PoseBackToRest => {
                     if let Some(part) = studio.selected().map(str::to_owned) {
                         let _ = studio.pose_back_to_rest(&part);

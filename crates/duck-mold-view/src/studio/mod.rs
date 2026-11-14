@@ -20,12 +20,14 @@ mod paint;
 mod pose;
 mod shape;
 mod sockets;
+mod timeline;
 pub mod viewport;
 
 pub use edges::CutAim;
 pub use pose::{POSE_STEP, PoseTool};
 pub use shape::{FaceTool, Mode};
 pub use sockets::Clicked;
+pub use timeline::{KEY_STEP, KeyMark};
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -162,6 +164,16 @@ pub struct Studio {
     pub pose_tool: PoseTool,
     /// A ring or arrow in hand in Pose mode.
     pose_grab: Option<pose::PoseGrab>,
+    /// The animation chosen on the timeline, or with the view's Play
+    /// button.
+    animation: Option<String>,
+    /// The time shown on the timeline, in seconds from the animation's
+    /// start. `None`: the pose chosen is shown.
+    at_time: Option<f64>,
+    /// True while the animation chosen plays.
+    playing: bool,
+    /// Whether the poses of the keys before and after are drawn faintly.
+    ghosts: bool,
 }
 
 impl Studio {
@@ -206,6 +218,10 @@ impl Studio {
             pose_problems: Vec::new(),
             pose_tool: PoseTool::Turn,
             pose_grab: None,
+            animation: None,
+            at_time: None,
+            playing: false,
+            ghosts: true,
         };
         studio.reload();
         studio.read_library();
@@ -382,6 +398,7 @@ impl Studio {
         if !self.pose_names().contains(&self.pose) {
             self.pose = duck_mold_core::recipe::REST.to_owned();
         }
+        self.keep_timeline();
         self.refresh_pose();
     }
 
@@ -396,6 +413,8 @@ impl Studio {
     /// Lets `seconds` pass. Twice a second the files are checked, and the
     /// model is built again if one has changed. True if it was.
     pub fn tick(&mut self, seconds: f64) -> bool {
+        // A playing animation moves on.
+        self.advance(seconds);
         self.since_check += seconds;
         if self.since_check < CHECK_EVERY {
             return false;
@@ -876,6 +895,7 @@ impl Studio {
         } else {
             Vec::new()
         };
+        marks.extend(self.ghost_marks());
         marks.extend(self.marks(width, height));
         let hidden = self.unseen_in(model);
         let lit = if self.view == (width, height) {

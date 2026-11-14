@@ -265,6 +265,32 @@ of its poses; the list on the right has `rest` and the recipe's poses.
 
 ![The robot in Pose mode: waving, its head selected with a ring for each way it may turn, and the poses on the right](docs/studio-posing.png)
 
+**The timeline.** In Pose mode the timeline runs along the bottom.
+Pick an animation (or make one with **New**): its keys are diamonds,
+each with its pose's name.
+
+- Click a key: time goes there, and its pose is the one a drag
+  changes. (If other keys use the same pose, the status line says so:
+  they change with it.)
+- Drag along the ruler to move through time; the model moves with it.
+  Turning a part between two keys makes a new pose there (`wave_7`)
+  with a key.
+- Drag a key to change its time (it snaps to 0.05 s and can't pass its
+  neighbours; Ctrl: free). Right-click a key to remove it or give it
+  another pose. **+ Key** adds the pose chosen at the time shown.
+- **Play** (Space) plays it; **Loop** and **Smooth** are the
+  animation's own settings; **Ghosts** draws the poses of the keys
+  before (blue) and after (orange) faintly.
+- Every change is one edit: `move-key`, `set-key`, `remove-key`,
+  `add-key`, `set-animation`, `add-animation`. Moving through time,
+  playing and ghosts change nothing in the file.
+
+In Part mode, a model with animations has a **Play** button at the top
+right of the view, with the animation to play: the model moves, and
+comes back to rest when it stops.
+
+![The timeline: the robot's wave, half way between two keys, with the ghosts of both](docs/studio-timeline.png)
+
 **Adding parts.** There are two ways.
 
 - **Add**, in the top bar, lists the shapes (each with a small
@@ -384,6 +410,7 @@ keys, About). Every line shows its key.
 | C | The selected box's corners: click one to move it. C again: back to parts |
 | O | Pose mode: turn parts about their joins, in a pose. O again: back to parts |
 | R, G (posing) | Turn with rings, or move with arrows |
+| Space | Play the animation, or stop it |
 | T, G, R, S, I, K (shaping) | The Pull, Move, Turn, Scale, Inset and Cut tools (Edge mode: G and K) |
 | Ctrl held while dragging | No snapping |
 | Delete or Backspace | Remove what is selected |

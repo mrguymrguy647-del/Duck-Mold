@@ -688,7 +688,10 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   one `set-pose`, and the poses list's New, Copy, Mirror, Rename and
   Remove are `add-pose`, `add-pose --from`, `mirror-pose`,
   `rename-pose` and `remove-pose`. The Limits in the panel are
-  `set-limits`.
+  `set-limits`. Its timeline's changes are `move-key`, `set-key`,
+  `remove-key`, `add-key`, `set-animation` and `add-animation`; a turn
+  between two keys is `add-pose`, a `set-pose` for every part the
+  animation moves, and `add-key`, together.
 - **`pull`, `inset`, `set-change` and `remove-change` on a part made
   from a defined part** change the definition, like `set --shape`.
 - **`set --shape` to anything but a box drops a box's changes** (only a

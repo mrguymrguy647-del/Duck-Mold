@@ -2674,3 +2674,108 @@ fn the_panel_shows_a_parts_limits_in_part_mode_and_sets_them() {
     );
     screen.get_by_label("fixed: it doesn't turn or move");
 }
+
+// ---- Phase 5: the timeline -----------------------------------------------------------
+
+fn studio<'a>(screen: &'a Harness<'static, StudioApp>) -> &'a duck_mold_view::studio::Studio {
+    screen.state().studio().unwrap()
+}
+
+#[test]
+fn the_timeline_shows_the_keys_and_plays_moves_and_changes_them() {
+    use egui::Key;
+    let recipe = copy_of("robot.toml", "screens_timeline");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    // No animation chosen yet.
+    screen.get_by_label("Animation");
+    screen.get_by_label_contains("Choose an animation");
+    // Choose the wave.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("wave"));
+    screen.run_steps(3);
+    for label in ["Play", "Loop", "Smooth", "Ghosts", "+ Key", "0 s of 1.5 s"] {
+        screen.get_by_label(label);
+    }
+
+    // A click on the third key goes to it: its pose is chosen.
+    let third = screen.state().timeline().key_on_screen(0.6).unwrap();
+    click_at(&mut screen, third);
+    assert_eq!(studio(&screen).time(), Some(0.6));
+    assert_eq!(studio(&screen).pose(), "wave_out");
+    // A drag along the ruler moves through time.
+    let (from, to) = {
+        let timeline = screen.state().timeline();
+        (
+            timeline.time_on_screen(0.1).unwrap(),
+            timeline.time_on_screen(0.5).unwrap(),
+        )
+    };
+    drag(&mut screen, from, to);
+    let now = studio(&screen).time().unwrap();
+    assert!((now - 0.5).abs() < 0.02, "{now}");
+    // A key dragged: it snaps, and one line changes.
+    let (from, to) = {
+        let timeline = screen.state().timeline();
+        (
+            timeline.key_on_screen(0.6).unwrap(),
+            timeline.key_on_screen(0.72).unwrap(),
+        )
+    };
+    drag(&mut screen, from, to);
+    let lines = new_lines(&recipe);
+    assert_eq!(lines, ["  { at = 0.7, pose = \"wave_out\" },"], "{lines:?}");
+    // Loop is a switch: one line.
+    screen.get_by_label("Loop").click();
+    screen.run_steps(2);
+    assert!(
+        std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("[animations.wave]\nloop = true\n")
+    );
+    // Space plays, and stops.
+    screen.key_press(Key::Space);
+    screen.run_steps(2);
+    assert!(studio(&screen).is_playing());
+    screen.get_by_label("Stop");
+    screen.key_press(Key::Space);
+    screen.run_steps(2);
+    assert!(!studio(&screen).is_playing());
+    // Ghosts off.
+    screen.get_by_label("Ghosts").click();
+    screen.run_steps(2);
+    assert!(!studio(&screen).ghosts());
+}
+
+#[test]
+fn the_play_button_in_the_view_plays_an_animation_in_part_mode() {
+    use egui::Key;
+    let recipe = copy_of("robot.toml", "screens_play");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+
+    assert_eq!(studio(&screen).mode(), duck_mold_view::studio::Mode::Part);
+    // The first animation, ready to play.
+    screen.get_by_label("Animation to play");
+    screen.get_by_label("Play").click();
+    screen.run_steps(2);
+    assert!(studio(&screen).is_playing());
+    assert_eq!(studio(&screen).animation(), Some("idle"));
+    screen.get_by_label("Stop").click();
+    screen.run_steps(2);
+    assert!(!studio(&screen).is_playing());
+    // Space too.
+    screen.key_press(Key::Space);
+    screen.run_steps(2);
+    assert!(studio(&screen).is_playing());
+    // A model with no animations has no Play button.
+    let crate_recipe = copy_of("crate.toml", "screens_play_crate");
+    let mut plain = harness(StudioApp::with_file(&crate_recipe, false), false);
+    plain.run_steps(2);
+    assert!(plain.query_by_label("Play").is_none());
+}

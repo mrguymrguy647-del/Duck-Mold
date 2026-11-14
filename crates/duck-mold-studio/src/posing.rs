@@ -213,8 +213,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut PoseDraft) {
     ui.label(RichText::new("Poses").strong());
     ui.separator();
     let mut done: Option<Result<String, String>> = None;
+    let shown = studio.pose_shown().map(str::to_owned);
     for name in studio.pose_names() {
-        let chosen = studio.pose() == name;
+        let chosen = shown.as_deref() == Some(name.as_str());
         let words = if name == REST {
             RichText::new("rest").italics()
         } else {

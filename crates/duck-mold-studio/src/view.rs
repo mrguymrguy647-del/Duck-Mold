@@ -59,6 +59,12 @@ struct Drawn {
     /// selected, so markers show).
     pointer: Option<(i32, i32)>,
     dragging: bool,
+    /// The pose shown, the time on the timeline (in milliseconds),
+    /// whether it plays, and the ghosts.
+    pose: String,
+    time: Option<i64>,
+    playing: bool,
+    ghosts: bool,
 }
 
 /// Where a part is about to be added.
@@ -303,6 +309,10 @@ pub fn show(
             .map(in_picture)
             .map(|(x, y)| (x.round() as i32, y.round() as i32)),
         dragging: studio.dragging().is_some(),
+        pose: studio.pose().to_owned(),
+        time: studio.time().map(|at| (at * 1000.0).round() as i64),
+        playing: studio.is_playing(),
+        ghosts: studio.ghosts(),
     };
     // While a handle is held the picture changes with every move.
     if view.drawn.as_ref() != Some(&now) || view.texture.is_none() || view.moving {
@@ -438,6 +448,9 @@ pub fn show(
 
     mode_row(ui, studio, rect);
     tool_strip(ui, studio, rect);
+    if studio.mode() == Mode::Part {
+        crate::timeline::play_button(ui, studio, rect);
+    }
     add_list(ui, studio, view, thumbs, rect);
     asked
 }

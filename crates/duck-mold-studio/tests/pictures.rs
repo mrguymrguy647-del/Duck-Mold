@@ -582,6 +582,32 @@ fn the_screens_look_as_they_did() {
             .select(Some("left_arm/forearm"));
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "pose-fixed"));
+
+        // The timeline: the wave chosen, half way between two keys, with
+        // the ghosts of both.
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("left_arm"));
+            studio.choose_animation(Some("wave"));
+            studio.set_time(0.5);
+        }
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "timeline"));
+    }
+
+    // Play in Part mode: the robot waving, part way through.
+    {
+        let mut screen = robot();
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.choose_animation(Some("wave"));
+            studio.play();
+            // (While it plays, each frame moves it on by the same
+            // step, so the picture is the same every time.)
+            studio.tick(0.5);
+        }
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "play"));
     }
 
     assert!(

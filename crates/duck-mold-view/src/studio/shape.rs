@@ -139,6 +139,7 @@ impl Studio {
         self.cancel_drag();
         self.mode = Mode::Part;
         self.faces.clear();
+        self.playing = false;
         self.refresh_pose();
         self.say("Back to parts: a click selects a part".to_owned());
     }

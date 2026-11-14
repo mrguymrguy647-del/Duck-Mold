@@ -92,6 +92,8 @@ pub enum Action {
     PoseTool(PoseTool),
     /// Put the selected part back at rest in the pose chosen.
     PoseBackToRest,
+    /// Play the animation chosen, or stop it (Space).
+    Play,
     /// Ask for a name, and make a definition from the selected part.
     MakeDefinition,
     /// Write the selected part alone to the library's folder.
@@ -99,7 +101,7 @@ pub enum Action {
 }
 
 /// Every key and what it does, for Help's list and the README's.
-pub const KEYS: [(&str, &str); 27] = [
+pub const KEYS: [(&str, &str); 28] = [
     (
         "G, R, S, T, P",
         "The Move, Rotate, Scale, Size and Paint tools",
@@ -125,6 +127,7 @@ pub const KEYS: [(&str, &str); 27] = [
         "Pose mode: turn parts about their joins, in a pose. O again: back to parts",
     ),
     ("R, G (posing)", "Turn with rings, or move with arrows"),
+    ("Space", "Play the animation, or stop it"),
     ("Ctrl held while dragging", "No snapping"),
     ("Delete or Backspace", "Remove what is selected"),
     ("Ctrl+D", "Duplicate what is selected"),

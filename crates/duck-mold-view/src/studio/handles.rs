@@ -950,6 +950,8 @@ impl Studio {
     /// taken, or `None` if the pointer is on neither: then the drag
     /// turns the view.
     pub fn grab(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<Grip> {
+        // A playing animation stops: what is taken hold of stands still.
+        self.stop();
         self.hover(size, Some(at));
         self.grab = None;
         self.pose_grab = None;
