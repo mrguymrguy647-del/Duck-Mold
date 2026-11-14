@@ -83,6 +83,16 @@ pub enum Code {
     /// A change to a shape that would squeeze a face flat, turn the
     /// shape inside out or make it pass through itself.
     BadShape,
+    /// A pose that turns a part further than its limits allow, or moves
+    /// a part that is fixed.
+    LimitBroken,
+    /// A pose's name that the recipe doesn't have.
+    UnknownPose,
+    /// An animation's name that the recipe doesn't have.
+    UnknownAnimation,
+    /// An animation that loops and doesn't end on the pose it starts
+    /// with: the model would jump when it starts again.
+    LoopJumps,
 }
 
 impl Code {
@@ -115,6 +125,10 @@ impl Code {
             Code::OffGround => "off_ground",
             Code::Skipped => "skipped",
             Code::BadShape => "bad_shape",
+            Code::LimitBroken => "limit_broken",
+            Code::UnknownPose => "unknown_pose",
+            Code::UnknownAnimation => "unknown_animation",
+            Code::LoopJumps => "loop_jumps",
         }
     }
 }

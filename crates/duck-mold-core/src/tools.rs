@@ -13,13 +13,17 @@ use serde::Serialize;
 use crate::assemble::assemble;
 use crate::glb::{read_glb, write_glb};
 use crate::gltf::{is_duck_mold_glb, read_gltf};
-use crate::inspect::{Inspection, MaterialUse, face_report, inspect, socket_report};
+use crate::inspect::{
+    AnimationInspection, Inspection, MaterialUse, face_report, inspect, inspect_animation,
+    inspect_pose, join_report, socket_report,
+};
 use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load};
 use crate::math::{Bounds, Transform, Vec3};
 use crate::mesh::{MeshFile, read_obj};
 use crate::model::{Face, Model, Part, PartKind};
-use crate::recipe::{Loc, PaletteColor};
+use crate::motion::{self, Animation, Pose};
+use crate::recipe::{Loc, PaletteColor, REST};
 
 /// Why an operation gave nothing.
 #[derive(Debug, Clone, PartialEq)]
@@ -218,6 +222,11 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         mirrored: false,
         place: Transform::IDENTITY,
         local: Transform::IDENTITY,
+        pivot: Vec3::ZERO,
+        parent: None,
+        axes: crate::math::Mat3::IDENTITY,
+        limits: crate::recipe::Limits::Free,
+        carried: Vec::new(),
         sockets: Vec::new(),
         bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
         faces: 0..faces.len(),
@@ -236,6 +245,9 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         faces,
         parts: vec![part],
         sockets: Vec::new(),
+        carried: Vec::new(),
+        poses: Vec::new(),
+        animations: Vec::new(),
         zero: Vec3::ZERO,
     }
 }
@@ -268,27 +280,121 @@ pub fn inspect_file(path: &Path) -> Result<Inspection, Failure> {
 /// `duck-mold inspect --sockets`: [`inspect_file`], with every named
 /// socket listed too.
 pub fn inspect_file_with_sockets(path: &Path) -> Result<Inspection, Failure> {
-    inspect_file_listing(path, true, false)
+    inspect_file_listing(
+        path,
+        &Also {
+            sockets: true,
+            ..Also::default()
+        },
+    )
 }
 
 /// `duck-mold inspect --sockets --faces`: [`inspect_file`], with every
 /// named socket listed if `sockets`, and every face of every shaped part
 /// if `faces`.
-pub fn inspect_file_listing(
-    path: &Path,
-    sockets: bool,
-    faces: bool,
-) -> Result<Inspection, Failure> {
+pub fn inspect_file_listing(path: &Path, also: &Also) -> Result<Inspection, Failure> {
     let built = build(path)?;
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
+    // In a pose, everything is measured on the model as the pose puts
+    // it.
+    let model = match &also.pose {
+        None => built.model,
+        Some(name) => {
+            let pose = pose_named(&built.model, name, &built.source)?;
+            let posed = motion::posed(&built.model, &pose.joints);
+            inspection = inspect_pose(&inspection, &built.model, &posed, &pose, &built.source);
+            posed
+        }
+    };
     inspection.materials = built.materials;
-    if sockets {
-        inspection.sockets = socket_report(&built.model);
+    if also.sockets {
+        inspection.sockets = socket_report(&model);
     }
-    if faces {
-        inspection.shaped = face_report(&built.model);
+    if also.faces {
+        inspection.shaped = face_report(&model);
+    }
+    if also.joins {
+        inspection.joins = join_report(&model);
     }
     Ok(inspection)
+}
+
+/// The model's pose with this name, or a sentence saying which poses it
+/// has. `rest` is always one of them.
+pub fn pose_named(model: &Model, name: &str, source: &str) -> Result<Pose, Failure> {
+    model.pose(name).ok_or_else(|| {
+        let names: Vec<&str> = std::iter::once(REST)
+            .chain(model.poses.iter().map(|pose| pose.name.as_str()))
+            .collect();
+        Failure::Usage(Box::new(
+            Issue::error(
+                Code::UnknownPose,
+                "",
+                format!("there is no pose \"{name}\" in this recipe"),
+            )
+            .in_file(source)
+            .got(name)
+            .one_of(name, names),
+        ))
+    })
+}
+
+/// `duck-mold inspect --animation`: the report on one of a recipe's
+/// animations, with every frame looked at.
+pub fn inspect_animation_file(path: &Path, name: &str) -> Result<AnimationInspection, Failure> {
+    let built = build(path)?;
+    let animation = animation_named(&built.model, name, &built.source)?.clone();
+    let rest = inspect(&built.model, &built.source, built.warnings);
+    Ok(inspect_animation(
+        &rest,
+        &built.model,
+        &animation,
+        &built.source,
+    ))
+}
+
+/// The model's animation with this name, or a sentence saying which it
+/// has.
+pub fn animation_named<'m>(
+    model: &'m Model,
+    name: &str,
+    source: &str,
+) -> Result<&'m Animation, Failure> {
+    model.animation(name).ok_or_else(|| {
+        let names: Vec<&str> = model
+            .animations
+            .iter()
+            .map(|animation| animation.name.as_str())
+            .collect();
+        Failure::Usage(Box::new(
+            Issue::error(
+                Code::UnknownAnimation,
+                "",
+                if names.is_empty() {
+                    format!("there is no animation \"{name}\" in this recipe: it has no animations")
+                } else {
+                    format!("there is no animation \"{name}\" in this recipe")
+                },
+            )
+            .in_file(source)
+            .got(name)
+            .one_of(name, names),
+        ))
+    })
+}
+
+/// What `inspect` lists besides its report, when asked.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Also {
+    /// Every named socket and where it is: `--sockets`.
+    pub sockets: bool,
+    /// The faces of every shaped part: `--faces`.
+    pub faces: bool,
+    /// The tree the model moves by: what every part turns about, and how
+    /// far: `--joins`.
+    pub joins: bool,
+    /// Report on the model as it stands in this pose: `--pose`.
+    pub pose: Option<String>,
 }
 
 /// What `duck-mold export` did: the report on the model, and the file it

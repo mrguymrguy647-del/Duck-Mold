@@ -502,7 +502,7 @@ Mold writes a deliberately narrow kind of it:
 
 | | |
 |---|---|
-| Layout | One scene, one object (named after the recipe), one mesh, one list of triangles. Every part is merged into it, as Duck Forge's guide recommends ("one draw instead of dozens"). |
+| Layout | One scene, one object (named after the recipe), one mesh, one list of triangles. Every part is merged into it, as Duck Forge's guide recommends ("one draw instead of dozens"). (From Phase 5 the file is a tree with an object for every part, so that parts can move: section 21. Duck Forge still puts them together and draws one mesh.) |
 | Positions | `POSITION`: three decimal numbers per corner (32-bit). |
 | Normals | `NORMAL`: which way each face points, the same for all corners of a face, so every viewer shades it flat like Duck Forge does. |
 | Colours | `COLOR_0`: three decimal numbers per corner, linear. |
@@ -3122,3 +3122,871 @@ other way.
     after Phase 3's step 3. I keep building unless you say stop.
 
 The version becomes 0.4.0.
+
+---
+
+## 21. Phase 5: Motion
+
+Phases 0 to 4 make models that stand still. Phase 5 makes them move: a
+character that stands idle, walks, waves and jumps; a door that opens;
+wheels that turn. Duck Forge plays these in a game.
+
+The four rules hold. The recipe is the model, and now the motion too:
+poses and animations are written in the recipe, in words. Every Studio
+action is an edit command. An edit changes only what it must in the
+file. The viewport is Duck Forge's CPU renderer. And Duck Forge's
+loader stays in step: the same reader code in both repositories, a
+raised version, shared test files, the handoff note updated.
+
+Nothing in this section is built yet. It ends with the decisions I made
+and, for each, the other way, so you can change any of them before I
+start.
+
+### In one picture
+
+```toml
+# A join may say how far it turns.
+[[parts]]
+name = "head"
+attach = "bottom"
+to = "body.neck"
+limits = { x = [-30, 40], y = [-80, 80] }   # nods and turns; doesn't tilt
+
+# A pose: which parts are turned, and how far, in degrees.
+[poses.step_left]
+left_leg  = [30, 0, 0]       # forward
+right_leg = [-30, 0, 0]      # back
+left_arm  = [-25, 0, 0]
+right_arm = [25, 0, 0]
+
+# An animation: poses at times, in seconds.
+[animations.walk]
+loop = true
+keys = [
+  { at = 0.0, pose = "step_left" },
+  { at = 0.4, pose = "step_right" },
+  { at = 0.8, pose = "step_left" },
+]
+```
+
+Read aloud: "The head nods 30 degrees one way and 40 the other, and
+turns 80 either way. In the pose `step_left` the left leg is 30 degrees
+forward and the right leg 30 back, the arms the other way round.
+Walking goes from `step_left` to `step_right` in 0.4 seconds, back in
+another 0.4, and starts again."
+
+### What a bone is: a join
+
+There are no bones to place. **Every join is already a bone**: the
+robot's head sits on `body.neck`, so turning that join turns the head,
+and everything that hangs from the head (its eyes, its antenna) goes
+with it. Every model made so far can be posed as it is.
+
+The rules, all of them:
+
+- **Every part can turn, about its pivot.** For a joined part the pivot
+  is the socket it is joined to (the neck, the shoulder, the hinge).
+  For a part that isn't joined, it is the part's own middle.
+- **Turning a part carries what hangs from it**: the parts joined to
+  it, the parts joined to those, and so on.
+- **A part made of parts is a bone too.** The robot's `left_arm` is an
+  arm made of an upper arm, an elbow, a forearm and a hand. Turning
+  `left_arm` turns the whole arm at the shoulder. The parts inside are
+  bones below it, named by their path: `left_arm/elbow` bends the arm
+  at the elbow.
+- **Parts turn rigidly.** Nothing bends or stretches (that is skinning,
+  and not in this phase). An elbow is a ball between two boxes, as the
+  robot's already is.
+
+So the model is a tree: the body at the root, the head and the limbs
+below it, the hand at the end of the arm. `duck-mold inspect --joins`
+prints it:
+
+```text
+robot  (robot.toml): 20 joins
+  body                    turns about its middle           free
+    panel                 on body.chest                    fixed
+    head                  on body.neck                     x -30..40, y -80..80
+      left_eye            on head.left_eye                 free
+      antenna             on head.antenna                  free
+        antenna_tip       on antenna.top                   free
+    left_arm              on body.left_arm                 x -60..180, z -170..10
+      left_arm/upper      turns about its middle           free
+        left_arm/elbow    on upper.bottom                  x 0..140
+        ...
+```
+
+### Which way a turn goes
+
+A turn is three numbers, `[x, y, z]`, in degrees, the same as `rotate`
+has always been: around x, then y, then z.
+
+| Number | Around | What it looks like on a character facing forward |
+|---|---|---|
+| x | the left-to-right direction | A nod. Positive swings a hanging arm or leg **forward**, and tips a head back. |
+| y | the up direction | A turn. Positive turns a head to **its right**. A door swings around y. |
+| z | the forward direction | A tilt. Positive leans the top to **its left**; it lifts the right arm out sideways (the left arm lifts with a negative z). |
+
+**Whose x, y and z?** Those of the list the part is written in, as it
+stands at rest. For a part of the model that is simply the model's own
+x, y and z. For a part inside a definition (the elbow inside `arm`) it
+is the definition's own, wherever that arm is put. Two things follow,
+both wanted:
+
+- When a parent turns, the child's directions turn with it. A forearm
+  bends the same way whether the arm hangs down or points up.
+- A mirrored arm mirrors its motion by itself: `"left_arm/elbow" = [40,
+  0, 0]` and `"right_arm/elbow" = [40, 0, 0]` bend both elbows the same
+  way, though the right arm is a mirror image.
+
+You don't have to think about this in the Studio: the rings stand at
+the join, the right way round.
+
+### Limits: how far a join may turn
+
+`limits` is written on the part, next to its join:
+
+```toml
+limits = { x = [-30, 40], y = [-80, 80] }   # a neck
+limits = { x = [0, 140] }                   # a knee or an elbow: one way only
+limits = { y = [0, 110] }                   # a door on its hinge
+limits = { x = "free" }                     # a wheel on its axle: round and round
+limits = "fixed"                            # never moves: a badge, a window
+```
+
+- **No `limits`**: the part may turn any way, any amount. That is what
+  every existing recipe says, so every existing model can be posed.
+- **With `limits`**: only the directions named may turn, each between
+  its two numbers (the first is 0 or less, the second 0 or more, so
+  that standing at rest is always allowed), or `"free"` for any amount.
+  A direction not named doesn't turn.
+- **`"fixed"`**: the part neither turns nor moves in any pose.
+- Limits inside a definition go with it: both arms get the elbow's
+  limit. A mirror copy of a part (`duplicate --mirror`) gets its limits
+  mirrored.
+
+**A pose that breaks a limit is a warning, not an error.** The model
+still builds and exports, and `inspect` and the Studio's Problems list
+say which pose turns which part how far past which limit. (An error
+would stop the whole model from exporting because one pose is two
+degrees over.) In the Studio a drag simply stops at the limit.
+
+Limits are about turning. A pose may also move a part (below); that has
+no limits in this phase, except that a `"fixed"` part can't.
+
+*As built (step 2):* as above. Two things the design didn't say:
+`limits = {}` names no direction, so the part doesn't turn but may still
+be moved (a drawer); and the plain `inspect` report says a part's
+limits beside it in the list of parts ("on body.neck, turns x -30..40,
+y -80..80"), only for parts that have them, so no example's report
+changes. `set-limits` takes `--x`, `--y` and `--z`, each two angles,
+`free` or `none`; a direction not given stays as it is.
+
+### Poses
+
+```toml
+[poses.wave]
+left_arm = [0, 0, -150]                       # up and out to its side
+"left_arm/elbow" = [0, 0, -30]                # a part inside a part: its path, in quotes
+head = [0, -15, 0]
+
+[poses.crouch]
+body = { move = [0, -0.15, 0] }               # the whole robot sinks 15 cm
+left_leg  = { turn = [40, 0, 0] }             # the long way of writing a turn
+right_leg = [40, 0, 0]
+```
+
+- A pose has a name and a line for each part that isn't at rest. The
+  line is the part's turn, or `{ turn = ..., move = ... }` when it also
+  moves. `move` is in metres, in the same directions as the turn, from
+  where the part stands at rest. Everything hanging from the part moves
+  with it, so moving the body moves the whole robot: that is how it
+  jumps.
+- A part the pose doesn't name is at rest.
+- **`rest`** is always there and can't be written: the model as the
+  recipe builds it.
+- A pose naming a part that doesn't exist is a mistake, with the
+  closest name, like every other name in a recipe.
+- Poses belong to the model: they are at the top of the recipe, not in
+  a definition. (A recipe used as a part inside another recipe brings
+  its limits, not its poses: see "What Phase 5 won't do".)
+
+**No reaching (IK) in this phase.** A leg is posed by turning the hip
+and the knee, not by putting the foot somewhere. So in a crouch the
+feet are kept on the ground by hand: sink the body until they touch.
+`inspect --pose` says how far the lowest point is above or below the
+ground, so a person or an agent can get it right.
+
+*As built (step 3):* as above, with these details. A turn's x, y and z
+are those of the list the part is written in, as for limits, so a pose
+of a mirrored arm uses the same numbers as its twin and comes out as
+the mirror image. `mirror-pose` swaps `left` and `right` in the parts'
+names and turns y and z the other way; for a part inside a mirrored
+part the numbers stay as they are, because the mirroring is already in
+the part. A move to one side goes to the other. `set-pose` takes
+`--turn`, `--move` or both, and `--rest` takes the part's line out; a
+pose with no lines left stays, as an empty pose. `add-pose` with no
+`--from` is an empty pose. `remove-pose` has no `--with-keys` until
+there are keys (step 4). A number in a turn may be from -36000 to
+36000: a hundred times round. In `inspect --pose` the `ground` line and
+the sockets of `--sockets` are of the posed model; a pose that leaves
+the ground isn't warned about (a jump). The plain `inspect` report
+lists the names of the poses on one line. `render --pose wave` writes
+`robot.wave.png`.
+
+### Animations
+
+An animation is a list of **keys**: a pose, and the time it is reached.
+
+```toml
+[animations.wave]
+keys = [
+  { at = 0.0, pose = "rest" },
+  { at = 0.3, pose = "wave" },
+  { at = 0.6, pose = "wave_out" },
+  { at = 0.9, pose = "wave" },
+  { at = 1.3, pose = "rest" },
+]
+
+[animations.roll]            # a cart's wheels
+loop = true
+smooth = false
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 1, pose = "wheels_round" },   # each wheel = [360, 0, 0]: once round
+]
+```
+
+- **`at`** is in seconds. The first key is at 0, and each key is later
+  than the one before. The animation lasts until its last key.
+- **Between two keys every number goes from one pose's to the next's.**
+  A wheel at `[0, 0, 0]` and then `[360, 0, 0]` turns once round (the
+  numbers are followed, so a full turn is a full turn, not "the same
+  place").
+- **`smooth`** (on, unless you write `smooth = false`): the motion
+  flows through each pose without stopping there, and starts and ends
+  gently. That suits arms, legs, doors. With `smooth = false` it goes
+  straight from pose to pose at a steady speed: a wheel, a clock hand.
+- **`loop`** (off, unless you write `loop = true`): it starts again
+  after its last key. **A loop ends on the pose it starts with**, as
+  `walk` does above. If it doesn't, the model would jump; that is a
+  warning that says so. (A wheel at 360 is where it was at 0, so `roll`
+  is fine.)
+- The same pose can be used by many keys and many animations.
+
+*As built (step 4):* as above, with these details. "Smooth" is a curve
+through the keys that never goes past a key's value on its way to it
+(so an animation whose poses are within the limits stays within them):
+a number that keeps going the same way through a key passes it at a
+speed between those of the two sides, and one that turns back stops
+there. The two ends are at a stop, unless the animation loops: then the
+end runs into the start, so a wheel turns at one speed all the way
+round even with `smooth` on. An animation may have no keys (that is
+what `add-animation` makes); it is a warning until it gets one. The
+edit commands keep the first key at 0: `move-key` refuses to move key
+1, and removing key 1 moves the others earlier. `move-key` past
+another key changes places with it. `remove-pose --with-keys` is here
+now. `inspect --animation` has its own report (not the model's with
+lines added): length, loop, smooth, keys, what moves, how the lowest
+point goes, and the worst floating, overlapping and broken limit of any
+frame with its time. The strip is named `robot.walk.strip.png`, not
+`robot.walk.png`, because a pose and an animation may share a name
+(the robot's `wave`); each frame's time is in its corner, not under
+it; and `--view` chooses where the frames are drawn from (a walk shows
+best from the side). A loop's strip stops one step before its end,
+which is its start again.
+
+### What happens when things are renamed or removed
+
+Poses name parts, and keys name poses. The edit commands keep them
+right, as `rename` already does for joins:
+
+| You do | Poses and animations |
+|---|---|
+| Rename a part (`rename head skull`) | Every pose line for it is renamed, and every line for a part inside it (`skull/jaw`). The same for a part inside a definition, in every part that uses the definition. |
+| Remove a part | Its lines are removed from every pose, with the lines of what was removed with it. The summary says how many. |
+| Duplicate a part | The copy starts at rest in every pose. |
+| Join, unjoin, move a socket | Nothing to change: the part's pivot moves, and its turns now happen there. |
+| Rename or remove a socket | Nothing to change: poses don't name sockets. (Removing a socket something is joined to is already refused.) |
+| Make a definition of a part (`define`) | Nothing to change: the part keeps its name. |
+| Rename a pose | Every key that uses it follows. |
+| Remove a pose | Refused while a key uses it, naming the animations. `--with-keys` removes those keys too. |
+| Change a shape so a part can no longer be found | Not possible: parts are found by name, never by number. |
+
+A recipe changed by hand can still get it wrong; then it is a mistake
+with the line and the closest name, as always.
+
+### The new commands
+
+All take `--json` and `--dry-run`, print the report after the edit, and
+change only the lines they must.
+
+**Limits**
+
+```bash
+duck-mold edit robot.toml set-limits head --x -30,40 --y -80,80
+duck-mold edit cart.toml set-limits wheel_front_left --x free
+duck-mold edit robot.toml set-limits panel --fixed
+duck-mold edit robot.toml set-limits head --none        # no limits again
+```
+
+**Poses**
+
+```bash
+duck-mold edit robot.toml set-pose wave left_arm --turn 0,0,-150
+duck-mold edit robot.toml set-pose crouch body --move 0,-0.15,0
+duck-mold edit robot.toml set-pose wave head --rest      # the head is at rest in this pose again
+duck-mold edit robot.toml add-pose wave_out --from wave  # a copy to change (without --from: empty)
+duck-mold edit robot.toml rename-pose wave hello
+duck-mold edit robot.toml remove-pose hello
+duck-mold edit robot.toml mirror-pose step_left --as step_right
+```
+
+`set-pose` makes the pose if it isn't there. `mirror-pose` makes the
+mirror image, left to right: what `left_arm` did, `right_arm` does, and
+the other way round (names with `left` and `right` in them swap, as
+`duplicate --mirror` already does), and a part in the middle (the head)
+turns the other way. Without `--as` the pose itself is mirrored.
+
+**Animations**
+
+```bash
+duck-mold edit robot.toml add-animation walk --loop
+duck-mold edit robot.toml add-key walk step_left --at 0
+duck-mold edit robot.toml add-key walk step_right --at 0.4
+duck-mold edit robot.toml move-key walk 2 --at 0.5       # key 2, counted from 1 as inspect prints them
+duck-mold edit robot.toml set-key walk 2 --pose crouch
+duck-mold edit robot.toml remove-key walk 2
+duck-mold edit robot.toml set-animation walk --loop false --smooth true --length 1.2
+duck-mold edit robot.toml rename-animation walk stroll
+duck-mold edit robot.toml remove-animation stroll
+```
+
+`--length` makes the whole animation faster or slower: every key's time
+is scaled.
+
+**Looking and checking, with no window**
+
+```bash
+duck-mold inspect robot.toml --joins              # the tree above
+duck-mold inspect robot.toml --pose wave          # the usual report, of the model in that pose
+duck-mold inspect robot.toml --animation walk     # every frame checked
+duck-mold render robot.toml --pose wave           # the four-view picture, in that pose
+duck-mold render robot.toml --animation walk      # a strip of frames: robot.walk.png
+```
+
+`inspect --pose wave` is the report you know, measured on the posed
+model, plus what a pose can get wrong:
+
+```text
+robot, in the pose "wave"  (robot.toml)
+  size         1.21 wide x 2.05 tall x 0.39 deep, in metres (x, y, z)
+  ground       its lowest point is on the ground
+  floating     none
+  overlapping  left_arm/hand pokes 0.04 into head        (not so at rest)
+  limits       head is turned 95 around y: its limit is -80 to 80
+```
+
+`inspect --animation walk` looks at every frame (30 a second) and says
+the worst it found, and when:
+
+```text
+robot, "walk": 0.8 s, 3 keys, loops
+  keys         1  0.0 s  step_left
+               2  0.4 s  step_right
+               3  0.8 s  step_left
+  moves        left_arm, left_leg, right_arm, right_leg
+  ground       its lowest point stays within 0.01 of the ground
+  floating     none in any frame
+  overlapping  left_arm/hand pokes 0.02 into left_leg/thigh at 0.2 s   (not so at rest)
+  limits       none broken in any frame
+  loop         ends as it starts
+```
+
+With `--json`, the same as data, for agents. The plain `inspect` report
+gains one line each for joins with limits, poses and animations, only
+when a recipe has them, so no existing example's report changes.
+
+`render --animation` draws a strip: 8 frames (`--frames` for another
+number), evenly spaced in time, side by side, all from the same place
+and at the same size, each with its time under it. It is how an agent,
+or a pull request, sees a motion.
+
+### How the `.glb` changes
+
+Today the file holds one object with one lump of triangles, and a note
+of which triangles belong to which part. From Phase 5:
+
+| | Before | From Phase 5 |
+|---|---|---|
+| Objects ("nodes") | One, the model. | The model, and under it **one for every part**, in a tree that follows the joins. An arm is under the body, the hand under the forearm. |
+| Where a part's object is | - | **At its pivot**: the join it turns about. Its triangles are measured from there. Turning the object turns the part about its join, and everything under it follows. That is exactly what glTF means by an animated object, so other programs understand it too. |
+| Triangles | One list. | One list per part, in the same order as before. Put together they are the old list. |
+| Colours, directions, the palette, the part and assembly names, the sockets | As they are. | The same. Each socket also says which part carries it, so a hat stays on a nodding head. |
+| Animations | None. | Each animation, as glTF animations (below). |
+| Poses | None. | Each pose by name, so game code can set one. |
+| The format's number (`extras.duck_mold.version`) | 0 | 1 |
+| The reader's version | 3 | 4 |
+
+**Models without animations load and look as before.** The reader puts
+the parts back together at rest and gives Duck Forge the same mesh:
+the same triangles in the same order, the same colours, the same part
+ranges, the same sockets. One honest footnote: a corner's position is
+now "its part's pivot plus its place in the part", added up on loading,
+so it can differ from the old number in its last digit, far less than a
+thousandth of a millimetre. Pictures don't change; a Duck Forge test
+draws every example from an old file and a new one and compares them.
+
+**Old and new together.**
+
+- The new reader (version 4) reads both old files and new ones. Models
+  already exported and sitting in a game keep loading.
+- An old Duck Forge refuses a new file with a sentence, rather than
+  drawing one part of it. So: update Duck Forge first (step 1 opens
+  that pull request), then export again.
+- Every example's stored `.glb` changes once, in step 1, on purpose.
+  Their reports and pictures don't change by a byte.
+
+**Animations in the file** are standard glTF animations: for each part
+that moves, where it is turned to (and moved to) 30 times a second,
+with straight steps between. Duck Mold works the smooth curve out; the
+file holds the result. Why this way:
+
+- Any glTF program plays them (Blender, the web viewers, the Windows 3D
+  viewer), so you can check a file without Duck Forge, and the official
+  validator still passes.
+- Duck Forge's reader stays simple: it reads samples, it doesn't know
+  about curves or limits.
+- 30 a second is finer than the eye sees for these motions, and Duck
+  Forge fills in between samples for a game running at 60.
+
+The file also says, in Duck Mold's own corner of it, each animation's
+name and whether it loops, and each named pose. A 1-second walk of the
+robot adds about 10 KB.
+
+*As built (step 1):* as above, with these details. A part's object is
+named by its path (`left_arm/hand`). The objects are in the recipe's
+order, a part made of parts before the parts inside it; an object's
+children are the parts joined to it and, for a part made of parts, the
+parts inside it that aren't joined. The four lists of numbers
+(positions, directions, colours, triangle corners) are shared: each
+part's lists point into them. The pivots are kept as 32-bit numbers and
+each corner's distance from its pivot is chosen so that the reader's
+sum gives the old number back wherever it can: measured on the eighteen
+examples, about nineteen numbers in twenty are the same to the last
+bit, the ground is at exactly 0 as before, and the rest differ by at
+most a ten-thousandth of a millimetre. Two parts no longer share a
+corner where they touch, so a few models have a handful more points
+(the house 76 where it had 72). The robot's file grows from 50 KB to
+64 KB. A socket passed on with `from` (an arm's `grip`, from its hand)
+is carried by the part it came from. The reader is version 4 after this
+step; animations (step 5) will make it version 5, because Duck Forge's
+first pull request is opened before they exist.
+
+*As built (step 5):* animations and poses are in the file as above.
+Each animation's samples are at thirty a second from 0, and its very
+end; all of an animation's parts share one list of times. A part gets
+a list of turns only if the animation turns it, and a list of places
+only if it moves it. An animation that moves nothing (every key at
+rest) is named in Duck Mold's corner of the file with its length, and
+isn't in glTF's own list, which has no way to write it; one with no
+keys isn't written at all. A pose is written as an animation would
+write one moment of it. Each part that isn't in the model's own list
+(a part inside a part that is turned or a mirror image) also says the
+three directions its turns are measured around, so that game code can
+turn a join by degrees and get what a pose with the same numbers gets.
+The format's number stays 1: nothing a version 4 reader reads has
+changed, so it loads a file with animations as the same model,
+standing still. The robot's three animations (4.3 seconds in all) and
+six poses take its file from 64 KB to 78 KB. The official validator
+reports nothing on it.
+
+### Playing them in Duck Forge
+
+A new type beside `Mesh` and `GlbModel`: **`AnimatedModel`**. It is a
+loaded model that remembers what it is playing. The whole of it:
+
+```rust
+use duckforge::glb::AnimatedModel;
+
+// in new(): load once
+let mut robot = AnimatedModel::load("assets/robot.glb")?;
+robot.play("idle");
+
+// in update(): let time pass
+if walking { robot.play("walk"); } else { robot.play("idle"); }
+robot.update(ctx.dt());
+
+// in draw(): it is a mesh, drawn like any other
+canvas.draw_mesh(robot.mesh(), &Transform::at(self.position), &self.camera);
+```
+
+| | |
+|---|---|
+| `robot.play("walk")` | Plays it from its start. It loops if the recipe says `loop = true`; otherwise it stops on its last pose. Asking for the animation that is already playing changes nothing, so it is safe to call every frame, as above. |
+| `robot.play_once("walk")`, `robot.play_looping("wave")` | The same, saying whether it loops instead of the recipe. |
+| `robot.stop()` | Freezes it as it stands. `robot.resume()` carries on. |
+| `robot.rest()` | Back to the rest pose, playing nothing. |
+| `robot.set_speed(1.5)` | Faster or slower. 0 is still; a negative speed plays backwards (a door closing is `open` backwards). |
+| `robot.set_pose("wave")` | Holds a pose from the recipe, playing nothing. |
+| `robot.turn("head", vec3(0.0, 30.0, 0.0))` | Game code turns one join itself, in degrees, on top of whatever is playing: a head that looks at the player, a wheel that turns as fast as the cart drives. `robot.release("head")` gives the join back to the animation. |
+| `robot.update(dt)` | Moves time on. Call it once in `update`. |
+| `robot.mesh()` | The model as it stands now, to draw. |
+| `robot.is_playing()`, `robot.finished()`, `robot.playing()` | Whether something is playing, whether a one-time animation has reached its end, and its name. |
+| `robot.socket("left_arm/hand.bottom")` | Where a socket is **now**, and the way it faces: a sword stays in a waving hand, a hat on a nodding head. |
+| `robot.animations()`, `robot.poses()` | The names in the file. |
+
+- **Changing from one animation to another blends**, over 0.15 seconds,
+  so a walking robot that stops doesn't snap to standing.
+  `robot.set_blend(0.0)` turns that off.
+- **A name that isn't in the file** doesn't crash a game: nothing
+  changes, and Duck Forge says once, in its usual way, which name was
+  asked for and which ones the file has.
+- Time only moves in `update`, with the `dt` the game gives it, so a
+  recorded playthrough plays back the same, as everything in Duck Forge
+  does.
+- `Mesh::load_glb` and `GlbModel::load` stay exactly as they are, for a
+  model that only stands there.
+- Each frame Duck Forge moves the corners of the parts that moved and
+  draws one mesh, as now ("one draw instead of dozens").
+
+Duck Forge gets an example, `examples/robot_walk/`: the robot idles;
+the arrow keys walk it about; a key makes it wave; its hat stays on.
+Duck Forge's tests play every animation of every example file, on the
+CPU renderer, with stored pictures.
+
+*As built (step 5):* as above, with these details. The reader is in
+two halves. Where an animation has a join at a time, and where that
+puts every corner and socket, is in the shared reader, so that Duck
+Mold's tests can check it against Duck Mold's own posing: at every
+sample of every animation, and in every pose, the two put every corner
+of the test model in the same place to the last digits a file keeps
+(a few millionths of a metre). Between two samples the reader goes
+straight where Duck Mold follows its curve; they differ most where a
+motion starts from a stop, by about a degree for a thirtieth of a
+second. What is playing, speed, blending and the game's own turns are
+`AnimatedModel`, Duck Forge's own. Added to the list: `restart()`
+(play what is playing from its start again, since `play` of the same
+name changes nothing), `time()`, `mesh_mut()` and `model()`. A join the
+game turns is the game's until it is released: the animation's turn
+for that join is replaced, not added to. Played backwards, an
+animation starts from its end. A model at rest is, bit for bit, the
+mesh `Mesh::load_glb` gives. Duck Forge's tests play the robot's three
+animations frame by frame and check each against Duck Mold's report on
+it (how far its lowest point leaves the ground), and compare fourteen
+stored pictures pixel for pixel. Working out one frame of the robot
+takes about 2.5 millionths of a second.
+
+### Reusing animations: one walk for every character
+
+An animation only names parts. So a walk made on the robot works on any
+model whose parts have the same names. That is the "shared skeleton" of
+the original plan: not a thing to build, just names that agree.
+
+**The names for a two-legged character**: `body`, `head`, `left_arm`,
+`right_arm`, `left_leg`, `right_leg`, each standing at rest with the
+arms hanging down. (An elbow or a knee inside them is a bonus that
+starter animations don't need.) The robot already has exactly these.
+
+**Saving one.** `duck-mold save-animation robot.toml walk
+animations/walk.toml` writes the animation and the poses it uses as a
+small file of their own:
+
+```toml
+# Saved by `duck-mold save-animation` from robot.toml.
+version = 0
+name = "walk"
+
+[poses.step_left]
+left_leg = [30, 0, 0]
+...
+
+[animations.walk]
+loop = true
+keys = [ ... ]
+```
+
+**Using one.** `duck-mold edit duck.toml add-animation walk --from
+animations/walk.toml` copies the animation and its poses into the
+recipe. If the model lacks a part the animation names, the edit is
+refused and lists them; `--skip-missing` takes the rest. A pose name
+that is already taken by a different pose gets a number, as part names
+do. Once copied in, it is the model's own: change a pose to suit
+longer legs, and nothing else changes.
+
+**In the Studio**, the library gets a second list, Animations: the
+files in the folder `animations` beside the recipe, and the **starter
+animations** that come inside the program:
+
+| Starter | For | What it does |
+|---|---|---|
+| `idle` | two legs | Breathes: the body rises and sinks a little, the arms sway. Loops. |
+| `walk` | two legs | Legs and arms swing against each other. Loops. In place: the game moves the character. |
+| `wave` | two legs | Raises an arm, waves twice, lowers it. |
+| `jump` | two legs | Crouches, rises 40 cm, lands, straightens. |
+| `open` | a part called `door` | Swings 100 degrees on its hinge. Played backwards, it closes. |
+| `roll` | parts called `wheel_front_left`, `wheel_front_right`, `wheel_back_left`, `wheel_back_right` | Each turns once round, steadily. Loops. |
+
+### The Studio: Pose mode and the timeline
+
+A fifth mode beside Part, Face, Edge and Corner: **Pose** (the key O).
+It works on every model, not just boxes.
+
+```text
++---------------------------------------------------------------------------------------------+
+| robot.toml | File Edit View Help | Undo Redo | Add | Front Side Top 3/4 | Frame | Export    |
++------------+--------------------------------------------------------------+-----------------+
+| Parts      | [Part][Face][Edge][Corner][Pose]                             | Poses           |
+|  body      |                                                              |   rest          |
+|  head      | [Turn]                     ___                               |   step_left     |
+|  left_arm *| [Move]                    |o o|        (faint: the key       |   step_right    |
+|   upper    |                         __|___|__       before and after)    | > wave          |
+|   elbow    |                  \     |         |                           |   wave_out      |
+|   forearm  |                   \    |   []    |                           | New  Copy       |
+|   hand     |                 ( (O) )|         |                           | Mirror  Rename  |
+|  right_arm |              rings at  |_________|                           | Remove          |
+|  left_leg  |              the         ||   ||                             |-----------------|
+|  right_leg |              shoulder    ||   ||                             | left_arm        |
+|            |                         _||_ _||_                            |  Turn  0 0 -150 |
+|            |                                                              |  Limits         |
+|            | Drag a ring to turn the arm. It stops at its limit.          |   x  -60 .. 180 |
+|            |                                              Snap 5 degrees  |   z -170 .. 10  |
+|            |                                                              |  Back to rest   |
++------------+--------------------------------------------------------------+-----------------+
+| Animation [wave v]  New   |>  Play   [x] Loop  [x] Smooth  [x] Ghosts      1.3 s    + Key   |
+|  0.0       0.2       0.4       0.6       0.8       1.0       1.2                            |
+|  <>rest         <>wave         <>wave_out     <>wave                    <>rest              |
+|                  |                                                                          |
+|                  ^ 0.30 s   (drag to move through time)                                     |
++---------------------------------------------------------------------------------------------+
+| Problems  None                                         Turned "left_arm" in the pose "wave" |
++---------------------------------------------------------------------------------------------+
+```
+
+**Pose mode (step 6)**
+
+- **The Poses list**, on the right, shows `rest` and every pose. Click
+  one: the model stands in it, and it is the pose you are changing.
+  New, Copy, Mirror, Rename and Remove are the commands above.
+- **Click a part**, in the picture or the list. Rings appear at its
+  join, one for each direction it may turn (a knee has one ring, a
+  wheel one, a `fixed` part none, and says so). The parts list marks
+  the parts this pose turns.
+- **Drag a ring** to turn the part. What hangs from it follows as you
+  drag. It snaps in steps of 5 degrees (Ctrl: free) and **stops at its
+  limit**, and the label beside the pointer says the angle. Letting go
+  is one `set-pose` edit and one step to undo.
+- **Move** (G) gives arrows instead, to slide the part: a jump, a
+  drawer.
+- With `rest` selected a drag doesn't change the rest pose (that is the
+  model itself, in Part mode). It asks for a name and starts a new
+  pose.
+- **The panel** shows the selected part's turn and move in this pose as
+  numbers you can type, its limits (also to type: that is
+  `set-limits`), and "Back to rest".
+- A pose that breaks a limit, or that leaves a part floating, shows in
+  Problems, as in `inspect --pose`.
+
+**The timeline (step 7)**, along the bottom in Pose mode:
+
+- **Pick an animation**, or make one (New).
+- **Keys** are the diamonds, each with its pose's name. Click one: time
+  jumps there and its pose is selected, so turning a part now changes
+  that pose. The panel says if other keys use the same pose, because
+  they change with it.
+- **Drag a key** left or right to change its time (it snaps to 0.05 s;
+  it can't pass its neighbours). Right-click it for Remove and for
+  another pose.
+- **Drag in the ruler** to move through time; the model moves as you
+  drag. Between two keys you see the in-between.
+- **+ Key** puts a key at the time shown, with the selected pose.
+  Turning a part between two keys asks first, then makes a new pose
+  there (named after the animation: `wave_3`) with a key.
+- **Play** (the space bar) plays it in the viewport, again and again if
+  Loop is on. Loop and Smooth are the animation's own settings.
+- **Ghosts**: the poses of the key before and the key after, drawn
+  faintly, so you see where the motion comes from and goes to.
+- The time ruler stretches with the window; a long animation scrolls.
+
+Every one of these is an edit command from the list above. Selecting,
+moving through time, playing and ghosts change nothing in the file.
+
+### Examples (step 9)
+
+Each with its stored model, report, picture, and a frame strip of each
+animation:
+
+- **`robot.toml`** gets limits, and `idle`, `walk` and `wave`.
+- **`dog.toml`** gets a `walk` on four legs, with its tail wagging.
+- **`door.toml`** (new): a frame, a door on a hinge at its edge, a
+  handle that turns; `open`.
+- **`cart.toml`** (new): a box on four wheels with a handle; `roll`.
+
+The robot's and the dog's stored files change on purpose. `door` and
+`cart` join the start page.
+
+### Steps
+
+In the order of the brief, one commit each:
+
+1. The `.glb` as a tree of parts; the reader, version 4, reading old
+   and new files; Duck Forge's copy of it, with a pull request there.
+   Every old model and test still passes.
+2. `limits` in the recipe; `set-limits`; `inspect --joins`.
+3. Poses; `set-pose`, `add-pose`, `rename-pose`, `remove-pose`,
+   `mirror-pose`; `render --pose`, `inspect --pose`; renames and
+   removals keep poses right.
+4. Animations; `add-animation`, `set-animation`, `rename-animation`,
+   `remove-animation`, `add-key`, `move-key`, `set-key`, `remove-key`;
+   `render --animation`, `inspect --animation`.
+5. Animations and poses in the `.glb`; `AnimatedModel` in Duck Forge
+   and its `robot_walk` example, with a pull request there. The robot
+   gets its three animations here, because the example needs them.
+6. Pose mode in the Studio.
+7. The timeline.
+8. The animation library: `save-animation`, `add-animation --from`,
+   the Animations list, the six starters.
+9. The examples.
+
+### One session, or two: 5a and 5b
+
+This is the biggest phase so far. Phase 4 was nine steps in one
+repository, and it filled a long session. Phase 5 is nine steps in two
+repositories, with a file format change at the start and two new
+Studio screens.
+
+I recommend splitting it where a game can first use it:
+
+- **5a: steps 1 to 5.** At the end, the robot idles, walks and waves in
+  a Duck Forge example, made entirely by commands. Everything a game
+  needs is there, and everything an agent needs. It ends with a short
+  `PHASE5A_REPORT.md`, a frame strip of each of the robot's animations,
+  and both Duck Forge pull requests open.
+- **5b: steps 6 to 9.** Pose mode, the timeline, the library and
+  starters, and the other examples. It ends with `PHASE5_REPORT.md`
+  for the whole phase.
+
+The split costs nothing: 5b only adds windows and files on top of
+5a's commands. And it lets you try a walking robot in a game before
+the Studio work starts, when the names and the Duck Forge calls are
+still cheap to change. If you would rather have it in one go, say so
+and I will carry straight on from step 5 to step 6.
+
+*As built:* approved as two halves. 5a (steps 1 to 5) is built:
+`PHASE5A_REPORT.md` has the frame strips, what works, the known limits
+and what changed from this design. The version is 0.5.0. "What Duck
+Mold draws is what Duck Forge plays" (in Testing, below) is checked on
+the model, not on pictures: at every frame of every animation, the
+robot as Duck Forge's player has it stands in the same box, with its
+sockets in the same places, as Duck Mold poses it; and the shared
+reader puts every corner of a test model where Duck Mold does. 5b
+(steps 6 to 9) is to come.
+
+### Testing
+
+- **The tree**: every example, put back together at rest by the
+  reader, has the same triangles, colours, parts and sockets as the old
+  file gave. Old files still load. The glTF validator passes on files
+  with animations.
+- **The two readers**: byte for byte the same between the markers, as
+  now, with the one-line check in the handoff note.
+- **Limits, poses, animations**: every field and every message; every
+  edit command, with a line in the agent guide (a test fails
+  otherwise); renames and removals; `mirror-pose` done twice gives the
+  pose back.
+- **Posing never breaks a model**: after any pose, every part has the
+  same shape and size as at rest (only where it is changes), and what
+  hangs from a part is still joined to it. Checked on every example
+  with random poses.
+- **What Duck Mold draws is what Duck Forge plays**: for every
+  animation of every example, frames from `render --animation` and
+  from Duck Forge's `AnimatedModel` at the same times, compared.
+- **Golden files**: the stored model, report, picture and frame strips
+  of every example; the strips are compared byte for byte on Windows
+  and Linux like the pictures.
+- **Picture tests of every new screen**: Pose mode with rings, a drag
+  stopped at a limit, the Poses list, the timeline with keys, a key
+  being dragged, ghosts, the Animations list.
+- **Duck Forge's own tests**: play every example animation; `play`,
+  `stop`, speed, blending, `set_pose`, `turn`, sockets that follow; a
+  recorded playthrough of `robot_walk` plays back the same.
+
+### What Phase 5 won't do
+
+By the brief: parts that bend (skinning), face shapes and expressions,
+IK, physics, sound, UVs and textures. Also:
+
+- **Poses don't come along with a recipe used as a part.** A wheel
+  recipe with its own `spin`, used four times in a cart, brings its
+  limits but not its animation; the cart animates its wheels itself.
+- **No blending of two animations at once** (walking while waving).
+  Game code can turn single joins on top of an animation with `turn`.
+- **No events in animations** ("a footstep sound here").
+- **Parts don't change size or colour** in a pose: only turn and move.
+- **A wheel faster than 15 turns a second** can't be told from a
+  slower one at 30 samples a second.
+- **Duck Forge's Studio and scene files** don't place animated models
+  yet; that is Duck Forge's own next step, from game code they work.
+
+### The decisions
+
+Places where a choice was made. Each says what I recommend, and the
+other way.
+
+1. **A bone is a join** (yours). A part made of parts is a bone too,
+   and a part that isn't joined turns about its own middle.
+2. **A turn's x, y and z are those of the list the part is written
+   in.** So limits in a definition mean the same wherever it is used,
+   and a mirrored arm mirrors its motion by itself. *The other way:*
+   always the model's own x, y and z, which is simpler to say but makes
+   a limit inside a turned or mirrored definition mean something
+   different in each use.
+3. **`limits` names the directions that may turn**, each with two
+   numbers or `"free"`; no `limits` means free; `"fixed"` means never.
+   **Breaking one is a warning.** *The other way:* an error, which
+   stops the export of a model over one pose.
+4. **Animations are poses at times**, the poses named (yours). *The
+   other way:* each key holds its own numbers, which is how Blender
+   stores it; shorter to make, but a walk's two steps couldn't share a
+   pose, and nothing could be set by name from a game.
+5. **A loop ends on the pose it starts with**, written out, and a
+   warning says when it doesn't. *The other way:* a `length`, and the
+   loop goes back to its first pose by itself; one key fewer, and a
+   rule you have to know.
+6. **`smooth` flows through the poses; `smooth = false` is steady.**
+   One switch for the whole animation. *The other way:* a choice on
+   every key, which is more control than a first game needs.
+7. **In the `.glb`, each part is an object with its own triangles, at
+   its pivot** (yours). Format version 1, reader version 4; old Duck
+   Forge refuses new files; positions can differ in their last digit.
+   *The other way:* keep the one lump of triangles exactly as it is and
+   add glTF's "skin" on top. Old files and new would be the same to the
+   last digit, but it is the machinery for parts that bend, used for
+   parts that don't, and harder to read.
+8. **Animations are stored as standard glTF, 30 samples a second**, and
+   that is what Duck Forge plays. *The other way:* store Duck Mold's
+   own keys and let Duck Forge work the curves out; smaller files and
+   exact, but other programs would show a model standing still, and
+   the reader would be three times the size.
+9. **Duck Forge gets `AnimatedModel`**, with a short blend when the
+   animation changes and `turn` for one join from game code. *The
+   other way:* leave out the blend and `turn` to keep it smaller; a
+   character would snap between animations, and a wheel couldn't follow
+   the cart's speed.
+10. **Using a saved animation copies it into the recipe.** *The other
+    way:* the recipe points at the file, as it does for parts, so one
+    fix reaches every model; but then changing a walk for one model
+    changes it for all, or needs a "make it my own" step.
+11. **Removing a pose that a key uses is refused**, unless
+    `--with-keys`.
+12. **The six names for a two-legged character**, and the six starter
+    animations, as above.
+13. **The keys: O for Pose mode, Space to play**; G and R for Move and
+    Turn inside it, as everywhere.
+14. **Two sessions, 5a and 5b**, split after step 5. *The other way:*
+    one session, straight through.
+15. **A zip to try** at the end of 5a (it has the commands, not yet the
+    Studio screens) and again after step 6, when Pose mode can be
+    felt. I keep building unless you say stop.
+
+The version becomes 0.5.0.

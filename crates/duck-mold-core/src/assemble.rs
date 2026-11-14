@@ -25,9 +25,10 @@ use crate::issue::{Code, Issue};
 use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
+use crate::motion::{self, Animation, Joint, Key, Pose};
 use crate::recipe::{
-    Axis, Define, Loc, PaletteColor, PartDef, Placement, Recipe, Shape, Side, SocketDef,
-    SocketKind, SocketRef, Source, hex, rgb_of,
+    AnimationDef, Axis, Define, Limits, Loc, PaletteColor, PartDef, Placement, PoseDef, REST,
+    Recipe, Shape, Side, SocketDef, SocketKind, SocketRef, Source, hex, rgb_of,
 };
 use crate::shapes::{self, Landing, Polygon};
 use crate::shaping::{self, Shaped};
@@ -104,14 +105,146 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     if assembler.issues.iter().any(Issue::is_error) {
         return None;
     }
-    Some(Model {
+    let mut model = Model {
         name: recipe.name.clone(),
         palette: assembler.palette,
         faces,
         parts,
         sockets: body.all_sockets(&Transform::IDENTITY),
+        carried: body.passed.clone(),
+        poses: Vec::new(),
+        animations: Vec::new(),
         zero: body.zero,
-    })
+    };
+    model.poses = poses(&model, &recipe.poses, assembler.issues);
+    model.animations = animations(&model, &recipe.animations, assembler.issues);
+    if assembler.issues.iter().any(Issue::is_error) {
+        return None;
+    }
+    Some(model)
+}
+
+/// The recipe's poses, checked against the model that was built: every
+/// part a pose names must be there (a mistake, with the closest name),
+/// and a pose that turns a part past its limits is a warning.
+fn poses(model: &Model, written: &[PoseDef], issues: &mut Vec<Issue>) -> Vec<Pose> {
+    let paths: Vec<String> = model
+        .all_parts()
+        .iter()
+        .map(|part| part.path.clone())
+        .collect();
+    written
+        .iter()
+        .map(|pose| {
+            let mut joints: Vec<Joint> = Vec::new();
+            for line in &pose.parts {
+                if !paths.contains(&line.part) {
+                    let issue = line
+                        .loc
+                        .error(
+                            Code::UnknownPart,
+                            format!(
+                                "the pose \"{}\" turns \"{}\", but the model has no part with that name. A part inside another is written with its path, like \"left_arm/elbow\"",
+                                pose.name, line.part
+                            ),
+                        )
+                        .got(line.part.as_str())
+                        .one_of(&line.part, paths.iter().map(String::as_str));
+                    issues.push(issue);
+                    continue;
+                }
+                joints.push(Joint {
+                    part: line.part.clone(),
+                    loc: line.loc.clone(),
+                    turn: line.turn,
+                    move_by: line.move_by,
+                });
+            }
+            for broken in motion::limits_broken(model, &joints) {
+                let loc = joints
+                    .iter()
+                    .find(|joint| joint.part == broken.part)
+                    .map_or(&pose.loc, |joint| &joint.loc);
+                issues.push(loc.warning(
+                    Code::LimitBroken,
+                    format!("the pose \"{}\" {}", pose.name, broken.describe()),
+                ));
+            }
+            Pose {
+                name: pose.name.clone(),
+                loc: pose.loc.clone(),
+                joints,
+            }
+        })
+        .collect()
+}
+
+/// The recipe's animations, checked against the model's poses: every
+/// key names a pose there is, and an animation that loops ends as it
+/// starts.
+fn animations(model: &Model, written: &[AnimationDef], issues: &mut Vec<Issue>) -> Vec<Animation> {
+    let names: Vec<&str> = std::iter::once(REST)
+        .chain(model.poses.iter().map(|pose| pose.name.as_str()))
+        .collect();
+    written
+        .iter()
+        .map(|animation| {
+            let mut keys = Vec::new();
+            for key in &animation.keys {
+                if !names.contains(&key.pose.as_str()) {
+                    let issue = key
+                        .loc
+                        .error(
+                            Code::UnknownPose,
+                            format!(
+                                "the animation \"{}\" has a key with the pose \"{}\", but there is no pose with that name",
+                                animation.name, key.pose
+                            ),
+                        )
+                        .got(key.pose.as_str())
+                        .one_of(&key.pose, names.iter().copied());
+                    issues.push(issue);
+                    continue;
+                }
+                keys.push(Key {
+                    at: key.at,
+                    pose: key.pose.clone(),
+                    loc: key.loc.clone(),
+                });
+            }
+            let built = Animation {
+                name: animation.name.clone(),
+                loc: animation.loc.clone(),
+                looping: animation.looping,
+                smooth: animation.smooth,
+                keys,
+            };
+            if animation.keys.is_empty() {
+                issues.push(animation.loc.warning(
+                    Code::Unused,
+                    format!(
+                        "the animation \"{}\" has no keys yet, so it does nothing. Give it one with add-key, or write keys = [{{ at = 0, pose = \"rest\" }}]",
+                        animation.name
+                    ),
+                ));
+            } else if animation.looping
+                && built.keys.len() == animation.keys.len()
+                && !motion::ends_as_it_starts(model, &built)
+            {
+                // (With a key left out for its mistake, the ends can't be
+                // compared: the mistake is said already.)
+                let (first, last) = (&built.keys[0], &built.keys[built.keys.len() - 1]);
+                issues.push(last.loc.warning(
+                    Code::LoopJumps,
+                    format!(
+                        "the animation \"{}\" loops, but it starts on the pose \"{}\" and ends on \"{}\": the model would jump when it starts again. End it with a key of the pose \"{}\"",
+                        animation.name, first.pose, last.pose, first.pose
+                    ),
+                ));
+            }
+            built
+        })
+        .collect()
 }
 
 /// Which `define`s a `use` can name: those of the file it is written in.
@@ -148,6 +281,9 @@ struct Body {
     /// The sockets it declares. The seven built-in ones are worked out
     /// from `bounds` when asked for.
     sockets: Vec<Socket>,
+    /// Those of `sockets` that were passed on with `from`: the socket's
+    /// name, and the path of the part inside this body that it is on.
+    passed: Vec<(String, String)>,
     /// The box around everything in it.
     bounds: Option<Bounds>,
     /// True if it couldn't be built. The reason is already reported, so
@@ -176,6 +312,8 @@ struct Node {
     attached_to: Option<String>,
     /// From the part's own space to the space of its list.
     place: Transform,
+    /// How far it may turn when the model is posed.
+    limits: Limits,
     body: Body,
 }
 
@@ -192,6 +330,7 @@ impl Body {
             colors: Vec::new(),
             nodes: Vec::new(),
             sockets: Vec::new(),
+            passed: Vec::new(),
             bounds: None,
             broken: true,
             whole: false,
@@ -220,6 +359,7 @@ impl Body {
             colors,
             nodes: Vec::new(),
             sockets: Vec::new(),
+            passed: Vec::new(),
             bounds: None,
             broken: false,
             whole: false,
@@ -247,6 +387,7 @@ impl Body {
             colors: Vec::new(),
             nodes,
             sockets: Vec::new(),
+            passed: Vec::new(),
             bounds: None,
             broken,
             whole: false,
@@ -1123,8 +1264,22 @@ impl Assembler<'_> {
                         ));
                         None
                     } else {
-                        self.socket_of(&body.nodes, part, socket, &def.loc)
-                            .map(|socket| (socket.at, socket.facing))
+                        let found = self.socket_of(&body.nodes, part, socket, &def.loc);
+                        if found.is_some() {
+                            // The part that carries it: the one named, or
+                            // the one inside that it was passed on from.
+                            let deeper = body
+                                .nodes
+                                .iter()
+                                .find(|node| node.name == *part)
+                                .and_then(|node| {
+                                    node.body.passed.iter().find(|(name, _)| name == socket)
+                                })
+                                .map(|(_, inner)| format!("{part}/{inner}"));
+                            body.passed
+                                .push((def.name.clone(), deeper.unwrap_or_else(|| part.clone())));
+                        }
+                        found.map(|socket| (socket.at, socket.facing))
                     }
                 }
             };
@@ -1248,6 +1403,7 @@ impl Assembler<'_> {
                     turn: mirror_and_scale(&parts[at]),
                     shift: Vec3::ZERO,
                 }),
+                limits: parts[at].limits,
                 body,
             })
             .collect()
@@ -1522,6 +1678,34 @@ fn emit(
             }
             let parts = emit(&node.body.nodes, &place, &path, faces, issues);
             let own = first..faces.len();
+            // What it turns about, and what it hangs from: the socket it
+            // is joined to, on a part of its own list; or its own zero,
+            // in the part it is inside.
+            let joined = node.attached_to.as_deref().and_then(|to| {
+                let (target, socket) = to.rsplit_once('.')?;
+                let onto = nodes.iter().find(|other| other.name == target)?;
+                Some((target, outer.apply(onto.socket(socket)?.at)))
+            });
+            let within = |name: &str| {
+                if prefix.is_empty() {
+                    name.to_owned()
+                } else {
+                    format!("{prefix}/{name}")
+                }
+            };
+            let (pivot, parent) = match joined {
+                Some((target, at)) => (at, Some(within(target))),
+                None => (
+                    place.apply(Vec3::ZERO),
+                    (!prefix.is_empty()).then(|| prefix.to_owned()),
+                ),
+            };
+            let carried = node
+                .body
+                .passed
+                .iter()
+                .map(|(socket, inner)| (socket.clone(), format!("{path}/{inner}")))
+                .collect();
             Part {
                 name: node.name.clone(),
                 path,
@@ -1531,7 +1715,12 @@ fn emit(
                 mirrored: place.is_mirrored(),
                 place,
                 local: node.place,
+                pivot: pivot.tidied(),
+                parent,
+                axes: outer.turn,
+                limits: node.limits,
                 sockets: node.body.all_sockets(&place),
+                carried,
                 bounds: Bounds::around(
                     faces[own.clone()]
                         .iter()

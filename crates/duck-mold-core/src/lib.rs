@@ -23,6 +23,7 @@ pub mod load;
 pub mod math;
 pub mod mesh;
 pub mod model;
+pub mod motion;
 pub mod recipe;
 pub mod shapes;
 pub mod shaping;

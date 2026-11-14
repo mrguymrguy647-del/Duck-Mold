@@ -16,8 +16,10 @@
 //! reads the file, changes its text, checks it and writes it back.
 
 pub mod doc;
+mod motion;
 mod spot;
 
+pub use motion::LimitsTo;
 pub use spot::{Spot, spot};
 
 use std::path::Path;
@@ -30,7 +32,7 @@ use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
 use crate::math::{Bounds, Mat3, Vec3};
 use crate::model::{Model, Part};
-use crate::recipe::{PART_FIELDS, Shape, Side, rgb_of};
+use crate::recipe::{Limits, PART_FIELDS, Shape, Side, rgb_of};
 use crate::source::{Node, Syntax, Value};
 use crate::tools::Failure;
 use doc::{Doc, Step, TreePath, Val, key, with};
@@ -434,13 +436,132 @@ pub enum Edit {
         /// What the face in the middle is called.
         name: Option<String>,
     },
+    /// Says how far a part may turn about its join when the model is
+    /// posed: its `limits`.
+    SetLimits {
+        /// The part.
+        part: String,
+        /// What its limits become.
+        limits: LimitsTo,
+    },
+    /// Turns or moves a part in a pose, or puts it back at rest there.
+    /// Makes the pose if it isn't there.
+    SetPose {
+        /// The pose.
+        pose: String,
+        /// The part, by path.
+        part: String,
+        /// Degrees around x, then y, then z. `None`: as it is.
+        turn: Option<[f64; 3]>,
+        /// How far it is moved, in metres. `None`: as it is.
+        move_by: Option<[f64; 3]>,
+        /// Puts the part back at rest in the pose: its line goes.
+        rest: bool,
+    },
+    /// Adds a pose: with every part at rest, or as a copy of another.
+    AddPose {
+        /// Its name.
+        name: String,
+        /// The pose to copy.
+        from: Option<String>,
+    },
+    /// Renames a pose, and everything that names it.
+    RenamePose {
+        /// The pose.
+        pose: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Removes a pose. Refused while a key of an animation uses it,
+    /// unless `with_keys`.
+    RemovePose {
+        /// The pose.
+        pose: String,
+        /// Take the keys that use it away with it.
+        with_keys: bool,
+    },
+    /// Makes the mirror image of a pose, left to right: what the left
+    /// arm did, the right arm does.
+    MirrorPose {
+        /// The pose.
+        pose: String,
+        /// The name of the mirror image. Without one, the pose itself
+        /// is mirrored.
+        as_name: Option<String>,
+    },
+    /// Adds an animation, with no keys yet.
+    AddAnimation {
+        /// Its name.
+        name: String,
+        /// True if it starts again after its last key.
+        looping: bool,
+    },
+    /// Changes whether an animation loops, whether it is smooth, and
+    /// how long it lasts. What is `None` stays as it is.
+    SetAnimation {
+        /// The animation.
+        animation: String,
+        /// Whether it starts again after its last key.
+        looping: Option<bool>,
+        /// Whether the motion flows through each pose (true) or goes
+        /// straight from pose to pose at a steady speed (false).
+        smooth: Option<bool>,
+        /// How long it lasts, in seconds: every key's time is scaled.
+        length: Option<f64>,
+    },
+    /// Renames an animation.
+    RenameAnimation {
+        /// The animation.
+        animation: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Removes an animation. Its poses stay.
+    RemoveAnimation {
+        /// The animation.
+        animation: String,
+    },
+    /// Adds a key to an animation: a pose, and the time it is reached.
+    AddKey {
+        /// The animation.
+        animation: String,
+        /// The pose: one of the recipe's, or `rest`.
+        pose: String,
+        /// Seconds from the animation's start.
+        at: f64,
+    },
+    /// Gives a key another time.
+    MoveKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1 as `inspect` prints them.
+        key: usize,
+        /// Its new time, in seconds.
+        at: f64,
+    },
+    /// Gives a key another pose.
+    SetKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// Its new pose.
+        pose: String,
+    },
+    /// Removes a key.
+    RemoveKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+    },
 }
 
 impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 26] = [
+    pub const COMMANDS: [&'static str; 40] = [
         "add",
         "remove",
         "rename",
@@ -467,6 +588,20 @@ impl Edit {
         "cut",
         "move-corner",
         "define",
+        "set-limits",
+        "set-pose",
+        "add-pose",
+        "rename-pose",
+        "remove-pose",
+        "mirror-pose",
+        "add-animation",
+        "set-animation",
+        "rename-animation",
+        "remove-animation",
+        "add-key",
+        "move-key",
+        "set-key",
+        "remove-key",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -498,6 +633,20 @@ impl Edit {
             Edit::Cut { .. } => "cut",
             Edit::MoveCorner { .. } => "move-corner",
             Edit::Define { .. } => "define",
+            Edit::SetLimits { .. } => "set-limits",
+            Edit::SetPose { .. } => "set-pose",
+            Edit::AddPose { .. } => "add-pose",
+            Edit::RenamePose { .. } => "rename-pose",
+            Edit::RemovePose { .. } => "remove-pose",
+            Edit::MirrorPose { .. } => "mirror-pose",
+            Edit::AddAnimation { .. } => "add-animation",
+            Edit::SetAnimation { .. } => "set-animation",
+            Edit::RenameAnimation { .. } => "rename-animation",
+            Edit::RemoveAnimation { .. } => "remove-animation",
+            Edit::AddKey { .. } => "add-key",
+            Edit::MoveKey { .. } => "move-key",
+            Edit::SetKey { .. } => "set-key",
+            Edit::RemoveKey { .. } => "remove-key",
         }
     }
 }
@@ -1032,6 +1181,44 @@ fn part_in<'a>(model: &'a Model, path: &str) -> Option<&'a Part> {
 
 fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Stop> {
     match edit {
+        Edit::SetLimits { part, limits } => motion::set_limits(doc, part, *limits),
+        Edit::SetPose {
+            pose,
+            part,
+            turn,
+            move_by,
+            rest,
+        } => motion::set_pose(doc, pose, part, *turn, *move_by, *rest),
+        Edit::AddPose { name, from } => motion::add_pose(doc, name, from.as_deref()),
+        Edit::RenamePose { pose, new_name } => motion::rename_pose(doc, pose, new_name),
+        Edit::RemovePose { pose, with_keys } => motion::remove_pose(doc, pose, *with_keys),
+        Edit::AddAnimation { name, looping } => motion::add_animation(doc, name, *looping),
+        Edit::SetAnimation {
+            animation,
+            looping,
+            smooth,
+            length,
+        } => motion::set_animation(doc, animation, *looping, *smooth, *length),
+        Edit::RenameAnimation {
+            animation,
+            new_name,
+        } => motion::rename_animation(doc, animation, new_name),
+        Edit::RemoveAnimation { animation } => motion::remove_animation(doc, animation),
+        Edit::AddKey {
+            animation,
+            pose,
+            at,
+        } => motion::add_key(doc, animation, pose, *at),
+        Edit::MoveKey { animation, key, at } => motion::move_key(doc, animation, *key, *at),
+        Edit::SetKey {
+            animation,
+            key,
+            pose,
+        } => motion::set_key(doc, animation, *key, pose),
+        Edit::RemoveKey { animation, key } => motion::remove_key(doc, animation, *key),
+        Edit::MirrorPose { pose, as_name } => {
+            motion::mirror_pose(doc, pose, as_name.as_deref(), model)
+        }
         Edit::Add {
             name,
             made,
@@ -1188,11 +1375,23 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 ));
             }
             let count = going.len();
+            // What goes, by the paths the poses know it by.
+            let mut gone: Vec<String> = Vec::new();
+            for &at in &going {
+                let sibling = Found {
+                    at,
+                    name: Some(names[at].clone()),
+                    inside: beside(&found.inside, &names[at]),
+                    ..found.clone()
+                };
+                gone.extend(every_use(&sibling, model, &beside(part, &names[at])));
+            }
             going.sort_unstable();
             for at in going.into_iter().rev() {
                 doc.remove_item(&found.list, at).map_err(cant)?;
             }
-            let summary = match count {
+            let forgotten = motion::poses_forget(doc, &gone)?;
+            let mut summary = match count {
                 1 => format!("removed \"{part}\""),
                 2 => format!("removed \"{part}\" and the part that hung from it"),
                 more => format!(
@@ -1200,6 +1399,11 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                     more - 1
                 ),
             };
+            match forgotten {
+                0 => {}
+                1 => summary.push_str(", and its line in a pose"),
+                lines => summary.push_str(&format!(", and {lines} lines of poses")),
+            }
             Ok(Outcome {
                 summary,
                 touched: Some(found),
@@ -1255,6 +1459,8 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                     doc.set_value(&path, &text(&new)).map_err(cant)?;
                 }
             }
+            // The poses name it by its path: they follow.
+            motion::poses_follow_rename(doc, &every_use(&found, model, part), new_name)?;
             Ok(Outcome {
                 summary: format!("renamed \"{part}\" to \"{new_name}\""),
                 touched: Some(found),
@@ -1709,6 +1915,13 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                             ),
                         ));
                     }
+                }
+                // And so do its limits: a turn around y or z goes the
+                // other way.
+                if let limits @ Limits::Turns(_) = motion::limits_at(doc, &copy)
+                    && let Some(value) = motion::limits_val(limits.mirrored())
+                {
+                    set(doc, &copy, "limits", value)?;
                 }
                 // A twist seen in a mirror turns the other way.
                 let twist = doc
@@ -2753,6 +2966,26 @@ pub fn shared(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -> 
     share(&found, model, part)
 }
 
+/// A path with its last name replaced: `left_arm/hand` and `elbow` give
+/// `left_arm/elbow`.
+fn beside(path: &str, name: &str) -> String {
+    match path.rsplit_once('/') {
+        Some((around, _)) => format!("{around}/{name}"),
+        None => name.to_owned(),
+    }
+}
+
+/// Every part of the model that the recipe's part `part` is: itself,
+/// and, for a part inside a definition, the same part in every part
+/// that uses the definition.
+fn every_use(found: &Found, model: Option<&Model>, part: &str) -> Vec<String> {
+    let mut all = vec![part.to_owned()];
+    if let Some(shared) = share(found, model, part) {
+        all.extend(shared.also_changes);
+    }
+    all
+}
+
 fn share(found: &Found, model: Option<&Model>, part: &str) -> Option<Shared> {
     let definition = found.definition.clone()?;
     fn users<'a>(parts: &'a [Part], definition: &str, into: &mut Vec<&'a Part>) {
@@ -2830,6 +3063,8 @@ pub struct Facts {
     /// it (parts joined to it, its own join, a socket that passes it
     /// on).
     pub sockets: Vec<(String, usize)>,
+    /// How far it may turn when the model is posed: its `limits`.
+    pub limits: Limits,
     /// Which way each of `sockets` faces, as one of [`FACINGS`]: `None`
     /// for one written with `at` or `from`, or with three numbers.
     pub socket_facings: Vec<Option<String>>,
@@ -3028,6 +3263,7 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
                 (socket, uses)
             })
             .collect(),
+        limits: motion::limits_at(&doc, &found.path()),
         socket_facings: declared_sockets(&doc, &found)
             .iter()
             .map(|socket| facing_word(&doc, &found, socket))
@@ -3146,6 +3382,8 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::MoveEdge { part, .. }
         | Edit::MoveCorner { part, .. }
         | Edit::Define { part, .. }
+        | Edit::SetLimits { part, .. }
+        | Edit::SetPose { part, .. }
         | Edit::Cut { part, .. } => part,
         Edit::SetSocket { socket, .. }
         | Edit::RenameSocket { socket, .. }
@@ -3153,6 +3391,18 @@ fn part_of(edit: &Edit) -> &str {
         Edit::AddColor { .. }
         | Edit::SetColor { .. }
         | Edit::RemoveColor { .. }
+        | Edit::AddPose { .. }
+        | Edit::RenamePose { .. }
+        | Edit::RemovePose { .. }
+        | Edit::MirrorPose { .. }
+        | Edit::AddAnimation { .. }
+        | Edit::SetAnimation { .. }
+        | Edit::RenameAnimation { .. }
+        | Edit::RemoveAnimation { .. }
+        | Edit::AddKey { .. }
+        | Edit::MoveKey { .. }
+        | Edit::SetKey { .. }
+        | Edit::RemoveKey { .. }
         | Edit::TidySockets => "",
     }
 }

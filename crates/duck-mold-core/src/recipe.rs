@@ -75,7 +75,75 @@ pub struct Recipe {
     /// Where the model's zero point is. `None` means the default: the
     /// middle of the underside.
     pub origin: Option<Origin>,
+    /// The poses: parts turned and moved from where they stand at rest.
+    pub poses: Vec<PoseDef>,
+    /// The animations: poses at times.
+    pub animations: Vec<AnimationDef>,
 }
+
+/// An animation, as the recipe writes it: a name, and the poses it goes
+/// through, each with the time it is reached.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AnimationDef {
+    /// Its name.
+    pub name: String,
+    /// Where it was written.
+    pub loc: Loc,
+    /// True if it starts again after its last key (`loop = true`).
+    pub looping: bool,
+    /// True if the motion flows through each pose and starts and ends
+    /// gently; false if it goes straight from pose to pose at a steady
+    /// speed (`smooth = false`).
+    pub smooth: bool,
+    /// The keys, in the order of their times.
+    pub keys: Vec<KeyDef>,
+}
+
+/// One key of an animation: a pose, and when it is reached.
+#[derive(Debug, Clone, PartialEq)]
+pub struct KeyDef {
+    /// Seconds from the animation's start.
+    pub at: f64,
+    /// The pose's name.
+    pub pose: String,
+    /// Where it was written.
+    pub loc: Loc,
+}
+
+/// The fields of an animation, in the order they are written.
+pub(crate) const ANIMATION_FIELDS: [&str; 3] = ["loop", "smooth", "keys"];
+
+/// How late a key can be, in seconds: an hour.
+pub const LONGEST_ANIMATION: f64 = 3600.0;
+
+/// A pose, as the recipe writes it: a name, and a line for every part
+/// that isn't at rest.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PoseDef {
+    /// Its name.
+    pub name: String,
+    /// Where it was written.
+    pub loc: Loc,
+    /// The parts it turns or moves.
+    pub parts: Vec<PosePart>,
+}
+
+/// One part in a pose.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PosePart {
+    /// The part, by path: `left_arm/elbow`.
+    pub part: String,
+    /// Where it was written.
+    pub loc: Loc,
+    /// Degrees around x, then y, then z, about the part's pivot.
+    pub turn: [f64; 3],
+    /// How far it is moved from where it stands at rest, in metres.
+    pub move_by: [f64; 3],
+}
+
+/// The pose that is always there and can't be written: the model as the
+/// recipe builds it.
+pub const REST: &str = "rest";
 
 /// Where a recipe's colours come from.
 #[derive(Debug, Clone, PartialEq)]
@@ -156,6 +224,124 @@ pub struct PartDef {
     /// Changes made to its shape once it is built: pulls, insets...
     /// Only a box has them.
     pub changes: Vec<ChangeDef>,
+    /// How far it may turn when the model is posed.
+    pub limits: Limits,
+}
+
+/// How far a part may turn about its join when the model is posed: its
+/// `limits`.
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub enum Limits {
+    /// No `limits`: it may turn any way, any amount, and move.
+    #[default]
+    Free,
+    /// `limits = "fixed"`: it neither turns nor moves.
+    Fixed,
+    /// A table: around x, y and z, how far it may turn. A direction the
+    /// table doesn't name doesn't turn.
+    Turns([Turns; 3]),
+}
+
+/// How far a part may turn around one direction.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Turns {
+    /// Not at all.
+    No,
+    /// Any amount, round and round: `"free"`.
+    Any,
+    /// Between two angles, in degrees: the first 0 or less, the second 0
+    /// or more.
+    Between(f64, f64),
+}
+
+impl Turns {
+    /// How far past what is allowed an angle is: 0 if it is allowed.
+    pub fn past(self, degrees: f64) -> f64 {
+        match self {
+            Turns::Any => 0.0,
+            Turns::No => degrees.abs(),
+            Turns::Between(low, high) => (low - degrees).max(degrees - high).max(0.0),
+        }
+    }
+
+    /// The nearest allowed angle to this one.
+    pub fn kept(self, degrees: f64) -> f64 {
+        match self {
+            Turns::Any => degrees,
+            Turns::No => 0.0,
+            Turns::Between(low, high) => degrees.clamp(low, high),
+        }
+    }
+
+    /// The same, seen in a mirror across x: for a turn around y or z,
+    /// which then goes the other way.
+    fn flipped(self) -> Turns {
+        match self {
+            Turns::Between(low, high) => Turns::Between(-high + 0.0, -low + 0.0),
+            other => other,
+        }
+    }
+}
+
+impl Limits {
+    /// The words for x, y and z.
+    pub const AXES: [&'static str; 3] = ["x", "y", "z"];
+
+    /// How far the part may turn around x, y and z.
+    pub fn turns(self) -> [Turns; 3] {
+        match self {
+            Limits::Free => [Turns::Any; 3],
+            Limits::Fixed => [Turns::No; 3],
+            Limits::Turns(turns) => turns,
+        }
+    }
+
+    /// Whether a pose may move the part.
+    pub fn may_move(self) -> bool {
+        self != Limits::Fixed
+    }
+
+    /// The limits of the part's mirror image, left to right: turns
+    /// around y and z go the other way.
+    pub fn mirrored(self) -> Limits {
+        match self {
+            Limits::Turns([x, y, z]) => Limits::Turns([x, y.flipped(), z.flipped()]),
+            other => other,
+        }
+    }
+
+    /// In a few words: `free`, `fixed`, `x -30..40, y -80..80`, `doesn't
+    /// turn`.
+    pub fn describe(self) -> String {
+        match self {
+            Limits::Free => "free".to_owned(),
+            Limits::Fixed => "fixed".to_owned(),
+            Limits::Turns(turns) => {
+                let named: Vec<String> = Limits::AXES
+                    .iter()
+                    .zip(turns)
+                    .filter_map(|(axis, turns)| match turns {
+                        Turns::No => None,
+                        Turns::Any => Some(format!("{axis} free")),
+                        Turns::Between(low, high) => {
+                            Some(format!("{axis} {}..{}", short(low), short(high)))
+                        }
+                    })
+                    .collect();
+                if named.is_empty() {
+                    "doesn't turn".to_owned()
+                } else {
+                    named.join(", ")
+                }
+            }
+        }
+    }
+}
+
+/// A number without a needless `.0`, and never `-0`.
+fn short(number: f64) -> String {
+    let number = (number * 1000.0).round() / 1000.0 + 0.0;
+    format!("{number}")
 }
 
 /// One change to a shaped part's shape, and where it was written.
@@ -615,7 +801,7 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-pub(crate) const PART_FIELDS: [&str; 27] = [
+pub(crate) const PART_FIELDS: [&str; 28] = [
     "name",
     "shape",
     "use",
@@ -641,6 +827,7 @@ pub(crate) const PART_FIELDS: [&str; 27] = [
     "move",
     "scale",
     "mirror",
+    "limits",
     "sockets",
     "note",
 ];
@@ -663,7 +850,7 @@ fn a_shape(name: &str) -> String {
 }
 
 /// The fields at the top of a recipe.
-pub(crate) const TOP_FIELDS: [&str; 9] = [
+pub(crate) const TOP_FIELDS: [&str; 11] = [
     "version",
     "name",
     "description",
@@ -673,6 +860,8 @@ pub(crate) const TOP_FIELDS: [&str; 9] = [
     "parts",
     "sockets",
     "origin",
+    "poses",
+    "animations",
 ];
 
 /// Names kept for later phases, and what each is for.
@@ -973,6 +1162,8 @@ impl Decoder<'_> {
             parts: Vec::new(),
             sockets: Vec::new(),
             origin: None,
+            poses: Vec::new(),
+            animations: Vec::new(),
         };
         let Some(mut fields) = self.table(root, "", "a recipe: a table of fields") else {
             return recipe;
@@ -1098,8 +1289,276 @@ impl Decoder<'_> {
             });
         }
 
+        if let Some(entry) = fields.take("poses") {
+            recipe.poses = self.poses(&entry.node, "poses");
+        }
+        if let Some(entry) = fields.take("animations") {
+            recipe.animations = self.animations(&entry.node, "animations");
+        }
+
         self.finish(fields, &TOP_FIELDS);
         recipe
+    }
+
+    /// Reads `poses`: a table of poses by name, each a table of parts
+    /// with their turn (three numbers), or `{ turn = ..., move = ... }`.
+    fn poses(&mut self, node: &Node, path: &str) -> Vec<PoseDef> {
+        let Some(table) = self.table(node, path, "a table of poses by name, like [poses.wave]")
+        else {
+            return Vec::new();
+        };
+        let mut poses = Vec::new();
+        for pose in table.entries {
+            let pose_path = join(path, &pose.key);
+            if pose.key == REST {
+                self.error(
+                    Code::Reserved,
+                    &pose_path,
+                    pose.key_pos,
+                    "\"rest\" is the model as the recipe builds it, and is always there: it can't be written as a pose. Give this pose another name",
+                );
+                continue;
+            }
+            if !is_name(&pose.key) {
+                let message = format!(
+                    "\"{}\" can't be a name: use letters, digits, \"_\" and \"-\" only",
+                    pose.key
+                );
+                self.error(Code::TypeMismatch, &pose_path, pose.key_pos, message);
+                continue;
+            }
+            let Some(lines) = self.table(
+                &pose.node,
+                &pose_path,
+                "a table of parts and how each is turned, like left_arm = [0, 0, -150]",
+            ) else {
+                continue;
+            };
+            let mut parts = Vec::new();
+            for line in lines.entries {
+                let part_path = join(&pose_path, &line.key);
+                let (turn, move_by) = match &line.node.value {
+                    Value::Table(_) => {
+                        let Some(mut fields) =
+                            self.table(&line.node, &part_path, "{ turn = [0, 30, 0] }")
+                        else {
+                            continue;
+                        };
+                        let turn = fields.take("turn").map(|entry| {
+                            self.three(
+                                &entry.node,
+                                &join(&part_path, "turn"),
+                                TURN_RANGE,
+                                "[0, 30, 0]",
+                            )
+                        });
+                        let move_by = fields.take("move").map(|entry| {
+                            self.three(
+                                &entry.node,
+                                &join(&part_path, "move"),
+                                MOVE_RANGE,
+                                "[0, 0.2, 0]",
+                            )
+                        });
+                        if turn.is_none() && move_by.is_none() {
+                            self.error(
+                                Code::MissingField,
+                                &part_path,
+                                line.node.pos,
+                                "a part in a pose needs \"turn\", \"move\" or both, like { turn = [0, 30, 0] }",
+                            );
+                        }
+                        self.finish(fields, &["turn", "move"]);
+                        match (turn, move_by) {
+                            (Some(None), _) | (_, Some(None)) | (None, None) => continue,
+                            (turn, move_by) => (
+                                turn.flatten().unwrap_or([0.0; 3]),
+                                move_by.flatten().unwrap_or([0.0; 3]),
+                            ),
+                        }
+                    }
+                    Value::Array(_) => {
+                        match self.three(&line.node, &part_path, TURN_RANGE, "[0, 30, 0]") {
+                            Some(turn) => (turn, [0.0; 3]),
+                            None => continue,
+                        }
+                    }
+                    other => {
+                        let message = format!(
+                            "a part in a pose is its turn, three numbers in degrees like [0, 30, 0], or {{ turn = ..., move = ... }}, not {}",
+                            other.describe()
+                        );
+                        self.error(Code::TypeMismatch, &part_path, line.node.pos, message)
+                            .got = Some(other.to_got());
+                        continue;
+                    }
+                };
+                parts.push(PosePart {
+                    part: line.key.clone(),
+                    loc: self.loc(&part_path, line.key_pos),
+                    turn,
+                    move_by,
+                });
+            }
+            poses.push(PoseDef {
+                name: pose.key.clone(),
+                loc: self.loc(&pose_path, pose.key_pos),
+                parts,
+            });
+        }
+        poses
+    }
+
+    /// `true` or `false`.
+    fn yes_or_no(&mut self, node: &Node, path: &str) -> Option<bool> {
+        match &node.value {
+            Value::Bool(yes) => Some(*yes),
+            other => {
+                let message = format!("this needs true or false, not {}", other.describe());
+                self.error(Code::TypeMismatch, path, node.pos, message).got = Some(other.to_got());
+                None
+            }
+        }
+    }
+
+    /// Reads `animations`: a table of animations by name, each with its
+    /// `keys` (a pose and the time it is reached), and `loop` and
+    /// `smooth` if they are written.
+    fn animations(&mut self, node: &Node, path: &str) -> Vec<AnimationDef> {
+        let Some(table) = self.table(
+            node,
+            path,
+            "a table of animations by name, like [animations.walk]",
+        ) else {
+            return Vec::new();
+        };
+        let mut animations = Vec::new();
+        for animation in table.entries {
+            let own_path = join(path, &animation.key);
+            if !is_name(&animation.key) {
+                let message = format!(
+                    "\"{}\" can't be a name: use letters, digits, \"_\" and \"-\" only",
+                    animation.key
+                );
+                self.error(Code::TypeMismatch, &own_path, animation.key_pos, message);
+                continue;
+            }
+            let Some(mut fields) = self.table(
+                &animation.node,
+                &own_path,
+                "a table with the animation's keys, like keys = [{ at = 0, pose = \"rest\" }]",
+            ) else {
+                continue;
+            };
+            let looping = fields
+                .take("loop")
+                .and_then(|entry| self.yes_or_no(&entry.node, &join(&own_path, "loop")))
+                .unwrap_or(false);
+            let smooth = fields
+                .take("smooth")
+                .and_then(|entry| self.yes_or_no(&entry.node, &join(&own_path, "smooth")))
+                .unwrap_or(true);
+            let keys = match fields.take("keys") {
+                Some(entry) => self.keys(&entry.node, &join(&own_path, "keys")),
+                None => Vec::new(),
+            };
+            self.finish(fields, &ANIMATION_FIELDS);
+            animations.push(AnimationDef {
+                name: animation.key.clone(),
+                loc: self.loc(&own_path, animation.key_pos),
+                looping,
+                smooth,
+                keys,
+            });
+        }
+        animations
+    }
+
+    /// Reads an animation's `keys`: a list of `{ at = seconds, pose =
+    /// "name" }`. The first is at 0 and each is later than the one
+    /// before.
+    fn keys(&mut self, node: &Node, path: &str) -> Vec<KeyDef> {
+        let Value::Array(items) = &node.value else {
+            let message = format!(
+                "this needs a list of keys, like [{{ at = 0, pose = \"rest\" }}], not {}",
+                node.value.describe()
+            );
+            self.error(Code::TypeMismatch, path, node.pos, message).got = Some(node.value.to_got());
+            return Vec::new();
+        };
+        let mut keys: Vec<KeyDef> = Vec::new();
+        for (index, item) in items.iter().enumerate() {
+            let item_path = format!("{path}[{index}]");
+            let Some(mut fields) = self.table(
+                item,
+                &item_path,
+                "a key, like { at = 0.4, pose = \"wave\" }",
+            ) else {
+                continue;
+            };
+            let at = match fields.take("at") {
+                Some(entry) => self.ranged(
+                    &entry.node,
+                    &join(&item_path, "at"),
+                    (0.0, LONGEST_ANIMATION),
+                    "0.4",
+                ),
+                None => {
+                    self.error(
+                        Code::MissingField,
+                        &item_path,
+                        item.pos,
+                        "a key needs \"at\", its time in seconds, like at = 0.4",
+                    );
+                    None
+                }
+            };
+            let pose = match fields.take("pose") {
+                Some(entry) => self.text(&entry.node, &join(&item_path, "pose"), "wave"),
+                None => {
+                    self.error(
+                        Code::MissingField,
+                        &item_path,
+                        item.pos,
+                        "a key needs \"pose\", the name of the pose it reaches, like pose = \"wave\"",
+                    );
+                    None
+                }
+            };
+            self.finish(fields, &["at", "pose"]);
+            let (Some(at), Some(pose)) = (at, pose) else {
+                continue;
+            };
+            match keys.last() {
+                None if at != 0.0 => {
+                    let message = format!(
+                        "an animation starts with a key at 0, and this first key is at {}. Put it at 0, or add a key at 0 before it",
+                        plain(at)
+                    );
+                    let issue =
+                        self.error(Code::OutOfRange, &join(&item_path, "at"), item.pos, message);
+                    issue.got = Some(at.into());
+                    issue.suggestion = Some("at = 0".to_owned());
+                }
+                Some(before) if at <= before.at => {
+                    let message = format!(
+                        "each key is later than the one before it: this one is at {} and the one before is at {}",
+                        plain(at),
+                        plain(before.at)
+                    );
+                    self.error(Code::OutOfRange, &join(&item_path, "at"), item.pos, message)
+                        .got = Some(at.into());
+                    continue;
+                }
+                _ => {}
+            }
+            keys.push(KeyDef {
+                at,
+                pose,
+                loc: self.loc(&item_path, item.pos),
+            });
+        }
+        keys
     }
 
     /// A table of `name = "#RRGGBB"`.
@@ -1215,6 +1674,7 @@ impl Decoder<'_> {
             sockets: Vec::new(),
             trim: Trim::default(),
             changes: Vec::new(),
+            limits: Limits::Free,
         };
         let Some(mut fields) = self.table(node, path, "a part: a table of fields") else {
             return part;
@@ -1394,6 +1854,15 @@ impl Decoder<'_> {
                         None
                     }
                 };
+            }
+        }
+
+        if let Some(entry) = fields.take("limits") {
+            let limits_path = fields.sub("limits");
+            if place == Place::Defined {
+                self.defined_has_no(&limits_path, entry, "limits");
+            } else if let Some(limits) = self.limits(&entry.node, &limits_path) {
+                part.limits = limits;
             }
         }
 
@@ -1767,6 +2236,85 @@ impl Decoder<'_> {
             "a defined part has no place or size of its own: put \"{field}\" on the part that uses it"
         );
         self.error(Code::Conflict, path, entry.key_pos, message);
+    }
+
+    /// Reads `limits`: `"fixed"`, or a table of the directions the part
+    /// may turn around, each with two angles or `"free"`.
+    fn limits(&mut self, node: &Node, path: &str) -> Option<Limits> {
+        const EXAMPLE: &str =
+            "\"fixed\" (it never moves), or the directions it may turn, like { x = [-30, 40] }";
+        let table = match &node.value {
+            Value::Str(word) if word == "fixed" => return Some(Limits::Fixed),
+            Value::Str(word) => {
+                let message = format!("\"limits\" is {EXAMPLE}, not \"{word}\"");
+                let issue = Issue::error(Code::TypeMismatch, path, message)
+                    .in_file(self.file)
+                    .at(node.pos)
+                    .got(word.as_str())
+                    .one_of(word, ["fixed"]);
+                self.issues.push(issue);
+                return None;
+            }
+            _ => self.table(node, path, EXAMPLE)?,
+        };
+        let mut turns = [Turns::No; 3];
+        let mut good = true;
+        for entry in table.entries {
+            let axis_path = join(path, &entry.key);
+            let Some(axis) = Limits::AXES.iter().position(|axis| *axis == entry.key) else {
+                let message = format!(
+                    "a part turns around \"x\" (a nod), \"y\" (a turn) or \"z\" (a tilt), not \"{}\"",
+                    entry.key
+                );
+                let issue = Issue::error(Code::UnknownField, axis_path, message)
+                    .in_file(self.file)
+                    .at(entry.key_pos)
+                    .got(entry.key.as_str())
+                    .one_of(&entry.key.to_lowercase(), Limits::AXES);
+                self.issues.push(issue);
+                good = false;
+                continue;
+            };
+            let how = "two angles in degrees, like [-30, 40], or \"free\" for any amount";
+            turns[axis] = match &entry.node.value {
+                Value::Str(word) if word == "free" => Turns::Any,
+                Value::Array(items) if items.len() == 2 => {
+                    let low = self.ranged(&items[0], &axis_path, TURN_RANGE, "-30");
+                    let high = self.ranged(&items[1], &axis_path, TURN_RANGE, "40");
+                    match low.zip(high) {
+                        Some((low, high)) if low <= 0.0 && high >= 0.0 => Turns::Between(low, high),
+                        Some((low, high)) => {
+                            let message = format!(
+                                "the part stands at 0 when the model is at rest, so its limits must have 0 between them: the first 0 or less and the second 0 or more, not [{}, {}]",
+                                short(low),
+                                short(high)
+                            );
+                            self.error(Code::OutOfRange, &axis_path, entry.node.pos, message);
+                            good = false;
+                            continue;
+                        }
+                        None => {
+                            good = false;
+                            continue;
+                        }
+                    }
+                }
+                Value::Array(items) => {
+                    let message = format!("a limit is {how}, not a list of {}", items.len());
+                    self.error(Code::TypeMismatch, &axis_path, entry.node.pos, message);
+                    good = false;
+                    continue;
+                }
+                other => {
+                    let message = format!("a limit is {how}, not {}", other.describe());
+                    self.error(Code::TypeMismatch, &axis_path, entry.node.pos, message)
+                        .got = Some(other.to_got());
+                    good = false;
+                    continue;
+                }
+            };
+        }
+        good.then_some(Limits::Turns(turns))
     }
 
     /// Reads the one field that says where a part's shape comes from.

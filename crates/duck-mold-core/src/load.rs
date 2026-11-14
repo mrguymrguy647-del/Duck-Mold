@@ -162,6 +162,8 @@ impl Loader<'_> {
                     parts: Vec::new(),
                     sockets: Vec::new(),
                     origin: None,
+                    poses: Vec::new(),
+                    animations: Vec::new(),
                 };
             }
         };

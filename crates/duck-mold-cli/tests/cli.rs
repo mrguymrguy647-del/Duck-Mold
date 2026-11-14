@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -1317,7 +1317,7 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 26, "the guide's tables list 26 fields");
+    assert_eq!(checked, 29, "the guide's tables list 29 fields");
 }
 
 #[test]
@@ -1388,4 +1388,443 @@ fn a_box_is_shaped_from_the_command_line_and_its_faces_listed() {
     // Without --faces, no list.
     let report = json(&run(&folder, &["inspect", "wall.toml", "--json"]));
     assert!(report.get("shaped").is_none());
+}
+
+// ---- Phase 5: models that move ---------------------------------------------------------
+
+#[test]
+fn limits_are_set_and_the_joins_listed_from_the_command_line() {
+    let folder = folder("cli_limits");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+
+    // The leaves sway a little on the trunk, and turn right round.
+    let output = edit(&["set-limits", "leaves", "--x", "-10,10", "--y", "free"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output)
+            .starts_with("edited tree.toml: set the limits of \"leaves\": x -10..10, y free\n"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(
+        text().contains("limits = { x = [-10, 10], y = \"free\" }"),
+        "{}",
+        text()
+    );
+    // The report says so beside the part.
+    assert!(
+        stdout(&output).contains("on trunk.top, turns x -10..10, y free"),
+        "{}",
+        stdout(&output)
+    );
+
+    // The tree of joins: what each part turns about, and how far.
+    let output = run(&folder, &["inspect", "tree.toml", "--joins"]);
+    let listing = stdout(&output);
+    assert!(
+        listing.contains("  joins        2: what each part turns about, and how far\n"),
+        "{listing}"
+    );
+    assert!(
+        listing.contains("    trunk      turns about its middle   free\n"),
+        "{listing}"
+    );
+    assert!(
+        listing.contains("      leaves   on trunk.top             x -10..10, y free\n"),
+        "{listing}"
+    );
+    let report = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--joins", "--json"],
+    ));
+    assert_eq!(
+        report["joins"][1],
+        serde_json::json!({
+            "part": "leaves",
+            "parent": "trunk",
+            "joined_to": "trunk.top",
+            "pivot": [0.0, 1.2, 0.0],
+            "limits": { "x": [-10.0, 10.0], "y": "free" }
+        })
+    );
+    assert_eq!(report["joins"][0]["parent"], serde_json::Value::Null);
+    assert_eq!(report["joins"][0]["limits"], "free");
+    // In the report's own tree of parts, only a part with limits says so.
+    assert_eq!(
+        report["parts"][1]["limits"],
+        serde_json::json!({ "x": [-10.0, 10.0], "y": "free" })
+    );
+    assert!(report["parts"][0].get("limits").is_none());
+    // Without --joins the list isn't there.
+    let report = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    assert!(report.get("joins").is_none());
+
+    // One direction locked again, then fixed, then free.
+    let output = edit(&["set-limits", "leaves", "--y", "none", "--dry-run"]);
+    assert!(
+        stdout(&output).contains("x -10..10\n"),
+        "{}",
+        stdout(&output)
+    );
+    assert!(text().contains("y = \"free\""), "a dry run writes nothing");
+    let output = edit(&["set-limits", "leaves", "--fixed", "--json"]);
+    assert_eq!(json(&output)["edit"]["command"], "set-limits");
+    assert!(text().contains("limits = \"fixed\""), "{}", text());
+    let output = edit(&["set-limits", "leaves", "--none"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(text(), TREE);
+
+    // Mistakes say what to write.
+    let output = edit(&["set-limits", "leaves", "--x", "ten"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains(
+            "--x needs two angles in degrees, like -30,40, or free, or none, not \"ten\""
+        ),
+        "{}",
+        stderr(&output)
+    );
+    let output = edit(&["set-limits", "leaves", "--x", "5,40"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("must have 0 between them"),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(text(), TREE);
+}
+
+#[test]
+fn animations_are_made_checked_and_drawn_from_the_command_line() {
+    let folder = folder("cli_animations");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+
+    // The tree sways: its leaves tip one way, then the other, and back.
+    for words in [
+        &["set-pose", "lean", "leaves", "--turn", "0,0,-20"][..],
+        &["mirror-pose", "lean", "--as", "lean_back"],
+        &["add-animation", "sway", "--loop"],
+        &["add-key", "sway", "rest", "--at", "0"],
+        &["add-key", "sway", "lean", "--at", "0.5"],
+        &["add-key", "sway", "lean_back", "--at", "1.5"],
+        &["add-key", "sway", "rest", "--at", "2"],
+    ] {
+        let output = edit(words);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{words:?}: {}",
+            stderr(&output)
+        );
+    }
+    assert!(
+        text().ends_with(
+            "[animations.sway]\nloop = true\nkeys = [\n  { at = 0, pose = \"rest\" },\n  { at = 0.5, pose = \"lean\" },\n  { at = 1.5, pose = \"lean_back\" },\n  { at = 2, pose = \"rest\" },\n]\n"
+        ),
+        "{}",
+        text()
+    );
+
+    // The report on it: every frame looked at.
+    let output = run(&folder, &["inspect", "tree.toml", "--animation", "sway"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(
+        report.starts_with(
+            "tree, the animation \"sway\"  (tree.toml)\n  length       2 s  (61 frames at 30 a second)\n  plays        round and round (it loops)\n"
+        ),
+        "{report}"
+    );
+    assert!(
+        report.contains("  keys         1  0 s    rest\n               2  0.5 s  lean\n"),
+        "{report}"
+    );
+    assert!(report.contains("  moves        leaves\n"), "{report}");
+    assert!(
+        report.contains(
+            "  limits       none broken in any frame\n  loop         ends as it starts\n"
+        ),
+        "{report}"
+    );
+    let report = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--animation", "sway", "--json"],
+    ));
+    assert_eq!(report["ok"], true);
+    assert_eq!(report["animation"], "sway");
+    assert_eq!(report["length"], 2.0);
+    assert_eq!(report["frames"], 61);
+    assert_eq!(report["keys"][2]["pose"], "lean_back");
+    assert_eq!(report["ends_as_it_starts"], true);
+    // The plain report names the model's animations.
+    let plain = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    assert_eq!(plain["animations"][0]["name"], "sway");
+    assert_eq!(plain["animations"][0]["loops"], true);
+    assert_eq!(plain["animations"][0]["keys"], 4);
+    // A name that isn't there gets the closest one.
+    let output = run(&folder, &["inspect", "tree.toml", "--animation", "swa"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output)
+            .contains("there is no animation \"swa\" in this recipe. Did you mean \"sway\"?"),
+        "{}",
+        stderr(&output)
+    );
+
+    // The strip: frames side by side, named after the model and the
+    // animation.
+    let output = run(
+        &folder,
+        &[
+            "render",
+            "tree.toml",
+            "--animation",
+            "sway",
+            "--size",
+            "128",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("wrote tree.sway.strip.png (1031 x 140 pixels, "),
+        "{}",
+        stdout(&output)
+    );
+    assert!(folder.join("tree.sway.strip.png").is_file());
+    let output = run(
+        &folder,
+        &[
+            "render",
+            "tree.toml",
+            "--animation",
+            "sway",
+            "--frames",
+            "4",
+            "--view",
+            "front",
+            "--size",
+            "128",
+            "-o",
+            "four.png",
+            "--json",
+        ],
+    );
+    let report = json(&output);
+    assert_eq!(report["output"], "four.png");
+    assert_eq!(report["width"], 4 * 128 + 3);
+    assert_eq!(report["view"], "front");
+    assert_eq!(report["strip"].as_array().unwrap().len(), 4);
+    assert_eq!(report["strip"][1]["at"], 0.5);
+    assert_eq!(report["strip"][1]["left"], 129);
+    assert_eq!(report["animation"], "sway");
+    for (words, said) in [
+        (
+            &["--frames", "1"][..],
+            "a strip has from 2 to 60 frames, not 1",
+        ),
+        (&["--view", "top"], "there is no view \"top\""),
+    ] {
+        let mut arguments = vec!["render", "tree.toml", "--animation", "sway"];
+        arguments.extend_from_slice(words);
+        let output = run(&folder, &arguments);
+        assert_eq!(output.status.code(), Some(2), "{words:?}");
+        assert!(stderr(&output).contains(said), "{}", stderr(&output));
+    }
+
+    // Keys and the animation itself, changed and taken away again.
+    let output = edit(&["remove-pose", "lean"]);
+    assert_eq!(output.status.code(), Some(2), "{}", stdout(&output));
+    assert!(
+        stderr(&output).contains("the pose \"lean\" is used by the animation \"sway\" (key 2)"),
+        "{}",
+        stderr(&output)
+    );
+    for words in [
+        &["move-key", "sway", "2", "--at", "0.6"][..],
+        &["set-key", "sway", "3", "--pose", "rest"],
+        &[
+            "set-animation",
+            "sway",
+            "--loop",
+            "false",
+            "--smooth",
+            "false",
+            "--length",
+            "1",
+        ],
+        &["remove-key", "sway", "3"],
+        &["remove-pose", "lean", "--with-keys"],
+        &["rename-animation", "sway", "wind"],
+        &["remove-animation", "wind"],
+        &["remove-pose", "lean_back"],
+    ] {
+        let output = edit(words);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{words:?}: {}",
+            stderr(&output)
+        );
+    }
+    assert_eq!(text(), TREE);
+}
+
+#[test]
+fn poses_are_made_checked_and_drawn_from_the_command_line() {
+    let folder = folder("cli_poses");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+
+    // The tree leans in the wind: its leaves tip over on the trunk.
+    let output = edit(&["set-pose", "windy", "leaves", "--turn", "0,0,-20"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with(
+            "edited tree.toml: turned \"leaves\" to [0, 0, -20] in the pose \"windy\", a new pose\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+    assert_eq!(
+        text(),
+        format!("{TREE}\n[poses.windy]\nleaves = [0, 0, -20]\n")
+    );
+    let output = edit(&["set-pose", "windy", "trunk", "--move", "0.1,0,0", "--json"]);
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "set-pose");
+    assert!(text().ends_with("leaves = [0, 0, -20]\ntrunk = { move = [0.1, 0, 0] }\n"));
+
+    // The report on the model in the pose: bigger across, and it says
+    // what the pose moves.
+    let output = run(&folder, &["inspect", "tree.toml", "--pose", "windy"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let report = stdout(&output);
+    assert!(
+        report.starts_with("tree, in the pose \"windy\"  (tree.toml)\n"),
+        "{report}"
+    );
+    assert!(
+        report.contains("  moves        leaves, trunk\n"),
+        "{report}"
+    );
+    assert!(report.contains("  limits       none broken\n"), "{report}");
+    let at_rest = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    let posed = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--pose", "windy", "--json"],
+    ));
+    // The leaves lean over to one side, and the whole tree stands 10 cm
+    // to the side: it reaches further that way, and is lower.
+    assert!(
+        posed["bounds"]["max"][0].as_f64().unwrap()
+            > at_rest["bounds"]["max"][0].as_f64().unwrap() + 0.05
+    );
+    assert!(posed["size"][1].as_f64().unwrap() < at_rest["size"][1].as_f64().unwrap());
+    assert_eq!(posed["pose"]["name"], "windy");
+    assert_eq!(
+        posed["pose"]["moves"],
+        serde_json::json!(["leaves", "trunk"])
+    );
+    assert_eq!(posed["pose"]["limits_broken"], serde_json::json!([]));
+    assert!(at_rest.get("pose").is_none());
+    // `rest` is a pose too: the model as it is built.
+    let rest = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--pose", "rest", "--json"],
+    ));
+    assert_eq!(rest["size"], at_rest["size"]);
+
+    // A limit the pose breaks is said in the report and as a warning.
+    let output = edit(&["set-limits", "leaves", "--z", "-10,10"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stderr(&output)
+            .contains("the pose \"windy\" turns \"leaves\" -20 around z: its limit is -10 to 10"),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(&folder, &["inspect", "tree.toml", "--pose", "windy"]);
+    assert!(
+        stdout(&output).contains(
+            "  limits       the pose turns \"leaves\" -20 around z: its limit is -10 to 10\n"
+        ),
+        "{}",
+        stdout(&output)
+    );
+
+    // The picture of the pose goes beside the model's own, named after
+    // the pose.
+    let output = run(&folder, &["render", "tree.toml", "--pose", "windy"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("wrote tree.windy.png ("),
+        "{}",
+        stdout(&output)
+    );
+    assert!(folder.join("tree.windy.png").is_file());
+    assert!(!folder.join("tree.png").exists());
+    let plain = run(&folder, &["render", "tree.toml"]);
+    assert_eq!(plain.status.code(), Some(0));
+    assert_ne!(
+        std::fs::read(folder.join("tree.windy.png")).unwrap(),
+        std::fs::read(folder.join("tree.png")).unwrap()
+    );
+
+    // The mirror image, a copy, another name, and gone again.
+    let output = edit(&["mirror-pose", "windy", "--as", "windy_back"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        text().ends_with(
+            "[poses.windy_back]\nleaves = [0, 0, 20]\ntrunk = { move = [-0.1, 0, 0] }\n"
+        ),
+        "{}",
+        text()
+    );
+    for words in [
+        &["add-pose", "calm", "--from", "windy"][..],
+        &["set-pose", "calm", "trunk", "--rest"],
+        &["rename-pose", "calm", "still"],
+        &["remove-pose", "still"],
+        &["remove-pose", "windy_back"],
+        &["remove-pose", "windy"],
+        &["set-limits", "leaves", "--none"],
+    ] {
+        let output = edit(words);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{words:?}: {}",
+            stderr(&output)
+        );
+    }
+    assert_eq!(text(), TREE);
+
+    // A pose that isn't there: which there are.
+    let output = run(&folder, &["inspect", "tree.toml", "--pose", "windy"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("there is no pose \"windy\" in this recipe. It can be: rest."),
+        "{}",
+        stderr(&output)
+    );
+    let output = run(
+        &folder,
+        &["render", "tree.toml", "--pose", "windy", "--json"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(json(&output)["errors"][0]["code"], "unknown_pose");
 }

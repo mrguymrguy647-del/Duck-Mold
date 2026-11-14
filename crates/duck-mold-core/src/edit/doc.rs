@@ -437,6 +437,65 @@ impl Doc {
         start
     }
 
+    /// Where to put a new block after one that ends at `end`. That is
+    /// `end`, unless the block is followed by comments that stand apart
+    /// from it, after a blank line: a banner over what comes next
+    /// (`# ---- how it moves ----`). Then the new block goes above the
+    /// banner, straight under the block's own lines.
+    fn before_a_banner(&self, end: usize) -> usize {
+        if end >= self.text.len() {
+            return end;
+        }
+        // Back over the blank lines and comments the block ends with, to
+        // its last line that is neither.
+        let mut own = end;
+        let mut comments = false;
+        while own > 0 {
+            let above = self.line_start(own - 1);
+            let line = self.text[above..own].trim();
+            if line.is_empty() {
+                own = above;
+            } else if line.starts_with('#') {
+                comments = true;
+                own = above;
+            } else {
+                break;
+            }
+        }
+        if !comments {
+            return end;
+        }
+        // Forward again over the comments straight under that line:
+        // they are notes on the block itself.
+        while own < end {
+            let below = self.line_end(own);
+            if self.text[own..below].trim().starts_with('#') {
+                own = below;
+            } else {
+                break;
+            }
+        }
+        // (If nothing but those notes followed, there is no banner.)
+        if self.text[own..end]
+            .lines()
+            .any(|line| line.trim().starts_with('#'))
+        {
+            own
+        } else {
+            end
+        }
+    }
+
+    /// Just past the blank line at `at`, if there is one there.
+    fn past_a_blank_line(&self, at: usize) -> usize {
+        let end = self.line_end(at);
+        if self.text[at..end].trim().is_empty() {
+            end
+        } else {
+            at
+        }
+    }
+
     /// Where the lines under a header end: at the next header (with its
     /// comments), or the end of the file.
     fn body_end(&self, header_start: usize, headers: &[(usize, TreePath)]) -> usize {
@@ -729,6 +788,125 @@ impl Doc {
         self.splice(at..at, &block)
     }
 
+    // ---- tables kept by name in a group: `[poses.wave]` -------------------------
+
+    /// Adds a table to a group of tables kept by name at the top of the
+    /// recipe: `[poses.wave]`. It goes after the group's last table, or,
+    /// for the first of a group, at the end of the file. In JSON, and
+    /// where the group is written between braces, it is a field of the
+    /// group.
+    pub fn add_named_table(&mut self, group: &str, name: &str, fields: &[(String, Val)]) -> Done {
+        let path = [key(group), key(name)];
+        if self.node(&path).is_some() {
+            return cant(format!("there is already a {name} in {group}"));
+        }
+        let group_path = [key(group)];
+        let between_braces = self.syntax == Syntax::Json
+            || self
+                .node(&group_path)
+                .is_some_and(|node| self.text[node.span.clone()].starts_with('{'));
+        if between_braces {
+            return match self.node(&group_path) {
+                Some(_) => self.set_field(&group_path, name, &Val::Table(fields.to_vec()), &[]),
+                None => self.set_field(
+                    &[],
+                    group,
+                    &Val::Table(vec![(name.to_owned(), Val::Table(fields.to_vec()))]),
+                    &crate::recipe::TOP_FIELDS,
+                ),
+            };
+        }
+        let newline = self.newline();
+        let headers = self.headers();
+        // After the last table of the group, with everything under it.
+        let last = headers
+            .iter()
+            .filter(|(_, other)| other.starts_with(&group_path))
+            .map(|(_, other)| self.block_end(other, &headers))
+            .max();
+        let at = last.map_or(self.text.len(), |end| self.before_a_banner(end));
+        let mut block = self.gap_before(at);
+        block.push_str(&format!("[{}]{newline}", Self::header_name(&path)));
+        for (field, value) in fields {
+            block.push_str(&field_text(field, value, Syntax::Toml));
+            block.push_str(newline);
+        }
+        if at < self.text.len() && !self.text[at..].starts_with(['\n', '\r']) {
+            block.push_str(newline);
+        }
+        self.splice(at..at, &block)
+    }
+
+    /// Takes a table out of a group of tables kept by name, with its
+    /// comments and the blank line above it. Fine if it isn't there.
+    pub fn remove_named_table(&mut self, group: &str, name: &str) -> Done {
+        let path = [key(group), key(name)];
+        let Some(node) = self.node(&path) else {
+            return Ok(());
+        };
+        let under_header =
+            self.syntax == Syntax::Toml && self.text[node.span.clone()].starts_with('[');
+        if !under_header {
+            self.remove_field(&[key(group)], name)?;
+            // A group left empty goes too, where it is a field.
+            if self.entries(&[key(group)]).is_some_and(<[Entry]>::is_empty) {
+                self.remove_field(&[], group)?;
+            }
+            return Ok(());
+        }
+        let headers = self.headers();
+        let mut start = self.lead(node.span.start);
+        let above = &self.text[..start];
+        if above.ends_with("\r\n\r\n") {
+            start -= 2;
+        } else if above.ends_with("\n\n") {
+            start -= 1;
+        }
+        let mut end = self.block_end(&path, &headers);
+        if end == self.text.len() {
+            // The last thing in the file: nothing follows to keep a
+            // blank line for.
+            return self.splice(start..end, "");
+        }
+        // A banner under it stays, with the blank line above the table
+        // (taken out with it, above) made up for by the one under it.
+        let own = self.before_a_banner(end);
+        if own < end {
+            return self.splice(start..own, "");
+        }
+        while end > start {
+            if self.text[..end].ends_with("\r\n\r\n") {
+                end -= 2;
+            } else if self.text[..end].ends_with("\n\n") {
+                end -= 1;
+            } else {
+                break;
+            }
+        }
+        self.splice(start..end, "")
+    }
+
+    /// Renames a table of a group of tables kept by name, where it
+    /// stands.
+    pub fn rename_named_table(&mut self, group: &str, name: &str, new: &str) -> Done {
+        let path = [key(group), key(name)];
+        let Some(node) = self.node(&path) else {
+            return cant(format!("there is no {name} in {group}"));
+        };
+        let under_header =
+            self.syntax == Syntax::Toml && self.text[node.span.clone()].starts_with('[');
+        if !under_header {
+            return self.rename_field(&[key(group)], name, new);
+        }
+        // The header's own text, up to its closing bracket.
+        let start = node.span.start;
+        let Some(length) = self.text[start..].find(']') else {
+            return cant("the table's header has no end");
+        };
+        let header = format!("[{}", Self::header_name(&[key(group), key(new)]));
+        self.splice(start..start + length, &header)
+    }
+
     // ---- changing lists --------------------------------------------------------
 
     /// Adds a table to the end of a list of tables. Gives its place.
@@ -776,14 +954,16 @@ impl Doc {
         match self.form(list) {
             Form::Header => {
                 let headers = self.headers();
-                let at = self.block_end(&with(list, Step::Index(count - 1)), &headers);
+                let end = self.block_end(&with(list, Step::Index(count - 1)), &headers);
+                let at = self.before_a_banner(end);
                 let mut block = self.gap_before(at);
                 block.push_str(&format!("[[{}]]{newline}", Self::header_name(list)));
                 for (name, value) in fields {
                     block.push_str(&field_text(name, value, Syntax::Toml));
                     block.push_str(newline);
                 }
-                if at < self.text.len() {
+                // A blank line before what follows, unless one is there.
+                if at < self.text.len() && !self.text[at..].starts_with(['\n', '\r']) {
                     block.push_str(newline);
                 }
                 self.splice(at..at, &block)?;
@@ -890,6 +1070,32 @@ impl Doc {
         Ok(count)
     }
 
+    /// Puts a value into a list that is written between brackets, before
+    /// the item that is at `at` now, the way the items are written: on a
+    /// line of its own, or on the same line. At the end of the list it
+    /// is [`push_item`](Self::push_item).
+    pub fn insert_item(&mut self, list: &[Step], at: usize, value: &Val) -> Done {
+        let Some(node) = self.node(list) else {
+            return cant(format!("there is no list {} in the recipe", show(list)));
+        };
+        let Value::Array(items) = &node.value else {
+            return cant(format!("{} in the recipe is not a list", show(list)));
+        };
+        let Some(next) = items.get(at) else {
+            return self.push_item(list, value).map(|_| ());
+        };
+        let item = value.flat().write(self.syntax);
+        let target = next.span.start;
+        let line = self.line_start(target);
+        if self.text[line..target].trim().is_empty() {
+            let indent = self.text[line..target].to_owned();
+            let newline = self.newline();
+            self.splice(line..line, &format!("{indent}{item},{newline}"))
+        } else {
+            self.splice(target..target, &format!("{item}, "))
+        }
+    }
+
     /// The bytes of one item of a list of tables, with what separates it
     /// from the next: what to take out to remove it.
     fn item_range(&self, list: &[Step], at: usize) -> Result<Range<usize>, Cant> {
@@ -904,6 +1110,12 @@ impl Doc {
                 let headers = self.headers();
                 let mut start = self.lead(item.span.start);
                 let end = self.block_end(&with(list, Step::Index(at)), &headers);
+                // A banner under it stays; the blank line between the
+                // two goes instead.
+                let own = self.before_a_banner(end);
+                if own < end {
+                    return Ok(start..self.past_a_blank_line(own));
+                }
                 if end == self.text.len() {
                     // The last block of the file: the blank line above
                     // it goes too.
@@ -944,11 +1156,13 @@ impl Doc {
                 let headers = self.headers();
                 let start = self.lead(item.span.start);
                 let end = self.block_end(&with(list, Step::Index(at)), &headers);
+                // (A banner under it isn't the item's, and isn't copied.)
+                let end = self.before_a_banner(end);
                 let copy = self.text[start..end].trim_end().to_owned();
                 let mut block = self.gap_before(end);
                 block.push_str(&copy);
                 block.push_str(newline);
-                if end < self.text.len() {
+                if end < self.text.len() && !self.text[end..].starts_with(['\n', '\r']) {
                     block.push_str(newline);
                 }
                 self.splice(end..end, &block)

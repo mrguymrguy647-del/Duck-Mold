@@ -24,4 +24,7 @@
 pub mod render;
 pub mod studio;
 
-pub use render::{Rendered, Sheet, ViewPlace, render_file, render_sheet};
+pub use render::{
+    FramePlace, Rendered, RenderedAnimation, Sheet, Strip, ViewPlace, render_animation_file,
+    render_file, render_sheet, render_strip,
+};

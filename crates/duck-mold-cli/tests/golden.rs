@@ -24,6 +24,7 @@ use std::process::Command;
 
 /// The reader written for Duck Forge, exactly as it will be copied there.
 #[path = "../../../docs/forge/duck_mold_glb.rs"]
+#[allow(dead_code)]
 mod forge;
 
 const EXAMPLES: [&str; 18] = [
@@ -142,6 +143,69 @@ fn every_example_inspects_to_its_golden_report() {
     for name in EXAMPLES {
         let report = duck_mold(&["inspect", &format!("examples/{name}.toml"), "--json"]);
         check(&format!("{name}.inspect.json"), &report);
+    }
+}
+
+/// The examples that move, each with its animations and the view its
+/// strips are drawn from.
+const MOVING: [(&str, &[(&str, &str)]); 1] = [(
+    "robot",
+    &[
+        ("idle", "three-quarter"),
+        ("walk", "right"),
+        ("wave", "front"),
+    ],
+)];
+
+#[test]
+fn every_animation_renders_to_its_golden_strip_and_report() {
+    let scratch = scratch("golden_strips");
+    for (name, animations) in MOVING {
+        let recipe = format!("examples/{name}.toml");
+        // Every animation the example has is in the list above.
+        let plain: serde_json::Value =
+            serde_json::from_slice(&duck_mold(&["inspect", &recipe, "--json"])).unwrap();
+        let has: Vec<&str> = plain["animations"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|animation| animation["name"].as_str().unwrap())
+            .collect();
+        let listed: Vec<&str> = animations.iter().map(|(animation, _)| *animation).collect();
+        assert_eq!(has, listed, "{name}");
+        for (animation, view) in animations {
+            let output = scratch.join(format!("{name}.{animation}.strip.png"));
+            duck_mold(&[
+                "render",
+                &recipe,
+                "--animation",
+                animation,
+                "--view",
+                view,
+                "-o",
+                output.to_str().unwrap(),
+            ]);
+            check(
+                &format!("{name}.{animation}.strip.png"),
+                &std::fs::read(output).unwrap(),
+            );
+            let report = duck_mold(&["inspect", &recipe, "--animation", animation, "--json"]);
+            check(&format!("{name}.{animation}.inspect.json"), &report);
+            // An example's animation is a clean one: no limit broken, a
+            // loop that ends as it starts, and feet that stay within
+            // half a centimetre of the ground.
+            let report: serde_json::Value = serde_json::from_slice(&report).unwrap();
+            assert_eq!(
+                report["limits_broken"],
+                serde_json::json!([]),
+                "{animation}"
+            );
+            assert_eq!(report["floating"], serde_json::json!([]), "{animation}");
+            assert_ne!(report["ends_as_it_starts"], false, "{animation}");
+            assert!(report["ground"]["lowest_y"].as_f64().unwrap() > -0.005);
+            assert!(report["ground"]["highest_y"].as_f64().unwrap() < 0.005);
+            assert_eq!(report["warnings"], serde_json::json!([]), "{animation}");
+        }
     }
 }
 
@@ -296,16 +360,14 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
                 .iter()
                 .map(|v| v[axis])
                 .fold(f32::NEG_INFINITY, f32::max);
-            assert_eq!(
-                low,
-                report["bounds"]["min"][axis].as_f64().unwrap() as f32,
-                "{name}"
-            );
-            assert_eq!(
-                high,
-                report["bounds"]["max"][axis].as_f64().unwrap() as f32,
-                "{name}"
-            );
+            // (A corner is its part's pivot plus its place in the part,
+            // added up by the reader. Most come out to the last digit;
+            // all to a thousandth of a millimetre. The ground, above, is
+            // exact.)
+            for (found, field) in [(low, "min"), (high, "max")] {
+                let wanted = report["bounds"][field][axis].as_f64().unwrap() as f32;
+                assert!((found - wanted).abs() < 1e-6, "{name}: {found} {wanted}");
+            }
         }
         // Every named socket, where `inspect --sockets` says it is. The
         // file holds 32-bit numbers, so they agree to about 0.00001.

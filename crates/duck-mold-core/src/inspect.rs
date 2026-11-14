@@ -19,7 +19,7 @@ use serde::Serialize;
 use crate::issue::{Code, Issue, in_file_order};
 use crate::math::{Bounds, Vec3, tidy, vec3};
 use crate::model::{Model, Part};
-use crate::recipe::hex;
+use crate::recipe::{Limits, Turns, hex};
 use crate::shaping::{Shaped, facing_word};
 
 /// How close two surfaces must be to count as touching, and how deep one
@@ -79,6 +79,21 @@ pub struct Inspection {
     /// ([`face_report`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub shaped: Vec<ShapedReport>,
+    /// The tree the model moves by, every part with what it turns about
+    /// and hangs from: only with `--joins` ([`join_report`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub joins: Vec<JoinReport>,
+    /// The names of the model's poses, in the recipe's order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub poses: Vec<String>,
+    /// The model's animations, in the recipe's order.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub animations: Vec<AnimationSummary>,
+    /// For a report on the model in one of its poses (`--pose`): which
+    /// pose, and what the pose gets wrong that the model at rest
+    /// doesn't.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pose: Option<PoseReport>,
     /// Things that look like mistakes.
     pub warnings: Vec<Issue>,
     /// Always empty: a model that has errors is never inspected.
@@ -142,6 +157,159 @@ pub fn socket_report(model: &Model) -> Vec<SocketReport> {
             facing: socket.facing.to_array(),
         })
         .collect()
+}
+
+/// One of a model's animations, in a line of the plain report.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AnimationSummary {
+    /// Its name.
+    pub name: String,
+    /// How long it lasts, in seconds.
+    pub length: f64,
+    /// True if it starts again after its last key.
+    pub loops: bool,
+    /// How many keys it has.
+    pub keys: usize,
+}
+
+/// What `inspect --pose` adds to the report: the report itself is of
+/// the model as it stands in the pose.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct PoseReport {
+    /// The pose's name.
+    pub name: String,
+    /// The parts the pose turns or moves.
+    pub moves: Vec<String>,
+    /// What the pose asks of a part that its limits don't allow, each as
+    /// a sentence: `turns "head" 95 around y: its limit is -80 to 80`.
+    pub limits_broken: Vec<String>,
+    /// The pairs of `overlapping` that don't overlap when the model is
+    /// at rest: what the pose pushed into each other.
+    pub new_overlapping: Vec<[String; 2]>,
+    /// The parts of `floating` that don't float when the model is at
+    /// rest.
+    pub new_floating: Vec<String>,
+}
+
+/// The report on a model in one of its poses. `rest` is the report on
+/// the model as it is built; `posed` is the model in the pose.
+pub fn inspect_pose(
+    rest: &Inspection,
+    model: &Model,
+    posed: &Model,
+    pose: &crate::motion::Pose,
+    source: &str,
+) -> Inspection {
+    let mut inspection = inspect(posed, source, Vec::new());
+    // A pose may well leave the ground (a jump): the report's `ground`
+    // says so, and that is no warning.
+    inspection
+        .warnings
+        .retain(|warning| warning.code != Code::OffGround);
+    let was = |a: &str, b: &str| {
+        rest.overlapping
+            .iter()
+            .any(|old| (old.a == a && old.b == b) || (old.a == b && old.b == a))
+    };
+    inspection.pose = Some(PoseReport {
+        name: pose.name.clone(),
+        moves: pose
+            .joints
+            .iter()
+            .filter(|joint| !joint.is_rest())
+            .map(|joint| joint.part.clone())
+            .collect(),
+        limits_broken: crate::motion::limits_broken(model, &pose.joints)
+            .iter()
+            .map(crate::motion::Broken::describe)
+            .collect(),
+        new_overlapping: inspection
+            .overlapping
+            .iter()
+            .filter(|overlap| !was(&overlap.a, &overlap.b))
+            .map(|overlap| [overlap.a.clone(), overlap.b.clone()])
+            .collect(),
+        new_floating: inspection
+            .floating
+            .iter()
+            .filter(|float| !rest.floating.iter().any(|old| old.part == float.part))
+            .map(|float| float.part.clone())
+            .collect(),
+    });
+    inspection.summary = format!("in the pose \"{}\", {}", pose.name, inspection.summary);
+    inspection
+}
+
+/// One part in the tree the model moves by, for `inspect --joins`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct JoinReport {
+    /// The part, by path: `left_arm/elbow`.
+    pub part: String,
+    /// The part it hangs from: turning that one carries this one along.
+    /// `None`: it hangs from the model itself.
+    pub parent: Option<String>,
+    /// The socket it is joined to, as the recipe wrote it. `None`: it
+    /// isn't joined, and turns about its own middle.
+    pub joined_to: Option<String>,
+    /// The point it turns about, in the model.
+    pub pivot: [f64; 3],
+    /// How far it may turn: `"free"`, `"fixed"`, or the directions it
+    /// turns around, each with two angles or `"free"`.
+    pub limits: serde_json::Value,
+    /// The same in a few words: `x -30..40, y -80..80`.
+    #[serde(skip)]
+    pub limits_words: String,
+    /// How deep it is in the tree: 0 hangs from the model.
+    #[serde(skip)]
+    pub depth: usize,
+}
+
+/// `limits` as data: `"free"`, `"fixed"`, or `{ "x": [-30, 40], "z":
+/// "free" }` with the directions that turn.
+pub fn limits_json(limits: Limits) -> serde_json::Value {
+    match limits {
+        Limits::Free => "free".into(),
+        Limits::Fixed => "fixed".into(),
+        Limits::Turns(turns) => serde_json::Value::Object(
+            Limits::AXES
+                .iter()
+                .zip(turns)
+                .filter_map(|(axis, turns)| {
+                    let value = match turns {
+                        Turns::No => return None,
+                        Turns::Any => "free".into(),
+                        Turns::Between(low, high) => serde_json::json!([low, high]),
+                    };
+                    Some(((*axis).to_owned(), value))
+                })
+                .collect(),
+        ),
+    }
+}
+
+/// The tree a model moves by: every part, under the part it hangs from,
+/// in the recipe's order.
+pub fn join_report(model: &Model) -> Vec<JoinReport> {
+    let all = model.all_parts();
+    fn under(all: &[&Part], parent: Option<&str>, depth: usize, into: &mut Vec<JoinReport>) {
+        for part in all.iter().filter(|part| part.parent.as_deref() == parent) {
+            into.push(JoinReport {
+                part: part.path.clone(),
+                parent: part.parent.clone(),
+                joined_to: part.attached_to.clone(),
+                pivot: part.pivot.to_array(),
+                limits: limits_json(part.limits),
+                limits_words: part.limits.describe(),
+                depth,
+            });
+            // (A tree can't go round: a ring of joins is a mistake, and a
+            // model with mistakes is never inspected.)
+            under(all, Some(&part.path), depth + 1, into);
+        }
+    }
+    let mut joins = Vec::new();
+    under(&all, None, 0, &mut joins);
+    joins
 }
 
 /// The faces of one shaped part, for `inspect --faces`.
@@ -302,6 +470,13 @@ pub struct PartReport {
     /// True if it was flipped by `mirror`.
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub mirrored: bool,
+    /// How far it may turn when the model is posed, if the recipe gives
+    /// it `limits`: `"fixed"`, or the directions it turns around.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub limits: Option<serde_json::Value>,
+    /// The same in a few words.
+    #[serde(skip)]
+    pub limits_words: String,
     /// The parts inside it.
     pub parts: Vec<PartReport>,
 }
@@ -462,6 +637,19 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
         overlapping,
         sockets: Vec::new(),
         shaped: Vec::new(),
+        joins: Vec::new(),
+        poses: model.poses.iter().map(|pose| pose.name.clone()).collect(),
+        animations: model
+            .animations
+            .iter()
+            .map(|animation| AnimationSummary {
+                name: animation.name.clone(),
+                length: animation.length(),
+                loops: animation.looping,
+                keys: animation.keys.len(),
+            })
+            .collect(),
+        pose: None,
         warnings,
         errors: Vec::new(),
     }
@@ -505,6 +693,8 @@ fn part_report(model: &Model, part: &Part) -> PartReport {
             .collect(),
         attached_to: part.attached_to.clone(),
         mirrored: part.mirrored,
+        limits: (part.limits != Limits::Free).then(|| limits_json(part.limits)),
+        limits_words: part.limits.describe(),
         parts: part
             .parts
             .iter()
@@ -525,6 +715,16 @@ fn length(metres: f64) -> String {
         None => text,
     }
 }
+
+/// A time as a report says it: `0.4 s`.
+fn seconds(at: f64) -> String {
+    let rounded = (at * 1000.0).round() / 1000.0 + 0.0;
+    format!("{rounded} s")
+}
+
+/// Said after a part that floats or overlaps in a pose and doesn't when
+/// the model is at rest.
+const NOT_AT_REST: &str = "   (not so at rest)";
 
 /// The start of the summary: `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
 fn headline(name: &str, size: [f64; 3], triangles: usize) -> String {
@@ -559,7 +759,14 @@ impl Inspection {
     /// triangle count, as `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
     /// `render` writes it under its pictures.
     pub fn headline(&self) -> String {
-        headline(&self.name, self.size, self.triangles)
+        match &self.pose {
+            Some(pose) => headline(
+                &format!("{}, \"{}\"", self.name, pose.name),
+                self.size,
+                self.triangles,
+            ),
+            None => headline(&self.name, self.size, self.triangles),
+        }
     }
 
     /// The report for people, a few aligned lines.
@@ -643,6 +850,12 @@ impl Inspection {
                 if part.mirrored != inside_mirrored {
                     notes.push("mirrored".to_owned());
                 }
+                if part.limits.is_some() {
+                    notes.push(match part.limits_words.as_str() {
+                        words @ ("fixed" | "doesn't turn") => words.to_owned(),
+                        words => format!("turns {words}"),
+                    });
+                }
                 rows.push([
                     format!("{}{own_name}", "  ".repeat(depth)),
                     label,
@@ -697,11 +910,16 @@ impl Inspection {
             self.floating
                 .iter()
                 .map(|float| {
+                    let new = self
+                        .pose
+                        .as_ref()
+                        .is_some_and(|pose| pose.new_floating.contains(&float.part));
                     format!(
-                        "{} floats {} from {}",
+                        "{} floats {} from {}{}",
                         float.part,
                         length(float.gap),
-                        float.nearest
+                        float.nearest,
+                        if new { NOT_AT_REST } else { "" }
                     )
                 })
                 .collect(),
@@ -711,11 +929,17 @@ impl Inspection {
             self.overlapping
                 .iter()
                 .map(|overlap| {
+                    let new = self.pose.as_ref().is_some_and(|pose| {
+                        pose.new_overlapping
+                            .iter()
+                            .any(|[a, b]| *a == overlap.a && *b == overlap.b)
+                    });
+                    let new = if new { NOT_AT_REST } else { "" };
                     if overlap.hidden {
-                        format!("{} is hidden inside {}", overlap.a, overlap.b)
+                        format!("{} is hidden inside {}{new}", overlap.a, overlap.b)
                     } else {
                         format!(
-                            "{} is {} inside {}",
+                            "{} is {} inside {}{new}",
                             overlap.a,
                             length(overlap.depth),
                             overlap.b
@@ -724,6 +948,48 @@ impl Inspection {
                 })
                 .collect(),
         );
+        if !self.poses.is_empty() {
+            list("poses", vec![self.poses.join(", ")]);
+        }
+        if !self.animations.is_empty() {
+            list(
+                "animations",
+                vec![
+                    self.animations
+                        .iter()
+                        .map(|animation| {
+                            format!(
+                                "{} ({}{})",
+                                animation.name,
+                                seconds(animation.length),
+                                if animation.loops { ", loops" } else { "" }
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .join(", "),
+                ],
+            );
+        }
+        if let Some(pose) = &self.pose {
+            list(
+                "moves",
+                if pose.moves.is_empty() {
+                    vec!["nothing: every part is at rest".to_owned()]
+                } else {
+                    vec![pose.moves.join(", ")]
+                },
+            );
+            list("limits", {
+                if pose.limits_broken.is_empty() {
+                    vec!["none broken".to_owned()]
+                } else {
+                    pose.limits_broken
+                        .iter()
+                        .map(|broken| format!("the pose {broken}"))
+                        .collect()
+                }
+            });
+        }
         if !self.sockets.is_empty() {
             let name_width = self
                 .sockets
@@ -744,6 +1010,39 @@ impl Inspection {
                 })
                 .collect();
             list("sockets", rows);
+        }
+        if !self.joins.is_empty() {
+            out.push_str(&format!(
+                "  {:<12} {}: what each part turns about, and how far\n",
+                "joins",
+                self.joins.len()
+            ));
+            let rows: Vec<[String; 3]> = self
+                .joins
+                .iter()
+                .map(|join| {
+                    [
+                        format!("{}{}", "  ".repeat(join.depth), join.part),
+                        match &join.joined_to {
+                            Some(socket) => format!("on {socket}"),
+                            None => "turns about its middle".to_owned(),
+                        },
+                        join.limits_words.clone(),
+                    ]
+                })
+                .collect();
+            let width = |column: usize| {
+                rows.iter()
+                    .map(|row| row[column].chars().count())
+                    .max()
+                    .unwrap_or(0)
+            };
+            let (names, pivots) = (width(0), width(1));
+            for [name, pivot, limits] in &rows {
+                out.push_str(&format!(
+                    "    {name:<names$}   {pivot:<pivots$}   {limits}\n"
+                ));
+            }
         }
         for shaped in &self.shaped {
             out.push_str(&format!(
@@ -786,7 +1085,13 @@ impl Inspection {
                 ));
             }
         }
-        format!("{}  ({})\n{out}", self.name, self.source)
+        match &self.pose {
+            Some(pose) => format!(
+                "{}, in the pose \"{}\"  ({})\n{out}",
+                self.name, pose.name, self.source
+            ),
+            None => format!("{}  ({})\n{out}", self.name, self.source),
+        }
     }
 }
 
@@ -1266,6 +1571,487 @@ fn crossing(origin: Vec3, direction: Vec3, [a, b, c]: [Vec3; 3]) -> Option<f64> 
         return None;
     }
     Some(edge_2.dot(q) / determinant)
+}
+
+// ---- animations ------------------------------------------------------------------------
+
+/// The report on one of a model's animations (`inspect --animation`):
+/// what it is, and the worst that any of its frames gets wrong.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct AnimationInspection {
+    /// Always true: a model that has errors is never inspected.
+    pub ok: bool,
+    /// The whole report in one line.
+    pub summary: String,
+    /// The file the model came from, as it was named.
+    pub source: String,
+    /// The model's name.
+    pub name: String,
+    /// The animation's name.
+    pub animation: String,
+    /// How long it lasts, in seconds.
+    pub length: f64,
+    /// True if it starts again after its last key.
+    pub loops: bool,
+    /// True if the motion flows through each pose; false if it goes
+    /// straight from pose to pose at a steady speed.
+    pub smooth: bool,
+    /// Its keys, in order.
+    pub keys: Vec<KeyReport>,
+    /// How many frames were looked at: thirty a second, and the end.
+    pub frames: usize,
+    /// The parts it turns or moves.
+    pub moves: Vec<String>,
+    /// How the model's lowest point goes up and down.
+    pub ground: GroundOverTime,
+    /// Every part that touches nothing in some frame, at its worst.
+    pub floating: Vec<FloatingAt>,
+    /// Every pair of parts where one is inside the other in some frame,
+    /// at its worst.
+    pub overlapping: Vec<OverlapAt>,
+    /// Every limit that some frame breaks, at its worst.
+    pub limits_broken: Vec<BrokenAt>,
+    /// For an animation that loops: whether its last key puts every
+    /// part where its first does.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ends_as_it_starts: Option<bool>,
+    /// Things that look like mistakes in the recipe.
+    pub warnings: Vec<Issue>,
+    /// Always empty: a model that has errors is never inspected.
+    pub errors: Vec<Issue>,
+}
+
+/// One key of an animation, in its report.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct KeyReport {
+    /// Its number, counted from 1: what `move-key`, `set-key` and
+    /// `remove-key` call it.
+    pub key: usize,
+    /// Seconds from the animation's start.
+    pub at: f64,
+    /// The pose it reaches.
+    pub pose: String,
+}
+
+/// How the model's lowest point goes up and down through an animation.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct GroundOverTime {
+    /// True when the lowest point is within a millimetre of y = 0 in
+    /// every frame.
+    pub stays_on_ground: bool,
+    /// The lowest the lowest point gets.
+    pub lowest_y: f64,
+    /// When.
+    pub lowest_at: f64,
+    /// The highest the lowest point gets: how far the model leaves the
+    /// ground.
+    pub highest_y: f64,
+    /// When.
+    pub highest_at: f64,
+}
+
+/// A part that touches nothing in some frame.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FloatingAt {
+    /// The part.
+    pub part: String,
+    /// The nearest part it doesn't touch.
+    pub nearest: String,
+    /// How far apart they are, at the worst.
+    pub gap: f64,
+    /// When that is, in seconds.
+    pub at: f64,
+    /// True if the part doesn't float when the model is at rest.
+    pub new: bool,
+}
+
+/// Two parts, one inside the other in some frame.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct OverlapAt {
+    /// The part that pokes in.
+    pub a: String,
+    /// The part it pokes into.
+    pub b: String,
+    /// How deep, at the worst.
+    pub depth: f64,
+    /// True when `a` is entirely inside `b` then.
+    pub hidden: bool,
+    /// When that is, in seconds.
+    pub at: f64,
+    /// True if the two don't overlap when the model is at rest.
+    pub new: bool,
+}
+
+/// A limit that some frame breaks.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct BrokenAt {
+    /// The part.
+    pub part: String,
+    /// What is wrong, as a sentence's ending: `turns "head" 95 around
+    /// y: its limit is -80 to 80`.
+    pub text: String,
+    /// When it is worst, in seconds.
+    pub at: f64,
+}
+
+/// Looks at every frame of an animation (thirty a second, and its end)
+/// and reports the worst it finds, and when. `rest` is the report on
+/// the model as it is built; its warnings are passed on.
+pub fn inspect_animation(
+    rest: &Inspection,
+    model: &Model,
+    animation: &crate::motion::Animation,
+    source: &str,
+) -> AnimationInspection {
+    use crate::motion::{self, BrokenHow, Motion};
+
+    let moving = Motion::of(model, animation);
+    let times = motion::frame_times(animation.length());
+    let mut ground: Option<GroundOverTime> = None;
+    let mut floating: Vec<FloatingAt> = Vec::new();
+    let mut overlapping: Vec<OverlapAt> = Vec::new();
+    // Each broken limit with how far past it is at its worst.
+    let mut broken: Vec<(BrokenAt, Option<usize>, f64)> = Vec::new();
+    for &at in &times {
+        let joints = moving.joints_at(at);
+        let posed = motion::posed(model, &joints);
+        let frame = inspect(&posed, source, Vec::new());
+        let low = frame.ground.lowest_y;
+        match &mut ground {
+            None => {
+                ground = Some(GroundOverTime {
+                    stays_on_ground: frame.ground.rests_on_ground,
+                    lowest_y: low,
+                    lowest_at: at,
+                    highest_y: low,
+                    highest_at: at,
+                });
+            }
+            Some(ground) => {
+                ground.stays_on_ground &= frame.ground.rests_on_ground;
+                if low < ground.lowest_y {
+                    (ground.lowest_y, ground.lowest_at) = (low, at);
+                }
+                if low > ground.highest_y {
+                    (ground.highest_y, ground.highest_at) = (low, at);
+                }
+            }
+        }
+        for float in frame.floating {
+            match floating.iter_mut().find(|known| known.part == float.part) {
+                Some(known) => {
+                    if float.gap > known.gap {
+                        (known.gap, known.at, known.nearest) = (float.gap, at, float.nearest);
+                    }
+                }
+                None => floating.push(FloatingAt {
+                    new: !rest.floating.iter().any(|old| old.part == float.part),
+                    part: float.part,
+                    nearest: float.nearest,
+                    gap: float.gap,
+                    at,
+                }),
+            }
+        }
+        for overlap in frame.overlapping {
+            let same = |a: &str, b: &str| {
+                (a == overlap.a && b == overlap.b) || (a == overlap.b && b == overlap.a)
+            };
+            match overlapping
+                .iter_mut()
+                .find(|known| same(&known.a, &known.b))
+            {
+                Some(known) => {
+                    if overlap.depth > known.depth {
+                        known.depth = overlap.depth;
+                        known.at = at;
+                        known.hidden = overlap.hidden;
+                        known.a = overlap.a;
+                        known.b = overlap.b;
+                    }
+                }
+                None => overlapping.push(OverlapAt {
+                    new: !rest.overlapping.iter().any(|old| same(&old.a, &old.b)),
+                    a: overlap.a,
+                    b: overlap.b,
+                    depth: overlap.depth,
+                    hidden: overlap.hidden,
+                    at,
+                }),
+            }
+        }
+        for found in motion::limits_broken(model, &joints) {
+            let (axis, past) = match found.how {
+                BrokenHow::Turned {
+                    axis,
+                    degrees,
+                    allowed,
+                } => (Some(axis), allowed.past(degrees)),
+                BrokenHow::Moved => (None, 0.0),
+            };
+            let entry = BrokenAt {
+                part: found.part.clone(),
+                text: found.describe(),
+                at,
+            };
+            match broken
+                .iter_mut()
+                .find(|(known, known_axis, _)| known.part == found.part && *known_axis == axis)
+            {
+                Some(known) => {
+                    if past > known.2 {
+                        *known = (entry, axis, past);
+                    }
+                }
+                None => broken.push((entry, axis, past)),
+            }
+        }
+    }
+    let ground = ground.unwrap_or(GroundOverTime {
+        stays_on_ground: rest.ground.rests_on_ground,
+        lowest_y: rest.ground.lowest_y,
+        lowest_at: 0.0,
+        highest_y: rest.ground.lowest_y,
+        highest_at: 0.0,
+    });
+    let limits_broken: Vec<BrokenAt> = broken.into_iter().map(|(entry, _, _)| entry).collect();
+    let ends_as_it_starts = animation
+        .looping
+        .then(|| motion::ends_as_it_starts(model, animation));
+    let keys: Vec<KeyReport> = animation
+        .keys
+        .iter()
+        .enumerate()
+        .map(|(at, key)| KeyReport {
+            key: at + 1,
+            at: key.at,
+            pose: key.pose.clone(),
+        })
+        .collect();
+    let summary = format!(
+        "{}, \"{}\": {}, {}, {}, {}, {}, {}, {}",
+        model.name,
+        animation.name,
+        seconds(animation.length()),
+        count(keys.len(), "key"),
+        if animation.looping {
+            "loops"
+        } else {
+            "plays once"
+        },
+        ground_over_time_words(&ground),
+        match floating.len() {
+            0 => "nothing floating".to_owned(),
+            n => format!("{} floating", count(n, "part")),
+        },
+        match overlapping.len() {
+            0 => "nothing overlapping".to_owned(),
+            n => count(n, "overlap"),
+        },
+        match limits_broken.len() {
+            0 => "no limits broken".to_owned(),
+            n => format!("{} broken", count(n, "limit")),
+        },
+    );
+    AnimationInspection {
+        ok: true,
+        summary,
+        source: source.to_owned(),
+        name: model.name.clone(),
+        animation: animation.name.clone(),
+        length: animation.length(),
+        loops: animation.looping,
+        smooth: animation.smooth,
+        keys,
+        frames: times.len(),
+        moves: moving.parts().into_iter().map(str::to_owned).collect(),
+        ground,
+        floating,
+        overlapping,
+        limits_broken,
+        ends_as_it_starts,
+        warnings: rest.warnings.clone(),
+        errors: Vec::new(),
+    }
+}
+
+/// How the lowest point goes, in words.
+fn ground_over_time_words(ground: &GroundOverTime) -> String {
+    if ground.stays_on_ground {
+        return "stays on the ground".to_owned();
+    }
+    let mut words = Vec::new();
+    if ground.lowest_y < -TOUCH {
+        words.push(format!(
+            "sinks {} into the ground at {}",
+            length(-ground.lowest_y),
+            seconds(ground.lowest_at)
+        ));
+    }
+    if ground.highest_y > TOUCH {
+        words.push(format!(
+            "is {} above the ground at {}",
+            length(ground.highest_y),
+            seconds(ground.highest_at)
+        ));
+    }
+    words.join(", and ")
+}
+
+impl AnimationInspection {
+    /// What `render --animation` writes under its strip: `robot,
+    /// "walk": 0.8 s, 3 keys, loops`.
+    pub fn headline(&self) -> String {
+        format!(
+            "{}, \"{}\": {}, {}, {}",
+            self.name,
+            self.animation,
+            seconds(self.length),
+            count(self.keys.len(), "key"),
+            if self.loops { "loops" } else { "plays once" }
+        )
+    }
+
+    /// The report for people, a few aligned lines.
+    pub fn to_text(&self) -> String {
+        let mut out = format!(
+            "{}, the animation \"{}\"  ({})\n",
+            self.name, self.animation, self.source
+        );
+        let mut list = |label: &str, items: Vec<String>| {
+            for (at, item) in items.iter().enumerate() {
+                let label = if at == 0 { label } else { "" };
+                out.push_str(&format!("  {label:<12} {item}\n"));
+            }
+        };
+        list(
+            "length",
+            vec![format!(
+                "{}  ({} at 30 a second)",
+                seconds(self.length),
+                count(self.frames, "frame")
+            )],
+        );
+        list(
+            "plays",
+            vec![if self.loops {
+                "round and round (it loops)".to_owned()
+            } else {
+                "once".to_owned()
+            }],
+        );
+        list(
+            "motion",
+            vec![if self.smooth {
+                "smooth: it flows through each pose, and starts and ends gently".to_owned()
+            } else {
+                "straight from pose to pose, at a steady speed".to_owned()
+            }],
+        );
+        let width = self
+            .keys
+            .iter()
+            .map(|key| seconds(key.at).chars().count())
+            .max()
+            .unwrap_or(0);
+        list(
+            "keys",
+            if self.keys.is_empty() {
+                vec!["none yet".to_owned()]
+            } else {
+                self.keys
+                    .iter()
+                    .map(|key| format!("{}  {:<width$}  {}", key.key, seconds(key.at), key.pose))
+                    .collect()
+            },
+        );
+        list(
+            "moves",
+            vec![if self.moves.is_empty() {
+                "nothing: every part is at rest all the way".to_owned()
+            } else {
+                self.moves.join(", ")
+            }],
+        );
+        list(
+            "ground",
+            vec![format!(
+                "its lowest point {}",
+                ground_over_time_words(&self.ground)
+            )],
+        );
+        list(
+            "floating",
+            if self.floating.is_empty() {
+                vec!["none in any frame".to_owned()]
+            } else {
+                self.floating
+                    .iter()
+                    .map(|float| {
+                        format!(
+                            "{} floats {} from {} at {}{}",
+                            float.part,
+                            length(float.gap),
+                            float.nearest,
+                            seconds(float.at),
+                            if float.new { NOT_AT_REST } else { "" }
+                        )
+                    })
+                    .collect()
+            },
+        );
+        list(
+            "overlapping",
+            if self.overlapping.is_empty() {
+                vec!["none in any frame".to_owned()]
+            } else {
+                self.overlapping
+                    .iter()
+                    .map(|overlap| {
+                        let new = if overlap.new { NOT_AT_REST } else { "" };
+                        if overlap.hidden {
+                            format!(
+                                "{} is hidden inside {} at {}{new}",
+                                overlap.a,
+                                overlap.b,
+                                seconds(overlap.at)
+                            )
+                        } else {
+                            format!(
+                                "{} is {} inside {} at {}{new}",
+                                overlap.a,
+                                length(overlap.depth),
+                                overlap.b,
+                                seconds(overlap.at)
+                            )
+                        }
+                    })
+                    .collect()
+            },
+        );
+        list(
+            "limits",
+            if self.limits_broken.is_empty() {
+                vec!["none broken in any frame".to_owned()]
+            } else {
+                self.limits_broken
+                    .iter()
+                    .map(|broken| format!("it {} (at {})", broken.text, seconds(broken.at)))
+                    .collect()
+            },
+        );
+        if let Some(closes) = self.ends_as_it_starts {
+            list(
+                "loop",
+                vec![if closes {
+                    "ends as it starts".to_owned()
+                } else {
+                    "doesn't end as it starts: the model would jump when it starts again".to_owned()
+                }],
+            );
+        }
+        out
+    }
 }
 
 #[cfg(test)]

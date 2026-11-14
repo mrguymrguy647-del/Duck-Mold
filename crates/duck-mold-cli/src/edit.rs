@@ -3,7 +3,8 @@
 //! `Edit` values from clicks, so whatever it can do, this can.
 
 use clap::{Args, Subcommand};
-use duck_mold_core::edit::{Changes, Edit, Free, Made, Sizes};
+use duck_mold_core::edit::{Changes, Edit, Free, LimitsTo, Made, Sizes};
+use duck_mold_core::recipe::Turns;
 
 /// One change to a recipe. (Each variant's name is the command's, so
 /// `set-change` is `SetChange`.)
@@ -287,6 +288,172 @@ pub enum Change {
         #[arg(long, allow_hyphen_values = true, value_name = "X,Y,Z")]
         by: String,
     },
+    /// Say how far a part may turn about its join when the model is
+    /// posed: its "limits". Each of --x (a nod), --y (a turn) and --z (a
+    /// tilt) takes two angles in degrees like -30,40, or free (any
+    /// amount: a wheel), or none (it doesn't turn that way).
+    ///
+    /// A part with no limits turns freely every way. Once it has limits,
+    /// only the directions they name turn. `duck-mold inspect --joins`
+    /// lists every part's.
+    SetLimits {
+        /// The part.
+        part: String,
+        /// Around x, left to right: a nod. Positive swings a hanging arm
+        /// forward.
+        #[arg(long, value_name = "LOW,HIGH", allow_hyphen_values = true)]
+        x: Option<String>,
+        /// Around y, up: a turn. Positive turns to the part's right.
+        #[arg(long, value_name = "LOW,HIGH", allow_hyphen_values = true)]
+        y: Option<String>,
+        /// Around z, forward: a tilt. Positive leans the top to its left.
+        #[arg(long, value_name = "LOW,HIGH", allow_hyphen_values = true)]
+        z: Option<String>,
+        /// It never turns or moves in a pose: a badge, a window.
+        #[arg(long, conflicts_with_all = ["x", "y", "z", "none"])]
+        fixed: bool,
+        /// Take its limits away: it turns freely again.
+        #[arg(long, conflicts_with_all = ["x", "y", "z"])]
+        none: bool,
+    },
+    /// Turn or move a part in a pose. Makes the pose if it isn't there.
+    ///
+    /// A pose is the model with some parts turned about their joins:
+    /// the recipe's [poses.<name>]. --turn is degrees around x (a nod),
+    /// then y (a turn), then z (a tilt), about the part's pivot;
+    /// everything hanging from the part goes with it. --move slides the
+    /// part, in metres. A part inside another is named by its path:
+    /// left_arm/elbow. `duck-mold render <recipe> --pose <name>` draws
+    /// it; `duck-mold inspect <recipe> --pose <name>` checks it.
+    SetPose {
+        /// The pose's name.
+        pose: String,
+        /// The part.
+        part: String,
+        /// How far it is turned, in degrees: x,y,z.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        turn: Option<String>,
+        /// How far it is moved from where it stands at rest: x,y,z.
+        #[arg(long = "move", value_name = "X,Y,Z", allow_hyphen_values = true)]
+        move_by: Option<String>,
+        /// Put the part back at rest in this pose.
+        #[arg(long, conflicts_with_all = ["turn", "move_by"])]
+        rest: bool,
+    },
+    /// Add a pose: with every part at rest, or a copy of another to
+    /// change.
+    AddPose {
+        /// The new pose's name.
+        name: String,
+        /// The pose to copy.
+        #[arg(long, value_name = "POSE")]
+        from: Option<String>,
+    },
+    /// Rename a pose. Everything that names it follows.
+    RenamePose {
+        /// The pose.
+        pose: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Remove a pose. Refused while a key of an animation uses it,
+    /// unless --with-keys.
+    RemovePose {
+        /// The pose.
+        pose: String,
+        /// Take the keys that use the pose away with it.
+        #[arg(long)]
+        with_keys: bool,
+    },
+    /// Add an animation, with no keys yet: give it keys with add-key.
+    AddAnimation {
+        /// The new animation's name.
+        name: String,
+        /// It starts again after its last key.
+        #[arg(long = "loop")]
+        looping: bool,
+    },
+    /// Change whether an animation loops, whether it is smooth, and how
+    /// long it lasts.
+    SetAnimation {
+        /// The animation.
+        animation: String,
+        /// true: it starts again after its last key. false: it plays
+        /// once.
+        #[arg(long = "loop", value_name = "true|false")]
+        looping: Option<bool>,
+        /// true: the motion flows through each pose and starts and ends
+        /// gently. false: it goes straight from pose to pose at a
+        /// steady speed, like a wheel.
+        #[arg(long, value_name = "true|false")]
+        smooth: Option<bool>,
+        /// How long it lasts, in seconds: every key's time is scaled, so
+        /// the whole animation is faster or slower.
+        #[arg(long, value_name = "SECONDS")]
+        length: Option<f64>,
+    },
+    /// Rename an animation.
+    RenameAnimation {
+        /// The animation.
+        animation: String,
+        /// Its new name.
+        new_name: String,
+    },
+    /// Remove an animation. Its poses stay.
+    RemoveAnimation {
+        /// The animation.
+        animation: String,
+    },
+    /// Add a key to an animation: a pose, and the time it is reached.
+    /// The first key is at 0.
+    AddKey {
+        /// The animation.
+        animation: String,
+        /// The pose: one of the recipe's, or rest.
+        pose: String,
+        /// Its time, in seconds from the animation's start.
+        #[arg(long, value_name = "SECONDS")]
+        at: f64,
+    },
+    /// Give a key another time.
+    MoveKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1 as inspect --animation prints them.
+        key: usize,
+        /// Its new time, in seconds.
+        #[arg(long, value_name = "SECONDS")]
+        at: f64,
+    },
+    /// Give a key another pose.
+    SetKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// Its new pose.
+        #[arg(long, value_name = "POSE")]
+        pose: String,
+    },
+    /// Remove a key. If it is the first, the keys after it move earlier
+    /// so that the animation still starts at 0.
+    RemoveKey {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+    },
+    /// Make the mirror image of a pose, left to right: what left_arm
+    /// did, right_arm does, and a part in the middle turns the other
+    /// way. Names with "left" and "right" in them are swapped.
+    MirrorPose {
+        /// The pose.
+        pose: String,
+        /// The name of the mirror image: a new pose, or one to put it in
+        /// place of. Without it, the pose itself is mirrored.
+        #[arg(long = "as", value_name = "NAME")]
+        as_name: Option<String>,
+    },
     /// Make a definition from a part: what it is made of (its shape and
     /// sizes, changes, colours and own sockets) moves to [define.<name>],
     /// and the part uses it where it stands. Add more of it with
@@ -425,6 +592,26 @@ pub struct SizeOptions {
     /// its bottom: one number, or x,z. 1 makes the sides straight again.
     #[arg(long, value_name = "N or X,Z")]
     taper: Option<String>,
+}
+
+/// How far a part may turn around one direction: `-30,40`, `free` or
+/// `none`.
+fn turns(option: &str, written: &str) -> Result<Turns, String> {
+    match written.trim() {
+        "free" => Ok(Turns::Any),
+        "none" => Ok(Turns::No),
+        angles => {
+            let wrong = || {
+                format!(
+                    "{option} needs two angles in degrees, like -30,40, or free, or none, not \"{written}\""
+                )
+            };
+            let (low, high) = angles.split_once(',').ok_or_else(wrong)?;
+            let low: f64 = low.trim().parse().map_err(|_| wrong())?;
+            let high: f64 = high.trim().parse().map_err(|_| wrong())?;
+            Ok(Turns::Between(low, high))
+        }
+    }
 }
 
 /// `1,2,0.5` as three numbers.
@@ -704,6 +891,114 @@ impl Change {
             Change::Define { part, name } => Edit::Define {
                 part: part.clone(),
                 name: name.clone(),
+            },
+            Change::SetPose {
+                pose,
+                part,
+                turn,
+                move_by,
+                rest,
+            } => Edit::SetPose {
+                pose: pose.clone(),
+                part: part.clone(),
+                turn: turn
+                    .as_deref()
+                    .map(|turn| three("--turn", turn))
+                    .transpose()?,
+                move_by: move_by
+                    .as_deref()
+                    .map(|move_by| three("--move", move_by))
+                    .transpose()?,
+                rest: *rest,
+            },
+            Change::AddPose { name, from } => Edit::AddPose {
+                name: name.clone(),
+                from: from.clone(),
+            },
+            Change::RenamePose { pose, new_name } => Edit::RenamePose {
+                pose: pose.clone(),
+                new_name: new_name.clone(),
+            },
+            Change::RemovePose { pose, with_keys } => Edit::RemovePose {
+                pose: pose.clone(),
+                with_keys: *with_keys,
+            },
+            Change::AddAnimation { name, looping } => Edit::AddAnimation {
+                name: name.clone(),
+                looping: *looping,
+            },
+            Change::SetAnimation {
+                animation,
+                looping,
+                smooth,
+                length,
+            } => Edit::SetAnimation {
+                animation: animation.clone(),
+                looping: *looping,
+                smooth: *smooth,
+                length: *length,
+            },
+            Change::RenameAnimation {
+                animation,
+                new_name,
+            } => Edit::RenameAnimation {
+                animation: animation.clone(),
+                new_name: new_name.clone(),
+            },
+            Change::RemoveAnimation { animation } => Edit::RemoveAnimation {
+                animation: animation.clone(),
+            },
+            Change::AddKey {
+                animation,
+                pose,
+                at,
+            } => Edit::AddKey {
+                animation: animation.clone(),
+                pose: pose.clone(),
+                at: *at,
+            },
+            Change::MoveKey { animation, key, at } => Edit::MoveKey {
+                animation: animation.clone(),
+                key: *key,
+                at: *at,
+            },
+            Change::SetKey {
+                animation,
+                key,
+                pose,
+            } => Edit::SetKey {
+                animation: animation.clone(),
+                key: *key,
+                pose: pose.clone(),
+            },
+            Change::RemoveKey { animation, key } => Edit::RemoveKey {
+                animation: animation.clone(),
+                key: *key,
+            },
+            Change::MirrorPose { pose, as_name } => Edit::MirrorPose {
+                pose: pose.clone(),
+                as_name: as_name.clone(),
+            },
+            Change::SetLimits {
+                part,
+                x,
+                y,
+                z,
+                fixed,
+                none,
+            } => Edit::SetLimits {
+                part: part.clone(),
+                limits: if *fixed {
+                    LimitsTo::Fixed
+                } else if *none {
+                    LimitsTo::None
+                } else {
+                    LimitsTo::Turns([
+                        x.as_deref().map(|x| turns("--x", x)).transpose()?,
+                        y.as_deref().map(|y| turns("--y", y)).transpose()?,
+                        z.as_deref().map(|z| turns("--z", z)).transpose()?,
+                    ])
+                },
             },
             Change::MoveCorner { part, corners, by } => Edit::MoveCorner {
                 part: part.clone(),

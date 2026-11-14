@@ -31,6 +31,8 @@ Rules that hold everywhere:
 | `parts` | list of parts | required | The model's parts. At least one. |
 | `sockets` | table of sockets | none | Extra sockets on the whole model, for `origin` and for when another recipe uses this one as a part. |
 | `origin` | text | `"bottom"` | Where the model's zero point is (below). |
+| `poses` | table of poses | none | The model's poses, by name. See "Poses" below. |
+| `animations` | table of animations | none | The model's animations, by name. See "Animations" below. |
 | `bones`, `colliders`, `lods` | | | Reserved for later phases. Using one is an error that says so. |
 
 ### `palette`
@@ -99,13 +101,14 @@ Each entry of `parts`, and each entry of `define`, is a part.
 | `move` | three numbers | `[0, 0, 0]` | Without `attach` only: where the part's middle goes. -10000 to 10000. |
 | `scale` | number, or three | `1` | How much bigger: one number, or `[x, y, z]`. 0.001 to 1000. |
 | `mirror` | text | none | `"x"`, `"y"` or `"z"`: flips the part across that direction, its sockets and face names with it. |
+| `limits` | `"fixed"`, or a table | none: turns freely | How far the part may turn about its join when the model is posed. See "Limits" below. |
 | `sockets` | table of sockets | none | The part's own named sockets. |
 | `note` | anything | none | For people. Ignored. |
 | `bones`, `colliders`, `lods` | | | Reserved. |
 
 A part under `define` has no place of its own, so it can't have `name`,
-`attach`, `to`, `twist`, `rotate`, `move`, `scale` or `mirror`. Those go
-on the part that uses it.
+`attach`, `to`, `twist`, `rotate`, `move`, `scale`, `mirror` or
+`limits`. Those go on the part that uses it.
 
 **Order.** A part is mirrored, then scaled, then either turned and moved
 (`rotate`, `move`) or joined (`attach`, `to`, `twist`).
@@ -367,6 +370,124 @@ other.
 
 The parts of one list form a tree. A part attached to itself, or parts
 attached in a ring, are errors.
+
+## Limits
+
+A model moves by its joins: every part turns about its pivot (the
+socket it is joined to, or its own middle if it isn't joined), and what
+hangs from it goes with it. `limits` says how far a part may turn.
+
+| Written | Means |
+|---|---|
+| nothing | The part turns any way, any amount, and may be moved. |
+| `limits = { x = [-30, 40], y = [-80, 80] }` | It turns around x between -30 and 40 degrees and around y between -80 and 80. A direction not named (here z) doesn't turn. |
+| `limits = { x = "free" }` | It turns around x any amount: a wheel. |
+| `limits = {}` | It doesn't turn. A pose may still move it: a drawer. |
+| `limits = "fixed"` | It neither turns nor moves. |
+
+- The directions are `x` (a nod: around left-to-right), `y` (a turn:
+  around up) and `z` (a tilt: around forward), in the directions of the
+  list the part is written in: the model's for a part of the model, a
+  definition's own for a part inside it.
+- Two angles are in degrees, -36000 to 36000, the first 0 or less and
+  the second 0 or more: the part stands at 0 when the model is at rest.
+- A pose that turns a part past its limits is a warning, not an error.
+- `duck-mold inspect --joins` lists every part's pivot, parent and
+  limits; `duck-mold edit <recipe> set-limits` writes them.
+
+## Poses
+
+A pose is the model with some of its parts turned or moved from where
+they stand at rest. Poses are written at the top of the recipe, each
+under its name:
+
+```toml
+[poses.wave]
+left_arm = [0, 0, -150]
+"left_arm/elbow" = [0, 0, -30]
+body = { turn = [0, 10, 0], move = [0, -0.05, 0] }
+```
+
+| | |
+|---|---|
+| The pose's name | Letters, digits, `_` and `-`. Not `rest`: that is the model as it is built, and is always there. |
+| A line's name | A part, by its path from the top of the model: `head`, `left_arm/elbow`. A path with a `/` goes in quotes. A part that isn't there is an error. |
+| A line's value | The part's turn, `[x, y, z]` in degrees; or `{ turn = [x, y, z], move = [x, y, z] }` with one or both. |
+| `turn` | Degrees around x, then y, then z, about the part's pivot: the socket it is joined to, or its own middle if it isn't joined. -36000 to 36000 each (a wheel can be turned many times round). |
+| `move` | Metres from where the part stands at rest, -10000 to 10000 each. |
+
+- The x, y and z are those of the list the part is written in, as for
+  `limits`.
+- Turning or moving a part carries what hangs from it: the parts joined
+  to it and, for a part made of parts, the parts inside it. Parts move
+  rigidly; nothing bends.
+- A part the pose doesn't name is at rest.
+- A turn past the part's `limits`, or a move of a `"fixed"` part, is a
+  warning (`limit_broken`).
+- Only the poses of the recipe being built count. A recipe used as a
+  part in another (`file = "wheel.toml"`) brings its limits, not its
+  poses.
+
+`duck-mold inspect --pose <name>` reports on the model in a pose;
+`duck-mold render --pose <name>` draws it; `duck-mold edit` has
+`set-pose`, `add-pose`, `rename-pose`, `remove-pose` and `mirror-pose`.
+
+## Animations
+
+An animation takes the model through poses, each reached at a time.
+Animations are written at the top of the recipe, each under its name:
+
+```toml
+[animations.wave]
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 0.3, pose = "wave" },
+  { at = 0.6, pose = "wave_out" },
+  { at = 0.9, pose = "wave" },
+  { at = 1.3, pose = "rest" },
+]
+
+[animations.walk]
+loop = true
+keys = [
+  { at = 0, pose = "step_left" },
+  { at = 0.4, pose = "step_right" },
+  { at = 0.8, pose = "step_left" },
+]
+```
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `keys` | list of keys | none | The poses and their times, in order. An animation with no keys does nothing (a warning). |
+| `loop` | `true` or `false` | `false` | Whether it starts again after its last key. |
+| `smooth` | `true` or `false` | `true` | Whether the motion flows through the poses (`true`) or goes straight from each to the next at a steady speed (`false`). |
+
+A key is `{ at = <seconds>, pose = "<name>" }`:
+
+| | |
+|---|---|
+| `at` | Seconds from the animation's start, 0 to 3600. The first key is at 0, and each key is later than the one before. |
+| `pose` | One of the recipe's poses, or `rest`. A pose that isn't there is an error with the closest name. |
+
+- The animation's name is letters, digits, `_` and `-`. A pose and an
+  animation may have the same name.
+- The animation lasts until its last key.
+- Between two keys, every number of every part's `turn` and `move`
+  goes from the one pose's to the next's. A turn of 360 is once round.
+- With `smooth`, a number that keeps going the same way through a key
+  doesn't stop there; one that turns back comes to a stop there; and
+  the animation starts and ends at a stop (unless it loops: then its
+  end runs into its start). A number never goes past a key's value on
+  its way to it.
+- An animation that loops should end on the pose it starts with (or one
+  that puts every part in the same place, like a wheel turned 360).
+  If it doesn't, that is the warning `loop_jumps`.
+
+`duck-mold inspect --animation <name>` checks every frame of one;
+`duck-mold render --animation <name>` draws it as a strip of frames;
+`duck-mold edit` has `add-animation`, `set-animation`,
+`rename-animation`, `remove-animation`, `add-key`, `move-key`,
+`set-key` and `remove-key`.
 
 ## Files as parts
 
