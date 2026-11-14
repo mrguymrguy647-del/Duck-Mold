@@ -19,6 +19,7 @@ pub mod library;
 mod paint;
 mod pose;
 mod shape;
+pub mod shelf;
 mod sockets;
 mod timeline;
 pub mod viewport;
@@ -137,6 +138,8 @@ pub struct Studio {
     undo: Vec<history::Step>,
     redo: Vec<history::Step>,
     library: library::Library,
+    /// The animation library's files, as last read.
+    shelf: shelf::Shelf,
     /// The palette colour the Paint tool paints with.
     pub(crate) paint: Option<String>,
     /// Which tool is in hand: what the handles on the selected part are.
@@ -206,6 +209,7 @@ impl Studio {
             undo: Vec::new(),
             redo: Vec::new(),
             library: library::Library::default(),
+            shelf: shelf::Shelf::default(),
             paint: None,
             tool: handles::Tool::Move,
             grab: None,
@@ -225,6 +229,7 @@ impl Studio {
         };
         studio.reload();
         studio.read_library();
+        studio.read_shelf();
         studio.frame();
         studio
     }
@@ -421,7 +426,8 @@ impl Studio {
         }
         self.since_check = 0.0;
         let library = self.check_library();
-        self.check_files() || library
+        let shelf = self.check_shelf();
+        self.check_files() || library || shelf
     }
 
     /// Checks the files now. True if one had changed, and the model was

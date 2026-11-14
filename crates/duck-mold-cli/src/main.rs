@@ -186,6 +186,22 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Write an animation of a recipe, and the poses it uses, to a small
+    /// file of their own: for the animation library. Another model takes
+    /// it with `edit <recipe> add-animation <name> --from <file>`. The
+    /// recipe doesn't change. Never writes over a file.
+    SaveAnimation {
+        /// The recipe (.toml or .json).
+        recipe: PathBuf,
+        /// The animation: walk.
+        animation: String,
+        /// The file to write: animations/walk.toml. Its name must end in
+        /// .toml.
+        file: PathBuf,
+        /// Print the result as JSON, for agents.
+        #[arg(long)]
+        json: bool,
+    },
     /// Make one change to a recipe without typing it: add, remove, rename,
     /// join, unjoin, set, duplicate, add-color, set-color, remove-color,
     /// add-socket, set-socket, rename-socket, remove-socket, tidy-sockets.
@@ -383,6 +399,28 @@ fn main() -> ExitCode {
                 } else {
                     say(&format!("wrote {}", inspection.source));
                     say(inspection.to_text().trim_end());
+                }
+                ExitCode::SUCCESS
+            }
+            Err(failure) => fail(&failure, json),
+        },
+        Command::SaveAnimation {
+            recipe,
+            animation,
+            file,
+            json,
+        } => match tools::save_animation(&recipe, &animation, &file) {
+            Ok(text) => {
+                let written = duck_mold_core::load::display_path(&file);
+                if json {
+                    say_json(&serde_json::json!({
+                        "wrote": written,
+                        "animation": animation,
+                        "text": text,
+                    }));
+                } else {
+                    say(&format!("wrote {written}"));
+                    say(text.trim_end());
                 }
                 ExitCode::SUCCESS
             }

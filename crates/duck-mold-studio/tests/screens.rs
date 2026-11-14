@@ -2779,3 +2779,74 @@ fn the_play_button_in_the_view_plays_an_animation_in_part_mode() {
     plain.run_steps(2);
     assert!(plain.query_by_label("Play").is_none());
 }
+
+#[test]
+fn the_animations_list_adds_a_starter_and_saves_an_animation() {
+    let recipe = copy_of("robot.toml", "screens_animations");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.get_by_label("Animations").click();
+    screen.run_steps(2);
+    screen.get_by_label("Starters");
+    screen.get_by_label("Saved, in animations/");
+    screen.get_by_label_contains("None yet.");
+    // The door's and the wheels' can't be added to a robot.
+    assert!(
+        screen
+            .get_by_label("Add open")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        screen
+            .get_by_label("Add roll")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        !screen
+            .get_by_label("Add jump")
+            .accesskit_node()
+            .is_disabled()
+    );
+
+    // The panel is short and scrolls: the buttons below its edge are
+    // pressed the way a screen reader presses them.
+    screen.get_by_label("Add jump").click_accesskit();
+    screen.run_steps(2);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(
+        text.contains("[animations.jump]"),
+        "{}",
+        studio(&screen).status()
+    );
+    assert_eq!(studio(&screen).animation(), Some("jump"));
+    assert!(
+        studio(&screen)
+            .status()
+            .starts_with("Added the animation \"jump\" from the starters"),
+        "{}",
+        studio(&screen).status()
+    );
+
+    // Save the jump: it shows under Saved.
+    screen.get_by_label("Animation to save");
+    screen.get_by_label("Save the animation").click_accesskit();
+    screen.run_steps(2);
+    let saved = recipe.parent().unwrap().join("animations/jump.toml");
+    assert!(saved.exists(), "{}", studio(&screen).status());
+    assert!(
+        studio(&screen)
+            .status()
+            .starts_with("Saved the animation \"jump\" to the library"),
+        "{}",
+        studio(&screen).status()
+    );
+    screen.get_by_label(
+        "animations/jump.toml 5 keys, 1.3 s. Moves body, left_leg, right_leg, left_arm, right_arm.",
+    );
+    // Back to the parts library.
+    screen.get_by_label("Library").click();
+    screen.run_steps(2);
+    screen.get_by_label_contains("No parts here yet.");
+}

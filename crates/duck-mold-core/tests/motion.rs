@@ -2047,6 +2047,8 @@ fn an_animation_is_made_and_given_its_keys() {
         &Edit::AddAnimation {
             name: "hello".into(),
             looping: false,
+            from: None,
+            skip_missing: false,
         },
     );
     assert_eq!(
@@ -2094,6 +2096,8 @@ fn an_animation_is_made_and_given_its_keys() {
         &Edit::AddAnimation {
             name: "sway".into(),
             looping: true,
+            from: None,
+            skip_missing: false,
         },
     );
     assert_eq!(
@@ -2128,6 +2132,8 @@ fn an_animation_is_made_and_given_its_keys() {
         &Edit::AddAnimation {
             name: "hello".into(),
             looping: false,
+            from: None,
+            skip_missing: false,
         },
     );
     assert_eq!(issue.code, Code::DuplicateName);
@@ -2469,6 +2475,8 @@ fn animation_edits_work_on_json_too() {
         &Edit::AddAnimation {
             name: "opening".into(),
             looping: false,
+            from: None,
+            skip_missing: false,
         },
     );
     let one = on(&made.text, &add_key("opening", "rest", 0.0));

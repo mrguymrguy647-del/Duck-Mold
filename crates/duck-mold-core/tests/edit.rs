@@ -2860,6 +2860,8 @@ fn every_kind_of_edit_has_a_name() {
         Edit::AddAnimation {
             name: String::new(),
             looping: false,
+            from: None,
+            skip_missing: false,
         },
         Edit::SetAnimation {
             animation: String::new(),

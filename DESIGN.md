@@ -3850,6 +3850,36 @@ Space plays and stops in either mode. Both the window and the engine
 are tested: keys clicked and dragged with the mouse, the ruler
 scrubbed, Loop, Space, Ghosts, and two screen pictures.
 
+*As built (step 8):* as designed, with these details. The starters
+are six small files inside the program, each the same kind of file
+`save-animation` writes, with pose names of their own (`walk_left`,
+`jump_crouch`, `door_open`, `roll_round`) so they rarely meet a pose
+already there. The two-legged ones turn the arms and legs only about
+x, the one direction a mirrored arm turns the same way as the other.
+Two changes from the table above: `idle` doesn't raise and lower the
+body (the legs hang from it, so the feet would leave the ground);
+it nods the head and sways the arms. `walk` doesn't dip the body: a
+starter can't know how long the legs are. Feet that stick out of a
+leg dig in a little as it swings (the robot's own walk turns its feet
+back to stop that); the guide says to add such turns to the copied
+poses. `add-animation --from` takes the file's animation with the new
+name, or its only one; `--take` names another (the Studio uses it,
+so a saved walk can come in as `walk_2`). The file is found from the
+recipe's folder first, then from the folder the program runs in. A
+copy loops and is smooth as the one it copies. A pose taken by one
+that says the same (whatever the order of its lines) is used as it
+is, and the summary names those. Missing parts are refused in one
+sentence that names them and the six two-legged names; with
+`--skip-missing`, a copy that would move nothing at all is still
+refused. In the Studio the library panel switches between Library
+(parts) and Animations: the starters, then each animation of each file
+in `animations/` (a file that can't be read is listed with why), each
+with Add, greyed out (with why) when the model has none of its parts;
+an Add with some missing leaves those out and says so. Add chooses the
+new animation for the timeline. Save writes the timeline's animation,
+or the one picked beside it, to `animations/<name>.toml`, numbered
+rather than written over.
+
 ### Examples (step 9)
 
 Each with its stored model, report, picture, and a frame strip of each

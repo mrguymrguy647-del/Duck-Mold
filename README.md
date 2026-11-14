@@ -291,6 +291,32 @@ comes back to rest when it stops.
 
 ![The timeline: the robot's wave, half way between two keys, with the ghosts of both](docs/studio-timeline.png)
 
+**The animation library.** Under the parts list, switch from
+**Library** to **Animations**. It lists the six **starters** that come
+with Duck Mold, and the animations saved in the folder `animations`
+next to the recipe:
+
+| Starter | For | What it does |
+|---|---|---|
+| `idle` | two legs | Stands and breathes: the head nods, the arms sway. Loops. |
+| `walk` | two legs | Legs and arms swing against each other. Loops, in place. |
+| `wave` | two legs | Raises the right arm, waves twice, lowers it. |
+| `jump` | two legs | Crouches, rises 40 cm, lands, straightens. |
+| `open` | a door | The part called `door` swings 100 degrees. Backwards, it closes. |
+| `roll` | four wheels | Each wheel turns once round a second, steadily. Loops. |
+
+"Two legs" means parts called `body`, `head`, `left_arm`,
+`right_arm`, `left_leg` and `right_leg`, standing with the arms down:
+name a character's parts so and the starters work on it. **Add** copies
+an animation into the model with the poses it uses (`add-animation
+--from`, or `--starter`); from then on it is the model's own, to change
+in Pose mode. Add is greyed out when the model has none of the parts it
+moves. **Save** writes one of the model's animations to `animations/`
+(`duck-mold save-animation`), and every model in that folder can then
+take it.
+
+![The animation library: the six starters, the door's and the wheels' greyed out for the robot](docs/studio-animations.png)
+
 **Adding parts.** There are two ways.
 
 - **Add**, in the top bar, lists the shapes (each with a small
@@ -472,6 +498,7 @@ only: nothing can be changed there.
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
+| `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`): a copy of that example, with the files it uses. Never writes over a file. |
 | `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
 | `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |

@@ -701,6 +701,62 @@ pub fn save_part(recipe: &Path, part: &str, output: &Path) -> Result<Inspection,
     inspect_file(output)
 }
 
+/// `duck-mold save-animation`: writes an animation of a recipe and the
+/// poses it uses to `output`, a small file of their own that `edit
+/// add-animation --from` reads. `output` must end in `.toml` and must
+/// not be there yet. The recipe doesn't change.
+pub fn save_animation(recipe: &Path, animation: &str, output: &Path) -> Result<String, Failure> {
+    let text = std::fs::read_to_string(recipe).map_err(|error| {
+        let reason = match error.kind() {
+            std::io::ErrorKind::NotFound => "there is no such file",
+            _ => "it didn't work",
+        };
+        Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!("can't read \"{}\": {reason}", display_path(recipe)),
+        )))
+    })?;
+    let Some(syntax) = crate::source::Syntax::from_path(recipe) else {
+        return Err(Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!(
+                "\"{}\" isn't a recipe: its name must end in .toml or .json",
+                display_path(recipe)
+            ),
+        ))));
+    };
+    if output.exists() {
+        return Err(Failure::Usage(Box::new(Issue::error(
+            Code::Io,
+            "",
+            format!(
+                "\"{}\" is already there: save-animation never writes over a file",
+                display_path(output)
+            ),
+        ))));
+    }
+    let saved = crate::edit::animation_recipe(&text, syntax, &display_path(recipe), animation)?;
+    if let Some(folder) = output
+        .parent()
+        .filter(|folder| !folder.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(folder).map_err(|error| {
+            Failure::Usage(Box::new(Issue::error(
+                Code::Io,
+                "",
+                format!(
+                    "can't make the folder \"{}\": {error}",
+                    display_path(folder)
+                ),
+            )))
+        })?;
+    }
+    new_recipe(output, &saved)?;
+    Ok(saved)
+}
+
 /// Writes a new recipe's text to `path`, which must end in `.toml` and
 /// must not be there yet.
 fn new_recipe(path: &Path, text: &str) -> Result<(), Failure> {

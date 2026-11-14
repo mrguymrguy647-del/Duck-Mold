@@ -610,6 +610,15 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "play"));
     }
 
+    // The animation library: the starters, with the door's and the
+    // wheels' greyed out for the robot.
+    {
+        let mut screen = robot();
+        screen.get_by_label("Animations").click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "animations"));
+    }
+
     assert!(
         wrong.is_empty(),
         "{} of the screens changed:\n{}\nIf the change is meant, store the new pictures with: UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures",

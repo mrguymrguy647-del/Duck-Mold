@@ -458,6 +458,8 @@ impl Studio {
                 Edit::AddAnimation {
                     name: name.clone(),
                     looping: false,
+                    from: None,
+                    skip_missing: false,
                 },
                 Edit::AddKey {
                     animation: name.clone(),

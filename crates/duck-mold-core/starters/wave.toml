@@ -1,0 +1,29 @@
+# Starter animation `wave`, for a two-legged character: raises the
+# right arm, waves twice and lowers it.
+# It moves: right_arm.
+# To use it: duck-mold edit <recipe> add-animation wave --starter wave
+version = 0
+name = "wave"
+
+[poses.wave_up]
+right_arm = [170, 0, 0]
+
+# Up, and tipped to one side...
+[poses.wave_a]
+right_arm = [170, 0, 20]
+
+# ...and to the other.
+[poses.wave_b]
+right_arm = [170, 0, -20]
+
+[animations.wave]
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 0.4, pose = "wave_up" },
+  { at = 0.6, pose = "wave_a" },
+  { at = 0.8, pose = "wave_b" },
+  { at = 1, pose = "wave_a" },
+  { at = 1.2, pose = "wave_b" },
+  { at = 1.4, pose = "wave_up" },
+  { at = 1.8, pose = "rest" },
+]

@@ -1,0 +1,21 @@
+# Starter animation `roll`, for four wheels: each turns once round in a
+# second, at a steady speed (it isn't smooth: it never slows). Loops.
+# It moves: wheel_front_left, wheel_front_right, wheel_back_left,
+# wheel_back_right.
+# To use it: duck-mold edit <recipe> add-animation roll --starter roll
+version = 0
+name = "roll"
+
+[poses.roll_round]
+wheel_front_left = [360, 0, 0]
+wheel_front_right = [360, 0, 0]
+wheel_back_left = [360, 0, 0]
+wheel_back_right = [360, 0, 0]
+
+[animations.roll]
+loop = true
+smooth = false
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 1, pose = "roll_round" },
+]

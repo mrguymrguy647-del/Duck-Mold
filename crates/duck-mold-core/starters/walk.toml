@@ -1,0 +1,29 @@
+# Starter animation `walk`, for a two-legged character: the legs swing
+# against each other, and each arm against its leg. Loops. It walks in
+# place: the game moves the character along.
+# It moves: left_leg, right_leg, left_arm, right_arm.
+# To use it: duck-mold edit <recipe> add-animation walk --starter walk
+version = 0
+name = "walk"
+
+[poses.walk_left]
+left_leg = [20, 0, 0]
+right_leg = [-20, 0, 0]
+left_arm = [-20, 0, 0]
+right_arm = [20, 0, 0]
+
+[poses.walk_right]
+left_leg = [-20, 0, 0]
+right_leg = [20, 0, 0]
+left_arm = [20, 0, 0]
+right_arm = [-20, 0, 0]
+
+[animations.walk]
+loop = true
+keys = [
+  { at = 0, pose = "walk_left" },
+  { at = 0.25, pose = "rest" },
+  { at = 0.5, pose = "walk_right" },
+  { at = 0.75, pose = "rest" },
+  { at = 1, pose = "walk_left" },
+]

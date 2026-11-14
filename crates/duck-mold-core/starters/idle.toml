@@ -1,0 +1,24 @@
+# Starter animation `idle`, for a two-legged character: standing and
+# breathing. The head nods a little and the arms sway. Loops.
+# It moves: head, left_arm, right_arm.
+# To use it: duck-mold edit <recipe> add-animation idle --starter idle
+version = 0
+name = "idle"
+
+[poses.idle_in]
+head = [-3, 0, 0]
+left_arm = [4, 0, 0]
+right_arm = [-4, 0, 0]
+
+[poses.idle_out]
+head = [2, 0, 0]
+left_arm = [-4, 0, 0]
+right_arm = [4, 0, 0]
+
+[animations.idle]
+loop = true
+keys = [
+  { at = 0, pose = "idle_out" },
+  { at = 1.2, pose = "idle_in" },
+  { at = 2.4, pose = "idle_out" },
+]

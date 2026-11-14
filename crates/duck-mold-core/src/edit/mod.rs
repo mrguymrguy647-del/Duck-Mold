@@ -19,7 +19,7 @@ pub mod doc;
 mod motion;
 mod spot;
 
-pub use motion::LimitsTo;
+pub use motion::{LimitsTo, Offered, animation_recipe, animations_in};
 pub use spot::{Spot, spot};
 
 use std::path::Path;
@@ -489,12 +489,19 @@ pub enum Edit {
         /// is mirrored.
         as_name: Option<String>,
     },
-    /// Adds an animation, with no keys yet.
+    /// Adds an animation, with no keys yet; or, `from` a file or a
+    /// starter, a copy of an animation there and the poses it uses.
     AddAnimation {
         /// Its name.
         name: String,
-        /// True if it starts again after its last key.
+        /// True if it starts again after its last key. (A copy loops if
+        /// the one it is copied from does, or if this is true.)
         looping: bool,
+        /// Where to copy it from. `None`: a new animation with no keys.
+        from: Option<AnimationFrom>,
+        /// Leave out what it does to parts this model doesn't have,
+        /// instead of refusing.
+        skip_missing: bool,
     },
     /// Changes whether an animation loops, whether it is smooth, and
     /// how long it lasts. What is `None` stays as it is.
@@ -1179,7 +1186,82 @@ fn part_in<'a>(model: &'a Model, path: &str) -> Option<&'a Part> {
     find(&model.parts, path)
 }
 
-fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Stop> {
+/// Where `add-animation` copies an animation from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnimationFrom {
+    /// A file: a recipe, or one `duck-mold save-animation` wrote.
+    File {
+        /// The file, as written from the recipe's folder (or, if it
+        /// isn't there, from the folder the program runs in).
+        file: String,
+        /// Which of its animations to copy. `None`: the one with the
+        /// new animation's name, or, if it has only one, that one.
+        take: Option<String>,
+    },
+    /// One of the starter animations that come inside the program:
+    /// `walk`. See [`crate::starters`].
+    Starter(String),
+}
+
+/// The text an animation is copied from, read as a recipe, and its name
+/// in messages.
+fn animation_source(path: &Path, from: &AnimationFrom) -> Result<(Doc, String), Stop> {
+    let (text, syntax, shown) = match from {
+        AnimationFrom::Starter(name) => {
+            let Some(starter) = crate::starters::starter(name) else {
+                return Err(problem(
+                    Code::UnknownAnimation,
+                    format!("there is no starter animation \"{name}\""),
+                )
+                .got(name.as_str())
+                .one_of(
+                    name,
+                    crate::starters::STARTERS
+                        .iter()
+                        .map(|starter| starter.name.to_owned()),
+                ));
+            };
+            (
+                starter.text.to_owned(),
+                Syntax::Toml,
+                "the starters".to_owned(),
+            )
+        }
+        AnimationFrom::File { file, .. } => {
+            let beside = path.parent().unwrap_or(Path::new("")).join(file);
+            let found = [beside.as_path(), Path::new(file)]
+                .into_iter()
+                .find(|place| place.is_file());
+            let Some(found) = found else {
+                return Err(problem(
+                    Code::Io,
+                    format!(
+                        "there is no file \"{file}\" in the recipe's folder (or the folder the program runs in)"
+                    ),
+                ));
+            };
+            let Some(syntax) = Syntax::from_path(found) else {
+                return Err(problem(
+                    Code::Io,
+                    format!("\"{file}\" isn't a recipe: its name must end in .toml or .json"),
+                ));
+            };
+            let text = std::fs::read_to_string(found)
+                .map_err(|error| problem(Code::Io, format!("can't read \"{file}\": {error}")))?;
+            (text, syntax, format!("\"{file}\""))
+        }
+    };
+    let body = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let doc = Doc::parse(body, syntax).map_err(|_| {
+        problem(
+            Code::Syntax,
+            format!("{shown} can't be read: check it with duck-mold check"),
+        )
+    })?;
+    Ok((doc, shown))
+}
+
+fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result<Outcome, Stop> {
     match edit {
         Edit::SetLimits { part, limits } => motion::set_limits(doc, part, *limits),
         Edit::SetPose {
@@ -1192,7 +1274,35 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
         Edit::AddPose { name, from } => motion::add_pose(doc, name, from.as_deref()),
         Edit::RenamePose { pose, new_name } => motion::rename_pose(doc, pose, new_name),
         Edit::RemovePose { pose, with_keys } => motion::remove_pose(doc, pose, *with_keys),
-        Edit::AddAnimation { name, looping } => motion::add_animation(doc, name, *looping),
+        Edit::AddAnimation {
+            name,
+            looping,
+            from: None,
+            ..
+        } => motion::add_animation(doc, name, *looping),
+        Edit::AddAnimation {
+            name,
+            looping,
+            from: Some(from),
+            skip_missing,
+        } => {
+            let (source, shown) = animation_source(path, from)?;
+            let take = match from {
+                AnimationFrom::File {
+                    take: Some(take), ..
+                } => take.as_str(),
+                _ => name.as_str(),
+            };
+            motion::add_animation_from(
+                doc,
+                name,
+                take,
+                *looping,
+                (&source, &shown),
+                *skip_missing,
+                model,
+            )
+        }
         Edit::SetAnimation {
             animation,
             looping,
@@ -3755,7 +3865,7 @@ pub fn apply_many(
     let mut said = Vec::new();
     let mut shared = None;
     for edit in edits {
-        let outcome = run(&mut doc, edit, old_model.as_ref())
+        let outcome = run(&mut doc, edit, old_model.as_ref(), path)
             .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
         said.push(outcome.summary);
         // A new part that stands free, with no place given, is stood on
