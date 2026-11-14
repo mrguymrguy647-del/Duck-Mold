@@ -35,6 +35,9 @@ pub enum Mode {
     /// The corners of the selected box: a click selects a corner, the
     /// arrows move it.
     Corner,
+    /// The model in one of its poses: a click selects a part, the rings
+    /// at its join turn it in the pose (O).
+    Pose,
 }
 
 /// The tool in hand in Face mode.
@@ -65,6 +68,12 @@ impl Studio {
     /// What a click picks now: parts, or the faces of the selected box.
     pub fn mode(&self) -> Mode {
         self.mode
+    }
+
+    /// True in Face, Edge and Corner mode: the selected box is being
+    /// shaped.
+    pub fn is_shaping(&self) -> bool {
+        matches!(self.mode, Mode::Face | Mode::Edge | Mode::Corner)
     }
 
     /// Why the selected part can't be shaped, if it can't: only a box,
@@ -130,13 +139,14 @@ impl Studio {
         self.cancel_drag();
         self.mode = Mode::Part;
         self.faces.clear();
+        self.refresh_pose();
         self.say("Back to parts: a click selects a part".to_owned());
     }
 
     /// Tab: into Face mode, or back to Part mode.
     pub fn toggle_face_mode(&mut self) -> Result<String, String> {
         match self.mode {
-            Mode::Part | Mode::Edge | Mode::Corner => self.face_mode(),
+            Mode::Part | Mode::Edge | Mode::Corner | Mode::Pose => self.face_mode(),
             Mode::Face => {
                 self.part_mode();
                 Ok(self.status().to_owned())
@@ -235,7 +245,7 @@ impl Studio {
     /// The selected part as it is shown, and its shape with its faces,
     /// edges and corners: the shape its changes made, or the plain box.
     pub fn shaped_selected(&self) -> Option<(&Part, Shaped)> {
-        if self.mode == Mode::Part {
+        if !self.is_shaping() {
             return None;
         }
         let path = self.selected.as_deref()?;
@@ -299,8 +309,17 @@ impl Studio {
     /// edges), then Face (or Edge) mode, then the selection. False when there was nothing to
     /// let go of.
     pub fn escape(&mut self) -> bool {
-        if self.grab.is_some() {
+        if self.grab.is_some() || self.pose_grab_held() {
             self.cancel_drag();
+            return true;
+        }
+        if self.mode == Mode::Pose {
+            // The part, then Pose mode.
+            if self.selected.is_some() {
+                self.select(None);
+            } else {
+                self.part_mode();
+            }
             return true;
         }
         if self.mode != Mode::Part {
@@ -322,7 +341,7 @@ impl Studio {
     /// the part can't be shaped any more, and only faces that are still
     /// there selected.
     pub(super) fn keep_face_mode(&mut self) {
-        if self.mode == Mode::Part {
+        if matches!(self.mode, Mode::Part | Mode::Pose) {
             return;
         }
         if self.why_not_shaped().is_some() {
@@ -377,7 +396,7 @@ impl Studio {
 
     /// The faces of the part that aren't faded in Face mode: the box's.
     pub(super) fn face_focus(&self) -> Option<Range<usize>> {
-        if self.mode == Mode::Part {
+        if !self.is_shaping() {
             return None;
         }
         let path = self.selected.as_deref()?;

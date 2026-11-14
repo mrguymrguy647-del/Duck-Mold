@@ -7,7 +7,7 @@
 
 use duck_mold_core::edit::Made;
 use duck_mold_view::studio::viewport::Viewpoint;
-use duck_mold_view::studio::{FaceTool, Mode, Studio};
+use duck_mold_view::studio::{FaceTool, Mode, PoseTool, Studio};
 use eframe::egui::{self, RichText};
 
 use crate::library::Thumbs;
@@ -86,6 +86,12 @@ pub enum Action {
     /// The selected box's corners: Corner mode, or back to Part mode
     /// (C).
     CornerMode,
+    /// Pose mode, or back to Part mode (O).
+    PoseMode,
+    /// Take this tool in hand in Pose mode.
+    PoseTool(PoseTool),
+    /// Put the selected part back at rest in the pose chosen.
+    PoseBackToRest,
     /// Ask for a name, and make a definition from the selected part.
     MakeDefinition,
     /// Write the selected part alone to the library's folder.
@@ -93,7 +99,7 @@ pub enum Action {
 }
 
 /// Every key and what it does, for Help's list and the README's.
-pub const KEYS: [(&str, &str); 25] = [
+pub const KEYS: [(&str, &str); 27] = [
     (
         "G, R, S, T, P",
         "The Move, Rotate, Scale, Size and Paint tools",
@@ -114,6 +120,11 @@ pub const KEYS: [(&str, &str); 25] = [
         "T, G, R, S, I, K (shaping)",
         "The Pull, Move, Turn, Scale, Inset and Cut tools",
     ),
+    (
+        "O",
+        "Pose mode: turn parts about their joins, in a pose. O again: back to parts",
+    ),
+    ("R, G (posing)", "Turn with rings, or move with arrows"),
     ("Ctrl held while dragging", "No snapping"),
     ("Delete or Backspace", "Remove what is selected"),
     ("Ctrl+D", "Duplicate what is selected"),
@@ -283,6 +294,30 @@ pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) ->
         (None, count) => format!("{count} parts"),
     };
     ui.label(RichText::new(title).weak().small());
+    // Posing: back to rest, and the way back.
+    if studio.mode() == Mode::Pose {
+        if line(
+            ui,
+            edits && one.is_some() && studio.pose() != "rest",
+            "Back to rest",
+            "",
+        ) {
+            chosen = Some(Action::PoseBackToRest);
+        }
+        for (tool, words, key) in [(PoseTool::Turn, "Turn", "R"), (PoseTool::Move, "Move", "G")] {
+            if line(ui, true, words, key) {
+                chosen = Some(Action::PoseTool(tool));
+            }
+        }
+        ui.separator();
+        if line(ui, true, "Back to Part", "O") {
+            chosen = Some(Action::PoseMode);
+        }
+        if chosen.is_some() {
+            ui.close();
+        }
+        return chosen;
+    }
     // Shaping: the tools, and the way back.
     if studio.mode() != Mode::Part {
         let edges = studio.mode() == Mode::Edge;
@@ -340,6 +375,9 @@ pub fn part_menu(ui: &mut egui::Ui, studio: &mut Studio, thumbs: &mut Thumbs) ->
     }
     if line(ui, edits && one.is_some(), "Corners", "C") {
         chosen = Some(Action::CornerMode);
+    }
+    if line(ui, true, "Pose", "O") {
+        chosen = Some(Action::PoseMode);
     }
     if line(ui, edits && one.is_some(), "Make a definition...", "") {
         chosen = Some(Action::MakeDefinition);

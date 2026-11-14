@@ -684,6 +684,11 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   Pull arrow is a `pull`, of its Inset knob an `inset`, and the panel's
   Changes list is `set-change` and `remove-change`. Read the result
   with `inspect --faces`.
+- In the Studio, Pose mode (O) turns parts by their rings: a drag is
+  one `set-pose`, and the poses list's New, Copy, Mirror, Rename and
+  Remove are `add-pose`, `add-pose --from`, `mirror-pose`,
+  `rename-pose` and `remove-pose`. The Limits in the panel are
+  `set-limits`.
 - **`pull`, `inset`, `set-change` and `remove-change` on a part made
   from a defined part** change the definition, like `set --shape`.
 - **`set --shape` to anything but a box drops a box's changes** (only a

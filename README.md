@@ -244,6 +244,27 @@ every face's name.
 
 ![A wall in Face mode: the glass of its framed window selected, with the Changes list on the right](docs/studio-shaping.png)
 
+**Posing.** Press **O** (or click **Pose**) and the model stands in one
+of its poses; the list on the right has `rest` and the recipe's poses.
+
+- Click a part: rings appear at its join, one for each direction its
+  limits let it turn (a knee has one, a fixed part none, and the line
+  under the picture says so). Drag a ring to turn the part; what hangs
+  from it follows. It snaps to 5 degrees (Ctrl: free) and stops at its
+  limit. **G** gives arrows instead, to move it (a crouch, a jump);
+  **R** rings again.
+- Letting go writes one `set-pose` line. A drag in `rest` makes a new
+  pose, `pose`, rather than change the model itself.
+- The panel has the selected part's turn and move to type, **Back to
+  rest**, and its **Limits** (the same in Part mode, folded). **New**,
+  **Copy**, **Mirror** (step_left makes step_right), **Rename** and
+  **Remove** are under the list. The parts a pose turns are marked `*`
+  in the list of parts.
+- A pose that leaves a part floating says so in Problems.
+- Escape lets go of the part, then of Pose mode.
+
+![The robot in Pose mode: waving, its head selected with a ring for each way it may turn, and the poses on the right](docs/studio-posing.png)
+
 **Adding parts.** There are two ways.
 
 - **Add**, in the top bar, lists the shapes (each with a small
@@ -361,6 +382,8 @@ keys, About). Every line shows its key.
 | Tab | Shape the selected box: Face mode. Tab again: back to parts |
 | E | The selected box's edges: click one to move it. E again: back to parts |
 | C | The selected box's corners: click one to move it. C again: back to parts |
+| O | Pose mode: turn parts about their joins, in a pose. O again: back to parts |
+| R, G (posing) | Turn with rings, or move with arrows |
 | T, G, R, S, I, K (shaping) | The Pull, Move, Turn, Scale, Inset and Cut tools (Edge mode: G and K) |
 | Ctrl held while dragging | No snapping |
 | Delete or Backspace | Remove what is selected |

@@ -13,6 +13,7 @@ pub mod app;
 pub mod gallery;
 pub mod library;
 pub mod palette;
+pub mod posing;
 pub mod properties;
 pub mod recent;
 pub mod theme;

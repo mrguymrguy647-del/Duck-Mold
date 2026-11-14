@@ -61,6 +61,8 @@ pub struct Draft {
     /// The three amounts of each change that has three (a move, a
     /// turn), as they are being typed.
     change_xyz: Vec<[f64; 3]>,
+    /// Pose mode's panel, and a part's limits.
+    pub posing: crate::posing::PoseDraft,
 }
 
 impl Draft {
@@ -554,6 +556,10 @@ fn show_several(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft, count
 /// Draws the panel for the selected part, and makes the edit when a
 /// field's value is settled.
 pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
+    if studio.mode() == Mode::Pose {
+        crate::posing::show(ui, studio, &mut draft.posing);
+        return;
+    }
     ui.add_space(4.0);
     let count = studio.selection().len();
     if count > 1 {
@@ -608,7 +614,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     }
 
     definition_notice(ui, &facts);
-    if studio.mode() != Mode::Part {
+    if studio.is_shaping() {
         faces_section(ui, studio);
     }
 
@@ -1240,6 +1246,18 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
             if close {
                 draft.new_color = None;
             }
+        }
+
+        // ---- how far it may turn when posed
+        if !studio.is_shaping()
+            && let Some(limits) =
+                crate::posing::limits_section(ui, studio, &path, &mut draft.posing, false)
+        {
+            edits.push(Edit::SetLimits {
+                part: path.clone(),
+                limits,
+            });
+            draft.posing = Default::default();
         }
 
         // ---- the whole part

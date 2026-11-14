@@ -222,12 +222,17 @@ pub fn show(
     if response.clicked()
         && let Some(pointer) = response.interact_pointer_pos()
     {
-        if studio.mode() != Mode::Part && studio.face_tool == FaceTool::Cut {
+        if studio.mode() == Mode::Pose {
+            // Pose mode: the part under the pointer, as it stands in the
+            // pose, is selected.
+            studio.click(size, in_picture(pointer));
+            view.adding = None;
+        } else if studio.is_shaping() && studio.face_tool == FaceTool::Cut {
             // The Cut tool: cut where the ring is. What it did, or why
             // not, is in the status line.
             let _ = studio.cut_at(size, in_picture(pointer), free);
             view.adding = None;
-        } else if studio.mode() != Mode::Part {
+        } else if studio.is_shaping() {
             // Face or Edge mode: the face (or edge) under the pointer is
             // selected; with Shift, added or taken out.
             studio.click_face(size, in_picture(pointer), shift);
@@ -278,6 +283,7 @@ pub fn show(
     }
 
     let shaping = studio.mode() != Mode::Part;
+    let posing = studio.mode() == Mode::Pose;
     let shows_markers = (studio.selected().is_some() && !studio.look_only()) || shaping;
     let now = Drawn {
         builds: studio.builds(),
@@ -335,9 +341,19 @@ pub fn show(
     // What the mouse does here, in a line at the bottom, and how moves
     // snap.
     let handles = (shows_markers && studio.facts().is_some() && !shaping)
-        || (shaping && !studio.selected_faces().is_empty());
+        || (shaping && !posing && !studio.selected_faces().is_empty())
+        || (posing && !studio.grips().is_empty());
+    let why_not = studio.why_no_pose_handles();
     let hint = if view.moving {
         "Let go to make the change. Escape lets go without changing anything."
+    } else if posing && studio.selected().is_none() {
+        "Click a part to turn it in the pose. Pick the pose on the right. O goes back to parts."
+    } else if let Some(why) = why_not.as_deref().filter(|_| posing) {
+        why
+    } else if posing && studio.pose_tool == duck_mold_view::studio::PoseTool::Move {
+        "Drag an arrow to move the part in the pose: what hangs from it goes too."
+    } else if posing {
+        "Drag a ring to turn the part about its join. It stops at its limit. R: rings, G: arrows."
     } else if shaping && studio.face_tool == FaceTool::Cut {
         "Point at an edge: the ring shows where the cut goes, all the way round. Click to cut. Ctrl: not in tenths."
     } else if studio.mode() == Mode::Corner && studio.selected_faces().is_empty() {
@@ -455,9 +471,14 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
             "Corner",
             "The selected box's corners: click one and move it (C)",
         ),
+        (
+            Mode::Pose,
+            "Pose",
+            "The model in its poses: click a part and turn it about its join (O)",
+        ),
     ];
     for (at, (mode, name, tip)) in modes.into_iter().enumerate() {
-        let widths = [44.0, 44.0, 44.0, 56.0];
+        let widths = [44.0, 44.0, 44.0, 56.0, 48.0];
         let left: f32 = widths[..at].iter().sum::<f32>() + at as f32 * 4.0;
         let place = Rect::from_min_size(
             within.left_top() + egui::vec2(8.0 + left, 8.0),
@@ -478,6 +499,7 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
                 Mode::Face => studio.face_mode(),
                 Mode::Edge => studio.edge_mode(),
                 Mode::Corner => studio.corner_mode(),
+                Mode::Pose => studio.pose_mode(),
             };
         }
     }
@@ -486,6 +508,40 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
 /// The tools, down the left edge of the viewport: one is in hand.
 fn tool_strip(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
     if studio.look_only() {
+        return;
+    }
+    if studio.mode() == Mode::Pose {
+        use duck_mold_view::studio::PoseTool;
+        let tools = [
+            (
+                PoseTool::Turn,
+                "Turn",
+                "R",
+                "Rings at the join: drag one to turn the part in the pose. It stops at its limit",
+            ),
+            (
+                PoseTool::Move,
+                "Move",
+                "G",
+                "Arrows: drag one to move the part in the pose (a crouch, a jump)",
+            ),
+        ];
+        for (row, (tool, name, key, tip)) in tools.into_iter().enumerate() {
+            let place = Rect::from_min_size(
+                within.left_top() + egui::vec2(8.0, TOOLS_TOP + row as f32 * 30.0),
+                egui::vec2(76.0, 24.0),
+            );
+            ui.painter_at(within)
+                .rect_filled(place, 4.0, Color32::from_black_alpha(150));
+            let button = egui::Button::selectable(studio.pose_tool == tool, name);
+            if ui
+                .put(place, button)
+                .on_hover_text(format!("{tip} ({key})"))
+                .clicked()
+            {
+                studio.pose_tool = tool;
+            }
+        }
         return;
     }
     if studio.mode() != Mode::Part {

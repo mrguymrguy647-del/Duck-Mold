@@ -559,6 +559,31 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "reuse-library"));
     }
 
+    // Pose mode: the robot waving, its head selected with its rings,
+    // and the panel with the poses, the head's turn and its limits.
+    {
+        let recipe = copy_of("robot.toml", "pictures_pose");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.pose_mode().unwrap();
+            studio.choose_pose("wave");
+            studio.select(Some("head"));
+        }
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "pose-mode"));
+        // A fixed part: no rings, and the line under the picture says
+        // why.
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("left_arm/forearm"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "pose-fixed"));
+    }
+
     assert!(
         wrong.is_empty(),
         "{} of the screens changed:\n{}\nIf the change is meant, store the new pictures with: UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures",

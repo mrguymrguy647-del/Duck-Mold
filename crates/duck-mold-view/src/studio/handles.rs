@@ -68,19 +68,20 @@ pub enum Grip {
 }
 
 /// Red, green and blue for x, y and z, as in other 3D tools.
-const AXIS_COLORS: [[u8; 3]; 3] = [[0xE5, 0x4B, 0x5F], [0x4C, 0xB8, 0x6A], [0x4A, 0x8C, 0xF0]];
+pub(super) const AXIS_COLORS: [[u8; 3]; 3] =
+    [[0xE5, 0x4B, 0x5F], [0x4C, 0xB8, 0x6A], [0x4A, 0x8C, 0xF0]];
 /// Duck yellow: the handle under the pointer, or in hand.
-const HOT: [u8; 3] = [0xFF, 0xCC, 0x2E];
+pub(super) const HOT: [u8; 3] = [0xFF, 0xCC, 0x2E];
 const MIDDLE: [u8; 3] = [0xE8, 0xE8, 0xF0];
 /// The Inset knob: the colour of the sockets' dots.
 const INSET: [u8; 3] = [0x6F, 0xD6, 0xC8];
 
 /// How long an arrow is on the screen, in pixels, whatever the zoom.
-const LENGTH: f64 = 84.0;
+pub(super) const LENGTH: f64 = 84.0;
 /// How near the pointer must be to a handle to be on it, in pixels.
-const REACH: f64 = 9.0;
+pub(super) const REACH: f64 = 9.0;
 /// How many straight pieces a ring is drawn with.
-const RING_PIECES: usize = 48;
+pub(super) const RING_PIECES: usize = 48;
 /// The step turns snap to, in degrees.
 pub const TURN_STEP: f64 = 15.0;
 /// The step scales snap to.
@@ -230,7 +231,7 @@ pub(super) struct Grab {
 
 /// Where the line through `from` along `along` (1 long) comes nearest to
 /// the line from `eye` along `ray`, as a distance along the first.
-fn nearest_on_line(from: Vec3, along: Vec3, eye: Vec3, ray: Vec3) -> Option<f64> {
+pub(super) fn nearest_on_line(from: Vec3, along: Vec3, eye: Vec3, ray: Vec3) -> Option<f64> {
     let between = from - eye;
     let (b, c) = (along.dot(ray), ray.dot(ray));
     let (d, e) = (along.dot(between), ray.dot(between));
@@ -241,7 +242,7 @@ fn nearest_on_line(from: Vec3, along: Vec3, eye: Vec3, ray: Vec3) -> Option<f64>
 /// Where the line from `eye` along `ray` meets the flat surface through
 /// `point` that faces `facing`. `None` if it runs along it, or meets it
 /// behind the eye.
-fn on_plane(point: Vec3, facing: Vec3, eye: Vec3, ray: Vec3) -> Option<Vec3> {
+pub(super) fn on_plane(point: Vec3, facing: Vec3, eye: Vec3, ray: Vec3) -> Option<Vec3> {
     let towards = ray.dot(facing);
     if towards.abs() < 1e-6 {
         return None;
@@ -252,7 +253,7 @@ fn on_plane(point: Vec3, facing: Vec3, eye: Vec3, ray: Vec3) -> Option<Vec3> {
 
 /// The turn around `axis` that takes the direction `from` to `to`, in
 /// degrees, counted the way [`Mat3::around`] counts.
-fn turn_between(axis: Vec3, from: Vec3, to: Vec3) -> f64 {
+pub(super) fn turn_between(axis: Vec3, from: Vec3, to: Vec3) -> f64 {
     let angle = from.cross(to).dot(axis).atan2(from.dot(to)).to_degrees();
     // Which way does `around` turn? Try a quarter turn and see.
     let tried = Mat3::around(axis, 90.0) * from;
@@ -292,6 +293,14 @@ impl Studio {
 
     /// What the bottom of the viewport says about snapping.
     pub fn snap_text(&self) -> String {
+        if self.mode == Mode::Pose {
+            return match self.pose_tool {
+                super::PoseTool::Turn => {
+                    format!("Snap {}°  (Ctrl: off)", short(super::pose::POSE_STEP))
+                }
+                super::PoseTool::Move => format!("Snap {} m  (Ctrl: off)", short(self.snap_step())),
+            };
+        }
         if self.mode != Mode::Part {
             return match self.face_tool {
                 FaceTool::Pull | FaceTool::Move => {
@@ -312,7 +321,7 @@ impl Studio {
 
     /// The line from the eye through the pointer, in the picture's space:
     /// where the eye is, and the way the line runs.
-    fn pointer_ray(&self, at: (f64, f64)) -> (Vec3, Vec3) {
+    pub(super) fn pointer_ray(&self, at: (f64, f64)) -> (Vec3, Vec3) {
         let eye = self.orbit.eye();
         let through = self.orbit.from_view(viewport::ray_through(self.view, at));
         (eye, through - eye)
@@ -320,7 +329,7 @@ impl Studio {
 
     /// The middle and directions for the handles of the selected part.
     fn gizmo(&self) -> Option<Gizmo> {
-        if self.look_only {
+        if self.look_only || self.mode == Mode::Pose {
             return None;
         }
         if self.mode != Mode::Part {
@@ -780,6 +789,9 @@ impl Studio {
 
     /// Every handle that can be pressed on now.
     pub fn grips(&self) -> Vec<Grip> {
+        if self.mode == Mode::Pose {
+            return self.pose_grips();
+        }
         self.gizmo().map_or_else(Vec::new, |gizmo| {
             self.handles_of(&gizmo)
                 .into_iter()
@@ -791,6 +803,9 @@ impl Studio {
     /// A point of a handle to take hold of it by, where the picture
     /// shows it (the model's own place plus [`Studio::offset`]).
     pub fn grip_at(&self, grip: Grip) -> Option<Vec3> {
+        if self.mode == Mode::Pose {
+            return self.pose_grip_at(grip);
+        }
         let gizmo = self.gizmo()?;
         let handle = self
             .handles_of(&gizmo)
@@ -863,6 +878,9 @@ impl Studio {
         if self.view != (width, height) {
             return Vec::new();
         }
+        if self.mode == Mode::Pose {
+            return self.pose_marks();
+        }
         let Some(gizmo) = self.gizmo() else {
             return Vec::new();
         };
@@ -934,8 +952,12 @@ impl Studio {
     pub fn grab(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<Grip> {
         self.hover(size, Some(at));
         self.grab = None;
+        self.pose_grab = None;
         self.preview = None;
         self.dragging = None;
+        if self.mode == Mode::Pose {
+            return self.pose_grab_at(at);
+        }
         let gizmo = self.gizmo()?;
         let facts = self.facts()?;
         let (eye, ray) = self.pointer_ray(at);
@@ -1016,7 +1038,10 @@ impl Studio {
 
     /// The handle in hand, if one is.
     pub fn grabbed(&self) -> Option<Grip> {
-        self.grab.as_ref().map(|grab| grab.grip)
+        self.grab
+            .as_ref()
+            .map(|grab| grab.grip)
+            .or_else(|| self.pose_grabbed())
     }
 
     /// Why the drag in hand can't be made as it stands, if it can't:
@@ -1028,6 +1053,9 @@ impl Studio {
     /// What the drag has done so far, in a few words, to show by the
     /// pointer: `x 1.2 m`, `45°`.
     pub fn drag_label(&self) -> Option<&str> {
+        if self.pose_grab_held() {
+            return self.pose_drag_label();
+        }
         self.grab
             .as_ref()
             .map(|grab| grab.label.as_str())
@@ -1039,6 +1067,10 @@ impl Studio {
     /// `free`, nothing snaps.
     pub fn drag(&mut self, size: (usize, usize), at: (f64, f64), free: bool) {
         self.hover(size, Some(at));
+        if self.pose_grab_held() {
+            self.pose_drag_to(at, free);
+            return;
+        }
         let Some(grab) = &self.grab else {
             return;
         };
@@ -1731,6 +1763,9 @@ impl Studio {
     /// to undo. `None` if nothing was in hand, or the pointer never
     /// moved it.
     pub fn release(&mut self) -> Option<Result<String, String>> {
+        if self.pose_grab_held() {
+            return self.pose_let_go();
+        }
         let grab = self.grab.take()?;
         let before = self.preview.take();
         self.dragging = None;
@@ -1822,6 +1857,7 @@ impl Studio {
     /// Lets go of the handle without changing anything.
     pub fn cancel_drag(&mut self) {
         self.grab = None;
+        self.pose_grab = None;
         self.preview = None;
         self.dragging = None;
     }

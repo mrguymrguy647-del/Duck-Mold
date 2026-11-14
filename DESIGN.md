@@ -3787,6 +3787,24 @@ It works on every model, not just boxes.
 - A pose that breaks a limit, or that leaves a part floating, shows in
   Problems, as in `inspect --pose`.
 
+*As built (step 6):* as above, with these details. The rings turn
+exactly one of the pose's three numbers each: a turn is around x, then
+y, then z, so the z ring turns around the part's z as its parent holds
+it, the y ring around y once z has turned, and the x ring around x once
+y and z have; the sign is found by trying a degree, so a mirrored part
+turns the way the pointer goes too. A press on a ring is taken at the
+ring's nearest point that is clear of the other rings. A drag in `rest`
+doesn't ask for a name: it makes the pose `pose` (`pose_2`...) and says
+so; Rename is on the right. Mirror on a pose named for one side makes
+the other side's (`step_left` gives `step_right`); any other pose is
+mirrored in place. Remove of a pose that keys use asks whether to take
+the keys too (`--with-keys`). The panel's Limits fold in Part mode
+(their words stay under the fold) and are open in Pose mode. Delete in
+Pose mode doesn't remove the part: it says to use Back to rest, or go
+back to Part mode. A pose that leaves most of the model away from what
+stands on the ground (a foot pushed into it) is one line in Problems,
+not a line for every part.
+
 **The timeline (step 7)**, along the bottom in Pose mode:
 
 - **Pick an animation**, or make one (New).

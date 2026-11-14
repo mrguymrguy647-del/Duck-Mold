@@ -450,7 +450,16 @@ impl StudioApp {
             let key = |key: egui::Key| {
                 ui.input(|input| input.modifiers.is_none() && input.key_pressed(key))
             };
-            if studio.mode() == Mode::Face {
+            if studio.mode() == Mode::Pose {
+                for (pressed, tool) in [
+                    (egui::Key::R, duck_mold_view::studio::PoseTool::Turn),
+                    (egui::Key::G, duck_mold_view::studio::PoseTool::Move),
+                ] {
+                    if key(pressed) {
+                        studio.pose_tool = tool;
+                    }
+                }
+            } else if studio.mode() == Mode::Face {
                 for (pressed, tool) in [
                     (egui::Key::T, FaceTool::Pull),
                     (egui::Key::G, FaceTool::Move),
@@ -498,6 +507,9 @@ impl StudioApp {
             }
             if key(egui::Key::C) {
                 asked = Some(Action::CornerMode);
+            }
+            if key(egui::Key::O) {
+                asked = Some(Action::PoseMode);
             }
             if let Some(action) = actions::keys(ui) {
                 asked = Some(action);
@@ -587,6 +599,11 @@ impl StudioApp {
                         self.draft.rename();
                     }
                 }
+                Action::Remove if studio.mode() == Mode::Pose => {
+                    studio.say_why(
+                        "In Pose mode a part isn't removed: \"Back to rest\" takes it out of the pose. To remove the part, go back to parts (O)",
+                    );
+                }
                 Action::Remove if studio.mode() != Mode::Part => {
                     studio.say_why(
                         "Faces can't be removed: a shape must stay closed. To take a change back, Undo, or remove it from the Changes list",
@@ -608,6 +625,16 @@ impl StudioApp {
                 }
                 Action::CornerMode => {
                     let _ = studio.toggle_corner_mode();
+                }
+                Action::PoseMode => {
+                    // What it did, or why not, is in the status line.
+                    let _ = studio.toggle_pose_mode();
+                }
+                Action::PoseTool(tool) => studio.pose_tool = tool,
+                Action::PoseBackToRest => {
+                    if let Some(part) = studio.selected().map(str::to_owned) {
+                        let _ = studio.pose_back_to_rest(&part);
+                    }
                 }
                 Action::MakeDefinition => {
                     if let Some(part) = studio.selected().map(str::to_owned) {
@@ -1134,6 +1161,12 @@ fn outliner(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let rows = studio.outline();
+            // In Pose mode, the parts the pose turns are marked.
+            let posed = if studio.mode() == Mode::Pose {
+                studio.posed_parts()
+            } else {
+                Vec::new()
+            };
             if rows.is_empty() {
                 ui.label(RichText::new("No parts to show.").weak());
             }
@@ -1159,8 +1192,11 @@ fn outliner(
                             eye = Some((row.path.clone(), !row.hidden));
                         }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            let turned = posed.contains(&row.path);
                             let words = if row.hidden {
                                 RichText::new(&row.name).weak().strikethrough()
+                            } else if turned {
+                                RichText::new(format!("{} *", row.name)).color(theme::DUCK_YELLOW)
                             } else {
                                 RichText::new(&row.name)
                             };

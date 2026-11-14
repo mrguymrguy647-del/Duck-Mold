@@ -235,7 +235,7 @@ impl Studio {
     /// mostly runs along. In tenths of the way from the middle to the
     /// side, unless `free`.
     pub fn cut_aim(&self, at: (f64, f64), free: bool) -> Option<CutAim> {
-        if self.face_tool != FaceTool::Cut || self.mode == Mode::Part {
+        if self.face_tool != FaceTool::Cut || !self.is_shaping() {
             return None;
         }
         let (part, shaped) = self.shaped_selected()?;
