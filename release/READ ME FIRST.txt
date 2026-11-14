@@ -57,6 +57,26 @@ A FIRST LOOK
   You can also drop a recipe file on DuckMoldStudio.exe to open it.
 
 
+MODELS THAT MOVE  (new in 0.5)
+  A recipe can now say how a model moves: how far each part may turn,
+  its poses, and animations made of poses. The robot example stands
+  idle, walks and waves. In this version that is written in the recipe
+  or done from the command line; the Studio shows such a model standing
+  still. Posing with the mouse and a timeline come in the next version.
+
+  To see the robot's walk as a strip of pictures, open a Command Prompt
+  in this folder and type:
+
+    duck-mold render examples\robot.toml --animation walk --view right
+
+  It writes examples\robot.walk.strip.png. To check every frame of it:
+
+    duck-mold inspect examples\robot.toml --animation walk
+
+  "Export" writes the animations into the .glb, and a Duck Forge game
+  plays them by name: robot.play("walk").
+
+
 YOUR MODELS ARE TEXT FILES
   A model is a recipe: a .toml file that lists its parts and where they
   join. The Studio changes that file every time you change something,
