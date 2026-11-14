@@ -485,4 +485,11 @@ About these:
 
 ## The checks on GitHub
 
-*(Filled in when the runs finish.)*
+| | |
+|---|---|
+| Duck Mold, 5b | Green on Windows and Linux for steps 6, 7 and 8, the pin, and this report's commit. That last commit also holds step 9: step 9's own run was stopped when the report's commit arrived, as the workflow does. |
+| Duck Forge, [Duck-Forge#13](https://github.com/mrguymrguy647-del/Duck-Forge/pull/13) | Green for its commit: the engine's tests on Windows, five times in a row (so the stored pictures of all eight animations are the same on Windows as on Linux, pixel for pixel), and the Studio, zip and installer. |
+| The Windows zip | Built: `DuckMold-0.5.0-windows.zip` (8.7 MB), under "Artifacts" at the bottom of [this Release run](https://github.com/mrguymrguy647-del/Duck-Mold/actions/runs/43639534422). It is kept there for 90 days. It isn't a published release: say when you want one. |
+
+Duck Forge's checks on GitHub run on Windows. Its Linux numbers above
+are from the machine this was built on.
