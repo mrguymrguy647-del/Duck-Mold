@@ -3872,6 +3872,16 @@ the Studio work starts, when the names and the Duck Forge calls are
 still cheap to change. If you would rather have it in one go, say so
 and I will carry straight on from step 5 to step 6.
 
+*As built:* approved as two halves. 5a (steps 1 to 5) is built:
+`PHASE5A_REPORT.md` has the frame strips, what works, the known limits
+and what changed from this design. The version is 0.5.0. "What Duck
+Mold draws is what Duck Forge plays" (in Testing, below) is checked on
+the model, not on pictures: at every frame of every animation, the
+robot as Duck Forge's player has it stands in the same box, with its
+sockets in the same places, as Duck Mold poses it; and the shared
+reader puts every corner of a test model where Duck Mold does. 5b
+(steps 6 to 9) is to come.
+
 ### Testing
 
 - **The tree**: every example, put back together at rest by the
