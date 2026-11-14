@@ -156,7 +156,7 @@ that every edit command is there.
 | | What | State |
 |---|---|---|
 | [Duck-Forge#11](https://github.com/mrguymrguy647-del/Duck-Forge/pull/11) | Step 1: the reader, version 4, for files laid out as a tree. | Open. |
-| [Duck-Forge#12](https://github.com/mrguymrguy647-del/Duck-Forge/pull/12) | Step 5: the reader, version 5, `AnimatedModel`, the `robot_walk` example. It sits on top of the first: merge the first, then this one. | Open. |
+| [Duck-Forge#12](https://github.com/mrguymrguy647-del/Duck-Forge/pull/12) | Step 5: the reader, version 5, `AnimatedModel`, the `robot_walk` example. It sits on top of the first: merge the first, then this one (GitHub then points it at `main` by itself). | Open. |
 
 Duck Mold is pinned to the Duck Forge commit of the second one, and one
 of Duck Mold's tests plays the robot's animations through it.
@@ -283,7 +283,8 @@ pull requests, and move Duck Mold's pin to Duck Forge's `main`.
 ## To try it
 
 The Windows zip is built by the Release workflow for this branch (the
-link is at the end of this report). Unzip it and:
+link is at the end of this report: you need to be signed in to GitHub
+to download it). Unzip it and:
 
 - Double-click `DuckMoldStudio.exe` and open the robot: it stands
   still (see the first known limit).
@@ -306,14 +307,12 @@ cargo run --example robot_walk
 
 ## The checks on GitHub
 
-As this report was first written:
-
 | | |
 |---|---|
-| Duck Mold, steps 1 to 4 | Green on Windows and Linux, each step's own run. |
-| Duck Mold, step 5 and version 0.5.0 | Running. |
-| Duck Forge, the first pull request | Green (Duck Forge's checks run on Windows; its Linux numbers above are from the build machine). |
-| Duck Forge, the second pull request | Running. |
-| The Windows zip | Being built by [this Release run](https://github.com/mrguymrguy647-del/Duck-Mold/actions/runs/43577483559): when it has finished, the zip is under "Artifacts" at the bottom of that page. |
+| Duck Mold, every step and version 0.5.0 | Green on Windows and Linux. Steps 1 to 4 each have a run of their own; step 5 and the version were checked by the run for the commit after them, which holds both (their own runs were stopped when the next commit arrived, as the workflow does). |
+| Duck Forge, the first pull request | Green. |
+| Duck Forge, the second pull request | Green, after one fix. Its first run failed in one place: Duck Forge's Studio keeps a list of the examples that come with Duck Forge, a test checks that list against the examples folder, and the new `robot_walk` wasn't on it. I had run the engine's tests here but not the Studio's. It is a one-line fix, in a second commit on the pull request. The engine's tests, five times in a row, passed both times, so the fourteen stored pictures are the same on Windows as on Linux, pixel for pixel. |
+| The Windows zip | Built: `DuckMold-0.5.0-windows.zip` (8.5 MB), under "Artifacts" at the bottom of [this Release run](https://github.com/mrguymrguy647-del/Duck-Mold/actions/runs/43577483559). It is kept there for 90 days. It isn't a published release: say so when you want one. |
 
-This section is brought up to date when they finish.
+Duck Forge's checks on GitHub run on Windows. Its Linux numbers above
+are from the machine this was built on.
