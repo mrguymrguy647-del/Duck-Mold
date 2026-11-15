@@ -4125,9 +4125,15 @@ viewport is Duck Forge's CPU renderer. Duck Forge's reader stays the
 same code in both repositories, with a raised version, shared test
 files and the handoff note updated.
 
-Nothing in this section is built yet. It ends with the decisions I
-made and, for each, the other way, so you can change any before I
-start.
+**Approved** with all twelve decisions as recommended, and two
+additions:
+
+1. **New models start with hit shapes.** A recipe made with `duck-mold
+   new` (and the Studio's New model) has `colliders = "parts"` from the
+   start. Existing files and the examples stay as planned below.
+2. **A loop's doubled event is a warning.** `inspect --animation` warns
+   when a looping animation has the same event on its first and last
+   key, since it would be heard twice where the loop joins.
 
 ### In one picture
 
