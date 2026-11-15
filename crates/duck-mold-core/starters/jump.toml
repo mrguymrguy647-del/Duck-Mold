@@ -23,8 +23,8 @@ right_arm = [160, 0, 0]
 [animations.jump]
 keys = [
   { at = 0, pose = "rest" },
-  { at = 0.3, pose = "jump_crouch" },
+  { at = 0.3, pose = "jump_crouch", event = "takeoff" },
   { at = 0.65, pose = "jump_up" },
-  { at = 1, pose = "jump_crouch" },
+  { at = 1, pose = "jump_crouch", event = "land" },
   { at = 1.3, pose = "rest" },
 ]

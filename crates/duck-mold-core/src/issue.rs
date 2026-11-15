@@ -96,6 +96,11 @@ pub enum Code {
     /// A hit shape with numbers of its own that leaves most of its part
     /// outside it, or is far bigger than it.
     HitShape,
+    /// An event's name that the key doesn't have.
+    UnknownEvent,
+    /// A looping animation with the same event on its first and last
+    /// key: it would be heard twice where the loop joins.
+    EventTwice,
 }
 
 impl Code {
@@ -133,6 +138,8 @@ impl Code {
             Code::UnknownAnimation => "unknown_animation",
             Code::LoopJumps => "loop_jumps",
             Code::HitShape => "hit_shape",
+            Code::UnknownEvent => "unknown_event",
+            Code::EventTwice => "event_twice",
         }
     }
 }

@@ -2610,7 +2610,7 @@ fn o_poses_the_model_the_rings_turn_a_part_and_the_panel_lists_the_poses() {
     screen.get_by_label_contains("Turned \"head\"");
 
     // Back to rest, from the panel.
-    screen.get_by_label("Back to rest").click();
+    screen.get_by_label("Back to rest").click_accesskit();
     screen.run_steps(2);
     assert!(
         !std::fs::read_to_string(&recipe)
@@ -2972,4 +2972,72 @@ fn typing_a_hit_shapes_number_makes_it_the_parts_own_and_fit_again_forgets_it() 
     screen.run_steps(3);
     assert!(text().contains("collider = \"sphere\""), "{}", text());
     screen.get_by_label("sphere r 0.32");
+}
+
+#[test]
+fn a_keys_menu_adds_and_removes_its_events() {
+    use egui::Key;
+    use egui::accesskit::Role;
+    let recipe = copy_of("robot.toml", "screens_events");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("walk"));
+    screen.run_steps(3);
+    // The walk's keys know their events.
+    let keys = studio(&screen).keys();
+    assert_eq!(keys[0].events, ["footstep"]);
+    assert!(keys[1].events.is_empty());
+    assert_eq!(keys[2].events, ["footstep"]);
+
+    // Right-click the second key, type a name, Add event.
+    let second = screen.state().timeline().key_on_screen(0.2).unwrap();
+    right_click_at(&mut screen, second);
+    screen.get_by_label("Events: heard by a game when this key is passed");
+    screen
+        .get_by_role_and_label(Role::TextInput, "New event")
+        .focus();
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "New event")
+        .type_text("breath");
+    screen.run_steps(2);
+    screen.get_by_label("Add event").click();
+    screen.run_steps(3);
+    assert_eq!(
+        new_lines(&recipe),
+        ["  { at = 0.2, pose = \"rest\", event = \"breath\" },"]
+    );
+    assert_eq!(studio(&screen).keys()[1].events, ["breath"]);
+    assert!(
+        studio(&screen)
+            .status()
+            .contains("has the event \"breath\""),
+        "{}",
+        studio(&screen).status()
+    );
+    // Its menu now offers to remove it; doing so puts the file back.
+    right_click_at(&mut screen, second);
+    screen.get_by_label("Remove \"breath\"").click();
+    screen.run_steps(3);
+    assert!(new_lines(&recipe).is_empty());
+    // A name with a space is refused, and said.
+    right_click_at(&mut screen, second);
+    screen
+        .get_by_role_and_label(Role::TextInput, "New event")
+        .focus();
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "New event")
+        .type_text("deep breath");
+    screen.run_steps(2);
+    screen.get_by_label("Add event").click();
+    screen.run_steps(3);
+    assert!(new_lines(&recipe).is_empty());
+    screen.get_by_label_contains("can't be a name");
 }

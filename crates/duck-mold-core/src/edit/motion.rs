@@ -11,7 +11,7 @@ use crate::issue::Code;
 use crate::math::{Mat3, Vec3, vec3};
 use crate::model::{Model, Part};
 use crate::motion::directions;
-use crate::recipe::{ANIMATION_FIELDS, LONGEST_ANIMATION, Limits, REST, Turns};
+use crate::recipe::{ANIMATION_FIELDS, KEY_FIELDS, LONGEST_ANIMATION, Limits, REST, Turns};
 use crate::source::{Node, Syntax, Value};
 
 /// What `set-limits` does to a part's `limits`.
@@ -795,12 +795,164 @@ fn keys_of(doc: &Doc, animation: &str) -> Result<Vec<(f64, String)>, Stop> {
         .collect()
 }
 
-/// A key as it is written: `{ at = 0.4, pose = "wave" }`.
-fn key_val(at: f64, pose: &str) -> Val {
-    Val::Table(vec![
+/// A key as it is written: `{ at = 0.4, pose = "wave" }`, and its
+/// events if it has any: `event = "footstep"`.
+fn key_val(at: f64, pose: &str, events: &[String]) -> Val {
+    let mut fields = vec![
         ("at".to_owned(), Val::Num(at)),
         ("pose".to_owned(), Val::Str(pose.to_owned())),
-    ])
+    ];
+    if let Some(events) = events_val(events) {
+        fields.push(("event".to_owned(), events));
+    }
+    Val::Table(fields)
+}
+
+/// Events as a key writes them: one name, or a list of them. `None` for
+/// none.
+fn events_val(events: &[String]) -> Option<Val> {
+    match events {
+        [] => None,
+        [one] => Some(Val::Str(one.clone())),
+        many => Some(Val::List(
+            many.iter().map(|name| Val::Str(name.clone())).collect(),
+        )),
+    }
+}
+
+/// The events of each of an animation's keys, as they are written.
+fn events_of(doc: &Doc, animation: &str) -> Vec<Vec<String>> {
+    let Some(node) = doc.node(&keys_at(animation)) else {
+        return Vec::new();
+    };
+    let Value::Array(items) = &node.value else {
+        return Vec::new();
+    };
+    items
+        .iter()
+        .map(|item| {
+            let Value::Table(entries) = &item.value else {
+                return Vec::new();
+            };
+            match entries
+                .iter()
+                .find(|entry| entry.key == "event")
+                .map(|entry| &entry.node.value)
+            {
+                Some(Value::Str(one)) => vec![one.clone()],
+                Some(Value::Array(many)) => many
+                    .iter()
+                    .filter_map(|item| match &item.value {
+                        Value::Str(name) => Some(name.clone()),
+                        _ => None,
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            }
+        })
+        .collect()
+}
+
+/// `set-event`: a name on a key, for a game to hear when the animation
+/// passes it.
+pub(super) fn set_event(
+    doc: &mut Doc,
+    animation: &str,
+    number: usize,
+    name: &str,
+) -> Result<Outcome, Stop> {
+    require_animation(doc, animation)?;
+    super::check_name(name)?;
+    let keys = keys_of(doc, animation)?;
+    let place = key_number(animation, &keys, number)?;
+    let mut events = events_of(doc, animation)
+        .get(place)
+        .cloned()
+        .unwrap_or_default();
+    if events.iter().any(|known| known == name) {
+        return Err(problem(
+            Code::Conflict,
+            format!(
+                "key {number} of \"{animation}\" has the event \"{name}\" already: it is heard once each time the animation passes the key"
+            ),
+        ));
+    }
+    events.push(name.to_owned());
+    let value = events_val(&events).expect("one at least");
+    doc.set_field(&key_at(animation, place), "event", &value, &KEY_FIELDS)
+        .map_err(cant)?;
+    Ok(Outcome {
+        summary: format!(
+            "key {number} of \"{animation}\", at {} (the pose \"{}\"), has the event \"{name}\"{}",
+            seconds(keys[place].0),
+            keys[place].1,
+            if events.len() > 1 {
+                format!(" now too: {}", events.join(", "))
+            } else {
+                String::new()
+            }
+        ),
+        touched: None,
+    })
+}
+
+/// `remove-event`: takes one event off a key, or every one.
+pub(super) fn remove_event(
+    doc: &mut Doc,
+    animation: &str,
+    number: usize,
+    name: Option<&str>,
+) -> Result<Outcome, Stop> {
+    require_animation(doc, animation)?;
+    let keys = keys_of(doc, animation)?;
+    let place = key_number(animation, &keys, number)?;
+    let mut events = events_of(doc, animation)
+        .get(place)
+        .cloned()
+        .unwrap_or_default();
+    if events.is_empty() {
+        return Err(problem(
+            Code::MissingField,
+            format!("key {number} of \"{animation}\" has no events to take away"),
+        ));
+    }
+    let gone = match name {
+        Some(name) => {
+            let Some(at) = events.iter().position(|known| known == name) else {
+                return Err(problem(
+                    Code::UnknownEvent,
+                    format!(
+                        "key {number} of \"{animation}\" has no event \"{name}\": it has {}",
+                        events
+                            .iter()
+                            .map(|known| format!("\"{known}\""))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ),
+                )
+                .got(name)
+                .one_of(name, events.iter().map(String::as_str)));
+            };
+            vec![events.remove(at)]
+        }
+        None => std::mem::take(&mut events),
+    };
+    let table = key_at(animation, place);
+    match events_val(&events) {
+        Some(value) => doc.set_field(&table, "event", &value, &KEY_FIELDS),
+        None => doc.remove_field(&table, "event"),
+    }
+    .map_err(cant)?;
+    Ok(Outcome {
+        summary: format!(
+            "took {} off key {number} of \"{animation}\"",
+            gone.iter()
+                .map(|name| format!("the event \"{name}\""))
+                .collect::<Vec<_>>()
+                .join(" and ")
+        ),
+        touched: None,
+    })
 }
 
 /// A time as a sentence says it: `0.4 s`.
@@ -1060,7 +1212,7 @@ pub(super) fn add_key(
     let place = keys.iter().filter(|(time, _)| *time < at).count();
     let list = keys_at(animation);
     let table = [key(ANIMATIONS), key(animation)];
-    let value = key_val(at, pose);
+    let value = key_val(at, pose, &[]);
     if doc.node(&list).is_none() {
         doc.set_field(&table, "keys", &Val::Lines(vec![value]), &ANIMATION_FIELDS)
             .map_err(cant)?;
@@ -1130,8 +1282,12 @@ pub(super) fn move_key(
         doc.set_value(&with(&key_at(animation, place), key("at")), &Val::Num(at))
             .map_err(cant)?;
     } else {
+        let events = events_of(doc, animation)
+            .get(place)
+            .cloned()
+            .unwrap_or_default();
         doc.remove_item(&list, place).map_err(cant)?;
-        doc.insert_item(&list, new_place, &key_val(at, &pose))
+        doc.insert_item(&list, new_place, &key_val(at, &pose, &events))
             .map_err(cant)?;
     }
     Ok(Outcome {
@@ -1457,7 +1613,12 @@ pub(super) fn add_animation_from(
         "keys".to_owned(),
         Val::Lines(
             keys.iter()
-                .map(|(at, pose)| key_val(*at, &renamed(pose)))
+                .zip(
+                    events_of(source, &taken)
+                        .into_iter()
+                        .chain(std::iter::repeat(Vec::new())),
+                )
+                .map(|((at, pose), events)| key_val(*at, &renamed(pose), &events))
                 .collect(),
         ),
     ));
@@ -1572,7 +1733,15 @@ pub fn animation_recipe(
             body.push_str(&format!("{field} = {on}\n"));
         }
     }
-    let keys = Val::Lines(keys.iter().map(|(at, pose)| key_val(*at, pose)).collect());
+    let events = events_of(&doc, animation);
+    let keys = Val::Lines(
+        keys.iter()
+            .enumerate()
+            .map(|(at, (time, pose))| {
+                key_val(*time, pose, events.get(at).map_or(&[][..], Vec::as_slice))
+            })
+            .collect(),
+    );
     body.push_str(&format!("keys = {}\n", keys.write(Syntax::Toml)));
     if !parts.is_empty() {
         out.push_str(&format!("# It moves: {}.\n", parts.join(", ")));

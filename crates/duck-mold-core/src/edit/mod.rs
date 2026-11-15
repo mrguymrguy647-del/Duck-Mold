@@ -582,13 +582,32 @@ pub enum Edit {
         /// The key, counted from 1.
         key: usize,
     },
+    /// Puts an event on a key: a name a game hears when the animation
+    /// passes it.
+    SetEvent {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// The event's name: `footstep`.
+        name: String,
+    },
+    /// Takes an event off a key, or every one it has.
+    RemoveEvent {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// The event; `None` for every one on the key.
+        name: Option<String>,
+    },
 }
 
 impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 42] = [
+    pub const COMMANDS: [&'static str; 44] = [
         "add",
         "remove",
         "rename",
@@ -631,6 +650,8 @@ impl Edit {
         "remove-key",
         "set-colliders",
         "set-collider",
+        "set-event",
+        "remove-event",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -678,6 +699,8 @@ impl Edit {
             Edit::MoveKey { .. } => "move-key",
             Edit::SetKey { .. } => "set-key",
             Edit::RemoveKey { .. } => "remove-key",
+            Edit::SetEvent { .. } => "set-event",
+            Edit::RemoveEvent { .. } => "remove-event",
         }
     }
 }
@@ -1356,6 +1379,16 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
             pose,
         } => motion::set_key(doc, animation, *key, pose),
         Edit::RemoveKey { animation, key } => motion::remove_key(doc, animation, *key),
+        Edit::SetEvent {
+            animation,
+            key,
+            name,
+        } => motion::set_event(doc, animation, *key, name),
+        Edit::RemoveEvent {
+            animation,
+            key,
+            name,
+        } => motion::remove_event(doc, animation, *key, name.as_deref()),
         Edit::MirrorPose { pose, as_name } => {
             motion::mirror_pose(doc, pose, as_name.as_deref(), model)
         }
@@ -3578,6 +3611,8 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::MoveKey { .. }
         | Edit::SetKey { .. }
         | Edit::RemoveKey { .. }
+        | Edit::SetEvent { .. }
+        | Edit::RemoveEvent { .. }
         | Edit::SetColliders { .. }
         | Edit::TidySockets => "",
     }

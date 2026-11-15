@@ -278,11 +278,19 @@ each with its pose's name.
 - Drag a key to change its time (it snaps to 0.05 s and can't pass its
   neighbours; Ctrl: free). Right-click a key to remove it or give it
   another pose. **+ Key** adds the pose chosen at the time shown.
+- **Events** are names on keys that a game hears when the animation
+  passes them: the robot's walk has a `footstep` on each step. They
+  show as small cyan flags under their keys. Right-click a key, type a
+  name and **Add event**; each event it has is in that menu with
+  **Remove**. In the recipe: `{ at = 0.4, pose = "step_right", event =
+  "footstep" }`; on the command line: `set-event` and `remove-event`;
+  `inspect --animation walk` says when each is heard.
 - **Play** (Space) plays it; **Loop** and **Smooth** are the
   animation's own settings; **Ghosts** draws the poses of the keys
   before (blue) and after (orange) faintly.
 - Every change is one edit: `move-key`, `set-key`, `remove-key`,
-  `add-key`, `set-animation`, `add-animation`. Moving through time,
+  `add-key`, `set-event`, `remove-event`, `set-animation`,
+  `add-animation`. Moving through time,
   playing and ghosts change nothing in the file.
 
 In Part mode, a model with animations has a **Play** button at the top
@@ -290,6 +298,8 @@ right of the view, with the animation to play: the model moves, and
 comes back to rest when it stops.
 
 ![The timeline: the robot's wave, half way between two keys, with the ghosts of both](docs/studio-timeline.png)
+
+![The timeline with the walk's footstep flags, and a key's menu with its event](crates/duck-mold-studio/tests/screens/timeline-event-menu.png)
 
 **The animation library.** Under the parts list, switch from
 **Library** to **Animations**. It lists the six **starters** that come

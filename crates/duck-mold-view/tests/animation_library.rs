@@ -64,7 +64,9 @@ fn adding_a_starter_copies_it_in_under_a_free_name_and_undo_takes_it_out() {
         said,
         "Added the animation \"jump_2\", a copy of \"jump\" from the starters, with 5 keys and the pose \"jump_crouch_2\" (names taken by other poses here, so they came in as: \"jump_crouch\" as \"jump_crouch_2\"); it uses the pose \"jump_up\" already here, which says the same"
     );
-    assert!(file(&recipe).contains("  { at = 0.3, pose = \"jump_crouch_2\" },"));
+    assert!(
+        file(&recipe).contains("  { at = 0.3, pose = \"jump_crouch_2\", event = \"takeoff\" },")
+    );
     // It is the timeline's animation now.
     assert_eq!(studio.animation(), Some("jump_2"));
     assert_eq!(
@@ -187,7 +189,7 @@ fn a_door_takes_open_and_leaves_the_two_legged_ones() {
     assert!(studio.missing_parts(&open).is_empty());
     studio.add_from_library(&open).unwrap();
     assert!(file(&recipe).ends_with(
-        "[poses.door_open]\ndoor = [0, -100, 0]\n\n[animations.open]\nkeys = [\n  { at = 0, pose = \"rest\" },\n  { at = 1, pose = \"door_open\" },\n]\n"
+        "[poses.door_open]\ndoor = [0, -100, 0]\n\n[animations.open]\nkeys = [\n  { at = 0, pose = \"rest\" },\n  { at = 1, pose = \"door_open\", event = \"opened\" },\n]\n"
     ));
     // Played, the door turns.
     studio.play();

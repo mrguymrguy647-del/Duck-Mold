@@ -514,6 +514,8 @@ Warnings (the model is still built; exit code 0):
 | `limit_broken` | A pose turns a part past its `limits`, or moves a part that is `"fixed"`. The model still builds. |
 | `loop_jumps` | An animation loops and doesn't end on the pose it starts with. The model still builds. |
 | `hit_shape` | A part's hit shape with numbers of its own leaves most of the part outside it, or is more than 8 times as big. |
+| `unknown_event` | `remove-event` names an event the key doesn't have. |
+| `event_twice` | A looping animation has the same event on its first and last key: where the loop joins they are the same moment, so a game would hear it twice. Keep it on one of them. |
 | `unknown_pose` | A key, or a command, names a pose the recipe doesn't have. `rest` is always one. |
 | `unknown_animation` | A command names an animation the recipe doesn't have. |
 | `hidden` | A part is entirely inside another. |
@@ -630,6 +632,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> move-key <animation> <number> --at <seconds>` | Gives a key another time. Keys are numbered from 1, as `inspect --animation` prints them. Key 1 stays at 0. |
 | `duck-mold edit <recipe> set-key <animation> <number> --pose <pose>` | Gives a key another pose. |
 | `duck-mold edit <recipe> remove-key <animation> <number>` | Removes a key. If it is the first, the keys after it move earlier so the animation still starts at 0. |
+| `duck-mold edit <recipe> set-event <animation> <number> <name>` | Puts an event on a key: a name a game hears each time the animation passes that key (`footstep`). A key keeps the events it had; one already there is refused. |
+| `duck-mold edit <recipe> remove-event <animation> <number> [<name>]` | Takes an event off a key; without a name, every event on it. |
 | `duck-mold edit <recipe> set-animation <animation> --loop true\|false --smooth true\|false --length <seconds>` | Any of the three. `--length` scales every key's time: the whole animation gets faster or slower. |
 | `duck-mold edit <recipe> rename-animation <animation> <new name>` | Renames an animation where it stands. |
 | `duck-mold edit <recipe> remove-animation <animation>` | Removes an animation. Its poses stay. |
@@ -703,7 +707,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   Remove are `add-pose`, `add-pose --from`, `mirror-pose`,
   `rename-pose` and `remove-pose`. The Limits in the panel are
   `set-limits`. Its timeline's changes are `move-key`, `set-key`,
-  `remove-key`, `add-key`, `set-animation` and `add-animation`; a turn
+  `remove-key`, `add-key`, `set-event`, `remove-event` (a key's menu:
+  Add event, and Remove for each), `set-animation` and `add-animation`; a turn
   between two keys is `add-pose`, a `set-pose` for every part the
   animation moves, and `add-key`, together. The library's Animations
   list: Add is `add-animation --from` (or `--starter`) with
@@ -925,6 +930,48 @@ duck-mold render robot.toml --animation walk --view right
 Renaming a pose renames it in every key that uses it. A pose that keys
 use can't be removed from under them: change the keys, or
 `remove-pose <pose> --with-keys`.
+
+**Events: moments a game hears.** A key can carry an **event**, a name
+that marks the moment it is reached: a footstep, a jump leaving the
+ground, a door fully open. A game asks for the events passed since the
+last frame and plays a sound or makes a puff then. Events don't change
+the motion.
+
+```toml
+keys = [
+  { at = 0, pose = "step_left", event = "footstep" },
+  { at = 0.2, pose = "rest" },
+  { at = 0.4, pose = "step_right", event = "footstep" },
+  { at = 0.6, pose = "rest" },
+  { at = 0.8, pose = "step_left" },   # no footstep here: see below
+]
+```
+
+- `event` is one name, or a list: `event = ["footstep", "dust"]`.
+  Names are letters, digits, `_` and `-`. The same name twice on one
+  key is an error.
+- **On a loop, the last key and the first are the same moment.** An
+  event on both is heard twice where the loop joins: the warning
+  `event_twice`. Put it on one of them (the first, as above).
+- `set-event walk 3 footstep` and `remove-event walk 3 [footstep]`,
+  with keys numbered from 1 as `inspect --animation` prints them.
+  Moving a key keeps its events; copying or saving an animation copies
+  them.
+- `inspect --animation walk` shows each key's events and a line saying
+  when each is heard:
+
+```text
+  keys         1  0 s    step_left   event: footstep
+               2  0.2 s  rest
+               3  0.4 s  step_right   event: footstep
+               ...
+  events       footstep at 0 s (key 1) and 0.4 s (key 3): twice a round
+```
+
+  With `--json`: each key has `events` (left out when it has none), and
+  the report has `events`: each `name`, `at` and `key`, in order.
+- The starters have them: `walk` a `footstep` on each step, `jump`
+  `takeoff` and `land`, `open` `opened` at its end.
 
 ### Sharing animations
 

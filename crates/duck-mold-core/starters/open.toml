@@ -11,5 +11,5 @@ door = [0, -100, 0]
 [animations.open]
 keys = [
   { at = 0, pose = "rest" },
-  { at = 1, pose = "door_open" },
+  { at = 1, pose = "door_open", event = "opened" },
 ]

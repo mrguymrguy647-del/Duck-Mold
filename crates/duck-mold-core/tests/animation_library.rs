@@ -189,7 +189,7 @@ fn a_saved_animation_comes_in_with_its_poses_and_reuses_those_that_say_the_same(
     let added = &applied.text[robot_text().len()..];
     assert_eq!(
         added,
-        "\n[animations.stroll]\nloop = true\nkeys = [\n  { at = 0, pose = \"step_left\" },\n  { at = 0.2, pose = \"rest\" },\n  { at = 0.4, pose = \"step_right\" },\n  { at = 0.6, pose = \"rest\" },\n  { at = 0.8, pose = \"step_left\" },\n]\n"
+        "\n[animations.stroll]\nloop = true\nkeys = [\n  { at = 0, pose = \"step_left\", event = \"footstep\" },\n  { at = 0.2, pose = \"rest\" },\n  { at = 0.4, pose = \"step_right\", event = \"footstep\" },\n  { at = 0.6, pose = \"rest\" },\n  { at = 0.8, pose = \"step_left\" },\n]\n"
     );
     let model = applied.model.unwrap();
     let stroll = model.animation("stroll").unwrap();
@@ -239,7 +239,7 @@ fn a_saved_animation_comes_in_with_its_poses_and_reuses_those_that_say_the_same(
     assert!(
         applied
             .text
-            .contains("  { at = 0, pose = \"step_left_2\" },\n")
+            .contains("  { at = 0, pose = \"step_left_2\", event = \"footstep\" },\n")
     );
     // The pose goes after the other poses, the animation after the
     // other animations.

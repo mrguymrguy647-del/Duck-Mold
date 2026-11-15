@@ -4472,6 +4472,23 @@ A starter's events: `walk` gets `footstep` on its two steps, `jump`
 gets `takeoff` and `land`, `open` gets `opened` at its end. Copying
 an animation copies its events.
 
+*As built (step 4):* as above, with these details. An event name is
+like any other name (letters, digits, `_` and `-`). The same name twice
+on one key is an error; the same event on a loop's first and last key
+is the warning `event_twice` (asked for at approval), said by `inspect` and
+`inspect --animation` and in the Studio's problems, with the
+`remove-event` that puts it right. `remove-event` naming an event the
+key doesn't have is `unknown_event`. `inspect --animation` puts each
+key's events beside it (`event: footstep`) and adds an `events` line
+only when there are some, so the reports of animations without events
+are as they were. The starters' walk has its footsteps on keys 1 and 3
+(not the last, which is the first again); the robot's and the gnome's
+walks the same; the robot's jump `takeoff` on its crouch (key 2) and
+`land` on its landing (key 4); the door's `open` `opened` on its last
+key. In the Studio the flags are cyan, like the hit shapes, and the
+ruler is a little taller to hold them. A key's menu has a name to type
+and **Add event** in place of an "Add event..." line opening a box.
+
 ### Fitting to the ground
 
 A walk copied from the robot onto the gnome sank the gnome's feet 2 cm

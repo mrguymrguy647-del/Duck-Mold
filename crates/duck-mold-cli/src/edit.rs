@@ -507,6 +507,26 @@ pub enum Change {
         /// The key, counted from 1.
         key: usize,
     },
+    /// Put an event on a key: a name a game hears each time the
+    /// animation passes that key ("footstep" on a step). A key keeps the
+    /// events it had.
+    SetEvent {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1 as inspect --animation prints them.
+        key: usize,
+        /// The event's name: letters, digits, "_" and "-".
+        name: String,
+    },
+    /// Take an event off a key; without a name, every event on it.
+    RemoveEvent {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// The event to take away.
+        name: Option<String>,
+    },
     /// Make the mirror image of a pose, left to right: what left_arm
     /// did, right_arm does, and a part in the middle turns the other
     /// way. Names with "left" and "right" in them are swapped.
@@ -1054,6 +1074,24 @@ impl Change {
             Change::RemoveKey { animation, key } => Edit::RemoveKey {
                 animation: animation.clone(),
                 key: *key,
+            },
+            Change::SetEvent {
+                animation,
+                key,
+                name,
+            } => Edit::SetEvent {
+                animation: animation.clone(),
+                key: *key,
+                name: name.clone(),
+            },
+            Change::RemoveEvent {
+                animation,
+                key,
+                name,
+            } => Edit::RemoveEvent {
+                animation: animation.clone(),
+                key: *key,
+                name: name.clone(),
             },
             Change::MirrorPose { pose, as_name } => Edit::MirrorPose {
                 pose: pose.clone(),

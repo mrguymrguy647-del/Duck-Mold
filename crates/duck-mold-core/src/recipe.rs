@@ -209,9 +209,15 @@ pub struct KeyDef {
     pub at: f64,
     /// The pose's name.
     pub pose: String,
+    /// The names of the moments it marks (`event = "footstep"`), for a
+    /// game to hear when the animation passes it. Empty for most keys.
+    pub events: Vec<String>,
     /// Where it was written.
     pub loc: Loc,
 }
+
+/// The fields of a key, in the order they are written.
+pub(crate) const KEY_FIELDS: [&str; 3] = ["at", "pose", "event"];
 
 /// The fields of an animation, in the order they are written.
 pub(crate) const ANIMATION_FIELDS: [&str; 3] = ["loop", "smooth", "keys"];
@@ -1654,7 +1660,11 @@ impl Decoder<'_> {
                     None
                 }
             };
-            self.finish(fields, &["at", "pose"]);
+            let events = match fields.take("event") {
+                Some(entry) => self.events(&entry.node, &join(&item_path, "event")),
+                None => Vec::new(),
+            };
+            self.finish(fields, &KEY_FIELDS);
             let (Some(at), Some(pose)) = (at, pose) else {
                 continue;
             };
@@ -1684,10 +1694,55 @@ impl Decoder<'_> {
             keys.push(KeyDef {
                 at,
                 pose,
+                events,
                 loc: self.loc(&item_path, item.pos),
             });
         }
         keys
+    }
+
+    /// Reads a key's `event`: one name, or a list of names.
+    fn events(&mut self, node: &Node, path: &str) -> Vec<String> {
+        let items: Vec<(&Node, String)> = match &node.value {
+            Value::Str(_) => vec![(node, path.to_owned())],
+            Value::Array(items) => items
+                .iter()
+                .enumerate()
+                .map(|(at, item)| (item, format!("{path}[{at}]")))
+                .collect(),
+            other => {
+                let message = format!(
+                    "this needs the name of an event in quotes, like \"footstep\", or a list of names, not {}",
+                    other.describe()
+                );
+                self.error(Code::TypeMismatch, path, node.pos, message).got = Some(other.to_got());
+                return Vec::new();
+            }
+        };
+        let mut events: Vec<String> = Vec::new();
+        for (item, item_path) in items {
+            let Some(name) = self.text(item, &item_path, "footstep") else {
+                continue;
+            };
+            if !is_name(&name) {
+                let message = format!(
+                    "\"{name}\" can't be an event's name: use letters, digits, \"_\" and \"-\" only, like \"footstep\""
+                );
+                self.error(Code::TypeMismatch, &item_path, item.pos, message)
+                    .got = Some(name.as_str().into());
+                continue;
+            }
+            if events.contains(&name) {
+                let message = format!(
+                    "this key has the event \"{name}\" twice: a key's event is heard once each time the animation passes it, so once is enough"
+                );
+                self.error(Code::DuplicateName, &item_path, item.pos, message)
+                    .got = Some(name.as_str().into());
+                continue;
+            }
+            events.push(name);
+        }
+        events
     }
 
     /// A table of `name = "#RRGGBB"`.

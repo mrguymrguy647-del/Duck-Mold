@@ -5,7 +5,9 @@
 //! its pose's name, along a ruler of seconds. A click on a key goes to
 //! it; a drag of a key moves it (it snaps to 0.05 s and can't pass its
 //! neighbours); a drag anywhere else moves through time. A right-click
-//! on a key has Remove and another pose. Play (Space) plays it; Loop,
+//! on a key has Remove, another pose, and its events: a name to type and
+//! Add event, and Remove for each; a key's events show as small flags
+//! under it, with their names. Play (Space) plays it; Loop,
 //! Smooth and Ghosts are switches; + Key adds the pose chosen at the
 //! time shown. Every change to the file is one of the key commands.
 
@@ -15,7 +17,7 @@ use eframe::egui::{self, Color32, Pos2, Rect, RichText, Sense, Stroke, pos2, vec
 use crate::theme;
 
 /// How tall the ruler is, in points.
-const RULER: f32 = 58.0;
+const RULER: f32 = 74.0;
 /// Room at either end of the ruler.
 const ENDS: f32 = 24.0;
 /// How near the pointer must be to a key to be on it.
@@ -32,6 +34,8 @@ pub struct Timeline {
     scrubbing: bool,
     /// The key a right-click opened the menu for.
     menu_for: Option<usize>,
+    /// The name of an event being typed in a key's menu.
+    event_name: String,
 }
 
 impl Timeline {
@@ -53,7 +57,7 @@ impl Timeline {
     /// drawn: for tests.
     pub fn key_on_screen(&self, at: f64) -> Option<Pos2> {
         let (rect, _) = self.placed?;
-        Some(pos2(self.x_of(at)?, rect.top() + RULER * 0.45))
+        Some(pos2(self.x_of(at)?, rect.top() + RULER * 0.4))
     }
 
     /// Where a time is on the ruler, on the screen: for tests.
@@ -214,7 +218,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
         let Some(x) = timeline.x_of(shown_at(key)) else {
             continue;
         };
-        let middle = pos2(x, rect.top() + RULER * 0.45);
+        let middle = pos2(x, rect.top() + RULER * 0.4);
         let size = 6.0;
         let diamond = vec![
             middle + vec2(0.0, -size),
@@ -235,6 +239,24 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
             egui::FontId::proportional(11.0),
             color,
         );
+        // Its events: a small flag under it, and their names.
+        if !key.events.is_empty() {
+            let pole = middle + vec2(0.0, size + 2.0);
+            let flag = theme::EVENT_FLAG;
+            painter.line_segment([pole, pole + vec2(0.0, 11.0)], Stroke::new(1.0, flag));
+            painter.add(egui::Shape::convex_polygon(
+                vec![pole, pole + vec2(7.0, 2.5), pole + vec2(0.0, 5.0)],
+                flag,
+                Stroke::NONE,
+            ));
+            painter.text(
+                pole + vec2(9.0, 0.0),
+                egui::Align2::LEFT_TOP,
+                key.events.join(", "),
+                egui::FontId::proportional(10.0),
+                flag,
+            );
+        }
     }
     // The time shown.
     if let Some(x) = studio.time().and_then(|at| timeline.x_of(at)) {
@@ -249,7 +271,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
         .iter()
         .filter_map(|key| {
             let x = timeline.x_of(key.at)?;
-            Some((key.number, pos2(x, rect.top() + RULER * 0.45)))
+            Some((key.number, pos2(x, rect.top() + RULER * 0.4)))
         })
         .collect();
     let key_under = |pointer: Pos2| {
@@ -309,9 +331,15 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
         && let Some(pointer) = response.interact_pointer_pos()
     {
         timeline.menu_for = key_under(pointer);
+        timeline.event_name.clear();
     }
     if editable {
         let poses = studio.pose_names();
+        let events_of = |number: usize| {
+            keys.iter()
+                .find(|key| key.number == number)
+                .map_or_else(Vec::new, |key| key.events.clone())
+        };
         response.context_menu(|ui| {
             let Some(number) = timeline.menu_for else {
                 ui.label(RichText::new("Right-click a key for its menu").weak());
@@ -330,6 +358,40 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
                     }
                 }
             });
+            // Events: a name to type and Add event, and each one there
+            // with Remove.
+            ui.separator();
+            ui.label(
+                RichText::new("Events: heard by a game when this key is passed")
+                    .weak()
+                    .small(),
+            );
+            let mut add = false;
+            ui.horizontal(|ui| {
+                let label = ui.label("New event");
+                let typed = ui
+                    .add(
+                        egui::TextEdit::singleline(&mut timeline.event_name)
+                            .hint_text("footstep")
+                            .desired_width(110.0),
+                    )
+                    .labelled_by(label.id);
+                add |= typed.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Enter));
+                add |= ui.button("Add event").clicked();
+            });
+            if add {
+                done = Some(studio.add_event(number, &timeline.event_name));
+                if matches!(done, Some(Ok(_))) {
+                    timeline.event_name.clear();
+                    ui.close();
+                }
+            }
+            for name in events_of(number) {
+                if ui.button(format!("Remove \"{name}\"")).clicked() {
+                    done = Some(studio.remove_event(number, &name));
+                    ui.close();
+                }
+            }
         });
     }
     finish(ui, studio, done);

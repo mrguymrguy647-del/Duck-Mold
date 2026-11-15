@@ -1823,6 +1823,10 @@ pub struct AnimationInspection {
     pub smooth: bool,
     /// Its keys, in order.
     pub keys: Vec<KeyReport>,
+    /// Each event on its keys, in the order the animation reaches them:
+    /// when a game hears it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<EventReport>,
     /// How many frames were looked at: thirty a second, and the end.
     pub frames: usize,
     /// The parts it turns or moves.
@@ -1856,6 +1860,21 @@ pub struct KeyReport {
     pub at: f64,
     /// The pose it reaches.
     pub pose: String,
+    /// The events on it, for a game to hear when it is passed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<String>,
+}
+
+/// One event of an animation, in its report: its name and when it is
+/// heard.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EventReport {
+    /// Its name: `footstep`.
+    pub name: String,
+    /// Seconds from the animation's start: its key's time.
+    pub at: f64,
+    /// Its key, counted from 1.
+    pub key: usize,
 }
 
 /// How the model's lowest point goes up and down through an animation.
@@ -2051,6 +2070,17 @@ pub fn inspect_animation(
             key: at + 1,
             at: key.at,
             pose: key.pose.clone(),
+            events: key.events.clone(),
+        })
+        .collect();
+    let events: Vec<EventReport> = keys
+        .iter()
+        .flat_map(|key| {
+            key.events.iter().map(|name| EventReport {
+                name: name.clone(),
+                at: key.at,
+                key: key.key,
+            })
         })
         .collect();
     let summary = format!(
@@ -2088,6 +2118,7 @@ pub fn inspect_animation(
         loops: animation.looping,
         smooth: animation.smooth,
         keys,
+        events,
         frames: times.len(),
         moves: moving.parts().into_iter().map(str::to_owned).collect(),
         ground,
@@ -2124,6 +2155,42 @@ fn ground_over_time_words(ground: &GroundOverTime) -> String {
 }
 
 impl AnimationInspection {
+    /// Each event's name with when it is heard, a line for each name:
+    /// `footstep at 0 s (key 1) and 0.4 s (key 3): twice a round`.
+    pub fn event_lines(&self) -> Vec<String> {
+        let mut names: Vec<&str> = Vec::new();
+        for event in &self.events {
+            if !names.contains(&event.name.as_str()) {
+                names.push(&event.name);
+            }
+        }
+        names
+            .into_iter()
+            .map(|name| {
+                let when: Vec<String> = self
+                    .events
+                    .iter()
+                    .filter(|event| event.name == name)
+                    .map(|event| format!("{} (key {})", seconds(event.at), event.key))
+                    .collect();
+                let times = match when.len() {
+                    1 => "once".to_owned(),
+                    2 => "twice".to_owned(),
+                    n => format!("{n} times"),
+                };
+                let listed = match when.as_slice() {
+                    [one] => one.clone(),
+                    [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+                    [] => String::new(),
+                };
+                format!(
+                    "{name} at {listed}: {times}{}",
+                    if self.loops { " a round" } else { "" }
+                )
+            })
+            .collect()
+    }
+
     /// What `render --animation` writes under its strip: `robot,
     /// "walk": 0.8 s, 3 keys, loops`.
     pub fn headline(&self) -> String {
@@ -2186,10 +2253,21 @@ impl AnimationInspection {
             } else {
                 self.keys
                     .iter()
-                    .map(|key| format!("{}  {:<width$}  {}", key.key, seconds(key.at), key.pose))
+                    .map(|key| {
+                        let line =
+                            format!("{}  {:<width$}  {}", key.key, seconds(key.at), key.pose);
+                        if key.events.is_empty() {
+                            line
+                        } else {
+                            format!("{line}   event: {}", key.events.join(", "))
+                        }
+                    })
                     .collect()
             },
         );
+        if !self.events.is_empty() {
+            list("events", self.event_lines());
+        }
         list(
             "moves",
             vec![if self.moves.is_empty() {

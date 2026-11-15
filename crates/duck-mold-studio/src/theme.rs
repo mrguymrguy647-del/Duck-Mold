@@ -17,6 +17,9 @@ pub const GOOD: Color32 = Color32::from_rgb(0x4C, 0xB8, 0x6A);
 pub const LOOK: Color32 = Color32::from_rgb(0xF0, 0xA0, 0x30);
 /// A mistake.
 pub const BAD: Color32 = Color32::from_rgb(0xE5, 0x4B, 0x5F);
+/// An event's flag on the timeline: the hit shapes' cyan, so the two
+/// things for games look alike.
+pub const EVENT_FLAG: Color32 = Color32::from_rgb(0x3C, 0xD8, 0xF0);
 
 /// Gives both the dark and the light look the brand's selection colour.
 /// Done once at start: egui keeps a style for each theme.

@@ -608,6 +608,21 @@ fn the_screens_look_as_they_did() {
         }
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "timeline"));
+        // The walk: a footstep flag under its first and third keys; then
+        // the third key's menu, with its event.
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.choose_animation(Some("walk"));
+            studio.set_time(0.3);
+        }
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "timeline-events"));
+        let third = screen.state().timeline().key_on_screen(0.4).unwrap();
+        right_click_at(&mut screen, third);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "timeline-event-menu"));
+        screen.key_press(egui::Key::Escape);
+        screen.run_steps(2);
     }
 
     // Play in Part mode: the robot waving, part way through.

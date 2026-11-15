@@ -44,6 +44,9 @@ pub struct KeyMark {
     pub at: f64,
     /// The pose it reaches.
     pub pose: String,
+    /// The events on it: names a game hears when the animation passes
+    /// it.
+    pub events: Vec<String>,
 }
 
 impl Studio {
@@ -122,6 +125,7 @@ impl Studio {
                     number: at + 1,
                     at: key.at,
                     pose: key.pose.clone(),
+                    events: key.events.clone(),
                 })
                 .collect()
         })
@@ -587,6 +591,33 @@ impl Studio {
             self.set_time(now);
         }
         done
+    }
+
+    /// A key's menu: an event on it (`set-event`), for a game to hear
+    /// when the animation passes the key.
+    pub fn add_event(&mut self, number: usize, name: &str) -> Result<String, String> {
+        let animation = self.chosen_or_why()?;
+        let name = name.trim();
+        if name.is_empty() {
+            let why = "Type the event's name first, like footstep".to_owned();
+            self.say(why.clone());
+            return Err(why);
+        }
+        self.apply(&Edit::SetEvent {
+            animation,
+            key: number,
+            name: name.to_owned(),
+        })
+    }
+
+    /// A key's menu: takes an event off it (`remove-event`).
+    pub fn remove_event(&mut self, number: usize, name: &str) -> Result<String, String> {
+        let animation = self.chosen_or_why()?;
+        self.apply(&Edit::RemoveEvent {
+            animation,
+            key: number,
+            name: Some(name.to_owned()),
+        })
     }
 
     /// The animation chosen, or why nothing can be done to one.

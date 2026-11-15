@@ -109,5 +109,5 @@ handle = [0, 0, 40]
 keys = [
   { at = 0, pose = "rest" },
   { at = 0.25, pose = "unlatch" },
-  { at = 1, pose = "door_open" },
+  { at = 1, pose = "door_open", event = "opened" },
 ]

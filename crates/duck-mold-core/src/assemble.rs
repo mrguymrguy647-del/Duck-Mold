@@ -222,6 +222,7 @@ fn animations(model: &Model, written: &[AnimationDef], issues: &mut Vec<Issue>) 
                 keys.push(Key {
                     at: key.at,
                     pose: key.pose.clone(),
+                    events: key.events.clone(),
                     loc: key.loc.clone(),
                 });
             }
@@ -254,6 +255,22 @@ fn animations(model: &Model, written: &[AnimationDef], issues: &mut Vec<Issue>) 
                         animation.name, first.pose, last.pose, first.pose
                     ),
                 ));
+            }
+            // A loop's last key and its first are the same moment: an
+            // event on both is heard twice there.
+            if animation.looping && built.keys.len() >= 2 {
+                let (first, last) = (&built.keys[0], &built.keys[built.keys.len() - 1]);
+                for event in last.events.iter().filter(|event| first.events.contains(event)) {
+                    issues.push(last.loc.warning(
+                        Code::EventTwice,
+                        format!(
+                            "the animation \"{}\" loops, and its first and last keys both have the event \"{event}\": where the loop joins they are the same moment, so it would be heard twice. Keep it on one of them: remove-event {} {} {event}",
+                            animation.name,
+                            animation.name,
+                            built.keys.len()
+                        ),
+                    ));
+                }
             }
             built
         })
