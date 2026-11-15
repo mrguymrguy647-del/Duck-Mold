@@ -211,6 +211,9 @@ fn a_model_with_no_faces_gives_empty_views() {
         poses: Vec::new(),
         animations: Vec::new(),
         zero: duck_mold_core::math::Vec3::ZERO,
+        hit_setting: None,
+        colliders: Vec::new(),
+        without_collider: Vec::new(),
     };
     let sheet = render_sheet(&model, "nothing", 128);
     for name in ["front", "right", "back", "three_quarter"] {

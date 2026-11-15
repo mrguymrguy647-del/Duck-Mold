@@ -4105,3 +4105,676 @@ other way.
     felt. I keep building unless you say stop.
 
 The version becomes 0.5.0.
+
+---
+
+## 22. Phase 6: Game-ready
+
+Phase 5 made models move. Phase 6 lets a Duck Forge game **use** them
+as characters: it can tell **what was hit** (the robot's head, not just
+"the robot"), and **hear moments in an animation** (a foot touching
+down) to play a sound or puff some dust at the right time. Two things
+make that easier to set up: a command that **fits an animation to the
+ground**, so a walk copied onto a character with shorter legs keeps its
+feet down, and two leftovers for the timeline.
+
+The rules hold. The recipe is the model, and now its hit shapes and
+events too, written in words. Every Studio action is an edit command
+agents can run. An edit changes only what it must in the file. The
+viewport is Duck Forge's CPU renderer. Duck Forge's reader stays the
+same code in both repositories, with a raised version, shared test
+files and the handoff note updated.
+
+**Approved** with all twelve decisions as recommended, and two
+additions:
+
+1. **New models start with hit shapes.** A recipe made with `duck-mold
+   new` (and the Studio's New model) has `colliders = "parts"` from the
+   start. Existing files and the examples stay as planned below.
+2. **A loop's doubled event is a warning.** `inspect --animation` warns
+   when a looping animation has the same event on its first and last
+   key, since it would be heard twice where the loop joins.
+
+### In one picture
+
+```toml
+# Every part gets a simple hit shape, fitted to it, that moves with it.
+colliders = "parts"
+
+[[parts]]
+name = "antenna_tip"
+shape = "sphere"
+radius = 0.04
+collider = "none"                 # too small to aim at: no hit shape
+
+[[parts]]
+name = "head"
+shape = "box"
+size = [0.42, 0.32, 0.36]
+collider = "sphere"               # a ball round the head instead of a box
+
+# A moment in an animation, on a key.
+[animations.walk]
+loop = true
+keys = [
+  { at = 0, pose = "step_left", event = "footstep" },
+  { at = 0.2, pose = "rest" },
+  { at = 0.4, pose = "step_right", event = "footstep" },
+  { at = 0.6, pose = "rest" },
+  { at = 0.8, pose = "step_left" },
+]
+```
+
+And in a Duck Forge game:
+
+```rust
+robot.update(ctx.dt());
+for event in robot.events() {            // what happened since the last update
+    if event.name == "footstep" {
+        ctx.play(step_sound);        // a Sound the game made: a short thud
+    }
+}
+
+if let (true, Some(mouse)) = (
+    ctx.input.was_mouse_pressed(MouseButton::Left),
+    ctx.input.mouse_position(),
+) {
+    let ray = camera.ray_through(mouse, &canvas);
+    if let Some(hit) = robot.hit_ray(ray, &place) {
+        message = format!("You clicked the {}", hit.part); // "left_arm/hand"
+    }
+}
+```
+
+Read aloud: "Every part of the robot has a hit shape except the tip of
+its antenna; its head's is a ball. Each time a foot comes down in the
+walk, the game hears `footstep`. A click on the robot says which part
+was under the mouse, in whatever pose the robot is in at that moment."
+
+### Hit shapes
+
+A **hit shape** (a game programmer would say a *collider*) is a simple
+shape that stands in for a part when the game asks "what is here?".
+The model's own triangles are too many to test quickly, and a game
+doesn't need them: it needs to know the head was hit, roughly where.
+
+**Three simple shapes**, each easy and fast to test:
+
+| Shape | What it is | Good for |
+|---|---|---|
+| `box` | A box, turned with the part. | Bodies, boxes, crates, doors, feet. |
+| `sphere` | A ball. | Heads, hands, balls, wheels' hubs. |
+| `capsule` | A cylinder with a ball on each end: a sausage. | Arms, legs, poles, round long things. |
+
+**Fitted, not typed.** A hit shape is worked out from the part's own
+corners, so it always matches the part, even after the part is resized
+or reshaped:
+
+- **box**: the part's own box. It is measured in the part's own
+  directions, so a part that is turned gets a turned box, and it turns
+  again when the join turns. It holds every corner of the part.
+- **sphere**: centred in the middle of the part's box, just big enough
+  to hold every corner. For a ball it is the ball.
+- **capsule**: lying along the part's longest side, centred in its
+  box, just thick enough to hold every corner, and as long as the part.
+
+**What a part gets** comes from one line at the top of the recipe:
+
+```toml
+colliders = "parts"     # every part gets the shape that suits it (below)
+colliders = "capsule"   # one capsule round the whole model, standing up
+colliders = "box"       # one box round the whole model
+colliders = "sphere"    # one ball round the whole model
+                        # (no line: no hit shapes at all, as now)
+```
+
+With `"parts"`, the shape that suits a part is chosen from its own
+shape: a **sphere** for a sphere; a **capsule** for a cylinder, a
+capsule or a cone; a **box** for everything else (box, wedge, pyramid,
+prism, stairs, arch, torus, tube, and parts from model files).
+
+One shape round the whole model (`"capsule"`, `"box"`, `"sphere"`)
+suits a prop (a crate, a house) or a game that only needs "the robot
+was hit". It is fitted to the model at rest and moves with the whole
+model, not with its joins; a hit on it names the model itself.
+
+**A part can say its own**, beside its other fields:
+
+```toml
+collider = "sphere"     # this shape, fitted to it, whatever colliders says
+collider = "none"       # no hit shape: too small, or never hit (eyes, a buckle)
+collider = { shape = "capsule", radius = 0.08, length = 0.5 }      # my own numbers
+collider = { shape = "box", size = [0.3, 0.3, 0.3], center = [0, 0.1, 0] }
+```
+
+- With a table, the numbers are used as written, in the part's own
+  space (metres, from the part's own middle; a capsule lies along the
+  part's longest side unless `along = "x"`, `"y"` or `"z"` says). This
+  is for a shape that should be bigger or smaller than the part: a
+  generous head to make it easier to hit, say.
+- `collider` works with or without `colliders` at the top: one part
+  with its own shape in a model that otherwise has none is fine.
+- **A part made of parts** (the robot's arm) can have a `collider` of
+  its own too: one shape round all of it, and then the parts inside
+  get none. It moves with the assembly's join, so it doesn't bend
+  where the elbow bends: for an arm that bends, leave it to its parts.
+- A hit names the part as `inspect` does: `head`, `left_arm/hand`, or
+  the assembly's name for an assembly's shape.
+
+*As built (step 1):* as above, with these details.
+
+- **A capsule is as long as its part**, round ends included (as the
+  design says), so it doesn't hold a cylinder's rim corners: they
+  stand up to four tenths of the radius outside its round ends. One
+  long enough to hold them would reach well past the part: the robot's
+  thigh would have been 65 cm for a 45 cm thigh, its ends inside the
+  body and the foot, and a hit there would name the wrong part.
+- **`"parts"` gives a capsule only to a cylinder, capsule or cone
+  clearly longer than it is wide** (its longest side at least 1.2 times
+  its next). A flat one, a wheel or a disc, gets a box: a capsule lying
+  across a disc fits it badly.
+- **Every fitted shape holds its part**, checked on every example in
+  every pose and every frame step (capsules within their rim corners).
+  Sizes are kept to a millionth of a metre, rounded up, so rounding
+  never leaves a corner a hair outside.
+- **A definition can say its part's `collider`**; the part that uses it
+  can say another, which wins.
+- **On a part made of parts**, one shape round all of it; the parts
+  inside have none and aren't listed as "none".
+- **The warnings** count a corner as outside only if it is further out
+  than a twentieth of the part's size across, so a sphere of exactly
+  the part's radius doesn't warn over a few millimetres.
+- `inspect` with no `colliders` line and some parts' own says "2,
+  only on the parts that say their own". A model with neither says
+  nothing about hit shapes, so the other examples' reports didn't
+  change by a byte. The robot, gnome, door and cart got their hit shapes
+  (with `set-colliders` and `set-collider`), and their reports changed;
+  their models and pictures didn't (hit shapes go into the file in step
+  2).
+- `render --colliders` draws the outlines over the model without hiding
+  the parts in front, so a shape inside another part shows.
+- `duck-mold new` and the Studio's New model write `colliders =
+  "parts"` (your addition).
+
+### What `inspect` and `render` say
+
+```text
+  hit shapes   each part: 13 (box 6, capsule 5, sphere 2)
+               none: panel, left_eye, right_eye, antenna_tip (their own)
+```
+
+- `inspect --colliders` lists every hit shape with its numbers, in the
+  model's directions at rest: where its middle is, and its size (box),
+  radius (sphere) or radius and length (capsule). With `--json`,
+  `colliders` and `parts_without_colliders`.
+- `inspect --pose` and `--animation` say nothing new about hit shapes
+  (they move with the parts, so they can't come apart from them).
+- **Warnings**: a part whose own numbers leave much of it outside its
+  hit shape ("half of `head` is outside its hit shape"), and a hit shape
+  far bigger than its part. Both are warnings, not errors: a game may
+  mean it.
+- `render --colliders` draws the hit shapes over the model, in the four
+  views (and with `--pose`, and in `--animation` strips), as thin cyan
+  outlines: a box's twelve edges, a sphere's three rings, a capsule's
+  outline. Parts with none aren't outlined.
+
+### New edit commands (hit shapes)
+
+| Command | What it does |
+|---|---|
+| `duck-mold edit <recipe> set-colliders <parts\|capsule\|box\|sphere\|none>` | Sets the line at the top. `none` takes it away. |
+| `duck-mold edit <recipe> set-collider <part> <box\|sphere\|capsule\|none\|fitted>` | Gives one part its own shape, fitted. `fitted` takes the part's own away: it follows `colliders` again. |
+| `duck-mold edit <recipe> set-collider <part> <shape> --size x,y,z / --radius r / --length l / --center x,y,z / --along x\|y\|z` | Gives it its own numbers. Any number not given keeps the fitted one, so `--radius 0.2` alone makes a fitted sphere bigger. |
+
+Renaming a part keeps its `collider` (it is a field of the part).
+Changing a part's size changes a fitted shape by itself, and leaves own
+numbers alone.
+
+### How Duck Forge uses them
+
+Duck Forge's `physics` today is a small engine for **bodies** that
+fall, bounce and stack: balls and boxes that never turn. It answers
+"where does this body go?", not "what did I hit?", and nothing in it
+knows about models or parts. So hit shapes don't go into the physics
+engine. They answer a different question, and they live with the
+model:
+
+- **A game moves a character with physics** (one `Body::block` for the
+  whole robot, so it stands on the floor and bumps into walls), and
+- **asks the model what was hit** (which part a click, a bullet or a
+  sword touched), with the model in whatever pose it is in now.
+
+New in Duck Forge:
+
+```rust
+// A ray: a starting point and a direction.
+let ray = Ray::new(from, direction);
+let ray = camera.ray_through(mouse, &canvas);             // from the camera, through a pixel
+
+// The first part a ray hits, on the model drawn at `place`.
+if let Some(hit) = robot.hit_ray(ray, &place) {
+    hit.part;      // "head", "left_arm/hand"
+    hit.point;     // where, in the world
+    hit.normal;    // which way the surface faces there
+    hit.distance;  // how far along the ray
+}
+
+// Every part a ball touches: a sword's tip, an explosion, a hand.
+for hit in robot.hits_ball(center, radius, &place) {
+    hit.part;      // each part touched, nearest first
+    hit.point;     // the point of that part's hit shape nearest the centre
+}
+
+// The same between two points: a bullet between two frames, a sword's blade.
+let hit = robot.hit_segment(from, to, &place);
+
+// The hit shapes as they are now, to draw them while making a game.
+for shape in robot.hit_shapes(&place) { /* shape.part, shape.kind, ... */ }
+```
+
+- They test the model **as it stands now**: in the frame `update` last
+  worked out, with any pose, animation, blend and `turn` in it. They
+  are as fast as testing a dozen boxes and balls: no triangles are
+  looked at.
+- `place` is the `Transform` the game draws the model with: its
+  position and turn are used. A model **scaled the same in every
+  direction** is fine; one stretched more one way than another is
+  tested as if scaled by the largest, and that is in its docs.
+- `GlbModel` gets `colliders`, read from the file; `Mesh::load_glb`
+  ignores them; a model with none answers `None` and an empty list.
+- `Camera3D::ray_through(pixel, &canvas)` is the one new thing outside
+  `glb`: the ray from the camera through a point on the canvas, the
+  exact opposite of `world_to_screen`, so a click lands on what is drawn
+  under the mouse.
+
+*As built (step 2):* as above, with these changes.
+
+- **The result is `PartHit`, not `Hit`**: Duck Forge's prelude already
+  has a `Hit` (a moving box meeting another, in 2D). The shapes are
+  `HitShape { part, volume }`, the volume a `HitVolume::Box`, `Ball` or
+  `Capsule` in the world.
+- **`ctx.mouse_ray(&camera)`** was added beside `ray_through`: a game's
+  `update` has no canvas, and that is where clicks are handled. It is
+  `None` while the pointer is off the window.
+- **The shapes are in the file at rest, in the model's own space**, not
+  in each part's space: like the sockets, with the node that carries
+  each. The reader moves them with the same join stands as the corners
+  and the sockets (`GlbHitShape::moved`), so the three can't disagree.
+- A ray that starts inside a shape hits it at distance 0. A ray that
+  only touches a box's edge or corner and goes on outside it may be
+  counted either way; Duck Forge's tests allow both.
+
+### Events: named moments on keys
+
+An **event** is a name on a key: `{ at = 0.4, pose = "step_right",
+event = "footstep" }`. It marks the moment that key is reached. A key
+can have several: `event = ["footstep", "dust"]`. Names are like other
+names: letters, digits and `_`. Events don't change the motion at all.
+
+**How a game hears them.** After each `update`, `robot.events()` lists
+the events the animation **passed during that update**, in the order
+they were passed, each with its name, the animation's name and the
+key's time. Then it is cleared, so each is heard once:
+
+```rust
+robot.update(ctx.dt());
+for event in robot.events() {
+    match event.name.as_str() {
+        "footstep" => ctx.play(step_sound),
+        "dust" => puffs.push(robot.socket("left_leg/foot.bottom")),
+        _ => {}
+    }
+}
+```
+
+The rules, so a game can count on them:
+
+- **Each event fires exactly once each time the animation passes its
+  key.** A key at 0.4 fires when time goes from below 0.4 to 0.4 or
+  past it.
+- **Starting.** An event on the first key (at 0) fires on the first
+  `update` after `play` (and after `restart`).
+- **Looping.** Going round, the end and the start are the same moment.
+  An event on the last key fires as the loop comes round; an event on
+  the first key fires at the start of each round after that, too. (A
+  loop's last key is its first pose again, so give the event to one of
+  the two, not both, or it is heard twice at the join.)
+- **Backwards** (`set_speed(-1.0)`): events fire as time goes down past
+  their keys, in that order. The door's `open` played backwards closes,
+  and an event on its last key fires first.
+- **Skipped through quickly** (a long `dt`, a game that hitched): every
+  key passed fires, in order, even several rounds of a loop, up to ten
+  rounds; past that only the last ten rounds' are listed, so a game
+  that was paused for a minute doesn't hear six hundred footsteps.
+- **Changing to another animation** (with the 0.15-second blend): the
+  old one's events stop at once, and the new one's start from its
+  start. The blend only eases the parts; it doesn't play the old one
+  on.
+- **Stopped, finished, speed 0, or holding a pose**: no time passes,
+  no events. An animation that plays once fires its last key's event
+  when it reaches the end, and not again while it stands there.
+- **`turn`** changes nothing about events.
+
+**In the recipe and on the command line:**
+
+| Command | What it does |
+|---|---|
+| `duck-mold edit <recipe> set-event <animation> <key> <name>` | Adds an event to a key (keys numbered from 1, as `inspect --animation` prints them). A key keeps the events it had. |
+| `duck-mold edit <recipe> remove-event <animation> <key> [<name>]` | Takes one away, or every one on that key. |
+
+`inspect --animation walk` lists them:
+
+```text
+  events       footstep at 0 s (key 1) and 0.4 s (key 3): twice a round
+```
+
+A starter's events: `walk` gets `footstep` on its two steps, `jump`
+gets `takeoff` and `land`, `open` gets `opened` at its end. Copying
+an animation copies its events.
+
+*As built (step 4):* as above, with these details. An event name is
+like any other name (letters, digits, `_` and `-`). The same name twice
+on one key is an error; the same event on a loop's first and last key
+is the warning `event_twice` (asked for at approval), said by `inspect` and
+`inspect --animation` and in the Studio's problems, with the
+`remove-event` that puts it right. `remove-event` naming an event the
+key doesn't have is `unknown_event`. `inspect --animation` puts each
+key's events beside it (`event: footstep`) and adds an `events` line
+only when there are some, so the reports of animations without events
+are as they were. The starters' walk has its footsteps on keys 1 and 3
+(not the last, which is the first again); the robot's and the gnome's
+walks the same; the robot's jump `takeoff` on its crouch (key 2) and
+`land` on its landing (key 4); the door's `open` `opened` on its last
+key. In the Studio the flags are cyan, like the hit shapes, and the
+ruler is a little taller to hold them. A key's menu has a name to type
+and **Add event** in place of an "Add event..." line opening a box.
+
+*As built (step 5):* as above. In the file each animation's entry has
+`events: [{ name, at }]`, in key order, left out when there are none.
+The reader (version 7) refuses an event with no name, no time, a time
+outside the animation, or out of order. In Duck Forge, `AnimatedModel`
+follows time as one line across a loop's rounds and hears every event
+on the stretch each update covers; the first update after `play` or
+`restart` includes the starting moment; at speed 0 that waits until time
+moves. The list is emptied by the next `update`, also when stopped.
+`AnimationEvent` is in `duckforge::glb`, not the prelude.
+
+### Fitting to the ground
+
+A walk copied from the robot onto the gnome sank the gnome's feet 2 cm
+into the ground at each step, because its legs are shorter, and I
+fixed it by typing a new body move into two poses. **`fit-ground`
+does that by itself:**
+
+```bash
+duck-mold edit gnome.toml fit-ground walk
+```
+
+For each pose the animation's keys use (not `rest`), it stands the
+model in that pose, finds its lowest point, and changes the body's
+up-and-down move in that pose so the lowest point is on the ground,
+exactly. Only that one number of each pose changes.
+
+- **The body** is the part every other part hangs from (`body` on the
+  robot and the gnome). For a model with more than one, say which:
+  `--part body`.
+- **A pose that lifts the body is left alone**: it is a leap, meant to
+  be in the air (the jump's `jump_up`). `--all` fits those too.
+- **A pose used by other animations** changes for them too; the
+  summary names them.
+- **Between keys** the smooth curve can still dip a few millimetres
+  below the ground where a leg turns fast; the summary says the worst
+  ("between keys it sinks at most 0.004"). The example tests keep every
+  example within 5 mm, as now.
+- The Studio has a **Fit to ground** button beside Loop and Smooth.
+
+*As built (step 6):* as above. The body is the top-level part that
+has parts hanging from it (the frame of a door, the bed of a cart); a
+leap is a pose whose body is moved up already, so fit a crouch before
+anything lifts it. Moves are kept to a tenth of a millimetre, so each
+key pose stands within a twentieth of one. The gnome's `walk` was fitted
+(its body 1.87 cm down in each step, not the 1.7 typed by hand), its
+`wave` needed nothing, and its new `jump` (the starter) had its boots
+turned flat in the crouch, as the robot's are, then was fitted: it
+sinks at most 4 mm between keys. Fitting the robot's own jump exactly
+would make it dip 1 cm between keys, more than its hand-tuned 4 mm, so
+the robot is left as it was; that is the known limit of fitting only the
+keys.
+
+### The Studio
+
+```text
++---------------------------------------------------------------------------------------------+
+| robot.toml | File Edit View Help | Undo Redo | Add | Front Side Top 3/4 | Hits | Export     |
++------------+--------------------------------------------------------------+-----------------+
+| Parts      | [Part][Face][Edge][Corner][Pose]          [walk v] [Play]    | head            |
+|  body      |                    .-----.                                   |  ...            |
+|  head      |                   ( o   o )   <- a cyan ball: the head's     | Hit shape       |
+|  antenna   |                    `-----'      hit shape                    |  [sphere   v]   |
+|  ...       |                 +-----------+                                |  middle 0 0.1 0 |
+|            |                 |           |  <- a cyan box: the body's     |  radius   0.22  |
+|            |                 |           |                                |  [Fit again]    |
+|            |                 +-----------+                                |                 |
++------------+--------------------------------------------------------------+-----------------+
+| Animation [walk v]  New   Play  [x] Loop  [x] Smooth  [x] Ghosts  Fit to ground   + Key     |
+|  0.0          0.2          0.4          0.6          0.8      [-] [+]   <==========>        |
+|  <>step_left  <>rest       <>step_right <>rest       <>step_left                            |
+|  ^footstep                 ^footstep                                                        |
++---------------------------------------------------------------------------------------------+
+```
+
+- **Hits**, a switch in the top bar (and View > Hit shapes), draws
+  every hit shape as a thin cyan outline over the model, in every
+  mode, following the pose and the animation as it plays. The selected
+  part's is brighter.
+- **The properties panel** has a **Hit shape** section for the
+  selected part: a list (`fitted: box`, `box`, `sphere`, `capsule`,
+  `none`), and for a shape of its own, its numbers to type and **Fit
+  again**. Each change is one `set-collider`. With nothing selected,
+  the panel has the model's line: **Hit shapes: none / each part / one
+  capsule / one box / one ball** (`set-colliders`).
+- *As built (step 3):* as above. The section is below Limits, in Part
+  mode. The list's first line says what the model's line gives the
+  part (`fitted: box`, `fitted: none`, `the model's` for one shape
+  round all of it). A shape fitted to the part shows its numbers too:
+  typing one makes the shape the part's own, with the rest as fitted,
+  in one `set-collider`. Fit again shows only for a shape with numbers
+  of its own. The number fields are named `Middle`, `Box size`,
+  `Ball radius`, `Capsule radius` and `Length`, so that they aren't
+  mistaken for the part's own Size and Radius. The panel is longer
+  for it and scrolls, as before. The Hits switch has no key.
+- **The timeline** shows each key's events as small flags under its
+  diamond, with their names. Right-click a key: **Add event...**
+  (a name to type), and each event with **Remove**. (`set-event`,
+  `remove-event`.)
+- **Fit to ground** beside Loop and Smooth (`fit-ground`).
+- **The two leftovers:**
+  - Right-click a key: **Make this key's pose its own**. If other keys
+    use the same pose, the key gets a copy (`walk_2`) and a drag
+    changes only it. That is `add-pose --from` and `set-key`, together,
+    one step to undo; no new command.
+  - **The timeline zooms and scrolls**: Ctrl + the mouse wheel (or `-`
+    and `+`) zoom about the mouse; the wheel, or the bar under the
+    ruler, scrolls. At the start it fits the whole animation, as now;
+    **Fit** goes back to that.
+
+*As built (step 8):* "Make this key's pose its own" names the copy
+after the animation and the key (`walk_1` for the walk's key 1, with a
+number added if that is taken), and is greyed in the menu when no other
+key, in any animation, uses the pose; a `rest` key always can, since
+rest itself can't change. The zoom goes from the whole animation to a
+fortieth of it; shown less than 0.6 s at a time, the ruler marks
+hundredths and numbers tenths. The `-` and `+` buttons and Fit are at
+the end of the row above the ruler; the bar under the ruler shows where
+the part in view is. Each animation starts fitted.
+
+### How the `.glb` changes
+
+- **Hit shapes**: each part's object gets its hit shape in Duck Mold's
+  corner of the file (`extras`), in the part's own space, measured
+  from its pivot: its kind, its middle, and its size, radius, length
+  and direction. A shape round the whole model is on the model's
+  object. (*As built:* one list, `colliders`, in the model's own space
+  at rest, each with the node that carries it, like the sockets; see
+  the step 2 note above.)
+- **Events**: each animation's events, in Duck Mold's corner of the
+  file: name and time. glTF has no events of its own; other programs
+  ignore them, and the validator passes.
+- The format's number stays 1: an older Duck Forge reads the file and
+  ignores both. The reader's version goes to **6** with hit shapes
+  (step 2) and **7** with events (step 5), each with its pull request
+  in Duck Forge, the copies the same, the shared test files and the
+  handoff note updated.
+
+### Duck Forge, all of it
+
+| New | What it does |
+|---|---|
+| `Ray`, `Ray::new(from, direction)` | A starting point and a direction. |
+| `Camera3D::ray_through(pixel, &canvas)` | The ray from the camera through a point of the canvas. |
+| `GlbModel::colliders` | The hit shapes the file holds. |
+| `AnimatedModel::hit_ray(ray, &place) -> Option<PartHit>` | The first part a ray hits, as the model stands now. |
+| `AnimatedModel::hit_segment(from, to, &place) -> Option<PartHit>` | The same between two points. |
+| `AnimatedModel::hits_ball(center, radius, &place) -> Vec<PartHit>` | Every part a ball touches, nearest first. |
+| `AnimatedModel::hit_shapes(&place) -> Vec<HitShape>` | The hit shapes as they are now, to draw. |
+| `PartHit { part, point, normal, distance }` | What was hit (*as built*: named so beside Duck Forge's own `Hit`). |
+| `Context::mouse_ray(&camera)` | *As built*: the ray under the mouse, in `update`. |
+| `AnimatedModel::events() -> &[AnimationEvent]` | The events passed during the last `update`. |
+| `AnimationEvent { name, animation, at }` | One of them. |
+| `examples/robot_click/` | The robot walking about; footsteps make a sound and a puff; a click names the part and makes it flash. |
+
+### Examples
+
+- **The robot** gets `colliders = "parts"`, `collider = "none"` on its
+  eyes, panel and antenna tip, a sphere for its head, and `footstep`
+  events on its walk, `takeoff` and `land` on its jump.
+- **The gnome** gets hit shapes and footsteps too, and its `walk`,
+  `wave` and a new `jump` are fitted with `fit-ground` instead of by
+  hand (its hand-typed numbers go).
+- **The door** gets one box for its door, and `opened` at the end of
+  `open`. **The cart** gets hit shapes for its wheels and bed.
+- Every other example is unchanged, byte for byte.
+
+### Steps
+
+1. Hit shapes in the recipe and the core: `colliders` and `collider`,
+   the fitting, `set-colliders` and `set-collider`, `inspect` reporting
+   them (and parts with none), `render --colliders`.
+2. Hit shapes in the `.glb` and in Duck Forge: reader version 6,
+   `Ray`, `ray_through`, `hit_ray`, `hit_segment`, `hits_ball`,
+   `hit_shapes`. Pull request in Duck Forge.
+3. Hit shapes in the Studio: the Hits switch, the panel's Hit shape
+   section, the model's line.
+4. Events on keys: `event` in the recipe, `set-event` and
+   `remove-event`, flags on the timeline, `inspect --animation`
+   listing when each fires, the starters' events.
+5. Events in the `.glb` and in Duck Forge: reader version 7,
+   `AnimatedModel::events`. Pull request in Duck Forge.
+6. Fitting to the ground: `fit-ground`, the Fit to ground button; the
+   gnome's animations fitted with it; every example checked.
+7. The Duck Forge example game `robot_click`.
+8. The two leftovers: "make this key's pose its own", and a timeline
+   that zooms and scrolls.
+
+Then `PHASE6_REPORT.md`, a Windows zip, and the version 0.6.0.
+
+### Testing
+
+- **Fitting**: every example part's fitted shape holds every corner of
+  the part (and isn't more than a little bigger: a box exactly, a
+  sphere and a capsule within what holding the corners needs); in
+  every pose of every example, each hit shape still holds its part.
+- **Every field and message**, every edit command, with a line in the
+  agent guide (a test fails otherwise).
+- **Duck Forge hits every example model in several poses**: rays aimed
+  at each part with a hit shape, from several sides, in rest and in
+  frames of every animation, name the part a slow, simple check over
+  every shape says is first; a test also aims at things a game cares
+  about (a click on the robot's head from the front names `head`; a
+  ray just past the model hits nothing). Balls and segments the same
+  way.
+- **Events fire exactly once per pass**: every animation of every
+  example, played with many different `dt`s (tiny, uneven, one frame,
+  longer than a round, ten rounds), forwards and backwards, looping
+  and once, with changes to another animation part way: each event is
+  counted against the passes worked out by hand.
+- **Fit to ground**: after `fit-ground`, every key pose's lowest point
+  is on the ground to the last digit kept, the leaps aren't touched,
+  and every example animation keeps within 5 mm.
+- **Golden files**: the changed examples' models, reports and pictures
+  (and new pictures with `--colliders`); the other examples' don't
+  change by a byte.
+- **Picture tests of every new screen**: hit shapes shown, the panel's
+  Hit shape section, events on the timeline, the key menu with events
+  and "make its own", a zoomed timeline.
+- **Duck Forge**: its own tests of `ray_through`, the hit tests and
+  `events`; the example game's tests and a recorded playthrough.
+
+### What Phase 6 won't do
+
+By the brief: physics (falling, pushing), parts that bend, IK,
+far-away versions (LODs), textures, and placing models in Duck Forge's
+Studio. Also:
+
+- **Hit shapes don't push.** Two robots walk through each other; a
+  game uses a physics body for that.
+- **No hit test against the triangles themselves.** Only the simple
+  shapes; a hit point is on the shape, a few millimetres off the
+  part's own surface.
+- **No box-shaped "probe".** A ball, a ray and a segment cover clicks,
+  bullets, swords and explosions; a box can come later.
+- **Events are on keys only**, not between them. Put a key where the
+  moment is.
+- **Events in a recipe used as a part don't come along**, as poses and
+  animations don't.
+
+### The decisions
+
+1. **The recipe says `colliders` (the model's line) and `collider` (a
+   part's own)**, the names reserved since Phase 0; the Studio and the
+   guide call them **hit shapes**, in plain words. *The other way:*
+   `hit` everywhere; plainer, but a game programmer looks for
+   "collider".
+2. **No hit shapes unless the recipe asks.** Every model today stays
+   the same, and a model that a game never hits carries none. *The
+   other way:* `"parts"` by default: every model ready to hit, every
+   stored file changing.
+3. **Three shapes: box, sphere, capsule**, fitted from the part's own
+   corners, chosen by the part's shape with `"parts"`. *The other way:*
+   only boxes (simplest, but a head or a leg fits badly), or the
+   triangles themselves (exact, slow, and a game rarely needs it).
+4. **A part's own shape is a word (fitted) or a table (its numbers).**
+   *The other way:* only words, so every shape is fitted; simpler, but
+   no generous head.
+5. **Hit tests live on the model, beside physics, not inside it.**
+   `hit_ray`, `hit_segment`, `hits_ball`, on `AnimatedModel`, in the
+   current frame, with the `Transform` it is drawn with. *The other
+   way:* make each part a body in `PhysicsWorld`; that engine's bodies
+   don't turn and push each other, which isn't what a hit test wants.
+6. **Events are names on keys**, one or a list. *The other way:* events
+   at any time, in their own list (`events = [{ at = 0.37, name =
+   "footstep" }]`); more freedom, but another thing to keep in step
+   when keys move.
+7. **A game reads `events()` after `update`**: a list of what was
+   passed, cleared at the next update. *The other way:* a function the
+   game hands over, called during `update`; neater for some, but Duck
+   Forge's games are written as "update, then look", and a list is
+   easy to test and to record.
+8. **Each pass fires once, with a cap of ten rounds in one update**;
+   backwards fires going down; a change to another animation stops the
+   old one's events at once. *The other way:* no cap (a long pause
+   floods the game), or old events fire through the blend (two
+   footsteps at a change).
+9. **`fit-ground` fits each key pose exactly and leaves leaps alone**,
+   moving only the body's up-and-down. *The other way:* fit every frame
+   by adding keys; exact everywhere, but it writes many keys into a
+   recipe that a person reads.
+10. **Reader versions 6 and 7, two pull requests**, the file's format
+    number staying 1. *The other way:* one pull request at step 5; one
+    review fewer, but the click test would wait for events.
+11. **One new example game, `robot_click`**, in Duck Forge, rather than
+    changing `robot_walk`.
+12. **The leftovers as listed**; "make its own" is two existing edits
+    together, not a new command.
+
+The version becomes 0.6.0.

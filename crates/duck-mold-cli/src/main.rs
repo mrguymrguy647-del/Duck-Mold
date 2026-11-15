@@ -68,6 +68,10 @@ enum Command {
         /// turn (its "limits").
         #[arg(long)]
         joins: bool,
+        /// Also list every hit shape (collider): its shape, where its
+        /// middle is, and its size, radius or length.
+        #[arg(long)]
+        colliders: bool,
         /// Report on the model as it stands in this pose instead of at
         /// rest: its size, what floats and what overlaps then, and
         /// whether the pose breaks a part's limits.
@@ -77,7 +81,7 @@ enum Command {
         /// and the worst that any of its frames (30 a second) gets
         /// wrong: parts that float or overlap, limits broken, how far
         /// it leaves the ground, and whether a loop ends as it starts.
-        #[arg(long, value_name = "NAME", conflicts_with_all = ["pose", "sockets", "faces", "joins"])]
+        #[arg(long, value_name = "NAME", conflicts_with_all = ["pose", "sockets", "faces", "joins", "colliders"])]
         animation: Option<String>,
     },
     /// Build a recipe and write the model as a .glb file.
@@ -133,6 +137,10 @@ enum Command {
         /// the bottom).
         #[arg(long, value_name = "VIEW", requires = "animation")]
         view: Option<String>,
+        /// Draw the hit shapes (colliders) over the model, as thin cyan
+        /// outlines: in every view, and in every frame of a strip.
+        #[arg(long)]
+        colliders: bool,
     },
     /// Open the Studio: the window where a model is built with the mouse.
     ///
@@ -259,6 +267,7 @@ fn main() -> ExitCode {
             sockets,
             faces,
             joins,
+            colliders,
             pose,
             animation: None,
         } => match tools::inspect_file_listing(
@@ -267,6 +276,7 @@ fn main() -> ExitCode {
                 sockets,
                 faces,
                 joins,
+                colliders,
                 pose,
             },
         ) {
@@ -308,6 +318,7 @@ fn main() -> ExitCode {
             animation: Some(animation),
             frames,
             view,
+            colliders,
             ..
         } => match render::render_animation_file(
             &file,
@@ -316,6 +327,7 @@ fn main() -> ExitCode {
             &animation,
             frames,
             view.as_deref(),
+            colliders,
         ) {
             Ok(rendered) => {
                 if json {
@@ -341,26 +353,29 @@ fn main() -> ExitCode {
             size,
             json,
             pose,
+            colliders,
             ..
-        } => match render::render_file(&file, output.as_deref(), size, pose.as_deref()) {
-            Ok(rendered) => {
-                if json {
-                    say_json(&rendered);
-                } else {
-                    say(&format!(
-                        "wrote {} ({} x {} pixels, {} bytes): {}",
-                        rendered.output,
-                        rendered.width,
-                        rendered.height,
-                        rendered.bytes,
-                        rendered.inspection.summary
-                    ));
-                    complain_about(&rendered.inspection.warnings);
+        } => {
+            match render::render_file(&file, output.as_deref(), size, pose.as_deref(), colliders) {
+                Ok(rendered) => {
+                    if json {
+                        say_json(&rendered);
+                    } else {
+                        say(&format!(
+                            "wrote {} ({} x {} pixels, {} bytes): {}",
+                            rendered.output,
+                            rendered.width,
+                            rendered.height,
+                            rendered.bytes,
+                            rendered.inspection.summary
+                        ));
+                        complain_about(&rendered.inspection.warnings);
+                    }
+                    ExitCode::SUCCESS
                 }
-                ExitCode::SUCCESS
+                Err(failure) => fail(&failure, json),
             }
-            Err(failure) => fail(&failure, json),
-        },
+        }
         Command::Studio { file } => match studio::run(file.as_deref(), false) {
             Ok(()) => ExitCode::SUCCESS,
             Err(failure) => fail(&failure, false),

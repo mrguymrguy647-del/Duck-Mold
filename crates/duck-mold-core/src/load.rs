@@ -164,6 +164,7 @@ impl Loader<'_> {
                     origin: None,
                     poses: Vec::new(),
                     animations: Vec::new(),
+                    colliders: None,
                 };
             }
         };

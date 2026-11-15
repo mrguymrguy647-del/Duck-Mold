@@ -116,6 +116,9 @@ pub struct Studio {
     /// Whether the ground is darkened under the model. In the Studio
     /// only: `render`'s pictures have no shadow.
     pub shadow: bool,
+    /// Whether the model's hit shapes are outlined over it (the Hits
+    /// switch), as `render --colliders` draws them.
+    pub hits: bool,
     /// The part that is selected, by path. When several are, this is
     /// the one selected last: the one the panel shows.
     pub(crate) selected: Option<String>,
@@ -197,6 +200,7 @@ impl Studio {
             grid: true,
             wire: false,
             shadow: true,
+            hits: false,
             selected: None,
             also: Vec::new(),
             hidden: Vec::new(),
@@ -926,6 +930,7 @@ impl Studio {
                 grid: self.grid,
                 wire: self.wire,
                 shadow: self.shadow,
+                hits: self.hits,
             },
             width,
             height,
@@ -953,7 +958,7 @@ impl Studio {
     /// Writes the four-view picture next to the recipe, as `duck-mold
     /// render` does. Says where it went.
     pub fn render_picture(&mut self) -> Result<String, String> {
-        let done = render::render_file(&self.path, None, render::DEFAULT_SIZE, None)
+        let done = render::render_file(&self.path, None, render::DEFAULT_SIZE, None, false)
             .map(|rendered| {
                 self.shorten(&format!(
                     "Wrote {} ({} x {} pixels)",

@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -1999,4 +1999,137 @@ fn save_animation_and_add_animation_from_share_a_walk() {
         ],
     );
     assert_eq!(take.status.code(), Some(2));
+}
+
+#[test]
+fn hit_shapes_are_set_listed_and_drawn() {
+    let folder = folder("cli_hit_shapes");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    let output = edit(&["set-colliders", "parts"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).starts_with("edited tree.toml: every part now has a hit shape"));
+    let output = edit(&["set-collider", "leaves", "sphere", "--radius", "0.9"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(text.contains("colliders = \"parts\"\n"), "{text}");
+    assert!(
+        text.contains("collider = { shape = \"sphere\", radius = 0.9 }"),
+        "{text}"
+    );
+    // A mistake of the command.
+    let output = edit(&["set-collider", "leaves", "ball"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("box, sphere, capsule, none or fitted"));
+    let output = edit(&["set-colliders", "all"]);
+    assert_eq!(output.status.code(), Some(2));
+
+    // inspect: the summary, and every shape with --colliders.
+    let output = run(&folder, &["inspect", "tree.toml"]);
+    assert!(
+        stdout(&output).contains("  hit shapes   each part: 2 (capsule 1, sphere 1)\n"),
+        "{}",
+        stdout(&output)
+    );
+    let report = json(&run(
+        &folder,
+        &["inspect", "tree.toml", "--colliders", "--json"],
+    ));
+    assert_eq!(report["colliders"].as_array().unwrap().len(), 2);
+    assert_eq!(report["colliders"][1]["part"], "leaves");
+    assert_eq!(report["colliders"][1]["radius"], 0.9);
+    assert_eq!(report["colliders"][1]["own"], true);
+    // render: outlined in cyan, the picture different from without.
+    let plain = run(&folder, &["render", "tree.toml", "-o", "plain.png"]);
+    assert!(plain.status.success());
+    let outlined = run(
+        &folder,
+        &["render", "tree.toml", "--colliders", "-o", "outlined.png"],
+    );
+    assert!(outlined.status.success());
+    assert_ne!(
+        std::fs::read(folder.join("plain.png")).unwrap(),
+        std::fs::read(folder.join("outlined.png")).unwrap()
+    );
+    // inspect --animation doesn't take --colliders.
+    let output = run(
+        &folder,
+        &["inspect", "tree.toml", "--animation", "sway", "--colliders"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+
+    // A new recipe starts with hit shapes.
+    let output = run(&folder, &["new", "thing.toml"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("thing.toml")).unwrap();
+    assert!(text.contains("colliders = \"parts\""), "{text}");
+}
+
+/// The examples folder.
+fn examples() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
+}
+
+#[test]
+fn events_are_set_listed_and_taken_away() {
+    let folder = folder("cli_events");
+    std::fs::copy(examples().join("door.toml"), folder.join("door.toml")).unwrap();
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "door.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    // The door already has "opened" at the end of "open".
+    let output = edit(&["set-event", "open", "2", "click"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with(
+            "edited door.toml: key 2 of \"open\", at 0.25 s (the pose \"unlatch\"), has the event \"click\""
+        ),
+        "{}",
+        stdout(&output)
+    );
+    let text = std::fs::read_to_string(folder.join("door.toml")).unwrap();
+    assert!(
+        text.contains("{ at = 0.25, pose = \"unlatch\", event = \"click\" }"),
+        "{text}"
+    );
+    let report = json(&run(
+        &folder,
+        &["inspect", "door.toml", "--animation", "open", "--json"],
+    ));
+    let events: Vec<(String, f64)> = report["events"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|event| {
+            (
+                event["name"].as_str().unwrap().to_owned(),
+                event["at"].as_f64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        events,
+        [("click".to_owned(), 0.25), ("opened".to_owned(), 1.0)]
+    );
+    let output = run(&folder, &["inspect", "door.toml", "--animation", "open"]);
+    assert!(
+        stdout(&output).contains("  events       click at 0.25 s (key 2): once\n"),
+        "{}",
+        stdout(&output)
+    );
+    // Taken away again; one that isn't there is a mistake of the command.
+    let output = edit(&["remove-event", "open", "2", "click"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        std::fs::read_to_string(folder.join("door.toml")).unwrap(),
+        std::fs::read_to_string(examples().join("door.toml")).unwrap()
+    );
+    let output = edit(&["remove-event", "open", "2"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("key 2 of \"open\" has no events to take away"));
 }

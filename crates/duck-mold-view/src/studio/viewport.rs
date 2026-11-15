@@ -45,6 +45,8 @@ const MARKER_BEHIND: Color = Color::rgb(0x4a, 0x7f, 0x7a);
 const MARKER_EDGE: Color = Color::rgb(0x14, 0x18, 0x20);
 /// A face nobody coloured: the same grey a `.glb` gives it.
 const UNCOLOURED: [u8; 3] = [180, 180, 180];
+/// The selected part's hit shape: the hit shapes' cyan, lighter.
+pub const HIT_CHOSEN: Color = Color::rgb(0xc8, 0xf6, 0xff);
 
 /// A picture: pixels, row by row from the top, each `0x00RRGGBB`.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -319,6 +321,8 @@ pub struct Look<'a> {
     pub wire: bool,
     /// Whether the ground is darkened under the model.
     pub shadow: bool,
+    /// Whether the model's hit shapes are outlined over it.
+    pub hits: bool,
     /// The sockets to show.
     pub markers: &'a [Marker],
     /// Which of `markers` the pointer is on.
@@ -553,6 +557,38 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
                 ..Lighting::default()
             });
             canvas.draw_mesh(&mesh, &Transform::default(), &camera);
+        }
+    }
+
+    // The hit shapes, over the model: thin cyan outlines, the selected
+    // parts' lighter. A hidden part's isn't drawn.
+    if look.hits
+        && let Some(model) = look.model
+    {
+        for collider in &model.colliders {
+            let part = model.part(&collider.part);
+            let hidden = part.is_some_and(|part| {
+                !part.faces.is_empty()
+                    && look
+                        .hidden
+                        .iter()
+                        .any(|hidden| hidden.contains(&part.faces.start))
+            });
+            if hidden {
+                continue;
+            }
+            let chosen = look
+                .selected
+                .iter()
+                .any(|selected| selected.path == collider.part);
+            let color = if chosen {
+                HIT_CHOSEN
+            } else {
+                crate::render::HIT_OUTLINE
+            };
+            for (from, to) in collider.shape.outline() {
+                line(&mut canvas, from + offset, to + offset, color);
+            }
         }
     }
 

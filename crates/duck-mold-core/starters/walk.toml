@@ -21,9 +21,9 @@ right_arm = [-20, 0, 0]
 [animations.walk]
 loop = true
 keys = [
-  { at = 0, pose = "walk_left" },
+  { at = 0, pose = "walk_left", event = "footstep" },
   { at = 0.25, pose = "rest" },
-  { at = 0.5, pose = "walk_right" },
+  { at = 0.5, pose = "walk_right", event = "footstep" },
   { at = 0.75, pose = "rest" },
   { at = 1, pose = "walk_left" },
 ]

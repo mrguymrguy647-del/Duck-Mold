@@ -215,6 +215,12 @@ pub fn posed(model: &Model, joints: &[Joint]) -> Model {
             socket.facing = carrier.facing(socket.facing).tidied();
         }
     }
+    // Each hit shape goes with its part; one round the whole model stays.
+    for collider in &mut out.colliders {
+        if !collider.part.is_empty() {
+            collider.shape = collider.shape.moved(&place_of(&collider.part));
+        }
+    }
     out
 }
 
@@ -339,6 +345,8 @@ pub struct Key {
     pub at: f64,
     /// The pose that is reached then: one of the model's, or `rest`.
     pub pose: String,
+    /// The moments it marks, for a game to hear: `footstep`.
+    pub events: Vec<String>,
     /// Where the recipe wrote it.
     pub loc: Loc,
 }

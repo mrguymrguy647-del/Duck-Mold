@@ -18,8 +18,8 @@ use serde::Serialize;
 
 use crate::issue::{Code, Issue, in_file_order};
 use crate::math::{Bounds, Vec3, tidy, vec3};
-use crate::model::{Model, Part};
-use crate::recipe::{Limits, Turns, hex};
+use crate::model::{HitShape, Model, Part};
+use crate::recipe::{HitKind, Limits, Turns, hex};
 use crate::shaping::{Shaped, facing_word};
 
 /// How close two surfaces must be to count as touching, and how deep one
@@ -83,6 +83,18 @@ pub struct Inspection {
     /// and hangs from: only with `--joins` ([`join_report`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub joins: Vec<JoinReport>,
+    /// The model's hit shapes, in short: only for a model that has any,
+    /// or whose recipe asks for them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hit_shapes: Option<HitSummary>,
+    /// The parts with faces that have no hit shape, when the recipe asks
+    /// for hit shapes.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub parts_without_colliders: Vec<String>,
+    /// Every hit shape and its numbers: only with `--colliders`
+    /// ([`collider_report`]).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub colliders: Vec<ColliderReport>,
     /// The names of the model's poses, in the recipe's order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub poses: Vec<String>,
@@ -285,6 +297,131 @@ pub fn limits_json(limits: Limits) -> serde_json::Value {
                 .collect(),
         ),
     }
+}
+
+/// A model's hit shapes, in short.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct HitSummary {
+    /// The recipe's `colliders`: `parts`, `capsule`, `box` or `sphere`;
+    /// `null` when it doesn't say and only some parts have their own.
+    pub setting: Option<String>,
+    /// How many hit shapes there are.
+    pub count: usize,
+    /// How many of each shape.
+    pub boxes: usize,
+    /// How many spheres.
+    pub spheres: usize,
+    /// How many capsules.
+    pub capsules: usize,
+    /// The parts without one because they say so (`collider = "none"`).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub none_by_their_own: Vec<String>,
+}
+
+/// How a hit shape's part is named in a list: `(the whole model)` for one
+/// round the whole model.
+fn collider_name(part: &str) -> &str {
+    if part.is_empty() {
+        "(the whole model)"
+    } else {
+        part
+    }
+}
+
+/// The short report on a model's hit shapes, or `None` for a model with
+/// none whose recipe doesn't ask for them.
+fn hit_summary(model: &Model) -> Option<HitSummary> {
+    if model.hit_setting.is_none() && model.colliders.is_empty() {
+        return None;
+    }
+    let count = |kind: HitKind| {
+        model
+            .colliders
+            .iter()
+            .filter(|collider| collider.shape.kind() == kind)
+            .count()
+    };
+    Some(HitSummary {
+        setting: model.hit_setting.map(|setting| setting.name().to_owned()),
+        count: model.colliders.len(),
+        boxes: count(HitKind::Box),
+        spheres: count(HitKind::Sphere),
+        capsules: count(HitKind::Capsule),
+        none_by_their_own: model
+            .without_collider
+            .iter()
+            .filter(|(_, own)| *own)
+            .map(|(path, _)| path.clone())
+            .collect(),
+    })
+}
+
+/// One hit shape, for `inspect --colliders`: in the model's directions,
+/// with the model at rest (or in the pose asked for).
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ColliderReport {
+    /// The part, by path; empty for one shape round the whole model.
+    pub part: String,
+    /// `box`, `sphere` or `capsule`.
+    pub shape: String,
+    /// Where its middle is.
+    pub center: [f64; 3],
+    /// A box's size along its own three directions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub size: Option<[f64; 3]>,
+    /// A box's three directions, each 1 long.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub directions: Option<[[f64; 3]; 3]>,
+    /// A sphere's or a capsule's radius.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub radius: Option<f64>,
+    /// A capsule's length, from end to end.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub length: Option<f64>,
+    /// The two ends of a capsule's middle line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ends: Option<[[f64; 3]; 2]>,
+    /// True if the part gave it its own numbers.
+    pub own: bool,
+    /// For people: `box 0.6 x 0.7 x 0.36`.
+    pub words: String,
+}
+
+/// Every hit shape of a model, with its numbers.
+pub fn collider_report(model: &Model) -> Vec<ColliderReport> {
+    model
+        .colliders
+        .iter()
+        .map(|collider| {
+            let shape = &collider.shape;
+            let mut report = ColliderReport {
+                part: collider.part.clone(),
+                shape: shape.kind().name().to_owned(),
+                center: shape.center().tidied().to_array(),
+                size: None,
+                directions: None,
+                radius: None,
+                length: None,
+                ends: None,
+                own: collider.own,
+                words: shape.describe(),
+            };
+            match shape {
+                HitShape::Box { axes, half, .. } => {
+                    report.size = Some((*half * 2.0).tidied().to_array());
+                    report.directions =
+                        Some([0, 1, 2].map(|at| axes.column(at).tidied().to_array()));
+                }
+                HitShape::Sphere { radius, .. } => report.radius = Some(tidy(*radius)),
+                HitShape::Capsule { a, b, radius } => {
+                    report.radius = Some(tidy(*radius));
+                    report.length = Some(tidy((*b - *a).length() + 2.0 * radius));
+                    report.ends = Some([a.tidied().to_array(), b.tidied().to_array()]);
+                }
+            }
+            report
+        })
+        .collect()
 }
 
 /// The tree a model moves by: every part, under the part it hangs from,
@@ -638,6 +775,13 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
         sockets: Vec::new(),
         shaped: Vec::new(),
         joins: Vec::new(),
+        hit_shapes: hit_summary(model),
+        parts_without_colliders: model
+            .without_collider
+            .iter()
+            .map(|(path, _)| path.clone())
+            .collect(),
+        colliders: Vec::new(),
         poses: model.poses.iter().map(|pose| pose.name.clone()).collect(),
         animations: model
             .animations
@@ -714,6 +858,12 @@ fn length(metres: f64) -> String {
         Some(shorter) => shorter.to_owned(),
         None => text,
     }
+}
+
+/// A number for people, as short as it can be: `0`, `0.4`, `1.385`.
+fn short(number: f64) -> String {
+    let rounded = (number * 1000.0).round() / 1000.0 + 0.0;
+    format!("{rounded}")
 }
 
 /// A time as a report says it: `0.4 s`.
@@ -948,6 +1098,46 @@ impl Inspection {
                 })
                 .collect(),
         );
+        if let Some(hits) = &self.hit_shapes {
+            let kinds: Vec<String> = [
+                ("box", hits.boxes),
+                ("capsule", hits.capsules),
+                ("sphere", hits.spheres),
+            ]
+            .iter()
+            .filter(|(_, count)| *count > 0)
+            .map(|(name, count)| format!("{name} {count}"))
+            .collect();
+            let kinds = if kinds.is_empty() {
+                String::new()
+            } else {
+                format!(" ({})", kinds.join(", "))
+            };
+            let first = match hits.setting.as_deref() {
+                Some("parts") => format!("each part: {}{kinds}", hits.count),
+                Some(whole) => format!("one {whole} round the whole model"),
+                None => format!(
+                    "{}{kinds}, only on the parts that say their own: the recipe has no \"colliders\"",
+                    hits.count
+                ),
+            };
+            let mut lines = vec![first];
+            if !self.parts_without_colliders.is_empty() {
+                let words: Vec<String> = self
+                    .parts_without_colliders
+                    .iter()
+                    .map(|path| {
+                        if hits.none_by_their_own.contains(path) {
+                            format!("{path} (its own)")
+                        } else {
+                            path.clone()
+                        }
+                    })
+                    .collect();
+                lines.push(format!("none: {}", words.join(", ")));
+            }
+            list("hit shapes", lines);
+        }
         if !self.poses.is_empty() {
             list("poses", vec![self.poses.join(", ")]);
         }
@@ -1010,6 +1200,41 @@ impl Inspection {
                 })
                 .collect();
             list("sockets", rows);
+        }
+        if !self.colliders.is_empty() {
+            out.push_str(&format!(
+                "  {:<12} {}: each one's shape and where its middle is\n",
+                "colliders",
+                self.colliders.len()
+            ));
+            let names = self
+                .colliders
+                .iter()
+                .map(|collider| collider_name(&collider.part).chars().count())
+                .max()
+                .unwrap_or(0);
+            let words = self
+                .colliders
+                .iter()
+                .map(|collider| collider.words.chars().count())
+                .max()
+                .unwrap_or(0);
+            for collider in &self.colliders {
+                let at = collider.center.map(short);
+                out.push_str(&format!(
+                    "    {:<names$}   {:<words$}   at [{}, {}, {}]{}\n",
+                    collider_name(&collider.part),
+                    collider.words,
+                    at[0],
+                    at[1],
+                    at[2],
+                    if collider.own {
+                        "   (its own numbers)"
+                    } else {
+                        ""
+                    }
+                ));
+            }
         }
         if !self.joins.is_empty() {
             out.push_str(&format!(
@@ -1598,6 +1823,10 @@ pub struct AnimationInspection {
     pub smooth: bool,
     /// Its keys, in order.
     pub keys: Vec<KeyReport>,
+    /// Each event on its keys, in the order the animation reaches them:
+    /// when a game hears it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<EventReport>,
     /// How many frames were looked at: thirty a second, and the end.
     pub frames: usize,
     /// The parts it turns or moves.
@@ -1631,6 +1860,21 @@ pub struct KeyReport {
     pub at: f64,
     /// The pose it reaches.
     pub pose: String,
+    /// The events on it, for a game to hear when it is passed.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub events: Vec<String>,
+}
+
+/// One event of an animation, in its report: its name and when it is
+/// heard.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct EventReport {
+    /// Its name: `footstep`.
+    pub name: String,
+    /// Seconds from the animation's start: its key's time.
+    pub at: f64,
+    /// Its key, counted from 1.
+    pub key: usize,
 }
 
 /// How the model's lowest point goes up and down through an animation.
@@ -1826,6 +2070,17 @@ pub fn inspect_animation(
             key: at + 1,
             at: key.at,
             pose: key.pose.clone(),
+            events: key.events.clone(),
+        })
+        .collect();
+    let events: Vec<EventReport> = keys
+        .iter()
+        .flat_map(|key| {
+            key.events.iter().map(|name| EventReport {
+                name: name.clone(),
+                at: key.at,
+                key: key.key,
+            })
         })
         .collect();
     let summary = format!(
@@ -1863,6 +2118,7 @@ pub fn inspect_animation(
         loops: animation.looping,
         smooth: animation.smooth,
         keys,
+        events,
         frames: times.len(),
         moves: moving.parts().into_iter().map(str::to_owned).collect(),
         ground,
@@ -1899,6 +2155,42 @@ fn ground_over_time_words(ground: &GroundOverTime) -> String {
 }
 
 impl AnimationInspection {
+    /// Each event's name with when it is heard, a line for each name:
+    /// `footstep at 0 s (key 1) and 0.4 s (key 3): twice a round`.
+    pub fn event_lines(&self) -> Vec<String> {
+        let mut names: Vec<&str> = Vec::new();
+        for event in &self.events {
+            if !names.contains(&event.name.as_str()) {
+                names.push(&event.name);
+            }
+        }
+        names
+            .into_iter()
+            .map(|name| {
+                let when: Vec<String> = self
+                    .events
+                    .iter()
+                    .filter(|event| event.name == name)
+                    .map(|event| format!("{} (key {})", seconds(event.at), event.key))
+                    .collect();
+                let times = match when.len() {
+                    1 => "once".to_owned(),
+                    2 => "twice".to_owned(),
+                    n => format!("{n} times"),
+                };
+                let listed = match when.as_slice() {
+                    [one] => one.clone(),
+                    [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+                    [] => String::new(),
+                };
+                format!(
+                    "{name} at {listed}: {times}{}",
+                    if self.loops { " a round" } else { "" }
+                )
+            })
+            .collect()
+    }
+
     /// What `render --animation` writes under its strip: `robot,
     /// "walk": 0.8 s, 3 keys, loops`.
     pub fn headline(&self) -> String {
@@ -1961,10 +2253,21 @@ impl AnimationInspection {
             } else {
                 self.keys
                     .iter()
-                    .map(|key| format!("{}  {:<width$}  {}", key.key, seconds(key.at), key.pose))
+                    .map(|key| {
+                        let line =
+                            format!("{}  {:<width$}  {}", key.key, seconds(key.at), key.pose);
+                        if key.events.is_empty() {
+                            line
+                        } else {
+                            format!("{line}   event: {}", key.events.join(", "))
+                        }
+                    })
                     .collect()
             },
         );
+        if !self.events.is_empty() {
+            list("events", self.event_lines());
+        }
         list(
             "moves",
             vec![if self.moves.is_empty() {

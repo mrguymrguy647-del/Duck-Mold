@@ -56,6 +56,21 @@ fn robot() -> Harness<'static, StudioApp> {
     screen
 }
 
+/// Rolls the wheel over the properties panel, down to its end.
+fn scroll_panel(screen: &mut Harness<'static, StudioApp>) {
+    let over = egui::pos2(1140.0, 300.0);
+    screen.hover_at(over);
+    screen.step();
+    screen.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -2000.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+    screen.run_steps(4);
+}
+
 /// A wall with a framed window, shaped from one box.
 const WALL: &str = r##"version = 0
 name = "wall"
@@ -593,6 +608,31 @@ fn the_screens_look_as_they_did() {
         }
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "timeline"));
+        // The walk: a footstep flag under its first and third keys; then
+        // the third key's menu, with its event.
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.choose_animation(Some("walk"));
+            studio.set_time(0.3);
+        }
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "timeline-events"));
+        let third = screen.state().timeline().key_on_screen(0.4).unwrap();
+        right_click_at(&mut screen, third);
+        screen.run_steps(2);
+        wrong.extend(check(&mut screen, "timeline-event-menu"));
+        screen.key_press(egui::Key::Escape);
+        screen.run_steps(2);
+        // Zoomed in three times on the walk's middle, scrolled there.
+        screen.get_by_label("+").click();
+        screen.run_steps(2);
+        screen.get_by_label("+").click();
+        screen.run_steps(2);
+        screen.get_by_label("+").click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "timeline-zoomed"));
+        screen.get_by_label("Fit").click();
+        screen.run_steps(2);
     }
 
     // Play in Part mode: the robot waving, part way through.
@@ -617,6 +657,45 @@ fn the_screens_look_as_they_did() {
         screen.get_by_label("Animations").click();
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "animations"));
+    }
+
+    // Hit shapes: the Hits switch on, the head selected with its Hit
+    // shape section; nothing selected, with the model's line; and a
+    // part with numbers of its own.
+    {
+        let mut screen = robot();
+        screen.get_by_label("Hits").click();
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(3);
+        scroll_panel(&mut screen);
+        wrong.extend(check(&mut screen, "hits"));
+        screen.state_mut().studio_mut().unwrap().select(None);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "hits-model"));
+    }
+    {
+        let recipe = copy_of("robot.toml", "pictures_hit_own");
+        let text = std::fs::read_to_string(&recipe).unwrap().replace(
+            "collider = \"sphere\"   # a ball round the head, rather than a box",
+            "collider = { shape = \"capsule\", radius = 0.17, length = 0.46, along = \"x\" }",
+        );
+        std::fs::write(&recipe, text).unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        screen.state_mut().studio_mut().unwrap().hits = true;
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(3);
+        scroll_panel(&mut screen);
+        wrong.extend(check(&mut screen, "hits-own"));
     }
 
     assert!(

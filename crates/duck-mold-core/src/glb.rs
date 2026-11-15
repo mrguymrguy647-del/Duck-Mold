@@ -282,6 +282,38 @@ struct DuckMold {
     /// The named poses, so that a game can hold one.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     poses: Vec<PoseEntry>,
+    /// The hit shapes, where they are with the model at rest, in glTF's
+    /// directions like the corners, each with the object that carries
+    /// it: when that part turns, its shape turns with it.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    colliders: Vec<ColliderEntry>,
+}
+
+/// One hit shape: its part, the object that carries it (0 is the model
+/// itself), and its shape.
+#[derive(Serialize)]
+struct ColliderEntry {
+    part: String,
+    node: usize,
+    shape: &'static str,
+    /// A box's or a sphere's middle.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    center: Option<[f64; 3]>,
+    /// A box's three directions, each 1 long.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    axes: Option<[[f64; 3]; 3]>,
+    /// How far a box reaches from its middle along each of its
+    /// directions.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    half: Option<[f64; 3]>,
+    /// A sphere's or a capsule's radius.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    radius: Option<f64>,
+    /// The two ends of a capsule's middle line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    a: Option<[f64; 3]>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    b: Option<[f64; 3]>,
 }
 
 /// What Duck tools want to know of an animation.
@@ -297,6 +329,16 @@ struct AnimationEntry {
     looping: bool,
     /// How long it lasts, in seconds.
     length: f64,
+    /// The moments its keys mark, in the order they are reached.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    events: Vec<EventEntry>,
+}
+
+/// One event of an animation: a name, and the time of its key.
+#[derive(Serialize)]
+struct EventEntry {
+    name: String,
+    at: f64,
 }
 
 /// A named pose: the objects that aren't as they are at rest.
@@ -331,6 +373,46 @@ struct SocketEntry {
 /// a zero from being written `-0.0`).
 fn to_gltf(v: Vec3) -> [f64; 3] {
     [-v.x + 0.0, v.y + 0.0, v.z + 0.0]
+}
+
+/// A hit shape as the file keeps it.
+fn collider_entry(
+    collider: &crate::model::Collider,
+    node_of: &dyn Fn(&str) -> usize,
+) -> ColliderEntry {
+    use crate::model::HitShape;
+    let mut entry = ColliderEntry {
+        node: if collider.part.is_empty() {
+            0
+        } else {
+            node_of(&collider.part)
+        },
+        part: collider.part.clone(),
+        shape: collider.shape.kind().name(),
+        center: None,
+        axes: None,
+        half: None,
+        radius: None,
+        a: None,
+        b: None,
+    };
+    match collider.shape {
+        HitShape::Box { center, axes, half } => {
+            entry.center = Some(to_gltf(center));
+            entry.axes = Some([0, 1, 2].map(|at| to_gltf(axes.column(at).tidied())));
+            entry.half = Some(half.tidied().to_array());
+        }
+        HitShape::Sphere { center, radius } => {
+            entry.center = Some(to_gltf(center));
+            entry.radius = Some(tidy(radius));
+        }
+        HitShape::Capsule { a, b, radius } => {
+            entry.a = Some(to_gltf(a));
+            entry.b = Some(to_gltf(b));
+            entry.radius = Some(tidy(radius));
+        }
+    }
+    entry
 }
 
 #[derive(Serialize)]
@@ -673,6 +755,11 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
                     .collect(),
                 animations: moving.entries,
                 poses: moving.poses,
+                colliders: model
+                    .colliders
+                    .iter()
+                    .map(|collider| collider_entry(collider, &node_of))
+                    .collect(),
             },
         },
     };
@@ -905,6 +992,16 @@ fn motions(
             animation: place_in_file,
             looping: animation.looping,
             length: animation.length(),
+            events: animation
+                .keys
+                .iter()
+                .flat_map(|key| {
+                    key.events.iter().map(|name| EventEntry {
+                        name: name.clone(),
+                        at: key.at,
+                    })
+                })
+                .collect(),
         });
     }
 
@@ -1331,6 +1428,9 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         poses: Vec::new(),
         animations: Vec::new(),
         zero: Vec3::ZERO,
+        hit_setting: None,
+        colliders: Vec::new(),
+        without_collider: Vec::new(),
     })
 }
 
@@ -1412,6 +1512,7 @@ fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Fa
             parent: name.rsplit_once('/').map(|(outer, _)| outer.to_owned()),
             axes: Mat3::IDENTITY,
             limits: crate::recipe::Limits::Free,
+            collider: crate::recipe::ColliderDef::Unset,
             carried: Vec::new(),
             sockets: Vec::new(),
             bounds: Bounds::around(

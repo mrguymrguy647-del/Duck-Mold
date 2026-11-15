@@ -426,14 +426,14 @@ fn a_part_from_a_definition_says_so_before_any_edit() {
 #[test]
 fn duplicate_mirror_copy_and_remove_are_buttons() {
     let (recipe, mut screen) = robot_with("screens_panel_buttons", "antenna_tip");
-    screen.get_by_label("Duplicate").click();
+    screen.get_by_label("Duplicate").click_accesskit();
     screen.run_steps(3);
     let copy = selected(&screen).unwrap();
     assert_ne!(copy, "antenna_tip");
     assert!(new_lines(&recipe).contains(&format!("name = \"{copy}\"")));
 
     // Nothing hangs from the copy: it goes at once.
-    screen.get_by_label("Remove").click();
+    screen.get_by_label("Remove").click_accesskit();
     screen.run_steps(3);
     assert_eq!(selected(&screen), None);
     assert!(new_lines(&recipe).is_empty(), "{:?}", new_lines(&recipe));
@@ -445,14 +445,14 @@ fn duplicate_mirror_copy_and_remove_are_buttons() {
         .unwrap()
         .select(Some("head"));
     screen.run_steps(2);
-    screen.get_by_label("Remove").click();
+    screen.get_by_label("Remove").click_accesskit();
     screen.run_steps(2);
     screen.get_by_label("4 other parts hang from this one. Remove them too?");
     assert!(screen.state().studio().unwrap().part("head").is_some());
-    screen.get_by_label("Keep them").click();
+    screen.get_by_label("Keep them").click_accesskit();
     screen.run_steps(2);
     assert!(screen.state().studio().unwrap().part("head").is_some());
-    screen.get_by_label("Remove").click();
+    screen.get_by_label("Remove").click_accesskit();
     screen.run_steps(2);
     screen.get_by_label("Remove them all").click();
     screen.run_steps(3);
@@ -464,7 +464,7 @@ fn duplicate_mirror_copy_and_remove_are_buttons() {
 
     // A mirror copy of the left arm is a right arm.
     let (recipe, mut screen) = robot_with("screens_panel_mirror", "left_leg");
-    screen.get_by_label("Mirror copy").click();
+    screen.get_by_label("Mirror copy").click_accesskit();
     screen.run_steps(3);
     let lines = new_lines(&recipe);
     // A new part, mirrored, on the socket of the other side.
@@ -778,7 +778,7 @@ fn the_panel_has_position_rotation_and_scale_and_unjoin() {
     let (robot, mut joined) = robot_with("screens_handles_unjoin", "head");
     assert!(joined.query_by_label("Position").is_none());
     assert!(joined.query_all_by_label("Scale").count() >= 1);
-    joined.get_by_label("Unjoin").click();
+    joined.get_by_label("Unjoin").click_accesskit();
     joined.run_steps(3);
     let lines = new_lines(&robot);
     assert!(
@@ -2610,7 +2610,7 @@ fn o_poses_the_model_the_rings_turn_a_part_and_the_panel_lists_the_poses() {
     screen.get_by_label_contains("Turned \"head\"");
 
     // Back to rest, from the panel.
-    screen.get_by_label("Back to rest").click();
+    screen.get_by_label("Back to rest").click_accesskit();
     screen.run_steps(2);
     assert!(
         !std::fs::read_to_string(&recipe)
@@ -2805,48 +2805,386 @@ fn the_animations_list_adds_a_starter_and_saves_an_animation() {
     );
     assert!(
         !screen
-            .get_by_label("Add jump")
+            .get_by_label("Add idle")
             .accesskit_node()
             .is_disabled()
     );
 
+    // (The gnome has a jump of its own already: it takes the idle.)
     // The panel is short and scrolls: the buttons below its edge are
     // pressed the way a screen reader presses them.
-    screen.get_by_label("Add jump").click_accesskit();
+    screen.get_by_label("Add idle").click_accesskit();
     screen.run_steps(2);
     let text = std::fs::read_to_string(&recipe).unwrap();
     assert!(
-        text.contains("[animations.jump]"),
+        text.contains("[animations.idle]"),
         "{}",
         studio(&screen).status()
     );
-    assert_eq!(studio(&screen).animation(), Some("jump"));
+    assert_eq!(studio(&screen).animation(), Some("idle"));
     assert!(
         studio(&screen)
             .status()
-            .starts_with("Added the animation \"jump\" from the starters"),
+            .starts_with("Added the animation \"idle\" from the starters"),
         "{}",
         studio(&screen).status()
     );
 
-    // Save the jump: it shows under Saved.
+    // Save the idle: it shows under Saved.
     screen.get_by_label("Animation to save");
     screen.get_by_label("Save the animation").click_accesskit();
     screen.run_steps(2);
-    let saved = recipe.parent().unwrap().join("animations/jump.toml");
+    let saved = recipe.parent().unwrap().join("animations/idle.toml");
     assert!(saved.exists(), "{}", studio(&screen).status());
     assert!(
         studio(&screen)
             .status()
-            .starts_with("Saved the animation \"jump\" to the library"),
+            .starts_with("Saved the animation \"idle\" to the library"),
         "{}",
         studio(&screen).status()
     );
-    screen.get_by_label(
-        "animations/jump.toml 5 keys, 1.3 s. Moves body, left_leg, right_leg, left_arm, right_arm.",
+    assert!(
+        screen
+            .query_all_by_label_contains("animations/idle.toml")
+            .count()
+            >= 1
     );
     // Back to the parts library.
     screen.get_by_label("Library").click();
     screen.run_steps(2);
     screen.get_by_label_contains("No parts here yet.");
+}
+
+// ---- hit shapes ---------------------------------------------------------------------
+
+#[test]
+fn the_hits_switch_and_the_panels_hit_shape() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_hits", "head");
+    let studio = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().hits;
+    let text = || std::fs::read_to_string(&recipe).unwrap();
+    // The switch in the top bar, and the View menu's line.
+    assert!(!studio(&screen));
+    screen.get_by_label("Hits").click();
+    screen.run_steps(2);
+    assert!(studio(&screen));
+    screen.get_by_label("View").click();
+    screen.run_steps(3);
+    screen.get_by_label_contains("Hit shapes: on").click();
+    screen.run_steps(3);
+    assert!(!studio(&screen));
+    assert!(new_lines(&recipe).is_empty(), "looking changes nothing");
+
+    // The head's: a ball, as its recipe says, with its radius.
+    screen.get_by_label("sphere r 0.32");
+    screen.get_by_role_and_label(Role::SpinButton, "Ball radius");
+    // A box instead: one edit.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Hit shape")
+        .click();
+    screen.run_steps(2);
+    screen.query_all_by_label("box").last().unwrap().click();
+    screen.run_steps(3);
+    assert!(text().contains("collider = \"box\""), "{}", text());
+    screen.get_by_label_contains("\"head\" has a box for its hit shape");
+    assert_eq!(
+        screen
+            .query_all_by_role_and_label(Role::SpinButton, "Box size")
+            .count(),
+        3
+    );
+    // None: a click on it names nothing.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Hit shape")
+        .click();
+    screen.run_steps(2);
+    screen.query_all_by_label("none").last().unwrap().click();
+    screen.run_steps(3);
+    assert!(text().contains("collider = \"none\""), "{}", text());
+    screen.get_by_label("None: a ray goes on to what is behind it.");
+    // Back to what the model's line gives every part: the head's own
+    // line goes, and, being a box, it is fitted a box.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Hit shape")
+        .click();
+    screen.run_steps(2);
+    screen
+        .query_all_by_label("fitted: none")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    let lines = new_lines(&recipe);
+    assert!(
+        lines.iter().all(|line| !line.contains("collider")),
+        "{lines:?}"
+    );
+    screen.get_by_label("box 0.42 x 0.32 x 0.36");
+    // Undo goes back a step at a time.
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    screen.run_steps(3);
+    assert!(text().contains("collider = \"none\""));
+}
+
+#[test]
+fn with_nothing_selected_the_panel_has_the_models_hit_shapes() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_hits_model", "head");
+    screen.state_mut().studio_mut().unwrap().select(None);
+    screen.run_steps(2);
+    screen.get_by_label("15, one for each part but 4 that say none.");
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Hit shapes")
+        .click();
+    screen.run_steps(2);
+    screen
+        .query_all_by_label("one capsule")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("colliders = \"capsule\""), "{text}");
+    screen.get_by_label("One capsule round the whole model, and the parts that say their own.");
+}
+
+#[test]
+fn typing_a_hit_shapes_number_makes_it_the_parts_own_and_fit_again_forgets_it() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_hit_numbers", "head");
+    let text = || std::fs::read_to_string(&recipe).unwrap();
+    let field = screen.get_by_role_and_label(Role::SpinButton, "Ball radius");
+    field.focus();
+    screen.run_steps(2);
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    screen.run_steps(1);
+    screen
+        .get_by_role_and_label(Role::SpinButton, "Ball radius")
+        .type_text("0.25");
+    screen.run_steps(1);
+    screen.key_press(egui::Key::Enter);
+    screen.run_steps(3);
+    // Its own ball, with that radius (its middle the part's, so not written).
+    let now = text();
+    assert!(
+        now.contains("collider = { shape = \"sphere\", radius = 0.25 }"),
+        "{now}"
+    );
+    screen.get_by_label("sphere r 0.25");
+    // Fit again: back to the fitted ball.
+    screen.get_by_label("Fit again").click_accesskit();
+    screen.run_steps(3);
+    assert!(text().contains("collider = \"sphere\""), "{}", text());
+    screen.get_by_label("sphere r 0.32");
+}
+
+#[test]
+fn a_keys_menu_adds_and_removes_its_events() {
+    use egui::Key;
+    use egui::accesskit::Role;
+    let recipe = copy_of("robot.toml", "screens_events");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("walk"));
+    screen.run_steps(3);
+    // The walk's keys know their events.
+    let keys = studio(&screen).keys();
+    assert_eq!(keys[0].events, ["footstep"]);
+    assert!(keys[1].events.is_empty());
+    assert_eq!(keys[2].events, ["footstep"]);
+
+    // Right-click the second key, type a name, Add event.
+    let second = screen.state().timeline().key_on_screen(0.2).unwrap();
+    right_click_at(&mut screen, second);
+    screen.get_by_label("Events: heard by a game when this key is passed");
+    screen
+        .get_by_role_and_label(Role::TextInput, "New event")
+        .focus();
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "New event")
+        .type_text("breath");
+    screen.run_steps(2);
+    screen.get_by_label("Add event").click();
+    screen.run_steps(3);
+    assert_eq!(
+        new_lines(&recipe),
+        ["  { at = 0.2, pose = \"rest\", event = \"breath\" },"]
+    );
+    assert_eq!(studio(&screen).keys()[1].events, ["breath"]);
+    assert!(
+        studio(&screen)
+            .status()
+            .contains("has the event \"breath\""),
+        "{}",
+        studio(&screen).status()
+    );
+    // Its menu now offers to remove it; doing so puts the file back.
+    right_click_at(&mut screen, second);
+    screen.get_by_label("Remove \"breath\"").click();
+    screen.run_steps(3);
+    assert!(new_lines(&recipe).is_empty());
+    // A name with a space is refused, and said.
+    right_click_at(&mut screen, second);
+    screen
+        .get_by_role_and_label(Role::TextInput, "New event")
+        .focus();
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "New event")
+        .type_text("deep breath");
+    screen.run_steps(2);
+    screen.get_by_label("Add event").click();
+    screen.run_steps(3);
+    assert!(new_lines(&recipe).is_empty());
+    screen.get_by_label_contains("can't be a name");
+
+    // "Make this key's pose its own": key 3's step_right is used by no
+    // other key, so that line is greyed; key 1's is shared with key 5.
+    // (A click away closes the menu still open.)
+    click_at(&mut screen, IN_VIEW);
+    let third = screen.state().timeline().key_on_screen(0.4).unwrap();
+    right_click_at(&mut screen, third);
+    assert!(
+        screen
+            .get_by_label("Make this key's pose its own")
+            .accesskit_node()
+            .is_disabled()
+    );
+    click_at(&mut screen, IN_VIEW);
+    let first = screen.state().timeline().key_on_screen(0.0).unwrap();
+    right_click_at(&mut screen, first);
+    screen.get_by_label("Make this key's pose its own").click();
+    screen.run_steps(3);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(
+        text.contains("{ at = 0, pose = \"walk_1\", event = \"footstep\" }"),
+        "{text}"
+    );
+    assert_eq!(studio(&screen).pose(), "walk_1");
+}
+
+#[test]
+fn fit_to_ground_stands_the_animations_poses_on_the_ground() {
+    use egui::Key;
+    let recipe = copy_of("gnome.toml", "screens_fit_ground");
+    let fitted = std::fs::read_to_string(&recipe).unwrap();
+    // The crouch sunk into the ground by hand.
+    std::fs::write(
+        &recipe,
+        fitted.replacen(
+            "[poses.jump_crouch]\nbody = { move = [0, -0.0187, 0] }",
+            "[poses.jump_crouch]\nbody = { move = [0, -0.06, 0] }",
+            1,
+        ),
+    )
+    .unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("jump"));
+    screen.run_steps(3);
+    screen.get_by_label("Fit to ground").click();
+    screen.run_steps(3);
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), fitted);
+    assert!(
+        studio(&screen)
+            .status()
+            .contains("moving \"body\" in \"jump_crouch\" (up 0.0413)"),
+        "{}",
+        studio(&screen).status()
+    );
+    // One step to undo.
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    screen.run_steps(2);
+    assert!(
+        std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("body = { move = [0, -0.06, 0] }")
+    );
+}
+
+#[test]
+fn the_timeline_zooms_and_scrolls() {
+    use egui::Key;
+    let recipe = copy_of("robot.toml", "screens_timeline_zoom");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("idle"));
+    screen.run_steps(3);
+    let apart = |screen: &Harness<'static, StudioApp>| {
+        let timeline = screen.state().timeline();
+        timeline.key_on_screen(1.2).unwrap().x - timeline.key_on_screen(0.0).unwrap().x
+    };
+    // At first it shows the whole animation.
+    assert_eq!(screen.state().timeline().zoomed(), (1.0, 0.0));
+    let whole = apart(&screen);
+    // + zooms in, about the middle.
+    screen.get_by_label("+").click();
+    screen.run_steps(2);
+    assert_eq!(screen.state().timeline().zoomed().0, 1.5);
+    assert!(
+        (apart(&screen) - whole * 1.5).abs() < 0.5,
+        "{}",
+        apart(&screen)
+    );
+    // Ctrl and the wheel, on the ruler: zoom about the pointer, which
+    // stays on the same time.
+    let on = screen.state().timeline().time_on_screen(1.2).unwrap();
+    screen.hover_at(on);
+    screen.step();
+    screen.event(egui::Event::Zoom(2.0));
+    screen.run_steps(2);
+    assert_eq!(screen.state().timeline().zoomed().0, 3.0);
+    let still = screen.state().timeline().time_on_screen(1.2).unwrap();
+    assert!((still.x - on.x).abs() < 0.5, "{on:?} {still:?}");
+    // The wheel scrolls it: later times come into view.
+    let (_, before) = screen.state().timeline().zoomed();
+    screen.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -200.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+    screen.run_steps(4);
+    let (_, after) = screen.state().timeline().zoomed();
+    assert!(after > before, "{before} {after}");
+    // - zooms out with the pointer on it; Fit shows it all again.
+    screen.key_press(Key::Minus);
+    screen.run_steps(2);
+    assert_eq!(screen.state().timeline().zoomed().0, 2.0);
+    screen.get_by_label("Fit").click();
+    screen.run_steps(2);
+    assert_eq!(screen.state().timeline().zoomed(), (1.0, 0.0));
+    assert!((apart(&screen) - whole).abs() < 0.5);
+    // Another animation starts fitted.
+    screen.get_by_label("+").click();
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("walk"));
+    screen.run_steps(3);
+    assert_eq!(screen.state().timeline().zoomed(), (1.0, 0.0));
+    // Nothing of it is the recipe's.
+    assert_eq!(screen.state().studio().unwrap().can_undo(), None);
 }

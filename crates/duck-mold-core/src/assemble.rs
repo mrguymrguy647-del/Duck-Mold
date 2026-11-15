@@ -27,8 +27,8 @@ use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
 use crate::model::{Face, Model, Part, PartKind, Socket};
 use crate::motion::{self, Animation, Joint, Key, Pose};
 use crate::recipe::{
-    AnimationDef, Axis, Define, Limits, Loc, PaletteColor, PartDef, Placement, PoseDef, REST,
-    Recipe, Shape, Side, SocketDef, SocketKind, SocketRef, Source, hex, rgb_of,
+    AnimationDef, Axis, ColliderDef, Define, Limits, Loc, PaletteColor, PartDef, Placement,
+    PoseDef, REST, Recipe, Shape, Side, SocketDef, SocketKind, SocketRef, Source, hex, rgb_of,
 };
 use crate::shapes::{self, Landing, Polygon};
 use crate::shaping::{self, Shaped};
@@ -115,7 +115,20 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
         poses: Vec::new(),
         animations: Vec::new(),
         zero: body.zero,
+        hit_setting: recipe.colliders,
+        colliders: Vec::new(),
+        without_collider: Vec::new(),
     };
+    let fitted = crate::hit::fit(&model, recipe.colliders);
+    for (path, message) in fitted.warnings {
+        let loc = model
+            .part(&path)
+            .map(|part| part.loc.clone())
+            .unwrap_or_default();
+        assembler.issues.push(loc.warning(Code::HitShape, message));
+    }
+    model.colliders = fitted.colliders;
+    model.without_collider = fitted.without;
     model.poses = poses(&model, &recipe.poses, assembler.issues);
     model.animations = animations(&model, &recipe.animations, assembler.issues);
     if assembler.issues.iter().any(Issue::is_error) {
@@ -209,6 +222,7 @@ fn animations(model: &Model, written: &[AnimationDef], issues: &mut Vec<Issue>) 
                 keys.push(Key {
                     at: key.at,
                     pose: key.pose.clone(),
+                    events: key.events.clone(),
                     loc: key.loc.clone(),
                 });
             }
@@ -241,6 +255,22 @@ fn animations(model: &Model, written: &[AnimationDef], issues: &mut Vec<Issue>) 
                         animation.name, first.pose, last.pose, first.pose
                     ),
                 ));
+            }
+            // A loop's last key and its first are the same moment: an
+            // event on both is heard twice there.
+            if animation.looping && built.keys.len() >= 2 {
+                let (first, last) = (&built.keys[0], &built.keys[built.keys.len() - 1]);
+                for event in last.events.iter().filter(|event| first.events.contains(event)) {
+                    issues.push(last.loc.warning(
+                        Code::EventTwice,
+                        format!(
+                            "the animation \"{}\" loops, and its first and last keys both have the event \"{event}\": where the loop joins they are the same moment, so it would be heard twice. Keep it on one of them: remove-event {} {} {event}",
+                            animation.name,
+                            animation.name,
+                            built.keys.len()
+                        ),
+                    ));
+                }
             }
             built
         })
@@ -314,6 +344,8 @@ struct Node {
     place: Transform,
     /// How far it may turn when the model is posed.
     limits: Limits,
+    /// Its own hit shape, if it (or its definition) says one.
+    collider: ColliderDef,
     body: Body,
 }
 
@@ -1404,6 +1436,15 @@ impl Assembler<'_> {
                     shift: Vec3::ZERO,
                 }),
                 limits: parts[at].limits,
+                // The part's own word, or else its definition's.
+                collider: match (&parts[at].collider, &parts[at].source) {
+                    (ColliderDef::Unset, Source::Use(named)) => scope
+                        .defines
+                        .iter()
+                        .find(|define| define.name == named.text)
+                        .map_or(ColliderDef::Unset, |define| define.part.collider.clone()),
+                    (own, _) => own.clone(),
+                },
                 body,
             })
             .collect()
@@ -1719,6 +1760,7 @@ fn emit(
                 parent,
                 axes: outer.turn,
                 limits: node.limits,
+                collider: node.collider.clone(),
                 sockets: node.body.all_sockets(&place),
                 carried,
                 bounds: Bounds::around(

@@ -513,6 +513,9 @@ Warnings (the model is still built; exit code 0):
 | `floating` | A part touches nothing. |
 | `limit_broken` | A pose turns a part past its `limits`, or moves a part that is `"fixed"`. The model still builds. |
 | `loop_jumps` | An animation loops and doesn't end on the pose it starts with. The model still builds. |
+| `hit_shape` | A part's hit shape with numbers of its own leaves most of the part outside it, or is more than 8 times as big. |
+| `unknown_event` | `remove-event` names an event the key doesn't have. |
+| `event_twice` | A looping animation has the same event on its first and last key: where the loop joins they are the same moment, so a game would hear it twice. Keep it on one of them. |
 | `unknown_pose` | A key, or a command, names a pose the recipe doesn't have. `rest` is always one. |
 | `unknown_animation` | A command names an animation the recipe doesn't have. |
 | `hidden` | A part is entirely inside another. |
@@ -616,6 +619,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
+| `duck-mold edit <recipe> set-colliders <parts\|capsule\|box\|sphere\|none>` | The model's hit shapes (section 11, "Hit shapes"): `parts` fits one to every part; `capsule`, `box` or `sphere` puts one round the whole model; `none` takes the line away. |
+| `duck-mold edit <recipe> set-collider <part> <box\|sphere\|capsule\|none\|fitted>` | A part's own hit shape: a shape fitted to it, `none` (no hit shape), or `fitted` (take its own away: it follows `colliders`). `--size x,y,z`, `--radius r`, `--length l` (end to end), `--center x,y,z` and `--along x\|y\|z` give it numbers of its own; any not given keep the fitted shape's. |
 | `duck-mold edit <recipe> set-limits <part> --x <low,high> --y ... --z ...` | Says how far a part may turn when the model is posed (section 11). Each of `--x`, `--y`, `--z` takes two angles (`-30,40`), `free` (any amount) or `none` (not that way); directions not given stay as they are. `--fixed`: it never turns or moves. `--none`: no limits again. |
 | `duck-mold edit <recipe> set-pose <pose> <part> --turn x,y,z` | Turns a part in a pose, in degrees about its pivot (section 11); `--move x,y,z` slides it, in metres. Makes the pose if it isn't there. `--rest` puts the part back at rest in that pose. |
 | `duck-mold edit <recipe> add-pose <name>` | A new pose with every part at rest; `--from <pose>` makes it a copy of another. |
@@ -627,6 +632,9 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> move-key <animation> <number> --at <seconds>` | Gives a key another time. Keys are numbered from 1, as `inspect --animation` prints them. Key 1 stays at 0. |
 | `duck-mold edit <recipe> set-key <animation> <number> --pose <pose>` | Gives a key another pose. |
 | `duck-mold edit <recipe> remove-key <animation> <number>` | Removes a key. If it is the first, the keys after it move earlier so the animation still starts at 0. |
+| `duck-mold edit <recipe> set-event <animation> <number> <name>` | Puts an event on a key: a name a game hears each time the animation passes that key (`footstep`). A key keeps the events it had; one already there is refused. |
+| `duck-mold edit <recipe> remove-event <animation> <number> [<name>]` | Takes an event off a key; without a name, every event on it. |
+| `duck-mold edit <recipe> fit-ground <animation>` | Stands each pose the animation's keys use on the ground: the body (the part every other part hangs from) moves up or down in it until the lowest point touches. Only that number changes. A pose that lifts the body (a leap) is left alone; `--all` fits it too; `--part <part>` says which part to move when more than one has others hanging from it. The summary names other animations that use the same poses, and how far it still sinks between keys. |
 | `duck-mold edit <recipe> set-animation <animation> --loop true\|false --smooth true\|false --length <seconds>` | Any of the three. `--length` scales every key's time: the whole animation gets faster or slower. |
 | `duck-mold edit <recipe> rename-animation <animation> <new name>` | Renames an animation where it stands. |
 | `duck-mold edit <recipe> remove-animation <animation>` | Removes an animation. Its poses stay. |
@@ -690,12 +698,21 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   Pull arrow is a `pull`, of its Inset knob an `inset`, and the panel's
   Changes list is `set-change` and `remove-change`. Read the result
   with `inspect --faces`.
+- In the Studio, the panel's Hit shape list and numbers are
+  `set-collider` (the list's first line, what the model's line gives,
+  is `set-collider <part> fitted`), Fit again is `set-collider <part>
+  <shape>` with no numbers, and with nothing selected the panel's Hit
+  shapes list is `set-colliders`. The Hits switch only draws them.
 - In the Studio, Pose mode (O) turns parts by their rings: a drag is
   one `set-pose`, and the poses list's New, Copy, Mirror, Rename and
   Remove are `add-pose`, `add-pose --from`, `mirror-pose`,
   `rename-pose` and `remove-pose`. The Limits in the panel are
   `set-limits`. Its timeline's changes are `move-key`, `set-key`,
-  `remove-key`, `add-key`, `set-animation` and `add-animation`; a turn
+  `remove-key`, `add-key`, `set-event`, `remove-event` (a key's menu:
+  Add event, and Remove for each), `fit-ground` (Fit to ground),
+  "Make this key's pose its own" (`add-pose <animation>_<key> --from
+  <pose>` and `set-key`, together: run both),
+  `set-animation` and `add-animation`; a turn
   between two keys is `add-pose`, a `set-pose` for every part the
   animation moves, and `add-key`, together. The library's Animations
   list: Add is `add-animation --from` (or `--starter`) with
@@ -918,6 +935,48 @@ Renaming a pose renames it in every key that uses it. A pose that keys
 use can't be removed from under them: change the keys, or
 `remove-pose <pose> --with-keys`.
 
+**Events: moments a game hears.** A key can carry an **event**, a name
+that marks the moment it is reached: a footstep, a jump leaving the
+ground, a door fully open. A game asks for the events passed since the
+last frame and plays a sound or makes a puff then. Events don't change
+the motion.
+
+```toml
+keys = [
+  { at = 0, pose = "step_left", event = "footstep" },
+  { at = 0.2, pose = "rest" },
+  { at = 0.4, pose = "step_right", event = "footstep" },
+  { at = 0.6, pose = "rest" },
+  { at = 0.8, pose = "step_left" },   # no footstep here: see below
+]
+```
+
+- `event` is one name, or a list: `event = ["footstep", "dust"]`.
+  Names are letters, digits, `_` and `-`. The same name twice on one
+  key is an error.
+- **On a loop, the last key and the first are the same moment.** An
+  event on both is heard twice where the loop joins: the warning
+  `event_twice`. Put it on one of them (the first, as above).
+- `set-event walk 3 footstep` and `remove-event walk 3 [footstep]`,
+  with keys numbered from 1 as `inspect --animation` prints them.
+  Moving a key keeps its events; copying or saving an animation copies
+  them.
+- `inspect --animation walk` shows each key's events and a line saying
+  when each is heard:
+
+```text
+  keys         1  0 s    step_left   event: footstep
+               2  0.2 s  rest
+               3  0.4 s  step_right   event: footstep
+               ...
+  events       footstep at 0 s (key 1) and 0.4 s (key 3): twice a round
+```
+
+  With `--json`: each key has `events` (left out when it has none), and
+  the report has `events`: each `name`, `at` and `key`, in order.
+- The starters have them: `walk` a `footstep` on each step, `jump`
+  `takeoff` and `land`, `open` `opened` at its end.
+
 ### Sharing animations
 
 An animation only names parts. So a walk made on one model works on any
@@ -953,6 +1012,12 @@ duck-mold edit duck.toml add-animation hello --from robot.toml --take wave
   use that. The summary says which.
 - **Missing parts**: refused, naming them. `--skip-missing` takes the
   rest and says what it left out.
+- **Fit it to the model's legs**: `fit-ground <animation>` stands each
+  key's pose on the ground (shorter legs sink into it, longer ones
+  float). Turn the feet flat first if the legs tip them (as below):
+  fitting a toe that digs in lifts the whole body. It leaves a leap
+  alone. Between keys a fast turn can still dip a little: the summary
+  says how much; keep it under half a centimetre.
 - **Turns are about each part's own axes**, so check the result: render
   a strip. A starter only knows the six names: feet that stick out of a
   leg can dig in as it swings (the robot's own walk turns its feet back;
@@ -960,6 +1025,43 @@ duck-mold edit duck.toml add-animation hello --from robot.toml --take wave
 - The file `save-animation` writes: a comment line, `version`, `name`,
   the poses it uses, the animation. Any recipe with animations can be
   copied from too.
+
+### Hit shapes
+
+So a game can tell **what was hit** (the robot's head, not just "the
+robot"), each part can have a **hit shape**: a box, a sphere or a
+capsule that stands in for it. Duck Forge tests clicks, bullets and
+swords against them, in whatever pose the model is in.
+
+```bash
+duck-mold edit robot.toml set-colliders parts        # a shape fitted to every part
+duck-mold edit robot.toml set-collider head sphere   # a ball round the head instead
+duck-mold edit robot.toml set-collider left_eye none # no hit shape: too small to aim at
+duck-mold inspect robot.toml --colliders             # every shape and its numbers
+duck-mold render robot.toml --colliders              # outlined in cyan over the model
+```
+
+- `colliders = "parts"` at the top gives every part the shape that
+  suits it: a sphere for a sphere; a capsule for a cylinder, capsule or
+  cone; a box for the rest. A new recipe (`duck-mold new`) starts with
+  it. `"capsule"`, `"box"` or `"sphere"` is one shape round the whole
+  model instead (a prop, or "the robot was hit" is enough).
+- A part's own `collider`: `"box"`, `"sphere"`, `"capsule"` (fitted to
+  it), `"none"`, or `{ shape = "sphere", radius = 0.25 }` with numbers
+  of its own (in the part's own directions, from its own middle).
+- Fitted shapes follow the part: resize the part and its shape fits
+  again. A capsule is as long as its part, round ends included.
+- `inspect` adds `hit shapes   each part: 17 (box 11, capsule 3, sphere
+  3)` and the parts with none; with `--json`: `hit_shapes` (`setting`,
+  `count`, `boxes`, `spheres`, `capsules`, `none_by_their_own`) and
+  `parts_without_colliders`. `--colliders` adds `colliders`: each one's
+  `part`, `shape`, `center`, and `size` and `directions` (a box),
+  `radius` (a sphere), `radius`, `length` and `ends` (a capsule), and
+  `own`.
+- A shape with its own numbers that leaves most of its part outside, or
+  is more than 8 times its size, is the warning `hit_shape`.
+- Give tiny parts (eyes, a buckle) `none`: a hit on them is rarely
+  wanted, and the part behind is named instead.
 
 ### In a game
 

@@ -3796,3 +3796,185 @@ fn a_part_is_saved_to_the_library_and_shows_there() {
     // The recipe itself didn't change.
     assert!(file(&recipe).contains("{ pull = \"top\", by = 0.2, name = \"lid\" }"));
 }
+
+// ---- Phase 6: hit shapes ------------------------------------------------------------
+
+#[test]
+fn the_hits_switch_outlines_every_hit_shape_and_follows_the_pose() {
+    use duck_mold_view::render::HIT_OUTLINE;
+    use duck_mold_view::studio::viewport::HIT_CHOSEN;
+    let mut studio = Studio::open(examples().join("robot.toml"), false);
+    let count = |picture: &Picture, color: u32| {
+        picture
+            .pixels
+            .iter()
+            .filter(|&&pixel| pixel == color)
+            .count()
+    };
+    let (cyan, light) = (HIT_OUTLINE.to_u32(), HIT_CHOSEN.to_u32());
+    // Off to begin with: nothing cyan.
+    assert!(!studio.hits);
+    assert_eq!(count(&studio.picture(480, 360), cyan), 0);
+    // On: every shape's outline, drawn over the model.
+    studio.hits = true;
+    let on = studio.picture(480, 360);
+    assert!(count(&on, cyan) > 400, "{}", count(&on, cyan));
+    assert_eq!(count(&on, light), 0);
+    check_picture("studio-robot-hits", &on);
+    // The selected part's is lighter.
+    studio.select(Some("head"));
+    let head = studio.picture(480, 360);
+    assert!(count(&head, light) > 60, "{}", count(&head, light));
+    check_picture("studio-robot-hits-head", &head);
+    // A hidden part's isn't drawn.
+    studio.hide_selected();
+    let hidden = studio.picture(480, 360);
+    assert_eq!(count(&hidden, light), 0);
+    assert!(count(&hidden, cyan) < count(&on, cyan));
+    studio.show_all();
+    studio.select(None);
+
+    // Posed, the shapes go with the parts: waving lifts the hand's.
+    let hand = |model: &duck_mold_core::model::Model| {
+        model
+            .colliders
+            .iter()
+            .find(|collider| collider.part == "left_arm/hand")
+            .unwrap()
+            .shape
+            .center()
+    };
+    let at_rest = hand(studio.model().unwrap());
+    studio.pose_mode().unwrap();
+    assert!(studio.choose_pose("wave"));
+    let waving = hand(studio.shown_model().unwrap());
+    assert!(waving.y > at_rest.y + 0.3, "{at_rest:?} {waving:?}");
+    let waved = studio.picture(480, 360);
+    assert_ne!(waved.pixels, on.pixels);
+    check_picture("studio-robot-hits-wave", &waved);
+    // Looking changes nothing in the recipe.
+    assert_eq!(studio.can_undo(), None);
+}
+
+#[test]
+fn a_parts_hit_shape_and_the_models_line_are_edits() {
+    use duck_mold_core::edit::ColliderTo;
+    use duck_mold_core::recipe::{Colliders, HitKind};
+    let recipe = folder("studio_hit_edits").join("robot.toml");
+    std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    let kind_of = |studio: &Studio, part: &str| {
+        studio
+            .model()
+            .unwrap()
+            .colliders
+            .iter()
+            .find(|collider| collider.part == part)
+            .map(|collider| collider.shape.kind())
+    };
+    assert_eq!(kind_of(&studio, "head"), Some(HitKind::Sphere));
+    // The head's becomes a box, then none: each one edit, undone in one.
+    studio
+        .apply(&Edit::SetCollider {
+            part: "head".into(),
+            to: ColliderTo::Shape {
+                kind: HitKind::Box,
+                size: None,
+                radius: None,
+                length: None,
+                center: None,
+                along: None,
+            },
+        })
+        .unwrap();
+    assert_eq!(kind_of(&studio, "head"), Some(HitKind::Box));
+    assert!(
+        std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("collider = \"box\"")
+    );
+    studio
+        .apply(&Edit::SetCollider {
+            part: "head".into(),
+            to: ColliderTo::None,
+        })
+        .unwrap();
+    assert_eq!(kind_of(&studio, "head"), None);
+    studio.undo().unwrap();
+    assert_eq!(kind_of(&studio, "head"), Some(HitKind::Box));
+    // The model's line: one capsule round everything.
+    studio
+        .apply(&Edit::SetColliders {
+            colliders: Some(Colliders::Whole(HitKind::Capsule)),
+        })
+        .unwrap();
+    let model = studio.model().unwrap();
+    assert_eq!(model.hit_setting, Some(Colliders::Whole(HitKind::Capsule)));
+    assert!(
+        model
+            .colliders
+            .iter()
+            .any(|collider| collider.part.is_empty())
+    );
+}
+
+// ---- Phase 6, step 8: a key's pose of its own ----------------------------------------
+
+#[test]
+fn a_key_can_have_its_pose_to_itself_in_one_step() {
+    let recipe = copy_of("robot", "studio_own_pose");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.pose_mode().unwrap();
+    assert!(studio.choose_animation(Some("walk")));
+    // Key 1's step_left is also key 5's.
+    assert_eq!(studio.sharing_pose(1), [("walk".to_owned(), 5)]);
+    let said = studio.own_pose(1).unwrap();
+    assert_eq!(
+        said,
+        "Key 1 has a pose of its own now: \"walk_1\", a copy of \"step_left\". A drag changes only it"
+    );
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    // A copy of the pose, and the key uses it: its event is kept.
+    assert!(
+        text.contains("[poses.walk_1]\nbody = { move = [0, -0.04, 0] }"),
+        "{text}"
+    );
+    assert!(text.contains("{ at = 0, pose = \"walk_1\", event = \"footstep\" }"));
+    assert!(text.contains("{ at = 0.8, pose = \"step_left\" }"));
+    let keys = studio.keys();
+    assert_eq!(
+        (keys[0].pose.as_str(), keys[4].pose.as_str()),
+        ("walk_1", "step_left")
+    );
+    // It is the pose shown, at the key's time, and it is no longer shared.
+    assert_eq!(studio.pose(), "walk_1");
+    assert_eq!(studio.time(), Some(0.0));
+    assert!(studio.sharing_pose(1).is_empty());
+    // The model moves exactly as before: the copy says the same.
+    let walk = |studio: &Studio| {
+        let model = studio.model().unwrap();
+        let played = model.animation("walk").unwrap();
+        let moving = duck_mold_core::motion::Motion::of(model, played);
+        duck_mold_core::motion::posed(model, &moving.joints_at(0.3))
+            .bounds()
+            .unwrap()
+    };
+    let now = walk(&studio);
+    // Asked again: it is its own already, and nothing changes.
+    let again = studio.own_pose(1).unwrap();
+    assert!(again.contains("is its own already"), "{again}");
+    // One undo takes both edits back.
+    studio.undo().unwrap();
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), before);
+    assert_eq!(walk(&studio), now);
+
+    // A rest key gets a pose of its own too: rest can't be changed.
+    let said = studio.own_pose(2).unwrap();
+    assert!(said.contains("\"walk_2\", a copy of \"rest\""), "{said}");
+    assert!(
+        std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("{ at = 0.2, pose = \"walk_2\" }")
+    );
+}

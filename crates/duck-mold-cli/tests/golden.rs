@@ -141,6 +141,37 @@ fn every_example_renders_to_its_golden_picture() {
     }
 }
 
+/// The examples with hit shapes, drawn with them outlined
+/// (`render --colliders`), and their hit shapes listed (`inspect
+/// --colliders`).
+const WITH_HIT_SHAPES: [&str; 4] = ["robot", "gnome", "door", "cart"];
+
+#[test]
+fn every_example_with_hit_shapes_renders_them_to_its_golden_picture() {
+    let scratch = scratch("golden_colliders");
+    for name in WITH_HIT_SHAPES {
+        let output = scratch.join(format!("{name}.colliders.png"));
+        duck_mold(&[
+            "render",
+            &format!("examples/{name}.toml"),
+            "--colliders",
+            "-o",
+            output.to_str().unwrap(),
+        ]);
+        check(
+            &format!("{name}.colliders.png"),
+            &std::fs::read(output).unwrap(),
+        );
+        let listed = duck_mold(&[
+            "inspect",
+            &format!("examples/{name}.toml"),
+            "--colliders",
+            "--json",
+        ]);
+        check(&format!("{name}.colliders.json"), &listed);
+    }
+}
+
 #[test]
 fn every_example_inspects_to_its_golden_report() {
     for name in EXAMPLES {
@@ -163,7 +194,10 @@ const MOVING: [(&str, &[(&str, &str)]); 4] = [
     ),
     ("door", &[("open", "top")]),
     ("cart", &[("roll", "right")]),
-    ("gnome", &[("walk", "right"), ("wave", "front")]),
+    (
+        "gnome",
+        &[("walk", "right"), ("wave", "front"), ("jump", "right")],
+    ),
 ];
 
 #[test]

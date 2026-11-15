@@ -278,11 +278,31 @@ each with its pose's name.
 - Drag a key to change its time (it snaps to 0.05 s and can't pass its
   neighbours; Ctrl: free). Right-click a key to remove it or give it
   another pose. **+ Key** adds the pose chosen at the time shown.
+- **Make this key's pose its own** (right-click a key): when other keys
+  use the same pose (a walk's first and last key), the key gets a copy
+  (`walk_1`), so a drag changes only it. One step to undo.
+- **Zoom and scroll**: Ctrl and the mouse wheel (or `-` and `+`, with
+  the pointer on the ruler, or the `-` and `+` buttons) zoom about the
+  pointer; the wheel, or a drag of the bar under the ruler, scrolls;
+  **Fit** shows the whole animation again.
+- **Events** are names on keys that a game hears when the animation
+  passes them: the robot's walk has a `footstep` on each step. They
+  show as small cyan flags under their keys. Right-click a key, type a
+  name and **Add event**; each event it has is in that menu with
+  **Remove**. In the recipe: `{ at = 0.4, pose = "step_right", event =
+  "footstep" }`; on the command line: `set-event` and `remove-event`;
+  `inspect --animation walk` says when each is heard.
 - **Play** (Space) plays it; **Loop** and **Smooth** are the
   animation's own settings; **Ghosts** draws the poses of the keys
   before (blue) and after (orange) faintly.
+- **Fit to ground** stands every pose the animation uses on the ground:
+  in each, the body moves up or down until the lowest point touches
+  it, so a walk copied onto shorter legs doesn't sink. A leap is left
+  alone. On the command line: `duck-mold edit gnome.toml fit-ground
+  walk`.
 - Every change is one edit: `move-key`, `set-key`, `remove-key`,
-  `add-key`, `set-animation`, `add-animation`. Moving through time,
+  `add-key`, `set-event`, `remove-event`, `fit-ground`,
+  `set-animation`, `add-animation`. Moving through time,
   playing and ghosts change nothing in the file.
 
 In Part mode, a model with animations has a **Play** button at the top
@@ -290,6 +310,8 @@ right of the view, with the animation to play: the model moves, and
 comes back to rest when it stops.
 
 ![The timeline: the robot's wave, half way between two keys, with the ghosts of both](docs/studio-timeline.png)
+
+![The timeline with the walk's footstep flags, and a key's menu with its event](crates/duck-mold-studio/tests/screens/timeline-event-menu.png)
 
 **The animation library.** Under the parts list, switch from
 **Library** to **Animations**. It lists the six **starters** that come
@@ -419,11 +441,15 @@ these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
   something stands on it, so you can see what touches the ground and
   what hangs over it. It is the Studio's only: `render`'s pictures and
   the exported model have none.
+- **Hits** outlines every hit shape in cyan over the model (below,
+  *Hit shapes, for games*), following the pose and the animation as it
+  plays; the selected part's is lighter. It changes nothing in the
+  file.
 
 **The menus.** File (New model, Open, Open an example, Opened lately,
 Export, Render picture, Back to the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
 Unjoin, Remove, Tidy sockets, Select all), View (the four views, Frame, Grid,
-Wireframe, Shadow, Hide, Show everything hidden) and Help (Show the tips again, The
+Wireframe, Shadow, Hit shapes, Hide, Show everything hidden) and Help (Show the tips again, The
 keys, About). Every line shows its key.
 
 **The keys.** (Help > The keys shows this list in the Studio.)
@@ -493,10 +519,10 @@ only: nothing can be changed there.
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
-| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). |
-| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
+| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. |
+| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
@@ -624,6 +650,37 @@ A recipe can be written as TOML (the examples) or as JSON
 
 Each is commented line by line.
 
+## Hit shapes, for games
+
+So that a game can tell **what was hit** (the robot's head, not just
+"the robot"), a recipe can give its parts **hit shapes**: a simple box,
+ball or capsule fitted to each part, which moves with the part in any
+pose. One line does it:
+
+```toml
+colliders = "parts"     # a hit shape fitted to every part
+```
+
+A part can say its own (`collider = "sphere"`, `collider = "none"` for
+a part too small to aim at, or a table with its own numbers).
+`duck-mold inspect` says how many there are and which parts have none;
+`render --colliders` draws them; `duck-mold new` starts every new
+recipe with `colliders = "parts"`. The robot, gnome, door and cart
+examples have them.
+
+![The robot with its hit shapes outlined](tests/golden/robot.colliders.png)
+
+**In the Studio**, the Hits switch in the top bar draws them. The
+properties panel's **Hit shape** list sets the selected part's: what
+the model's line gives it (`fitted: box`), a box, a sphere or a
+capsule fitted to it, or none. A shape it says for itself shows its
+middle and size (or radius and length) to type, and **Fit again**
+forgets typed numbers. With nothing selected, the panel's **Hit
+shapes** list is the model's line: none, each part, or one capsule,
+box or ball round the whole model.
+
+![The Studio with Hits on and the head's hit shape in the panel](crates/duck-mold-studio/tests/screens/hits.png)
+
 ## Using a model in Duck Forge
 
 ```rust
@@ -664,6 +721,7 @@ see the handoff note.
 | [PHASE4_REPORT.md](PHASE4_REPORT.md) | Phase 4: shaping a box by hand (faces, edges, corners, cuts), shaped parts used again, and the chair, wall and rock examples, with a picture of each screen. |
 | [PHASE5A_REPORT.md](PHASE5A_REPORT.md) | The first half of Phase 5: limits, poses and animations in the recipe, the `.glb` as a tree of parts, and Duck Forge playing them. |
 | [PHASE5_REPORT.md](PHASE5_REPORT.md) | All of Phase 5, motion: Pose mode, the timeline, the animation library and its starters, the door, cart and gnome, a strip of every example animation, and what Phase 6 should start with. |
+| [PHASE6_REPORT.md](PHASE6_REPORT.md) | Phase 6, game-ready: hit shapes, events on keys, fitting to the ground, a timeline that zooms, Duck Forge's `robot_click`, and what Phase 7 should start with. |
 
 ## Project layout
 

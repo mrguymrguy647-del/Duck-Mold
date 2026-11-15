@@ -57,6 +57,8 @@ pub enum Action {
     Wireframe,
     /// Turn the ground shadow on or off.
     Shadow,
+    /// Show the hit shapes, or stop.
+    HitShapes,
     /// Start a new recipe.
     NewModel,
     /// Open another file.
@@ -256,6 +258,13 @@ pub fn menus(ui: &mut egui::Ui, studio: &Studio, recent: &[std::path::PathBuf]) 
             Action::Wireframe,
         );
         pick(ui, true, &tick(studio.shadow, "Shadow"), "", Action::Shadow);
+        pick(
+            ui,
+            true,
+            &tick(studio.hits, "Hit shapes"),
+            "",
+            Action::HitShapes,
+        );
         ui.separator();
         pick(ui, any, "Hide", "H", Action::Hide);
         pick(

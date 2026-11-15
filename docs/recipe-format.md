@@ -33,7 +33,8 @@ Rules that hold everywhere:
 | `origin` | text | `"bottom"` | Where the model's zero point is (below). |
 | `poses` | table of poses | none | The model's poses, by name. See "Poses" below. |
 | `animations` | table of animations | none | The model's animations, by name. See "Animations" below. |
-| `bones`, `colliders`, `lods` | | | Reserved for later phases. Using one is an error that says so. |
+| `colliders` | text | none: no hit shapes | `"parts"`: a hit shape fitted to every part, moving with it; `"capsule"`, `"box"` or `"sphere"`: one round the whole model. See "Hit shapes" below. |
+| `bones`, `lods` | | | Reserved for later phases. Using one is an error that says so. |
 
 ### `palette`
 
@@ -102,9 +103,10 @@ Each entry of `parts`, and each entry of `define`, is a part.
 | `scale` | number, or three | `1` | How much bigger: one number, or `[x, y, z]`. 0.001 to 1000. |
 | `mirror` | text | none | `"x"`, `"y"` or `"z"`: flips the part across that direction, its sockets and face names with it. |
 | `limits` | `"fixed"`, or a table | none: turns freely | How far the part may turn about its join when the model is posed. See "Limits" below. |
+| `collider` | text, or a table | follows `colliders` | The part's own hit shape: `"box"`, `"sphere"`, `"capsule"` (fitted to it), `"none"`, or a table with its numbers. See "Hit shapes" below. A part under `define` can have one too. |
 | `sockets` | table of sockets | none | The part's own named sockets. |
 | `note` | anything | none | For people. Ignored. |
-| `bones`, `colliders`, `lods` | | | Reserved. |
+| `bones`, `lods` | | | Reserved. |
 
 A part under `define` has no place of its own, so it can't have `name`,
 `attach`, `to`, `twist`, `rotate`, `move`, `scale`, `mirror` or
@@ -462,12 +464,14 @@ keys = [
 | `loop` | `true` or `false` | `false` | Whether it starts again after its last key. |
 | `smooth` | `true` or `false` | `true` | Whether the motion flows through the poses (`true`) or goes straight from each to the next at a steady speed (`false`). |
 
-A key is `{ at = <seconds>, pose = "<name>" }`:
+A key is `{ at = <seconds>, pose = "<name>" }`, and it can mark a
+moment: `{ at = 0.4, pose = "step_right", event = "footstep" }`.
 
 | | |
 |---|---|
 | `at` | Seconds from the animation's start, 0 to 3600. The first key is at 0, and each key is later than the one before. |
 | `pose` | One of the recipe's poses, or `rest`. A pose that isn't there is an error with the closest name. |
+| `event` | Optional. A name a game hears each time the animation passes this key (a footstep, a jump leaving the ground), or a list of names: `event = ["footstep", "dust"]`. Letters, digits, `_` and `-`; the same name twice on a key is an error. Events don't change the motion. |
 
 - The animation's name is letters, digits, `_` and `-`. A pose and an
   animation may have the same name.
@@ -482,12 +486,68 @@ A key is `{ at = <seconds>, pose = "<name>" }`:
 - An animation that loops should end on the pose it starts with (or one
   that puts every part in the same place, like a wheel turned 360).
   If it doesn't, that is the warning `loop_jumps`.
+- On a loop the last key and the first are the same moment, so the
+  same event on both would be heard twice there: the warning
+  `event_twice`. Put it on one of them.
 
 `duck-mold inspect --animation <name>` checks every frame of one;
 `duck-mold render --animation <name>` draws it as a strip of frames;
 `duck-mold edit` has `add-animation`, `set-animation`,
 `rename-animation`, `remove-animation`, `add-key`, `move-key`,
 `set-key` and `remove-key`.
+
+## Hit shapes
+
+A **hit shape** (a *collider*) is a simple shape that stands in for a
+part when a game asks what was hit: a `box`, a `sphere` (a ball) or a
+`capsule` (a cylinder with a ball on each end). They are written in
+the `.glb`, and Duck Forge tests rays, line segments and balls against
+them, in whatever pose the model is in.
+
+```toml
+colliders = "parts"       # every part gets the shape that suits it
+
+[[parts]]
+name = "head"
+collider = "sphere"       # a ball round it instead, fitted to it
+
+[[parts]]
+name = "antenna_tip"
+collider = "none"         # no hit shape: a hit can't name it
+
+[[parts]]
+name = "hand"
+collider = { shape = "sphere", radius = 0.12 }   # numbers of its own
+```
+
+- **`colliders` at the top** says what the model has: `"parts"` (each
+  part gets the shape that suits it: a sphere for a sphere; a capsule
+  for a cylinder, a capsule or a cone; a box for anything else), or one
+  shape round the whole model (`"capsule"`, standing up; `"box"`;
+  `"sphere"`). Without it there are none, except parts that say their
+  own. `duck-mold new` writes `colliders = "parts"` in a new recipe.
+- **A fitted shape** is worked out from the part's corners, in the
+  part's own directions (a turned part gets a turned box), and moves
+  with the part's join in a pose. A box and a sphere hold every corner.
+  A capsule lies along the part's longest side, is as thick as the part
+  and as long as it, round ends included (so a cylinder's rim corners
+  stand just outside its round ends).
+- **A table** gives the numbers: `shape`, `center` (where its middle
+  is, from the part's own middle, in metres, in its own directions;
+  `[0, 0, 0]` unless written), `size` for a box, `radius` for a sphere,
+  `radius` and `length` (end to end, at least twice the radius) for a
+  capsule, and `along` (`"x"`, `"y"` or `"z"`) to say which way a
+  capsule lies.
+- **On a part made of parts** (an arm), one shape round all of it; the
+  parts inside it then have none of their own.
+- **Warnings**: a hit shape with its own numbers that leaves most of
+  its part outside it, or is more than 8 times as big as the part
+  (`hit_shape`).
+
+`duck-mold inspect` says how many hit shapes there are, and which parts
+have none; `inspect --colliders` lists each with its numbers; `render
+--colliders` outlines them. `duck-mold edit` has `set-colliders` and
+`set-collider`.
 
 ## Files as parts
 

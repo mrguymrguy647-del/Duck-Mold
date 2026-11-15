@@ -12,7 +12,7 @@ use std::sync::Arc;
 
 use crate::math::{Bounds, Mat3, Transform, Vec3};
 use crate::motion::{Animation, Pose};
-use crate::recipe::{Limits, Loc, PaletteColor};
+use crate::recipe::{ColliderDef, Colliders, Limits, Loc, PaletteColor};
 use crate::shaping::Shaped;
 
 /// A finished model.
@@ -46,6 +46,61 @@ pub struct Model {
     /// the model to get the recipe's measurement. Zero for a model read
     /// from a file.
     pub zero: Vec3,
+    /// The recipe's `colliders`: what hit shapes the model has. `None`
+    /// when it doesn't say (a part can still have its own).
+    pub hit_setting: Option<Colliders>,
+    /// The hit shapes, where they are with the model at rest.
+    pub colliders: Vec<Collider>,
+    /// The parts with faces of their own that have no hit shape, when
+    /// the model has hit shapes (`colliders` is set): each part's path,
+    /// and true if the part says so itself (`collider = "none"`).
+    pub without_collider: Vec<(String, bool)>,
+}
+
+/// One hit shape of the model: a simple shape that stands in for a
+/// part when a game asks what is where.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Collider {
+    /// The part it stands for, by path: `head`, `left_arm/hand`. Empty
+    /// for one shape round the whole model.
+    pub part: String,
+    /// The shape, where it is.
+    pub shape: HitShape,
+    /// True if the part gave it its own numbers, rather than having it
+    /// fitted.
+    pub own: bool,
+}
+
+/// A hit shape, in the model.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum HitShape {
+    /// A box: its middle, its three directions (each 1 long, square to
+    /// the others) and how far it reaches along each, from the middle.
+    Box {
+        /// Its middle.
+        center: Vec3,
+        /// Its directions, as the columns.
+        axes: Mat3,
+        /// Half its size along each of `axes`.
+        half: Vec3,
+    },
+    /// A ball.
+    Sphere {
+        /// Its middle.
+        center: Vec3,
+        /// Its radius.
+        radius: f64,
+    },
+    /// A capsule: every point within `radius` of the line from `a` to
+    /// `b`.
+    Capsule {
+        /// One end of its middle line.
+        a: Vec3,
+        /// The other end.
+        b: Vec3,
+        /// How far it reaches from that line.
+        radius: f64,
+    },
 }
 
 /// One flat face of the finished model.
@@ -135,6 +190,9 @@ pub struct Part {
     pub faces: Range<usize>,
     /// The box around it. `None` only for a part with no faces.
     pub bounds: Option<Bounds>,
+    /// Its own hit shape, as the recipe says it (or its definition
+    /// does).
+    pub collider: ColliderDef,
     /// The parts inside it, if it is an assembly.
     pub parts: Vec<Part>,
     /// The names a recipe's `colors` can give this part's own faces: a

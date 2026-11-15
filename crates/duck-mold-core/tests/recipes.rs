@@ -203,11 +203,7 @@ fn a_misspelt_field_is_an_error_with_the_likely_fix() {
 
 #[test]
 fn reserved_names_say_not_yet() {
-    for (field, purpose) in [
-        ("bones", "rigs"),
-        ("colliders", "collision shapes"),
-        ("lods", "simpler versions"),
-    ] {
+    for (field, purpose) in [("bones", "rigs"), ("lods", "simpler versions")] {
         let issues = issues_of(&with_part(&format!("shape = \"box\"\n{field} = []")));
         let issue = only(&issues, Code::Reserved);
         assert_eq!(issue.path, format!("parts[0].{field}"));
@@ -217,6 +213,11 @@ fn reserved_names_say_not_yet() {
     // And at the top of the file.
     let issues = issues_of("version = 0\nbones = 1\n[[parts]]\nshape = \"box\"\n");
     assert_eq!(only(&issues, Code::Reserved).line, Some(2));
+    // `colliders` is a field now (Phase 6): on a part it is a slip for
+    // `collider`, which the message suggests.
+    let issues = issues_of(&with_part("shape = \"box\"\ncolliders = \"box\""));
+    let issue = only(&issues, Code::UnknownField);
+    assert_eq!(issue.suggestion.as_deref(), Some("collider"));
 }
 
 #[test]

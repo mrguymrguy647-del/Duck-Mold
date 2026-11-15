@@ -3,8 +3,9 @@
 //! `Edit` values from clicks, so whatever it can do, this can.
 
 use clap::{Args, Subcommand};
-use duck_mold_core::edit::{AnimationFrom, Changes, Edit, Free, LimitsTo, Made, Sizes};
+use duck_mold_core::edit::{AnimationFrom, Changes, ColliderTo, Edit, Free, LimitsTo, Made, Sizes};
 use duck_mold_core::recipe::Turns;
+use duck_mold_core::recipe::{Colliders, HitKind};
 
 /// One change to a recipe. (Each variant's name is the command's, so
 /// `set-change` is `SetChange`.)
@@ -322,6 +323,40 @@ pub enum Change {
         #[arg(long, conflicts_with_all = ["x", "y", "z"])]
         none: bool,
     },
+    /// Say what hit shapes (colliders) the model has: parts (a shape
+    /// fitted to every part, moving with it), capsule, box or sphere
+    /// (one round the whole model), or none (take the line away).
+    SetColliders {
+        /// parts, capsule, box, sphere or none.
+        setting: String,
+    },
+    /// Give a part a hit shape of its own: box, sphere or capsule
+    /// (fitted to it), none (no hit shape), or fitted (take its own away:
+    /// it follows the model's "colliders" again). With numbers, the shape
+    /// has its own; any not given keep the fitted shape's.
+    SetCollider {
+        /// The part, as inspect names it: head, or left_arm/hand.
+        part: String,
+        /// box, sphere, capsule, none or fitted.
+        shape: String,
+        /// A box's size, x,y,z in metres, in the part's own directions.
+        #[arg(long, value_name = "X,Y,Z")]
+        size: Option<String>,
+        /// A sphere's or a capsule's radius, in metres.
+        #[arg(long)]
+        radius: Option<f64>,
+        /// A capsule's length from end to end, in metres.
+        #[arg(long)]
+        length: Option<f64>,
+        /// Where its middle is, x,y,z in metres from the part's own
+        /// middle, in its own directions.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        center: Option<String>,
+        /// Which way a capsule lies: x, y or z (in the part's own
+        /// directions). By default, along the part's longest side.
+        #[arg(long)]
+        along: Option<String>,
+    },
     /// Turn or move a part in a pose. Makes the pose if it isn't there.
     ///
     /// A pose is the model with some parts turned about their joins:
@@ -471,6 +506,42 @@ pub enum Change {
         animation: String,
         /// The key, counted from 1.
         key: usize,
+    },
+    /// Put an event on a key: a name a game hears each time the
+    /// animation passes that key ("footstep" on a step). A key keeps the
+    /// events it had.
+    SetEvent {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1 as inspect --animation prints them.
+        key: usize,
+        /// The event's name: letters, digits, "_" and "-".
+        name: String,
+    },
+    /// Stand the poses an animation's keys use on the ground: in each,
+    /// the body (the part every other part hangs from) is moved up or
+    /// down so the model's lowest point is on the ground. Only that one
+    /// number of each pose changes. A pose that lifts the body (a leap)
+    /// is left alone unless --all.
+    FitGround {
+        /// The animation.
+        animation: String,
+        /// The part to move up and down, if more than one part has
+        /// others hanging from it.
+        #[arg(long, value_name = "PART")]
+        part: Option<String>,
+        /// Fit the poses that lift the body too.
+        #[arg(long)]
+        all: bool,
+    },
+    /// Take an event off a key; without a name, every event on it.
+    RemoveEvent {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// The event to take away.
+        name: Option<String>,
     },
     /// Make the mirror image of a pose, left to right: what left_arm
     /// did, right_arm does, and a part in the middle turns the other
@@ -1020,6 +1091,33 @@ impl Change {
                 animation: animation.clone(),
                 key: *key,
             },
+            Change::SetEvent {
+                animation,
+                key,
+                name,
+            } => Edit::SetEvent {
+                animation: animation.clone(),
+                key: *key,
+                name: name.clone(),
+            },
+            Change::FitGround {
+                animation,
+                part,
+                all,
+            } => Edit::FitGround {
+                animation: animation.clone(),
+                part: part.clone(),
+                all: *all,
+            },
+            Change::RemoveEvent {
+                animation,
+                key,
+                name,
+            } => Edit::RemoveEvent {
+                animation: animation.clone(),
+                key: *key,
+                name: name.clone(),
+            },
             Change::MirrorPose { pose, as_name } => Edit::MirrorPose {
                 pose: pose.clone(),
                 as_name: as_name.clone(),
@@ -1045,6 +1143,66 @@ impl Change {
                     ])
                 },
             },
+            Change::SetColliders { setting } => Edit::SetColliders {
+                colliders: match setting.as_str() {
+                    "none" => None,
+                    word => Some(Colliders::from_name(word).ok_or_else(|| {
+                        format!(
+                            "colliders is parts, capsule, box, sphere or none, not \"{word}\""
+                        )
+                    })?),
+                },
+            },
+            Change::SetCollider {
+                part,
+                shape,
+                size,
+                radius,
+                length,
+                center,
+                along,
+            } => {
+                let numbers = size.is_some()
+                    || radius.is_some()
+                    || length.is_some()
+                    || center.is_some()
+                    || along.is_some();
+                let to = match shape.as_str() {
+                    "fitted" | "none" if numbers => {
+                        return Err(format!(
+                            "\"{shape}\" has no numbers: give a shape (box, sphere or capsule) with --size, --radius or --length"
+                        ));
+                    }
+                    "fitted" => ColliderTo::Fitted,
+                    "none" => ColliderTo::None,
+                    word => ColliderTo::Shape {
+                        kind: HitKind::from_name(word).ok_or_else(|| {
+                            format!(
+                                "a hit shape is box, sphere, capsule, none or fitted, not \"{word}\""
+                            )
+                        })?,
+                        size: size.as_deref().map(|size| three("--size", size)).transpose()?,
+                        radius: *radius,
+                        length: *length,
+                        center: center
+                            .as_deref()
+                            .map(|center| three("--center", center))
+                            .transpose()?,
+                        along: along
+                            .as_deref()
+                            .map(|axis| {
+                                ["x", "y", "z"].iter().position(|known| *known == axis).ok_or_else(
+                                    || format!("--along is x, y or z, not \"{axis}\""),
+                                )
+                            })
+                            .transpose()?,
+                    },
+                };
+                Edit::SetCollider {
+                    part: part.clone(),
+                    to,
+                }
+            }
             Change::MoveCorner { part, corners, by } => Edit::MoveCorner {
                 part: part.clone(),
                 corners: face_list(corners),

@@ -14,17 +14,25 @@
 # Its legs have a `thigh` and a `foot`, like the robot's, so the walk's
 # turns of left_leg/foot and right_leg/foot fit too. Once copied in, the
 # walk is the gnome's own: its legs are shorter, so in each step its body
-# sinks 1.7 cm, not the robot's 4:
+# sinks less than the robot's. fit-ground works out how much, standing
+# each pose's lowest point on the ground:
 #
-#   duck-mold edit examples/gnome.toml set-pose step_left body --move 0,-0.017,0
-#   duck-mold edit examples/gnome.toml set-pose step_right body --move 0,-0.017,0
+#   duck-mold edit examples/gnome.toml fit-ground walk
 #
 # It also waves, with the starter `wave` (add-animation wave --starter
-# wave), which needs nothing but a `right_arm`.
+# wave), which needs nothing but a `right_arm`, and jumps, with the
+# starter `jump`; its crouch also turns the boots back to keep them flat,
+# as the robot's does, before it is fitted (the leap is left alone):
+#
+#   duck-mold edit examples/gnome.toml add-animation jump --starter jump
+#   duck-mold edit examples/gnome.toml set-pose jump_crouch left_leg/foot --turn 25,0,0
+#   duck-mold edit examples/gnome.toml set-pose jump_crouch right_leg/foot --turn 25,0,0
+#   duck-mold edit examples/gnome.toml fit-ground jump
 
 version = 0
 name = "gnome"
 description = "A garden gnome that walks with the robot's walk."
+colliders = "parts"   # a hit shape fitted to every part
 
 [palette]
 coat  = "#3E6FB0"
@@ -115,6 +123,7 @@ color = "belt"
 attach = "back"
 to = "body.belt"
 limits = "fixed"
+collider = "none"     # too small to aim at
 
 [[parts]]
 name = "head"
@@ -150,6 +159,7 @@ color = "skin"
 attach = "back"
 to = "head.nose"
 limits = "fixed"
+collider = "none"     # too small to aim at
 
 # Joined by its base to a chin socket that faces down, the cone hangs
 # point down.
@@ -194,7 +204,7 @@ to = "body.right_leg"
 limits = { x = [-60, 60] }
 
 [poses.step_left]
-body = { move = [0, -0.017, 0] }
+body = { move = [0, -0.0187, 0] }
 left_leg = [25, 0, 0]
 "left_leg/foot" = [-25, 0, 0]
 right_leg = [-25, 0, 0]
@@ -203,7 +213,7 @@ left_arm = [-25, 0, 0]
 right_arm = [25, 0, 0]
 
 [poses.step_right]
-body = { move = [0, -0.017, 0] }
+body = { move = [0, -0.0187, 0] }
 right_leg = [25, 0, 0]
 "right_leg/foot" = [-25, 0, 0]
 left_leg = [-25, 0, 0]
@@ -220,12 +230,28 @@ right_arm = [170, 0, 20]
 [poses.wave_b]
 right_arm = [170, 0, -20]
 
+[poses.jump_crouch]
+body = { move = [0, -0.0187, 0] }
+left_leg = [-25, 0, 0]
+right_leg = [-25, 0, 0]
+left_arm = [-40, 0, 0]
+right_arm = [-40, 0, 0]
+"left_leg/foot" = [25, 0, 0]
+"right_leg/foot" = [25, 0, 0]
+
+[poses.jump_up]
+body = { move = [0, 0.4, 0] }
+left_leg = [10, 0, 0]
+right_leg = [10, 0, 0]
+left_arm = [160, 0, 0]
+right_arm = [160, 0, 0]
+
 [animations.walk]
 loop = true
 keys = [
-  { at = 0, pose = "step_left" },
+  { at = 0, pose = "step_left", event = "footstep" },
   { at = 0.2, pose = "rest" },
-  { at = 0.4, pose = "step_right" },
+  { at = 0.4, pose = "step_right", event = "footstep" },
   { at = 0.6, pose = "rest" },
   { at = 0.8, pose = "step_left" },
 ]
@@ -240,4 +266,13 @@ keys = [
   { at = 1.2, pose = "wave_b" },
   { at = 1.4, pose = "wave_up" },
   { at = 1.8, pose = "rest" },
+]
+
+[animations.jump]
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 0.3, pose = "jump_crouch", event = "takeoff" },
+  { at = 0.65, pose = "jump_up" },
+  { at = 1, pose = "jump_crouch", event = "land" },
+  { at = 1.3, pose = "rest" },
 ]

@@ -16,9 +16,12 @@
 //! reads the file, changes its text, checks it and writes it back.
 
 pub mod doc;
+mod ground;
+mod hits;
 mod motion;
 mod spot;
 
+pub use hits::ColliderTo;
 pub use motion::{LimitsTo, Offered, animation_recipe, animations_in};
 pub use spot::{Spot, spot};
 
@@ -32,7 +35,7 @@ use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
 use crate::math::{Bounds, Mat3, Vec3};
 use crate::model::{Model, Part};
-use crate::recipe::{Limits, PART_FIELDS, Shape, Side, rgb_of};
+use crate::recipe::{Colliders, Limits, PART_FIELDS, Shape, Side, rgb_of};
 use crate::source::{Node, Syntax, Value};
 use crate::tools::Failure;
 use doc::{Doc, Step, TreePath, Val, key, with};
@@ -440,6 +443,20 @@ pub enum Edit {
         /// What the face in the middle is called.
         name: Option<String>,
     },
+    /// Sets the recipe's `colliders`: what hit shapes the model has.
+    /// `None` takes the line away.
+    SetColliders {
+        /// What it becomes.
+        colliders: Option<Colliders>,
+    },
+    /// Gives a part a hit shape of its own (`collider`), or takes it
+    /// away.
+    SetCollider {
+        /// The part.
+        part: String,
+        /// What it becomes.
+        to: ColliderTo,
+    },
     /// Says how far a part may turn about its join when the model is
     /// posed: its `limits`.
     SetLimits {
@@ -566,13 +583,43 @@ pub enum Edit {
         /// The key, counted from 1.
         key: usize,
     },
+    /// Puts an event on a key: a name a game hears when the animation
+    /// passes it.
+    SetEvent {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// The event's name: `footstep`.
+        name: String,
+    },
+    /// Takes an event off a key, or every one it has.
+    RemoveEvent {
+        /// The animation.
+        animation: String,
+        /// The key, counted from 1.
+        key: usize,
+        /// The event; `None` for every one on the key.
+        name: Option<String>,
+    },
+    /// Stands the poses an animation's keys use on the ground, by
+    /// moving the body up or down in each.
+    FitGround {
+        /// The animation.
+        animation: String,
+        /// The part to move: the one every other part hangs from. `None`:
+        /// found by itself.
+        part: Option<String>,
+        /// Fits poses that lift the body too (a leap).
+        all: bool,
+    },
 }
 
 impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 40] = [
+    pub const COMMANDS: [&'static str; 45] = [
         "add",
         "remove",
         "rename",
@@ -613,6 +660,11 @@ impl Edit {
         "move-key",
         "set-key",
         "remove-key",
+        "set-colliders",
+        "set-collider",
+        "set-event",
+        "remove-event",
+        "fit-ground",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -645,6 +697,8 @@ impl Edit {
             Edit::MoveCorner { .. } => "move-corner",
             Edit::Define { .. } => "define",
             Edit::SetLimits { .. } => "set-limits",
+            Edit::SetColliders { .. } => "set-colliders",
+            Edit::SetCollider { .. } => "set-collider",
             Edit::SetPose { .. } => "set-pose",
             Edit::AddPose { .. } => "add-pose",
             Edit::RenamePose { .. } => "rename-pose",
@@ -658,6 +712,9 @@ impl Edit {
             Edit::MoveKey { .. } => "move-key",
             Edit::SetKey { .. } => "set-key",
             Edit::RemoveKey { .. } => "remove-key",
+            Edit::SetEvent { .. } => "set-event",
+            Edit::RemoveEvent { .. } => "remove-event",
+            Edit::FitGround { .. } => "fit-ground",
         }
     }
 }
@@ -1272,6 +1329,8 @@ fn animation_source(path: &Path, from: &AnimationFrom) -> Result<(Doc, String), 
 fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result<Outcome, Stop> {
     match edit {
         Edit::SetLimits { part, limits } => motion::set_limits(doc, part, *limits),
+        Edit::SetColliders { colliders } => hits::set_colliders(doc, *colliders),
+        Edit::SetCollider { part, to } => hits::set_collider(doc, part, *to, model),
         Edit::SetPose {
             pose,
             part,
@@ -1334,6 +1393,21 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
             pose,
         } => motion::set_key(doc, animation, *key, pose),
         Edit::RemoveKey { animation, key } => motion::remove_key(doc, animation, *key),
+        Edit::SetEvent {
+            animation,
+            key,
+            name,
+        } => motion::set_event(doc, animation, *key, name),
+        Edit::RemoveEvent {
+            animation,
+            key,
+            name,
+        } => motion::remove_event(doc, animation, *key, name.as_deref()),
+        Edit::FitGround {
+            animation,
+            part,
+            all,
+        } => ground::fit_ground(doc, animation, part.as_deref(), *all, model, path),
         Edit::MirrorPose { pose, as_name } => {
             motion::mirror_pose(doc, pose, as_name.as_deref(), model)
         }
@@ -3535,6 +3609,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::MoveCorner { part, .. }
         | Edit::Define { part, .. }
         | Edit::SetLimits { part, .. }
+        | Edit::SetCollider { part, .. }
         | Edit::SetPose { part, .. }
         | Edit::Cut { part, .. } => part,
         Edit::SetSocket { socket, .. }
@@ -3555,6 +3630,10 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::MoveKey { .. }
         | Edit::SetKey { .. }
         | Edit::RemoveKey { .. }
+        | Edit::SetEvent { .. }
+        | Edit::RemoveEvent { .. }
+        | Edit::FitGround { .. }
+        | Edit::SetColliders { .. }
         | Edit::TidySockets => "",
     }
 }

@@ -226,6 +226,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         parent: None,
         axes: crate::math::Mat3::IDENTITY,
         limits: crate::recipe::Limits::Free,
+        collider: crate::recipe::ColliderDef::Unset,
         carried: Vec::new(),
         sockets: Vec::new(),
         bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
@@ -249,6 +250,9 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         poses: Vec::new(),
         animations: Vec::new(),
         zero: Vec3::ZERO,
+        hit_setting: None,
+        colliders: Vec::new(),
+        without_collider: Vec::new(),
     }
 }
 
@@ -315,6 +319,9 @@ pub fn inspect_file_listing(path: &Path, also: &Also) -> Result<Inspection, Fail
     }
     if also.joins {
         inspection.joins = join_report(&model);
+    }
+    if also.colliders {
+        inspection.colliders = crate::inspect::collider_report(&model);
     }
     Ok(inspection)
 }
@@ -393,6 +400,8 @@ pub struct Also {
     /// The tree the model moves by: what every part turns about, and how
     /// far: `--joins`.
     pub joins: bool,
+    /// Every hit shape and its numbers: `--colliders`.
+    pub colliders: bool,
     /// Report on the model as it stands in this pose: `--pose`.
     pub pose: Option<String>,
 }
@@ -460,10 +469,11 @@ pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
 }
 
 /// The recipe a new model starts as: one box, standing on the ground,
-/// with one colour.
+/// with one colour, and a hit shape fitted to every part it will have.
 pub const STARTER: &str = r##"# A new Duck Mold model. Sizes are in metres.
 version = 0
 name = "model"
+colliders = "parts"   # every part gets a hit shape a game can test
 
 [palette]
 duck = "#FFCC2E"

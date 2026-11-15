@@ -359,6 +359,9 @@ impl StudioApp {
                     .on_hover_text("Wireframe: only the outline of each face, to see through the model (Z)");
                 ui.toggle_value(&mut studio.shadow, "Shadow")
                     .on_hover_text("Darken the ground under the model, darkest where something stands on it");
+                ui.toggle_value(&mut studio.hits, "Hits").on_hover_text(
+                    "Hit shapes: the box, ball or capsule round each part that a game tests what was hit with",
+                );
                 if studio.hidden_count() > 0
                     && ui
                         .button(format!("{} hidden", studio.hidden_count()))
@@ -576,6 +579,7 @@ impl StudioApp {
                         | Action::Grid
                         | Action::Wireframe
                         | Action::Shadow
+                        | Action::HitShapes
                         | Action::Open
                         | Action::NewModel
                         | Action::Export
@@ -599,6 +603,7 @@ impl StudioApp {
                 Action::Grid => studio.grid = !studio.grid,
                 Action::Wireframe => studio.wire = !studio.wire,
                 Action::Shadow => studio.shadow = !studio.shadow,
+                Action::HitShapes => studio.hits = !studio.hits,
                 Action::NewModel => new_model = true,
                 Action::Open => open_another = true,
                 Action::Export => {

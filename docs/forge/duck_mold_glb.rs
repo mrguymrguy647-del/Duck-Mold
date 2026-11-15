@@ -27,9 +27,11 @@
 
 use std::collections::HashMap;
 
-// ==== Duck Mold's .glb reader, version 5 ====================================
+// ==== Duck Mold's .glb reader, version 7 ====================================
 //
-// Version 5: the model's animations and named poses, in `animations` and
+// Version 6: the model's hit shapes (colliders), in `colliders`: a box, a
+// ball or a capsule for each part that has one, at rest, each carried by
+// its part's join ([`GlbHitShape::moved`]). Version 5: the model's animations and named poses, in `animations` and
 // `poses`, and what it takes to play them: where an animation has every
 // join at a time ([`GlbAnimation::at`]), and the model's corners and
 // sockets with its joins so placed ([`GlbModel::stands`],
@@ -87,6 +89,80 @@ pub struct GlbModel {
     /// The model's named poses. `rest`, the model as it is built, isn't
     /// in the list: it is every join at [`GlbPlace::REST`].
     pub poses: Vec<GlbPose>,
+    /// The model's hit shapes: simple shapes that stand in for its parts
+    /// when a game asks what was hit, where they are with the model at
+    /// rest. Empty for a model with none, and for files from before
+    /// version 6.
+    pub colliders: Vec<GlbCollider>,
+}
+
+/// One hit shape of the model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlbCollider {
+    /// The part it stands for, by its path: `head`, `left_arm/hand`.
+    /// Empty for one shape round the whole model.
+    pub part: String,
+    /// The join that carries it, as a place in `joins`: when that part
+    /// moves, its shape moves with it. `None` for one round the whole
+    /// model.
+    pub join: Option<usize>,
+    /// The shape, where it is at rest.
+    pub shape: GlbHitShape,
+}
+
+/// A hit shape: a box, a ball, or a capsule (a cylinder with a ball on
+/// each end), in the model's own space like the vertices.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum GlbHitShape {
+    /// A box, turned: its middle, its three directions (each 1 long,
+    /// square to the others) and how far it reaches along each from the
+    /// middle.
+    Box {
+        /// Its middle.
+        center: [f32; 3],
+        /// Its three directions.
+        axes: [[f32; 3]; 3],
+        /// How far it reaches along each, from the middle.
+        half: [f32; 3],
+    },
+    /// A ball.
+    Sphere {
+        /// Its middle.
+        center: [f32; 3],
+        /// Its radius.
+        radius: f32,
+    },
+    /// Every point within `radius` of the straight line from `a` to `b`.
+    Capsule {
+        /// One end of its middle line.
+        a: [f32; 3],
+        /// The other end.
+        b: [f32; 3],
+        /// How far it reaches from that line.
+        radius: f32,
+    },
+}
+
+impl GlbHitShape {
+    /// The same shape carried by a join that stands as `stand` says.
+    pub fn moved(&self, stand: &GlbStand) -> GlbHitShape {
+        match *self {
+            GlbHitShape::Box { center, axes, half } => GlbHitShape::Box {
+                center: stand.point(center),
+                axes: axes.map(|axis| stand.direction(axis)),
+                half,
+            },
+            GlbHitShape::Sphere { center, radius } => GlbHitShape::Sphere {
+                center: stand.point(center),
+                radius,
+            },
+            GlbHitShape::Capsule { a, b, radius } => GlbHitShape::Capsule {
+                a: stand.point(a),
+                b: stand.point(b),
+                radius,
+            },
+        }
+    }
 }
 
 /// One join of the model's tree: a part (or an assembly), the point it
@@ -189,6 +265,18 @@ pub struct GlbAnimation {
     pub times: Vec<f32>,
     /// What it moves.
     pub tracks: Vec<GlbTrack>,
+    /// The moments its keys mark, for a game to hear, in the order they
+    /// are reached. Empty in files from before version 7.
+    pub events: Vec<GlbEvent>,
+}
+
+/// An event: a name a key of an animation marks, and its key's time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlbEvent {
+    /// Its name: `footstep`.
+    pub name: String,
+    /// Seconds from the animation's start.
+    pub at: f32,
 }
 
 /// One join's way through an animation.
@@ -781,6 +869,92 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
         });
     }
 
+    // ---- The hit shapes, with x negated like the points.
+    let mut colliders = Vec::new();
+    for entry in extras["colliders"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default()
+    {
+        let part = entry["part"].as_str().unwrap_or_default();
+        let name = if part.is_empty() {
+            "the whole model"
+        } else {
+            part
+        };
+        let three = |value: &serde_json::Value, flip: bool| match value
+            .as_array()
+            .map(Vec::as_slice)
+        {
+            Some([x, y, z]) => match (x.as_f64(), y.as_f64(), z.as_f64()) {
+                (Some(x), Some(y), Some(z)) if x.is_finite() && y.is_finite() && z.is_finite() => {
+                    let x = if flip { -x } else { x };
+                    Ok([x as f32 + 0.0, y as f32 + 0.0, z as f32 + 0.0])
+                }
+                _ => Err(format!("the hit shape of {name} has a broken number")),
+            },
+            _ => Err(format!("the hit shape of {name} is missing a point")),
+        };
+        let size = |field: &str| {
+            entry[field]
+                .as_f64()
+                .filter(|number| number.is_finite() && *number >= 0.0)
+                .map(|number| number as f32)
+                .ok_or_else(|| format!("the hit shape of {name} has no {field}"))
+        };
+        let shape = match entry["shape"].as_str() {
+            Some("box") => {
+                let axes = entry["axes"]
+                    .as_array()
+                    .filter(|axes| axes.len() == 3)
+                    .ok_or_else(|| format!("the hit shape of {name} has no directions"))?;
+                let half = three(&entry["half"], false)?;
+                if half.iter().any(|number| *number < 0.0) {
+                    return Err(format!("the hit shape of {name} has a size below 0"));
+                }
+                GlbHitShape::Box {
+                    center: three(&entry["center"], true)?,
+                    axes: [
+                        three(&axes[0], true)?,
+                        three(&axes[1], true)?,
+                        three(&axes[2], true)?,
+                    ],
+                    half,
+                }
+            }
+            Some("sphere") => GlbHitShape::Sphere {
+                center: three(&entry["center"], true)?,
+                radius: size("radius")?,
+            },
+            Some("capsule") => GlbHitShape::Capsule {
+                a: three(&entry["a"], true)?,
+                b: three(&entry["b"], true)?,
+                radius: size("radius")?,
+            },
+            _ => {
+                return Err(format!(
+                    "the hit shape of {name} isn't a box, a sphere or a capsule"
+                ));
+            }
+        };
+        let join = match entry["node"].as_u64() {
+            None | Some(0) => None,
+            Some(node) => Some(
+                usize::try_from(node)
+                    .ok()
+                    .and_then(|node| join_of_node.get(node).copied().flatten())
+                    .ok_or_else(|| {
+                        format!("the hit shape of {name} is on an object that isn't there")
+                    })?,
+            ),
+        };
+        colliders.push(GlbCollider {
+            part: part.to_owned(),
+            join,
+            shape,
+        });
+    }
+
     // ---- What moves it: the animations and the named poses. An
     // object's turn is four numbers (x, y, z, w); with x negated like
     // the points, its y and z change sign. An object's place is written
@@ -886,12 +1060,41 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
                 }
             }
         }
+        let length = entry["length"].as_f64().unwrap_or(0.0) as f32;
+        let mut events: Vec<GlbEvent> = Vec::new();
+        for event in entry["events"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+        {
+            let event_name = event["name"]
+                .as_str()
+                .filter(|event_name| !event_name.is_empty())
+                .ok_or_else(|| format!("{what} has an event with no name"))?;
+            let at = event["at"]
+                .as_f64()
+                .ok_or_else(|| format!("{what} has an event, \"{event_name}\", with no time"))?
+                as f32;
+            if !(0.0..=length).contains(&at) {
+                return Err(format!(
+                    "{what} has an event, \"{event_name}\", at a time outside it"
+                ));
+            }
+            if events.last().is_some_and(|before| before.at > at) {
+                return Err(format!("{what} has events out of order"));
+            }
+            events.push(GlbEvent {
+                name: event_name.to_owned(),
+                at,
+            });
+        }
         animations.push(GlbAnimation {
             name: name.to_owned(),
             looping: entry["loop"].as_bool().unwrap_or(false),
-            length: entry["length"].as_f64().unwrap_or(0.0) as f32,
+            length,
             times,
             tracks,
+            events,
         });
     }
     let mut poses = Vec::new();
@@ -951,6 +1154,7 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
         joins,
         animations,
         poses,
+        colliders,
     })
 }
 
@@ -1135,4 +1339,4 @@ fn srgb(linear: f32) -> u8 {
     (curved * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-// ==== end of Duck Mold's .glb reader, version 5 =============================
+// ==== end of Duck Mold's .glb reader, version 7 =============================
