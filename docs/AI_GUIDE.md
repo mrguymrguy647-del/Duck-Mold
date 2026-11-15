@@ -634,6 +634,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> remove-key <animation> <number>` | Removes a key. If it is the first, the keys after it move earlier so the animation still starts at 0. |
 | `duck-mold edit <recipe> set-event <animation> <number> <name>` | Puts an event on a key: a name a game hears each time the animation passes that key (`footstep`). A key keeps the events it had; one already there is refused. |
 | `duck-mold edit <recipe> remove-event <animation> <number> [<name>]` | Takes an event off a key; without a name, every event on it. |
+| `duck-mold edit <recipe> fit-ground <animation>` | Stands each pose the animation's keys use on the ground: the body (the part every other part hangs from) moves up or down in it until the lowest point touches. Only that number changes. A pose that lifts the body (a leap) is left alone; `--all` fits it too; `--part <part>` says which part to move when more than one has others hanging from it. The summary names other animations that use the same poses, and how far it still sinks between keys. |
 | `duck-mold edit <recipe> set-animation <animation> --loop true\|false --smooth true\|false --length <seconds>` | Any of the three. `--length` scales every key's time: the whole animation gets faster or slower. |
 | `duck-mold edit <recipe> rename-animation <animation> <new name>` | Renames an animation where it stands. |
 | `duck-mold edit <recipe> remove-animation <animation>` | Removes an animation. Its poses stay. |
@@ -708,7 +709,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   `rename-pose` and `remove-pose`. The Limits in the panel are
   `set-limits`. Its timeline's changes are `move-key`, `set-key`,
   `remove-key`, `add-key`, `set-event`, `remove-event` (a key's menu:
-  Add event, and Remove for each), `set-animation` and `add-animation`; a turn
+  Add event, and Remove for each), `fit-ground` (Fit to ground),
+  `set-animation` and `add-animation`; a turn
   between two keys is `add-pose`, a `set-pose` for every part the
   animation moves, and `add-key`, together. The library's Animations
   list: Add is `add-animation --from` (or `--starter`) with
@@ -1008,6 +1010,12 @@ duck-mold edit duck.toml add-animation hello --from robot.toml --take wave
   use that. The summary says which.
 - **Missing parts**: refused, naming them. `--skip-missing` takes the
   rest and says what it left out.
+- **Fit it to the model's legs**: `fit-ground <animation>` stands each
+  key's pose on the ground (shorter legs sink into it, longer ones
+  float). Turn the feet flat first if the legs tip them (as below):
+  fitting a toe that digs in lifts the whole body. It leaves a leap
+  alone. Between keys a fast turn can still dip a little: the summary
+  says how much; keep it under half a centimetre.
 - **Turns are about each part's own axes**, so check the result: render
   a strip. A starter only knows the six names: feet that stick out of a
   leg can dig in as it swings (the robot's own walk turns its feet back;

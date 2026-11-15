@@ -4528,6 +4528,19 @@ exactly. Only that one number of each pose changes.
   example within 5 mm, as now.
 - The Studio has a **Fit to ground** button beside Loop and Smooth.
 
+*As built (step 6):* as above. The body is the top-level part that
+has parts hanging from it (the frame of a door, the bed of a cart); a
+leap is a pose whose body is moved up already, so fit a crouch before
+anything lifts it. Moves are kept to a tenth of a millimetre, so each
+key pose stands within a twentieth of one. The gnome's `walk` was fitted
+(its body 1.87 cm down in each step, not the 1.7 typed by hand), its
+`wave` needed nothing, and its new `jump` (the starter) had its boots
+turned flat in the crouch, as the robot's are, then was fitted: it
+sinks at most 4 mm between keys. Fitting the robot's own jump exactly
+would make it dip 1 cm between keys, more than its hand-tuned 4 mm, so
+the robot is left as it was; that is the known limit of fitting only the
+keys.
+
 ### The Studio
 
 ```text

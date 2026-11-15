@@ -518,6 +518,22 @@ pub enum Change {
         /// The event's name: letters, digits, "_" and "-".
         name: String,
     },
+    /// Stand the poses an animation's keys use on the ground: in each,
+    /// the body (the part every other part hangs from) is moved up or
+    /// down so the model's lowest point is on the ground. Only that one
+    /// number of each pose changes. A pose that lifts the body (a leap)
+    /// is left alone unless --all.
+    FitGround {
+        /// The animation.
+        animation: String,
+        /// The part to move up and down, if more than one part has
+        /// others hanging from it.
+        #[arg(long, value_name = "PART")]
+        part: Option<String>,
+        /// Fit the poses that lift the body too.
+        #[arg(long)]
+        all: bool,
+    },
     /// Take an event off a key; without a name, every event on it.
     RemoveEvent {
         /// The animation.
@@ -1083,6 +1099,15 @@ impl Change {
                 animation: animation.clone(),
                 key: *key,
                 name: name.clone(),
+            },
+            Change::FitGround {
+                animation,
+                part,
+                all,
+            } => Edit::FitGround {
+                animation: animation.clone(),
+                part: part.clone(),
+                all: *all,
             },
             Change::RemoveEvent {
                 animation,

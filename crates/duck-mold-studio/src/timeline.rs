@@ -133,6 +133,15 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
             {
                 done = Some(studio.set_smooth(smooth_now));
             }
+            if ui
+                .add_enabled(editable, egui::Button::new("Fit to ground"))
+                .on_hover_text(
+                    "Stand each pose this animation uses on the ground: the body moves up or down until the lowest point touches it. A leap is left alone",
+                )
+                .clicked()
+            {
+                done = Some(studio.fit_ground());
+            }
         }
         let mut ghosts = studio.ghosts();
         if ui

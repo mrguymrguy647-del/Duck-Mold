@@ -212,7 +212,7 @@ fn three_at(node: &Node) -> Option<[f64; 3]> {
 /// What a pose says about a part, as it is written: its turn and its
 /// move. `None` if the pose doesn't name the part (or the line can't be
 /// read).
-fn joint_at(doc: &Doc, pose: &str, part: &str) -> Option<([f64; 3], [f64; 3])> {
+pub(super) fn joint_at(doc: &Doc, pose: &str, part: &str) -> Option<([f64; 3], [f64; 3])> {
     let node = doc.node(&[key(POSES), key(pose), key(part)])?;
     match &node.value {
         Value::Array(_) => Some((three_at(node)?, [0.0; 3])),
@@ -718,7 +718,7 @@ pub(super) fn animation_names(doc: &Doc) -> Vec<String> {
 
 /// Stops with the names there are, if the recipe has no animation
 /// `name`.
-fn require_animation(doc: &Doc, name: &str) -> Result<(), Stop> {
+pub(super) fn require_animation(doc: &Doc, name: &str) -> Result<(), Stop> {
     let names = animation_names(doc);
     if names.iter().any(|known| known == name) {
         return Ok(());

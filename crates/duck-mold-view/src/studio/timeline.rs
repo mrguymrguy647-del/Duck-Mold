@@ -492,6 +492,22 @@ impl Studio {
         })
     }
 
+    /// Fit to ground: stands the poses the animation's keys use on the
+    /// ground (`fit-ground`). Then shows the time it was at again.
+    pub fn fit_ground(&mut self) -> Result<String, String> {
+        let animation = self.chosen_or_why()?;
+        let done = self.apply(&Edit::FitGround {
+            animation,
+            part: None,
+            all: false,
+        });
+        if done.is_ok() {
+            let now = self.at_time.unwrap_or(0.0);
+            self.set_time(now);
+        }
+        done
+    }
+
     /// Smooth on or off: `set-animation --smooth`.
     pub fn set_smooth(&mut self, smooth: bool) -> Result<String, String> {
         let animation = self.chosen_or_why()?;

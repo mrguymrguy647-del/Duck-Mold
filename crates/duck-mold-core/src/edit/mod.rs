@@ -16,6 +16,7 @@
 //! reads the file, changes its text, checks it and writes it back.
 
 pub mod doc;
+mod ground;
 mod hits;
 mod motion;
 mod spot;
@@ -601,13 +602,24 @@ pub enum Edit {
         /// The event; `None` for every one on the key.
         name: Option<String>,
     },
+    /// Stands the poses an animation's keys use on the ground, by
+    /// moving the body up or down in each.
+    FitGround {
+        /// The animation.
+        animation: String,
+        /// The part to move: the one every other part hangs from. `None`:
+        /// found by itself.
+        part: Option<String>,
+        /// Fits poses that lift the body too (a leap).
+        all: bool,
+    },
 }
 
 impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 44] = [
+    pub const COMMANDS: [&'static str; 45] = [
         "add",
         "remove",
         "rename",
@@ -652,6 +664,7 @@ impl Edit {
         "set-collider",
         "set-event",
         "remove-event",
+        "fit-ground",
     ];
 
     /// This edit's name: `add`, `set-color`...
@@ -701,6 +714,7 @@ impl Edit {
             Edit::RemoveKey { .. } => "remove-key",
             Edit::SetEvent { .. } => "set-event",
             Edit::RemoveEvent { .. } => "remove-event",
+            Edit::FitGround { .. } => "fit-ground",
         }
     }
 }
@@ -1389,6 +1403,11 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
             key,
             name,
         } => motion::remove_event(doc, animation, *key, name.as_deref()),
+        Edit::FitGround {
+            animation,
+            part,
+            all,
+        } => ground::fit_ground(doc, animation, part.as_deref(), *all, model, path),
         Edit::MirrorPose { pose, as_name } => {
             motion::mirror_pose(doc, pose, as_name.as_deref(), model)
         }
@@ -3613,6 +3632,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::RemoveKey { .. }
         | Edit::SetEvent { .. }
         | Edit::RemoveEvent { .. }
+        | Edit::FitGround { .. }
         | Edit::SetColliders { .. }
         | Edit::TidySockets => "",
     }

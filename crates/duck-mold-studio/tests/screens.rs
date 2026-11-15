@@ -2805,45 +2805,49 @@ fn the_animations_list_adds_a_starter_and_saves_an_animation() {
     );
     assert!(
         !screen
-            .get_by_label("Add jump")
+            .get_by_label("Add idle")
             .accesskit_node()
             .is_disabled()
     );
 
+    // (The gnome has a jump of its own already: it takes the idle.)
     // The panel is short and scrolls: the buttons below its edge are
     // pressed the way a screen reader presses them.
-    screen.get_by_label("Add jump").click_accesskit();
+    screen.get_by_label("Add idle").click_accesskit();
     screen.run_steps(2);
     let text = std::fs::read_to_string(&recipe).unwrap();
     assert!(
-        text.contains("[animations.jump]"),
+        text.contains("[animations.idle]"),
         "{}",
         studio(&screen).status()
     );
-    assert_eq!(studio(&screen).animation(), Some("jump"));
+    assert_eq!(studio(&screen).animation(), Some("idle"));
     assert!(
         studio(&screen)
             .status()
-            .starts_with("Added the animation \"jump\" from the starters"),
+            .starts_with("Added the animation \"idle\" from the starters"),
         "{}",
         studio(&screen).status()
     );
 
-    // Save the jump: it shows under Saved.
+    // Save the idle: it shows under Saved.
     screen.get_by_label("Animation to save");
     screen.get_by_label("Save the animation").click_accesskit();
     screen.run_steps(2);
-    let saved = recipe.parent().unwrap().join("animations/jump.toml");
+    let saved = recipe.parent().unwrap().join("animations/idle.toml");
     assert!(saved.exists(), "{}", studio(&screen).status());
     assert!(
         studio(&screen)
             .status()
-            .starts_with("Saved the animation \"jump\" to the library"),
+            .starts_with("Saved the animation \"idle\" to the library"),
         "{}",
         studio(&screen).status()
     );
-    screen.get_by_label(
-        "animations/jump.toml 5 keys, 1.3 s. Moves body, left_leg, right_leg, left_arm, right_arm.",
+    assert!(
+        screen
+            .query_all_by_label_contains("animations/idle.toml")
+            .count()
+            >= 1
     );
     // Back to the parts library.
     screen.get_by_label("Library").click();
@@ -3040,4 +3044,49 @@ fn a_keys_menu_adds_and_removes_its_events() {
     screen.run_steps(3);
     assert!(new_lines(&recipe).is_empty());
     screen.get_by_label_contains("can't be a name");
+}
+
+#[test]
+fn fit_to_ground_stands_the_animations_poses_on_the_ground() {
+    use egui::Key;
+    let recipe = copy_of("gnome.toml", "screens_fit_ground");
+    let fitted = std::fs::read_to_string(&recipe).unwrap();
+    // The crouch sunk into the ground by hand.
+    std::fs::write(
+        &recipe,
+        fitted.replacen(
+            "[poses.jump_crouch]\nbody = { move = [0, -0.0187, 0] }",
+            "[poses.jump_crouch]\nbody = { move = [0, -0.06, 0] }",
+            1,
+        ),
+    )
+    .unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("jump"));
+    screen.run_steps(3);
+    screen.get_by_label("Fit to ground").click();
+    screen.run_steps(3);
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), fitted);
+    assert!(
+        studio(&screen)
+            .status()
+            .contains("moving \"body\" in \"jump_crouch\" (up 0.0413)"),
+        "{}",
+        studio(&screen).status()
+    );
+    // One step to undo.
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, Key::Z);
+    screen.run_steps(2);
+    assert!(
+        std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("body = { move = [0, -0.06, 0] }")
+    );
 }

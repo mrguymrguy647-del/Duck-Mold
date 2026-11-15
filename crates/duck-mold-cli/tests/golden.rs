@@ -194,7 +194,10 @@ const MOVING: [(&str, &[(&str, &str)]); 4] = [
     ),
     ("door", &[("open", "top")]),
     ("cart", &[("roll", "right")]),
-    ("gnome", &[("walk", "right"), ("wave", "front")]),
+    (
+        "gnome",
+        &[("walk", "right"), ("wave", "front"), ("jump", "right")],
+    ),
 ];
 
 #[test]

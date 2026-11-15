@@ -288,9 +288,14 @@ each with its pose's name.
 - **Play** (Space) plays it; **Loop** and **Smooth** are the
   animation's own settings; **Ghosts** draws the poses of the keys
   before (blue) and after (orange) faintly.
+- **Fit to ground** stands every pose the animation uses on the ground:
+  in each, the body moves up or down until the lowest point touches
+  it, so a walk copied onto shorter legs doesn't sink. A leap is left
+  alone. On the command line: `duck-mold edit gnome.toml fit-ground
+  walk`.
 - Every change is one edit: `move-key`, `set-key`, `remove-key`,
-  `add-key`, `set-event`, `remove-event`, `set-animation`,
-  `add-animation`. Moving through time,
+  `add-key`, `set-event`, `remove-event`, `fit-ground`,
+  `set-animation`, `add-animation`. Moving through time,
   playing and ghosts change nothing in the file.
 
 In Part mode, a model with animations has a **Play** button at the top

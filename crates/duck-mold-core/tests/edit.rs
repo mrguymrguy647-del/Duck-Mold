@@ -3035,6 +3035,11 @@ fn every_kind_of_edit_has_a_name() {
             key: 1,
             name: None,
         },
+        Edit::FitGround {
+            animation: String::new(),
+            part: None,
+            all: false,
+        },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
     assert_eq!(names, Edit::COMMANDS);
