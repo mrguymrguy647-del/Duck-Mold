@@ -215,6 +215,12 @@ pub fn posed(model: &Model, joints: &[Joint]) -> Model {
             socket.facing = carrier.facing(socket.facing).tidied();
         }
     }
+    // Each hit shape goes with its part; one round the whole model stays.
+    for collider in &mut out.colliders {
+        if !collider.part.is_empty() {
+            collider.shape = collider.shape.moved(&place_of(&collider.part));
+        }
+    }
     out
 }
 

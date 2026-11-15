@@ -17,6 +17,7 @@ pub mod assemble;
 pub mod edit;
 pub mod glb;
 pub mod gltf;
+pub mod hit;
 pub mod inspect;
 pub mod issue;
 pub mod load;

@@ -493,10 +493,10 @@ only: nothing can be changed there.
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
-| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). |
-| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
+| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. |
+| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
@@ -623,6 +623,26 @@ A recipe can be written as TOML (the examples) or as JSON
 | [gnome.toml](examples/gnome.toml) | A second character with the robot's six part names: it takes the robot's walk from [animations/walk.toml](examples/animations/walk.toml) (written by `save-animation`), fitted to its shorter legs, and waves with the starter `wave`. |
 
 Each is commented line by line.
+
+## Hit shapes, for games
+
+So that a game can tell **what was hit** (the robot's head, not just
+"the robot"), a recipe can give its parts **hit shapes**: a simple box,
+ball or capsule fitted to each part, which moves with the part in any
+pose. One line does it:
+
+```toml
+colliders = "parts"     # a hit shape fitted to every part
+```
+
+A part can say its own (`collider = "sphere"`, `collider = "none"` for
+a part too small to aim at, or a table with its own numbers).
+`duck-mold inspect` says how many there are and which parts have none;
+`render --colliders` draws them; `duck-mold new` starts every new
+recipe with `colliders = "parts"`. The robot, gnome, door and cart
+examples have them.
+
+![The robot with its hit shapes outlined](tests/golden/robot.colliders.png)
 
 ## Using a model in Duck Forge
 

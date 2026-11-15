@@ -45,6 +45,8 @@ const LINE: Color = Color::rgb(0x45, 0x4c, 0x5a);
 const TEXT: Color = Color::rgb(0xe6, 0xe9, 0xef);
 /// A face nobody coloured: the same grey a `.glb` gives it.
 const UNCOLOURED: [u8; 3] = [180, 180, 180];
+/// The colour hit shapes are outlined in (`--colliders`): a clear cyan.
+pub const HIT_OUTLINE: Color = Color::rgb(0x3c, 0xd8, 0xf0);
 
 /// How much the camera sees, top to bottom, in degrees. Narrow, so the
 /// views look nearly flat.
@@ -192,6 +194,12 @@ impl Sheet {
 /// A line one pixel wide runs between the views and above the caption,
 /// so the picture is `2 * size + 1` pixels wide.
 pub fn render_sheet(model: &Model, caption: &str, size: usize) -> Sheet {
+    render_sheet_with(model, caption, size, false)
+}
+
+/// [`render_sheet`], with the model's hit shapes outlined over it when
+/// `colliders` is true (`render --colliders`).
+pub fn render_sheet_with(model: &Model, caption: &str, size: usize, colliders: bool) -> Sheet {
     let scale = text_scale(size);
     let pad = 2 * scale as usize;
     let strip = Canvas::line_height(scale) as usize + 2 * pad;
@@ -203,7 +211,7 @@ pub fn render_sheet(model: &Model, caption: &str, size: usize) -> Sheet {
     let mut views = Vec::with_capacity(VIEWS.len());
     for (at, view) in VIEWS.iter().enumerate() {
         let (left, top) = ((at % 2) * (size + 1), (at / 2) * (size + 1));
-        let picture = draw_view(model, view, size);
+        let picture = draw_view(model, view, size, colliders);
         for (index, &pixel) in picture.pixels().iter().enumerate() {
             let (x, y) = (left + index % size, top + index / size);
             sheet.set_pixel(x as i32, y as i32, Color::from_hex(pixel));
@@ -269,19 +277,33 @@ fn fit(text: &str, room: usize, scale: u32) -> String {
 /// view's right, up and away become Duck Forge's x, y and z. The camera
 /// then always stands at the same place, looking straight ahead, and
 /// Duck Forge does no turning of its own.
-fn draw_view(model: &Model, view: &View, size: usize) -> Canvas {
+fn draw_view(model: &Model, view: &View, size: usize, colliders: bool) -> Canvas {
     let Some(bounds) = model.bounds() else {
         let mut canvas = Canvas::new(size, size);
         canvas.clear(BACKGROUND);
         return canvas; // nothing to draw
     };
-    draw_view_of(model, view, size, bounds.center(), bounds.half().length())
+    draw_view_of(
+        model,
+        view,
+        size,
+        bounds.center(),
+        bounds.half().length(),
+        colliders,
+    )
 }
 
 /// Draws one view, `size` pixels square, of what is within `radius` of
 /// `middle`: several pictures drawn with the same two show the model
 /// from the same place, at the same size.
-fn draw_view_of(model: &Model, view: &View, size: usize, middle: Vec3, radius: f64) -> Canvas {
+fn draw_view_of(
+    model: &Model,
+    view: &View,
+    size: usize,
+    middle: Vec3,
+    radius: f64,
+    colliders: bool,
+) -> Canvas {
     let mut canvas = Canvas::new(size, size);
     canvas.clear(BACKGROUND);
     let shrink = if radius > 0.0 { 1.0 / radius } else { 1.0 };
@@ -304,6 +326,29 @@ fn draw_view_of(model: &Model, view: &View, size: usize, middle: Vec3, radius: f
         fov: (FIELD_OF_VIEW as f32).to_radians(),
     };
     canvas.draw_mesh(&mesh, &Transform::default(), &camera);
+    if colliders {
+        // The hit shapes, as thin lines over the model: seen through it,
+        // so that a shape inside another part shows too.
+        let place = |point: Vec3| {
+            let from_middle = (point - middle) * shrink;
+            duckforge::prelude::vec3(
+                from_middle.dot(right) as f32,
+                from_middle.dot(up) as f32,
+                from_middle.dot(away) as f32,
+            )
+        };
+        for collider in &model.colliders {
+            for (from, to) in collider.shape.outline() {
+                let (Some(from), Some(to)) = (
+                    camera.world_to_screen(place(from), &canvas),
+                    camera.world_to_screen(place(to), &canvas),
+                ) else {
+                    continue;
+                };
+                canvas.draw_line(from, to, HIT_OUTLINE);
+            }
+        }
+    }
     canvas
 }
 
@@ -312,7 +357,7 @@ fn draw_view_of(model: &Model, view: &View, size: usize, middle: Vec3, radius: f
 /// shows these. Each pixel is `0x00RRGGBB`, row by row from the top.
 pub fn render_small(model: &Model, size: usize) -> Vec<u32> {
     let view = &VIEWS[VIEWS.len() - 1];
-    draw_view(model, view, size.max(1)).pixels().to_vec()
+    draw_view(model, view, size.max(1), false).pixels().to_vec()
 }
 
 /// The model as a Duck Forge mesh, each corner moved by `place` first.
@@ -372,6 +417,7 @@ pub fn render_file(
     output: Option<&Path>,
     size: usize,
     pose: Option<&str>,
+    colliders: bool,
 ) -> Result<Rendered, Failure> {
     if !(SMALLEST_SIZE..=LARGEST_SIZE).contains(&size) {
         return Err(Failure::Usage(Box::new(
@@ -403,7 +449,7 @@ pub fn render_file(
         }
     };
     inspection.materials = built.materials;
-    let sheet = render_sheet(&model, &inspection.headline(), size);
+    let sheet = render_sheet_with(&model, &inspection.headline(), size, colliders);
     let png = sheet.to_png();
     let output = match (output, pose) {
         (Some(output), _) => output.to_path_buf(),
@@ -514,6 +560,20 @@ pub fn render_strip(
     frames: usize,
     view: &str,
 ) -> Strip {
+    render_strip_with(model, animation, caption, size, frames, view, false)
+}
+
+/// [`render_strip`], with the hit shapes outlined in every frame when
+/// `colliders` is true.
+pub fn render_strip_with(
+    model: &Model,
+    animation: &Animation,
+    caption: &str,
+    size: usize,
+    frames: usize,
+    view: &str,
+    colliders: bool,
+) -> Strip {
     let view = view_named(view).unwrap_or(&VIEWS[VIEWS.len() - 1]);
     let moving = Motion::of(model, animation);
     // The camera takes in the model wherever the animation puts it, so
@@ -542,7 +602,7 @@ pub fn render_strip(
     for (frame, at) in strip_times(animation, frames).into_iter().enumerate() {
         let left = frame * (size + 1);
         let posed = motion::posed(model, &moving.joints_at(at));
-        let picture = draw_view_of(&posed, view, size, middle, radius);
+        let picture = draw_view_of(&posed, view, size, middle, radius, colliders);
         for (index, &pixel) in picture.pixels().iter().enumerate() {
             let (x, y) = (left + index % size, index / size);
             sheet.set_pixel(x as i32, y as i32, Color::from_hex(pixel));
@@ -618,6 +678,7 @@ pub fn render_animation_file(
     animation: &str,
     frames: usize,
     view: Option<&str>,
+    colliders: bool,
 ) -> Result<RenderedAnimation, Failure> {
     let fail = |issue: Issue| Err(Failure::Usage(Box::new(issue)));
     if !(SMALLEST_SIZE..=LARGEST_SIZE).contains(&size) {
@@ -677,13 +738,14 @@ pub fn render_animation_file(
     let moving = tools::animation_named(&built.model, animation, &built.source)?.clone();
     let rest = inspect(&built.model, &built.source, built.warnings);
     let inspection = inspect_animation(&rest, &built.model, &moving, &built.source);
-    let strip = render_strip(
+    let strip = render_strip_with(
         &built.model,
         &moving,
         &inspection.headline(),
         size,
         frames,
         view,
+        colliders,
     );
     let png = strip.to_png();
     let output = match output {

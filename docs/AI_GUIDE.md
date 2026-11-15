@@ -513,6 +513,7 @@ Warnings (the model is still built; exit code 0):
 | `floating` | A part touches nothing. |
 | `limit_broken` | A pose turns a part past its `limits`, or moves a part that is `"fixed"`. The model still builds. |
 | `loop_jumps` | An animation loops and doesn't end on the pose it starts with. The model still builds. |
+| `hit_shape` | A part's hit shape with numbers of its own leaves most of the part outside it, or is more than 8 times as big. |
 | `unknown_pose` | A key, or a command, names a pose the recipe doesn't have. `rest` is always one. |
 | `unknown_animation` | A command names an animation the recipe doesn't have. |
 | `hidden` | A part is entirely inside another. |
@@ -616,6 +617,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
+| `duck-mold edit <recipe> set-colliders <parts\|capsule\|box\|sphere\|none>` | The model's hit shapes (section 11, "Hit shapes"): `parts` fits one to every part; `capsule`, `box` or `sphere` puts one round the whole model; `none` takes the line away. |
+| `duck-mold edit <recipe> set-collider <part> <box\|sphere\|capsule\|none\|fitted>` | A part's own hit shape: a shape fitted to it, `none` (no hit shape), or `fitted` (take its own away: it follows `colliders`). `--size x,y,z`, `--radius r`, `--length l` (end to end), `--center x,y,z` and `--along x\|y\|z` give it numbers of its own; any not given keep the fitted shape's. |
 | `duck-mold edit <recipe> set-limits <part> --x <low,high> --y ... --z ...` | Says how far a part may turn when the model is posed (section 11). Each of `--x`, `--y`, `--z` takes two angles (`-30,40`), `free` (any amount) or `none` (not that way); directions not given stay as they are. `--fixed`: it never turns or moves. `--none`: no limits again. |
 | `duck-mold edit <recipe> set-pose <pose> <part> --turn x,y,z` | Turns a part in a pose, in degrees about its pivot (section 11); `--move x,y,z` slides it, in metres. Makes the pose if it isn't there. `--rest` puts the part back at rest in that pose. |
 | `duck-mold edit <recipe> add-pose <name>` | A new pose with every part at rest; `--from <pose>` makes it a copy of another. |
@@ -960,6 +963,43 @@ duck-mold edit duck.toml add-animation hello --from robot.toml --take wave
 - The file `save-animation` writes: a comment line, `version`, `name`,
   the poses it uses, the animation. Any recipe with animations can be
   copied from too.
+
+### Hit shapes
+
+So a game can tell **what was hit** (the robot's head, not just "the
+robot"), each part can have a **hit shape**: a box, a sphere or a
+capsule that stands in for it. Duck Forge tests clicks, bullets and
+swords against them, in whatever pose the model is in.
+
+```bash
+duck-mold edit robot.toml set-colliders parts        # a shape fitted to every part
+duck-mold edit robot.toml set-collider head sphere   # a ball round the head instead
+duck-mold edit robot.toml set-collider left_eye none # no hit shape: too small to aim at
+duck-mold inspect robot.toml --colliders             # every shape and its numbers
+duck-mold render robot.toml --colliders              # outlined in cyan over the model
+```
+
+- `colliders = "parts"` at the top gives every part the shape that
+  suits it: a sphere for a sphere; a capsule for a cylinder, capsule or
+  cone; a box for the rest. A new recipe (`duck-mold new`) starts with
+  it. `"capsule"`, `"box"` or `"sphere"` is one shape round the whole
+  model instead (a prop, or "the robot was hit" is enough).
+- A part's own `collider`: `"box"`, `"sphere"`, `"capsule"` (fitted to
+  it), `"none"`, or `{ shape = "sphere", radius = 0.25 }` with numbers
+  of its own (in the part's own directions, from its own middle).
+- Fitted shapes follow the part: resize the part and its shape fits
+  again. A capsule is as long as its part, round ends included.
+- `inspect` adds `hit shapes   each part: 17 (box 11, capsule 3, sphere
+  3)` and the parts with none; with `--json`: `hit_shapes` (`setting`,
+  `count`, `boxes`, `spheres`, `capsules`, `none_by_their_own`) and
+  `parts_without_colliders`. `--colliders` adds `colliders`: each one's
+  `part`, `shape`, `center`, and `size` and `directions` (a box),
+  `radius` (a sphere), `radius`, `length` and `ends` (a capsule), and
+  `own`.
+- A shape with its own numbers that leaves most of its part outside, or
+  is more than 8 times its size, is the warning `hit_shape`.
+- Give tiny parts (eyes, a buckle) `none`: a hit on them is rarely
+  wanted, and the part behind is named instead.
 
 ### In a game
 

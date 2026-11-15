@@ -18,6 +18,7 @@
 version = 0
 name = "cart"
 description = "A hand cart on four wheels that roll."
+colliders = "parts"   # a hit shape fitted to every part: wheels, bed, pole
 
 [palette]
 wood  = "#A0703C"

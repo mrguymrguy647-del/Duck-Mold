@@ -93,6 +93,9 @@ pub enum Code {
     /// An animation that loops and doesn't end on the pose it starts
     /// with: the model would jump when it starts again.
     LoopJumps,
+    /// A hit shape with numbers of its own that leaves most of its part
+    /// outside it, or is far bigger than it.
+    HitShape,
 }
 
 impl Code {
@@ -129,6 +132,7 @@ impl Code {
             Code::UnknownPose => "unknown_pose",
             Code::UnknownAnimation => "unknown_animation",
             Code::LoopJumps => "loop_jumps",
+            Code::HitShape => "hit_shape",
         }
     }
 }

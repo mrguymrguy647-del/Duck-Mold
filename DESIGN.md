@@ -4261,6 +4261,41 @@ collider = { shape = "box", size = [0.3, 0.3, 0.3], center = [0, 0.1, 0] }
 - A hit names the part as `inspect` does: `head`, `left_arm/hand`, or
   the assembly's name for an assembly's shape.
 
+*As built (step 1):* as above, with these details.
+
+- **A capsule is as long as its part**, round ends included (as the
+  design says), so it doesn't hold a cylinder's rim corners: they
+  stand up to four tenths of the radius outside its round ends. One
+  long enough to hold them would reach well past the part: the robot's
+  thigh would have been 65 cm for a 45 cm thigh, its ends inside the
+  body and the foot, and a hit there would name the wrong part.
+- **`"parts"` gives a capsule only to a cylinder, capsule or cone
+  clearly longer than it is wide** (its longest side at least 1.2 times
+  its next). A flat one, a wheel or a disc, gets a box: a capsule lying
+  across a disc fits it badly.
+- **Every fitted shape holds its part**, checked on every example in
+  every pose and every frame step (capsules within their rim corners).
+  Sizes are kept to a millionth of a metre, rounded up, so rounding
+  never leaves a corner a hair outside.
+- **A definition can say its part's `collider`**; the part that uses it
+  can say another, which wins.
+- **On a part made of parts**, one shape round all of it; the parts
+  inside have none and aren't listed as "none".
+- **The warnings** count a corner as outside only if it is further out
+  than a twentieth of the part's size across, so a sphere of exactly
+  the part's radius doesn't warn over a few millimetres.
+- `inspect` with no `colliders` line and some parts' own says "2,
+  only on the parts that say their own". A model with neither says
+  nothing about hit shapes, so the other examples' reports didn't
+  change by a byte. The robot, gnome, door and cart got their hit shapes
+  (with `set-colliders` and `set-collider`), and their reports changed;
+  their models and pictures didn't (hit shapes go into the file in step
+  2).
+- `render --colliders` draws the outlines over the model without hiding
+  the parts in front, so a shape inside another part shows.
+- `duck-mold new` and the Studio's New model write `colliders =
+  "parts"` (your addition).
+
 ### What `inspect` and `render` say
 
 ```text

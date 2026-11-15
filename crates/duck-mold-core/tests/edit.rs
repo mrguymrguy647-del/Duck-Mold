@@ -3020,6 +3020,11 @@ fn every_kind_of_edit_has_a_name() {
             animation: String::new(),
             key: 1,
         },
+        Edit::SetColliders { colliders: None },
+        Edit::SetCollider {
+            part: String::new(),
+            to: duck_mold_core::edit::ColliderTo::None,
+        },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();
     assert_eq!(names, Edit::COMMANDS);

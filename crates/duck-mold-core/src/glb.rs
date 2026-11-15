@@ -1331,6 +1331,9 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         poses: Vec::new(),
         animations: Vec::new(),
         zero: Vec3::ZERO,
+        hit_setting: None,
+        colliders: Vec::new(),
+        without_collider: Vec::new(),
     })
 }
 
@@ -1412,6 +1415,7 @@ fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Fa
             parent: name.rsplit_once('/').map(|(outer, _)| outer.to_owned()),
             axes: Mat3::IDENTITY,
             limits: crate::recipe::Limits::Free,
+            collider: crate::recipe::ColliderDef::Unset,
             carried: Vec::new(),
             sockets: Vec::new(),
             bounds: Bounds::around(

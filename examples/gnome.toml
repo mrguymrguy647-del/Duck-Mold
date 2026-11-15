@@ -25,6 +25,7 @@
 version = 0
 name = "gnome"
 description = "A garden gnome that walks with the robot's walk."
+colliders = "parts"   # a hit shape fitted to every part
 
 [palette]
 coat  = "#3E6FB0"
@@ -115,6 +116,7 @@ color = "belt"
 attach = "back"
 to = "body.belt"
 limits = "fixed"
+collider = "none"     # too small to aim at
 
 [[parts]]
 name = "head"
@@ -150,6 +152,7 @@ color = "skin"
 attach = "back"
 to = "head.nose"
 limits = "fixed"
+collider = "none"     # too small to aim at
 
 # Joined by its base to a chin socket that faces down, the cone hangs
 # point down.

@@ -79,6 +79,109 @@ pub struct Recipe {
     pub poses: Vec<PoseDef>,
     /// The animations: poses at times.
     pub animations: Vec<AnimationDef>,
+    /// What hit shapes the model has (`colliders`). `None`: none, but a
+    /// part can still say its own.
+    pub colliders: Option<Colliders>,
+}
+
+/// One of the three simple shapes a game tests hits against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HitKind {
+    /// A box, turned with its part.
+    Box,
+    /// A ball.
+    Sphere,
+    /// A cylinder with a ball on each end.
+    Capsule,
+}
+
+impl HitKind {
+    /// The three, as a recipe writes them.
+    pub const NAMES: [&'static str; 3] = ["box", "sphere", "capsule"];
+
+    /// The word for it: `box`, `sphere`, `capsule`.
+    pub fn name(self) -> &'static str {
+        match self {
+            HitKind::Box => "box",
+            HitKind::Sphere => "sphere",
+            HitKind::Capsule => "capsule",
+        }
+    }
+
+    /// The shape a word names.
+    pub fn from_name(word: &str) -> Option<HitKind> {
+        match word {
+            "box" => Some(HitKind::Box),
+            "sphere" => Some(HitKind::Sphere),
+            "capsule" => Some(HitKind::Capsule),
+            _ => None,
+        }
+    }
+}
+
+/// The recipe's `colliders`: what hit shapes the model has.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Colliders {
+    /// `"parts"`: every part gets the shape that suits it, fitted to it,
+    /// moving with its join.
+    Parts,
+    /// One shape round the whole model, fitted to it at rest.
+    Whole(HitKind),
+}
+
+impl Colliders {
+    /// The words `colliders` can be.
+    pub const NAMES: [&'static str; 4] = ["parts", "capsule", "box", "sphere"];
+
+    /// As a recipe writes it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Colliders::Parts => "parts",
+            Colliders::Whole(kind) => kind.name(),
+        }
+    }
+
+    /// The setting a word names.
+    pub fn from_name(word: &str) -> Option<Colliders> {
+        match word {
+            "parts" => Some(Colliders::Parts),
+            other => HitKind::from_name(other).map(Colliders::Whole),
+        }
+    }
+}
+
+/// A part's own `collider`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub enum ColliderDef {
+    /// Not written: the part follows the model's `colliders`.
+    #[default]
+    Unset,
+    /// `"none"`: no hit shape.
+    None,
+    /// A word: this shape, fitted to the part.
+    Fitted(HitKind),
+    /// A table: this shape, with its own numbers.
+    Own(OwnHitShape),
+}
+
+/// A hit shape with numbers of its own, in the part's own directions,
+/// in metres, measured from the part's own zero point (a shape's
+/// middle).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct OwnHitShape {
+    /// Which shape.
+    pub kind: HitKind,
+    /// Where its middle is.
+    pub center: [f64; 3],
+    /// A box's size along x, y and z.
+    pub size: [f64; 3],
+    /// A sphere's or a capsule's radius.
+    pub radius: f64,
+    /// A capsule's length, from end to end.
+    pub length: f64,
+    /// Which way a capsule lies: 0, 1 or 2 for x, y or z. `None`: along
+    /// the part's longest side.
+    pub along: Option<usize>,
 }
 
 /// An animation, as the recipe writes it: a name, and the poses it goes
@@ -226,6 +329,8 @@ pub struct PartDef {
     pub changes: Vec<ChangeDef>,
     /// How far it may turn when the model is posed.
     pub limits: Limits,
+    /// Its own hit shape, if it says one.
+    pub collider: ColliderDef,
 }
 
 /// How far a part may turn about its join when the model is posed: its
@@ -801,7 +906,7 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-pub(crate) const PART_FIELDS: [&str; 28] = [
+pub(crate) const PART_FIELDS: [&str; 29] = [
     "name",
     "shape",
     "use",
@@ -828,6 +933,7 @@ pub(crate) const PART_FIELDS: [&str; 28] = [
     "scale",
     "mirror",
     "limits",
+    "collider",
     "sockets",
     "note",
 ];
@@ -850,12 +956,13 @@ fn a_shape(name: &str) -> String {
 }
 
 /// The fields at the top of a recipe.
-pub(crate) const TOP_FIELDS: [&str; 11] = [
+pub(crate) const TOP_FIELDS: [&str; 12] = [
     "version",
     "name",
     "description",
     "note",
     "palette",
+    "colliders",
     "define",
     "parts",
     "sockets",
@@ -865,11 +972,13 @@ pub(crate) const TOP_FIELDS: [&str; 11] = [
 ];
 
 /// Names kept for later phases, and what each is for.
-const RESERVED: [(&str, &str); 3] = [
+const RESERVED: [(&str, &str); 2] = [
     ("bones", "rigs"),
-    ("colliders", "collision shapes"),
     ("lods", "simpler versions of a model for far away"),
 ];
+
+/// The fields of a hit shape written as a table.
+const COLLIDER_FIELDS: [&str; 6] = ["shape", "center", "size", "radius", "length", "along"];
 
 /// The most colours a palette can hold.
 pub const MAX_PALETTE: usize = 256;
@@ -1164,6 +1273,7 @@ impl Decoder<'_> {
             origin: None,
             poses: Vec::new(),
             animations: Vec::new(),
+            colliders: None,
         };
         let Some(mut fields) = self.table(root, "", "a recipe: a table of fields") else {
             return recipe;
@@ -1287,6 +1397,25 @@ impl Decoder<'_> {
                 socket,
                 loc: self.loc("origin", entry.node.pos),
             });
+        }
+
+        if let Some(entry) = fields.take("colliders")
+            && let Some(word) = self.text(&entry.node, "colliders", "parts")
+        {
+            match Colliders::from_name(&word) {
+                Some(colliders) => recipe.colliders = Some(colliders),
+                None => {
+                    let message = format!(
+                        "\"colliders\" is \"parts\" (a hit shape fitted to every part), or one shape round the whole model: \"capsule\", \"box\" or \"sphere\". Not \"{word}\""
+                    );
+                    let issue = Issue::error(Code::TypeMismatch, "colliders", message)
+                        .in_file(self.file)
+                        .at(entry.node.pos)
+                        .got(word.as_str())
+                        .one_of(&word, Colliders::NAMES);
+                    self.issues.push(issue);
+                }
+            }
         }
 
         if let Some(entry) = fields.take("poses") {
@@ -1675,6 +1804,7 @@ impl Decoder<'_> {
             trim: Trim::default(),
             changes: Vec::new(),
             limits: Limits::Free,
+            collider: ColliderDef::Unset,
         };
         let Some(mut fields) = self.table(node, path, "a part: a table of fields") else {
             return part;
@@ -1864,6 +1994,12 @@ impl Decoder<'_> {
             } else if let Some(limits) = self.limits(&entry.node, &limits_path) {
                 part.limits = limits;
             }
+        }
+
+        if let Some(entry) = fields.take("collider")
+            && let Some(collider) = self.collider(&entry.node, &fields.sub("collider"))
+        {
+            part.collider = collider;
         }
 
         if let Some(entry) = fields.take("sockets") {
@@ -2236,6 +2372,154 @@ impl Decoder<'_> {
             "a defined part has no place or size of its own: put \"{field}\" on the part that uses it"
         );
         self.error(Code::Conflict, path, entry.key_pos, message);
+    }
+
+    /// Reads a part's `collider`: `"none"`, a shape's name (fitted), or a
+    /// table with a shape and its numbers.
+    fn collider(&mut self, node: &Node, path: &str) -> Option<ColliderDef> {
+        const EXAMPLE: &str = "\"box\", \"sphere\" or \"capsule\" (fitted to the part), \"none\", or a shape with its numbers, like { shape = \"sphere\", radius = 0.2 }";
+        let wrong_shape = |this: &mut Self, word: &str, at: Pos, field_path: &str| {
+            let message = format!("a hit shape is {EXAMPLE}, not \"{word}\"");
+            let issue = Issue::error(Code::TypeMismatch, field_path, message)
+                .in_file(this.file)
+                .at(at)
+                .got(word)
+                .one_of(word, ["box", "sphere", "capsule", "none"]);
+            this.issues.push(issue);
+        };
+        let table = match &node.value {
+            Value::Str(word) if word == "none" => return Some(ColliderDef::None),
+            Value::Str(word) => {
+                return match HitKind::from_name(word) {
+                    Some(kind) => Some(ColliderDef::Fitted(kind)),
+                    None => {
+                        wrong_shape(self, word, node.pos, path);
+                        None
+                    }
+                };
+            }
+            _ => self.table(node, path, EXAMPLE)?,
+        };
+        let mut fields = table;
+        let Some(shape) = fields.take("shape") else {
+            self.error(
+                Code::MissingField,
+                path,
+                node.pos,
+                "a hit shape with numbers of its own says which shape it is: shape = \"box\", \"sphere\" or \"capsule\"",
+            );
+            self.finish(fields, &COLLIDER_FIELDS);
+            return None;
+        };
+        let shape_path = fields.sub("shape");
+        let word = self.text(&shape.node, &shape_path, "sphere")?;
+        let Some(kind) = HitKind::from_name(&word) else {
+            wrong_shape(self, &word, shape.node.pos, &shape_path);
+            self.finish(fields, &COLLIDER_FIELDS);
+            return None;
+        };
+        let mut own = OwnHitShape {
+            kind,
+            center: [0.0; 3],
+            size: [0.0; 3],
+            radius: 0.0,
+            length: 0.0,
+            along: None,
+        };
+        let mut good = true;
+        if let Some(entry) = fields.take("center") {
+            match self.three(
+                &entry.node,
+                &fields.sub("center"),
+                MOVE_RANGE,
+                "[0, 0.1, 0]",
+            ) {
+                Some(center) => own.center = center,
+                None => good = false,
+            }
+        }
+        // Which numbers each shape needs, and which it can't have.
+        let needs: &[&str] = match kind {
+            HitKind::Box => &["size"],
+            HitKind::Sphere => &["radius"],
+            HitKind::Capsule => &["radius", "length"],
+        };
+        for field in ["size", "radius", "length", "along"] {
+            let Some(entry) = fields.take(field) else {
+                if needs.contains(&field) {
+                    let message = format!(
+                        "a {} with numbers of its own needs \"{field}\"{}",
+                        kind.name(),
+                        match field {
+                            "size" => ", like size = [0.4, 0.3, 0.4]",
+                            "radius" => ", like radius = 0.2",
+                            _ => ", from end to end, like length = 0.6",
+                        }
+                    );
+                    self.error(Code::MissingField, path, node.pos, message);
+                    good = false;
+                }
+                continue;
+            };
+            let field_path = fields.sub(field);
+            let belongs = needs.contains(&field) || (field == "along" && kind == HitKind::Capsule);
+            if !belongs {
+                let message = format!(
+                    "a {}'s hit shape has no \"{field}\": a box has size, a sphere radius, a capsule radius, length and along",
+                    kind.name()
+                );
+                self.error(Code::Conflict, &field_path, entry.key_pos, message);
+                good = false;
+                continue;
+            }
+            match field {
+                "size" => match self.three(&entry.node, &field_path, SIZE_RANGE, "[0.4, 0.3, 0.4]")
+                {
+                    Some(size) => own.size = size,
+                    None => good = false,
+                },
+                "radius" => match self.ranged(&entry.node, &field_path, SIZE_RANGE, "0.2") {
+                    Some(radius) => own.radius = radius,
+                    None => good = false,
+                },
+                "length" => match self.ranged(&entry.node, &field_path, SIZE_RANGE, "0.6") {
+                    Some(length) => own.length = length,
+                    None => good = false,
+                },
+                _ => {
+                    let Some(word) = self.text(&entry.node, &field_path, "y") else {
+                        good = false;
+                        continue;
+                    };
+                    match Limits::AXES.iter().position(|axis| *axis == word) {
+                        Some(axis) => own.along = Some(axis),
+                        None => {
+                            let message = format!(
+                                "a capsule lies along \"x\", \"y\" or \"z\", not \"{word}\""
+                            );
+                            let issue = Issue::error(Code::TypeMismatch, field_path, message)
+                                .in_file(self.file)
+                                .at(entry.node.pos)
+                                .got(word.as_str())
+                                .one_of(&word, Limits::AXES);
+                            self.issues.push(issue);
+                            good = false;
+                        }
+                    }
+                }
+            }
+        }
+        if good && kind == HitKind::Capsule && own.length < 2.0 * own.radius {
+            let message = format!(
+                "a capsule's length is from end to end, round ends and all, so it is at least twice its radius ({}): not {}",
+                plain(2.0 * own.radius),
+                plain(own.length)
+            );
+            self.error(Code::OutOfRange, path, node.pos, message);
+            good = false;
+        }
+        self.finish(fields, &COLLIDER_FIELDS);
+        good.then_some(ColliderDef::Own(own))
     }
 
     /// Reads `limits`: `"fixed"`, or a table of the directions the part

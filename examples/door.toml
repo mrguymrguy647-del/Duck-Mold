@@ -78,6 +78,7 @@ color = "door"
 attach = "hinge"
 to = "post_left.hinge"
 limits = { y = [-90, 0] }
+collider = "box"      # the door is its hit shape; the frame has none
 
 # It is joined by the back edge of its left side, so it turns about
 # that edge, as a door on hinges does, and stays against the post.
