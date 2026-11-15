@@ -1,0 +1,140 @@
+# A hand cart: a bed on four wheels, with a pole to pull it by. Its
+# wheels roll.
+#
+#   duck-mold inspect examples/cart.toml --animation roll
+#   duck-mold render examples/cart.toml --animation roll --view right
+#
+# The animation is the starter `roll`, copied in with
+#
+#   duck-mold edit examples/cart.toml add-animation roll --starter roll
+#
+# It works because the wheels have the names it moves:
+# wheel_front_left, wheel_front_right, wheel_back_left and
+# wheel_back_right. Each wheel is joined to the bed by the end of its
+# tyre, so its axle is the x it turns around: `roll` turns each one -360
+# degrees around x, which rolls the cart forward (check a turn with
+# render --pose).
+
+version = 0
+name = "cart"
+description = "A hand cart on four wheels that roll."
+
+[palette]
+wood  = "#A0703C"
+dark  = "#3B3B3B"
+iron  = "#8A939B"
+red   = "#C8443A"
+
+# ---- a wheel -----------------------------------------------------------------
+
+# A tyre with a red hub and one spoke from the hub to the rim, so the
+# turning shows (a bar right across would look the same after half a
+# turn).
+# It is joined by the `axle` socket, the middle of the tyre's top: the
+# end of the cylinder, so the cylinder lies on its side, along the axle.
+[define.wheel]
+color = "dark"
+
+[define.wheel.sockets]
+axle = { from = "tyre.top" }
+
+[[define.wheel.parts]]
+name = "tyre"
+shape = "cylinder"
+radius = 0.16
+height = 0.06
+segments = 16
+
+[[define.wheel.parts]]
+name = "hub"
+shape = "cylinder"
+radius = 0.05
+height = 0.02
+segments = 8
+color = "red"
+attach = "top"
+to = "tyre.bottom"
+
+[define.wheel.parts.sockets]
+spoke = { on = "bottom", shift = [1, 0, 0] }
+
+[[define.wheel.parts]]
+name = "spoke"
+shape = "box"
+size = [0.13, 0.01, 0.04]
+color = "iron"
+attach = "top"
+to = "hub.spoke"
+
+# ---- the cart ----------------------------------------------------------------
+
+[[parts]]
+name = "bed"
+shape = "box"
+size = [0.6, 0.2, 1.0]
+color = "wood"
+
+# Low on each side, near the front and the back.
+[parts.sockets]
+front_left  = { on = "left", shift = [0, -0.5, 0.6] }
+front_right = { on = "right", shift = [0, -0.5, 0.6] }
+back_left   = { on = "left", shift = [0, -0.5, -0.6] }
+back_right  = { on = "right", shift = [0, -0.5, -0.6] }
+pole        = { on = "front", shift = [0, 0, 0] }
+
+[[parts]]
+name = "wheel_front_left"
+use = "wheel"
+attach = "axle"
+to = "bed.front_left"
+
+[[parts]]
+name = "wheel_front_right"
+use = "wheel"
+attach = "axle"
+to = "bed.front_right"
+
+[[parts]]
+name = "wheel_back_left"
+use = "wheel"
+attach = "axle"
+to = "bed.back_left"
+
+[[parts]]
+name = "wheel_back_right"
+use = "wheel"
+attach = "axle"
+to = "bed.back_right"
+
+# The pole sticks out in front, and the grip crosses its end.
+[[parts]]
+name = "pole"
+shape = "box"
+size = [0.05, 0.05, 0.6]
+color = "wood"
+attach = "back"
+to = "bed.pole"
+limits = "fixed"
+
+[[parts]]
+name = "grip"
+shape = "box"
+size = [0.4, 0.04, 0.04]
+color = "iron"
+attach = "back"
+to = "pole.front"
+limits = "fixed"
+
+[poses.roll_round]
+wheel_front_left = [-360, 0, 0]
+wheel_front_right = [-360, 0, 0]
+wheel_back_left = [-360, 0, 0]
+wheel_back_right = [-360, 0, 0]
+
+[animations.roll]
+loop = true
+smooth = false
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 1, pose = "roll_round" },
+]

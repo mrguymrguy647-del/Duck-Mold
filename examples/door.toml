@@ -1,0 +1,112 @@
+# A door in its frame. It opens on its hinge, and its handle turns
+# first.
+#
+#   duck-mold inspect examples/door.toml --animation open
+#   duck-mold render examples/door.toml --animation open --view top
+#
+# The hinge is a socket at an exact point: the front corner of the left
+# post's inner side. The door hangs on the front of the frame, joined
+# there by the back edge of its own left side, so it turns about that
+# edge and stays against the post. The point was set and turned with
+#
+#   duck-mold edit examples/door.toml set-socket post_left.hinge --at 0.05,-0.02,0.06
+#   duck-mold edit examples/door.toml set-socket post_left.hinge --facing right
+#
+# A socket at a point faces up unless it says otherwise; facing right,
+# the door, joined by its left side, stands out to the right of it.
+# The animation is the starter `open`, copied in with
+#
+#   duck-mold edit examples/door.toml add-animation open --starter open
+#
+# and then made its own: it opens to 90 degrees, not the starter's 100,
+# and a key turns the handle before the door swings:
+#
+#   duck-mold edit examples/door.toml set-pose door_open door --turn 0,-90,0
+#   duck-mold edit examples/door.toml set-pose unlatch handle --turn 0,0,40
+#   duck-mold edit examples/door.toml add-key open unlatch --at 0.25
+#
+# Played backwards (in Duck Forge, a speed below 0), it closes.
+
+version = 0
+name = "door"
+description = "A door in its frame that opens on its hinge."
+
+[palette]
+frame = "#6B4A2B"
+door  = "#B5835A"
+brass = "#D8B04C"
+
+[[parts]]
+name = "post_left"
+shape = "box"
+size = [0.1, 2.1, 0.12]
+color = "frame"
+limits = "fixed"
+
+[parts.sockets]
+lintel = { on = "top", shift = [0.5, 0, 0] }
+hinge  = { at = [0.05, -0.02, 0.06], facing = "right" }
+
+[[parts]]
+name = "lintel"
+shape = "box"
+size = [1.0, 0.1, 0.12]
+color = "frame"
+attach = "bottom_left"
+to = "post_left.lintel"
+limits = "fixed"
+
+[parts.sockets]
+bottom_left  = { on = "bottom", shift = [-0.95, 0, 0] }
+bottom_right = { on = "bottom", shift = [0.95, 0, 0] }
+
+[[parts]]
+name = "post_right"
+shape = "box"
+size = [0.1, 2.1, 0.12]
+color = "frame"
+attach = "top"
+to = "lintel.bottom_right"
+limits = "fixed"
+
+# It swings round y, the line of the hinge.
+[[parts]]
+name = "door"
+shape = "box"
+size = [0.8, 2.0, 0.04]
+color = "door"
+attach = "hinge"
+to = "post_left.hinge"
+limits = { y = [-90, 0] }
+
+# It is joined by the back edge of its left side, so it turns about
+# that edge, as a door on hinges does, and stays against the post.
+[parts.sockets]
+hinge  = { on = "left", shift = [0, 0, -1] }
+handle = { on = "front", shift = [0.8, 0, 0] }
+
+# The handle turns down to open the latch, and springs back.
+[[parts]]
+name = "handle"
+shape = "box"
+size = [0.14, 0.03, 0.03]
+color = "brass"
+attach = "back"
+to = "door.handle"
+limits = { z = [0, 40] }
+
+# From the starter, which swings a door 100 degrees; this one stops at
+# 90, flat against the wall the frame would be in.
+[poses.door_open]
+door = [0, -90, 0]
+
+# The handle pressed down; the door still shut.
+[poses.unlatch]
+handle = [0, 0, 40]
+
+[animations.open]
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 0.25, pose = "unlatch" },
+  { at = 1, pose = "door_open" },
+]

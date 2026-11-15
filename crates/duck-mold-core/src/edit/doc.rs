@@ -131,7 +131,7 @@ fn spread(text: &str, indent: &str, newline: &str) -> String {
 }
 
 /// `name = value` in TOML, `"name": value` in JSON.
-fn field_text(name: &str, value: &Val, syntax: Syntax) -> String {
+pub(super) fn field_text(name: &str, value: &Val, syntax: Syntax) -> String {
     match syntax {
         Syntax::Toml => format!("{} = {}", toml_key(name), value.write(syntax)),
         Syntax::Json => format!("{}: {}", quoted(name), value.write(syntax)),
@@ -519,7 +519,7 @@ impl Doc {
 
     /// The header for a place in the tree: `parts[2].parts` is
     /// `parts.parts`.
-    fn header_name(path: &[Step]) -> String {
+    pub(super) fn header_name(path: &[Step]) -> String {
         let names: Vec<String> = path
             .iter()
             .filter_map(|step| match step {
@@ -828,7 +828,8 @@ impl Doc {
         let mut block = self.gap_before(at);
         block.push_str(&format!("[{}]{newline}", Self::header_name(&path)));
         for (field, value) in fields {
-            block.push_str(&field_text(field, value, Syntax::Toml));
+            let line = spread(&field_text(field, value, Syntax::Toml), "", newline);
+            block.push_str(&line);
             block.push_str(newline);
         }
         if at < self.text.len() && !self.text[at..].starts_with(['\n', '\r']) {

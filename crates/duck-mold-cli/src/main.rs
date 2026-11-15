@@ -128,8 +128,9 @@ enum Command {
         #[arg(long, value_name = "NUMBER", default_value_t = render::DEFAULT_FRAMES, requires = "animation")]
         frames: usize,
         /// With --animation: where the frames are drawn from: front,
-        /// right, back or three-quarter (from the front right, a little
-        /// above; the default).
+        /// right, back, three-quarter (from the front right, a little
+        /// above; the default) or top (from straight above, the front at
+        /// the bottom).
         #[arg(long, value_name = "VIEW", requires = "animation")]
         view: Option<String>,
     },
@@ -183,6 +184,22 @@ enum Command {
         /// in .toml.
         file: PathBuf,
         /// Print the report as JSON, for agents.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write an animation of a recipe, and the poses it uses, to a small
+    /// file of their own: for the animation library. Another model takes
+    /// it with `edit <recipe> add-animation <name> --from <file>`. The
+    /// recipe doesn't change. Never writes over a file.
+    SaveAnimation {
+        /// The recipe (.toml or .json).
+        recipe: PathBuf,
+        /// The animation: walk.
+        animation: String,
+        /// The file to write: animations/walk.toml. Its name must end in
+        /// .toml.
+        file: PathBuf,
+        /// Print the result as JSON, for agents.
         #[arg(long)]
         json: bool,
     },
@@ -383,6 +400,28 @@ fn main() -> ExitCode {
                 } else {
                     say(&format!("wrote {}", inspection.source));
                     say(inspection.to_text().trim_end());
+                }
+                ExitCode::SUCCESS
+            }
+            Err(failure) => fail(&failure, json),
+        },
+        Command::SaveAnimation {
+            recipe,
+            animation,
+            file,
+            json,
+        } => match tools::save_animation(&recipe, &animation, &file) {
+            Ok(text) => {
+                let written = duck_mold_core::load::display_path(&file);
+                if json {
+                    say_json(&serde_json::json!({
+                        "wrote": written,
+                        "animation": animation,
+                        "text": text,
+                    }));
+                } else {
+                    say(&format!("wrote {written}"));
+                    say(text.trim_end());
                 }
                 ExitCode::SUCCESS
             }

@@ -52,6 +52,8 @@ pub struct StudioApp {
     /// The part a definition is being made from, and the name being
     /// typed for it, while the window that asks is open.
     defining: Option<(String, String)>,
+    /// The timeline, in Pose mode.
+    timeline: crate::timeline::Timeline,
 }
 
 /// The folder a person's own models go in: `Duck Mold` in their
@@ -92,6 +94,7 @@ impl StudioApp {
             titled: String::new(),
             shown_selected: None,
             draft: properties::Draft::default(),
+            timeline: crate::timeline::Timeline::default(),
             colours: palette::Draft::default(),
             thumbs: library::Thumbs::default(),
             recent: Recent::nowhere(),
@@ -214,6 +217,11 @@ impl StudioApp {
         self.studio.as_mut()
     }
 
+    /// The timeline as it was last drawn: where its keys are, for tests.
+    pub fn timeline(&self) -> &crate::timeline::Timeline {
+        &self.timeline
+    }
+
     /// Where on the screen the viewport was last drawn, and how many
     /// pixels its picture has. The tests use it to click on a part.
     pub fn viewport(&self) -> Option<(Rect, [usize; 2])> {
@@ -252,6 +260,10 @@ impl StudioApp {
         self.recent.keep_hidden(studio.path(), studio.hidden());
         ui.ctx()
             .request_repaint_after(std::time::Duration::from_millis(250));
+        // A playing animation moves every frame.
+        if studio.is_playing() {
+            ui.ctx().request_repaint();
+        }
 
         // What a menu or a key asked for, carried out at the end.
         let mut asked: Option<Action> = None;
@@ -382,6 +394,15 @@ impl StudioApp {
             .min_size(56.0)
             .show(ui, |ui| problems(ui, studio));
 
+        // The timeline, in Pose mode, above the problems.
+        if studio.mode() == Mode::Pose {
+            egui::Panel::bottom("duck_mold_timeline")
+                .resizable(false)
+                .show(ui, |ui| {
+                    crate::timeline::show(ui, studio, &mut self.timeline)
+                });
+        }
+
         egui::Panel::left("duck_mold_parts")
             .resizable(true)
             .default_size(230.0)
@@ -450,7 +471,16 @@ impl StudioApp {
             let key = |key: egui::Key| {
                 ui.input(|input| input.modifiers.is_none() && input.key_pressed(key))
             };
-            if studio.mode() == Mode::Face {
+            if studio.mode() == Mode::Pose {
+                for (pressed, tool) in [
+                    (egui::Key::R, duck_mold_view::studio::PoseTool::Turn),
+                    (egui::Key::G, duck_mold_view::studio::PoseTool::Move),
+                ] {
+                    if key(pressed) {
+                        studio.pose_tool = tool;
+                    }
+                }
+            } else if studio.mode() == Mode::Face {
                 for (pressed, tool) in [
                     (egui::Key::T, FaceTool::Pull),
                     (egui::Key::G, FaceTool::Move),
@@ -499,6 +529,12 @@ impl StudioApp {
             if key(egui::Key::C) {
                 asked = Some(Action::CornerMode);
             }
+            if key(egui::Key::O) {
+                asked = Some(Action::PoseMode);
+            }
+            if key(egui::Key::Space) {
+                asked = Some(Action::Play);
+            }
             if let Some(action) = actions::keys(ui) {
                 asked = Some(action);
             }
@@ -532,6 +568,7 @@ impl StudioApp {
                 || matches!(
                     action,
                     Action::Frame
+                        | Action::Play
                         | Action::Hide
                         | Action::ShowAll
                         | Action::SelectAll
@@ -587,6 +624,11 @@ impl StudioApp {
                         self.draft.rename();
                     }
                 }
+                Action::Remove if studio.mode() == Mode::Pose => {
+                    studio.say_why(
+                        "In Pose mode a part isn't removed: \"Back to rest\" takes it out of the pose. To remove the part, go back to parts (O)",
+                    );
+                }
                 Action::Remove if studio.mode() != Mode::Part => {
                     studio.say_why(
                         "Faces can't be removed: a shape must stay closed. To take a change back, Undo, or remove it from the Changes list",
@@ -608,6 +650,25 @@ impl StudioApp {
                 }
                 Action::CornerMode => {
                     let _ = studio.toggle_corner_mode();
+                }
+                Action::PoseMode => {
+                    // What it did, or why not, is in the status line.
+                    let _ = studio.toggle_pose_mode();
+                }
+                Action::PoseTool(tool) => studio.pose_tool = tool,
+                Action::Play => {
+                    // In Part mode with none chosen yet: the first.
+                    if studio.animation().is_none()
+                        && let Some(first) = studio.animation_names().first().cloned()
+                    {
+                        studio.choose_animation(Some(&first));
+                    }
+                    studio.toggle_play();
+                }
+                Action::PoseBackToRest => {
+                    if let Some(part) = studio.selected().map(str::to_owned) {
+                        let _ = studio.pose_back_to_rest(&part);
+                    }
                 }
                 Action::MakeDefinition => {
                     if let Some(part) = studio.selected().map(str::to_owned) {
@@ -1134,6 +1195,12 @@ fn outliner(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             let rows = studio.outline();
+            // In Pose mode, the parts the pose turns are marked.
+            let posed = if studio.mode() == Mode::Pose {
+                studio.posed_parts()
+            } else {
+                Vec::new()
+            };
             if rows.is_empty() {
                 ui.label(RichText::new("No parts to show.").weak());
             }
@@ -1159,8 +1226,11 @@ fn outliner(
                             eye = Some((row.path.clone(), !row.hidden));
                         }
                         ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                            let turned = posed.contains(&row.path);
                             let words = if row.hidden {
                                 RichText::new(&row.name).weak().strikethrough()
+                            } else if turned {
+                                RichText::new(format!("{} *", row.name)).color(theme::DUCK_YELLOW)
                             } else {
                                 RichText::new(&row.name)
                             };

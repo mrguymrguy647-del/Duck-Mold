@@ -559,6 +559,66 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "reuse-library"));
     }
 
+    // Pose mode: the robot waving, its head selected with its rings,
+    // and the panel with the poses, the head's turn and its limits.
+    {
+        let recipe = copy_of("robot.toml", "pictures_pose");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.pose_mode().unwrap();
+            studio.choose_pose("wave");
+            studio.select(Some("head"));
+        }
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "pose-mode"));
+        // A fixed part: no rings, and the line under the picture says
+        // why.
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("left_arm/forearm"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "pose-fixed"));
+
+        // The timeline: the wave chosen, half way between two keys, with
+        // the ghosts of both.
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.select(Some("left_arm"));
+            studio.choose_animation(Some("wave"));
+            studio.set_time(0.5);
+        }
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "timeline"));
+    }
+
+    // Play in Part mode: the robot waving, part way through.
+    {
+        let mut screen = robot();
+        {
+            let studio = screen.state_mut().studio_mut().unwrap();
+            studio.choose_animation(Some("wave"));
+            studio.play();
+            // (While it plays, each frame moves it on by the same
+            // step, so the picture is the same every time.)
+            studio.tick(0.5);
+        }
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "play"));
+    }
+
+    // The animation library: the starters, with the door's and the
+    // wheels' greyed out for the robot.
+    {
+        let mut screen = robot();
+        screen.get_by_label("Animations").click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "animations"));
+    }
+
     assert!(
         wrong.is_empty(),
         "{} of the screens changed:\n{}\nIf the change is meant, store the new pictures with: UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures",

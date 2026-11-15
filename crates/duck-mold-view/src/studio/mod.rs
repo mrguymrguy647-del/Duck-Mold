@@ -17,13 +17,18 @@ pub mod handles;
 pub mod history;
 pub mod library;
 mod paint;
+mod pose;
 mod shape;
+pub mod shelf;
 mod sockets;
+mod timeline;
 pub mod viewport;
 
 pub use edges::CutAim;
+pub use pose::{POSE_STEP, PoseTool};
 pub use shape::{FaceTool, Mode};
 pub use sockets::Clicked;
+pub use timeline::{KEY_STEP, KeyMark};
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
@@ -133,6 +138,8 @@ pub struct Studio {
     undo: Vec<history::Step>,
     redo: Vec<history::Step>,
     library: library::Library,
+    /// The animation library's files, as last read.
+    shelf: shelf::Shelf,
     /// The palette colour the Paint tool paints with.
     pub(crate) paint: Option<String>,
     /// Which tool is in hand: what the handles on the selected part are.
@@ -148,6 +155,28 @@ pub struct Studio {
     pub face_tool: FaceTool,
     /// The faces selected in Face mode, by their own names.
     faces: Vec<String>,
+    /// In Pose mode: the pose the model stands in (`rest`, or one of the
+    /// recipe's), what a drag turns the parts in.
+    pose: String,
+    /// The model as that pose puts it.
+    posed: Option<Model>,
+    /// What the pose gets wrong that the model at rest doesn't: for the
+    /// problems panel.
+    pose_problems: Vec<Problem>,
+    /// What a drag does in Pose mode.
+    pub pose_tool: PoseTool,
+    /// A ring or arrow in hand in Pose mode.
+    pose_grab: Option<pose::PoseGrab>,
+    /// The animation chosen on the timeline, or with the view's Play
+    /// button.
+    animation: Option<String>,
+    /// The time shown on the timeline, in seconds from the animation's
+    /// start. `None`: the pose chosen is shown.
+    at_time: Option<f64>,
+    /// True while the animation chosen plays.
+    playing: bool,
+    /// Whether the poses of the keys before and after are drawn faintly.
+    ghosts: bool,
 }
 
 impl Studio {
@@ -180,6 +209,7 @@ impl Studio {
             undo: Vec::new(),
             redo: Vec::new(),
             library: library::Library::default(),
+            shelf: shelf::Shelf::default(),
             paint: None,
             tool: handles::Tool::Move,
             grab: None,
@@ -187,9 +217,19 @@ impl Studio {
             mode: Mode::Part,
             face_tool: FaceTool::Pull,
             faces: Vec::new(),
+            pose: duck_mold_core::recipe::REST.to_owned(),
+            posed: None,
+            pose_problems: Vec::new(),
+            pose_tool: PoseTool::Turn,
+            pose_grab: None,
+            animation: None,
+            at_time: None,
+            playing: false,
+            ghosts: true,
         };
         studio.reload();
         studio.read_library();
+        studio.read_shelf();
         studio.frame();
         studio
     }
@@ -232,9 +272,14 @@ impl Studio {
         self.report().map(Inspection::headline)
     }
 
-    /// The mistakes and warnings of the file as it is now.
-    pub fn problems(&self) -> &[Problem] {
-        &self.problems
+    /// The mistakes and warnings of the file as it is now, and in Pose
+    /// mode what the pose gets wrong that the model at rest doesn't.
+    pub fn problems(&self) -> Vec<Problem> {
+        self.problems
+            .iter()
+            .chain(&self.pose_problems)
+            .cloned()
+            .collect()
     }
 
     /// True if the file as it is now has mistakes (and what is shown is
@@ -353,6 +398,13 @@ impl Studio {
             .filter(|path| self.part(path).is_some())
             .collect();
         self.keep_face_mode();
+        // A pose that is gone (renamed or removed elsewhere) is no longer
+        // the one shown.
+        if !self.pose_names().contains(&self.pose) {
+            self.pose = duck_mold_core::recipe::REST.to_owned();
+        }
+        self.keep_timeline();
+        self.refresh_pose();
     }
 
     /// True if a watched file has been saved, made or removed since it
@@ -366,13 +418,16 @@ impl Studio {
     /// Lets `seconds` pass. Twice a second the files are checked, and the
     /// model is built again if one has changed. True if it was.
     pub fn tick(&mut self, seconds: f64) -> bool {
+        // A playing animation moves on.
+        self.advance(seconds);
         self.since_check += seconds;
         if self.since_check < CHECK_EVERY {
             return false;
         }
         self.since_check = 0.0;
         let library = self.check_library();
-        self.check_files() || library
+        let shelf = self.check_shelf();
+        self.check_files() || library || shelf
     }
 
     /// Checks the files now. True if one had changed, and the model was
@@ -461,7 +516,7 @@ impl Studio {
             Some(_) => false,
         };
         // Another part in Face mode: its faces, if it can be shaped.
-        if self.mode != Mode::Part && self.selected != before {
+        if self.is_shaping() && self.selected != before {
             self.faces.clear();
             if self.selected.is_none() {
                 self.mode = Mode::Part;
@@ -481,7 +536,9 @@ impl Studio {
     /// the first click on a robot's hand selects its arm, and the second
     /// the hand.
     pub fn click(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<&str> {
-        let hit = self.model().and_then(|model| {
+        // (Picked from what is shown: in Pose mode, the model in its
+        // pose.)
+        let hit = self.shown_model().and_then(|model| {
             viewport::pick(model, &self.orbit, self.offset(), size, at, &self.unseen())
         });
         self.also.clear();
@@ -729,7 +786,10 @@ impl Studio {
     /// The model as the viewport shows it: what a drag would build, while
     /// a handle is held, and otherwise what the file builds.
     pub fn shown_model(&self) -> Option<&Model> {
-        self.preview.as_ref().or(self.model())
+        self.preview
+            .as_ref()
+            .or(self.posed_model())
+            .or(self.model())
     }
 
     /// The part to select once an edit is made, where that isn't the one
@@ -801,6 +861,7 @@ impl Studio {
     /// Draws the viewport, `width` x `height` pixels.
     pub fn picture(&self, width: usize, height: usize) -> Picture {
         let shaping = self.mode != Mode::Part;
+        let posing = self.mode == Mode::Pose;
         // In Face mode there are no sockets to show: the faces are.
         let mut markers = if shaping { Vec::new() } else { self.markers() };
         // What the pointer is on is drawn bigger: a marker, or the point
@@ -832,7 +893,7 @@ impl Studio {
         let selected: Vec<&Part> = self
             .selection()
             .into_iter()
-            .filter(|path| !shaping && !self.is_hidden(path))
+            .filter(|path| (!shaping || posing) && !self.is_hidden(path))
             .filter_map(|path| part_in(&model?.parts, path))
             .collect();
         let mut marks = if self.view == (width, height) {
@@ -840,6 +901,7 @@ impl Studio {
         } else {
             Vec::new()
         };
+        marks.extend(self.ghost_marks());
         marks.extend(self.marks(width, height));
         let hidden = self.unseen_in(model);
         let lit = if self.view == (width, height) {

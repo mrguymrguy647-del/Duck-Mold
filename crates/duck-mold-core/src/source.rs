@@ -110,6 +110,14 @@ impl Value {
             _ => None,
         }
     }
+
+    /// The value as `true` or `false`, if it is one.
+    pub fn as_bool(&self) -> Option<bool> {
+        match self {
+            Value::Bool(on) => Some(*on),
+            _ => None,
+        }
+    }
 }
 
 /// Which language a file is written in.

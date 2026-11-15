@@ -1,0 +1,243 @@
+# A garden gnome: a second character with the same six part names as the
+# robot (body, head, left_arm, right_arm, left_leg, right_leg), so it can
+# take the robot's walk.
+#
+#   duck-mold inspect examples/gnome.toml --animation walk
+#   duck-mold render examples/gnome.toml --animation walk --view right
+#
+# The robot's walk was saved to a file of its own, and the gnome copied
+# it in:
+#
+#   duck-mold save-animation examples/robot.toml walk examples/animations/walk.toml
+#   duck-mold edit examples/gnome.toml add-animation walk --from animations/walk.toml
+#
+# Its legs have a `thigh` and a `foot`, like the robot's, so the walk's
+# turns of left_leg/foot and right_leg/foot fit too. Once copied in, the
+# walk is the gnome's own: its legs are shorter, so in each step its body
+# sinks 1.7 cm, not the robot's 4:
+#
+#   duck-mold edit examples/gnome.toml set-pose step_left body --move 0,-0.017,0
+#   duck-mold edit examples/gnome.toml set-pose step_right body --move 0,-0.017,0
+#
+# It also waves, with the starter `wave` (add-animation wave --starter
+# wave), which needs nothing but a `right_arm`.
+
+version = 0
+name = "gnome"
+description = "A garden gnome that walks with the robot's walk."
+
+[palette]
+coat  = "#3E6FB0"
+hat   = "#C8443A"
+skin  = "#F0C8A0"
+beard = "#F2F2EE"
+boots = "#5A3A22"
+belt  = "#2E2E2E"
+
+# ---- parts defined once ------------------------------------------------------
+
+# An arm: a sleeve and a hand. It hangs from `shoulder`, near the top of
+# the sleeve's inner side.
+[define.arm]
+color = "coat"
+
+[define.arm.sockets]
+shoulder = { from = "sleeve.joint" }
+
+[[define.arm.parts]]
+name = "sleeve"
+shape = "box"
+size = [0.1, 0.24, 0.1]
+limits = "fixed"
+
+[define.arm.parts.sockets]
+joint = { on = "right", shift = [0, 0.6, 0] }
+
+[[define.arm.parts]]
+name = "hand"
+shape = "sphere"
+radius = 0.05
+segments = 8
+color = "skin"
+attach = "top"
+to = "sleeve.bottom"
+limits = "fixed"
+
+# A leg: a thigh and a boot that points forward. Named as the robot's
+# are, so the robot's walk turns the boot to keep it flat.
+[define.leg]
+color = "coat"
+
+[define.leg.sockets]
+hip = { from = "thigh.top" }
+
+[[define.leg.parts]]
+name = "thigh"
+shape = "cylinder"
+radius = 0.06
+height = 0.2
+segments = 8
+limits = "fixed"
+
+[[define.leg.parts]]
+name = "foot"
+shape = "box"
+size = [0.13, 0.07, 0.22]
+color = "boots"
+attach = "ankle"
+to = "thigh.bottom"
+limits = { x = [-45, 45] }
+
+[define.leg.parts.sockets]
+ankle = { on = "top", shift = [0, 0, -0.4] }
+
+# ---- the gnome ---------------------------------------------------------------
+
+[[parts]]
+name = "body"
+shape = "box"
+size = [0.36, 0.38, 0.28]
+color = "coat"
+
+[parts.sockets]
+neck      = { on = "top" }
+belt      = { on = "front", shift = [0, -0.3, 0] }
+left_arm  = { on = "left", shift = [0, 0.7, 0] }
+right_arm = { on = "right", shift = [0, 0.7, 0] }
+left_leg  = { on = "bottom", shift = [-0.5, 0, 0] }
+right_leg = { on = "bottom", shift = [0.5, 0, 0] }
+
+[[parts]]
+name = "buckle"
+shape = "box"
+size = [0.1, 0.07, 0.02]
+color = "belt"
+attach = "back"
+to = "body.belt"
+limits = "fixed"
+
+[[parts]]
+name = "head"
+shape = "sphere"
+radius = 0.14
+segments = 12
+color = "skin"
+attach = "bottom"
+to = "body.neck"
+limits = { x = [-30, 30], y = [-80, 80] }
+
+[parts.sockets]
+nose  = { on = "front" }
+chin  = { on = "front", shift = [0, -0.3, 0], facing = "down" }
+
+[[parts]]
+name = "hat"
+shape = "cone"
+radius = 0.15
+height = 0.34
+segments = 12
+color = "hat"
+attach = "bottom"
+to = "head.top"
+limits = "fixed"
+
+[[parts]]
+name = "nose"
+shape = "sphere"
+radius = 0.035
+segments = 8
+color = "skin"
+attach = "back"
+to = "head.nose"
+limits = "fixed"
+
+# Joined by its base to a chin socket that faces down, the cone hangs
+# point down.
+[[parts]]
+name = "beard"
+shape = "cone"
+radius = 0.08
+height = 0.24
+segments = 10
+color = "beard"
+attach = "bottom"
+to = "head.chin"
+limits = "fixed"
+
+[[parts]]
+name = "left_arm"
+use = "arm"
+attach = "shoulder"
+to = "body.left_arm"
+limits = { x = [-90, 180], z = [-60, 60] }
+
+[[parts]]
+name = "right_arm"
+use = "arm"
+mirror = "x"
+attach = "shoulder"
+to = "body.right_arm"
+limits = { x = [-90, 180], z = [-60, 60] }
+
+[[parts]]
+name = "left_leg"
+use = "leg"
+attach = "hip"
+to = "body.left_leg"
+limits = { x = [-60, 60] }
+
+[[parts]]
+name = "right_leg"
+use = "leg"
+attach = "hip"
+to = "body.right_leg"
+limits = { x = [-60, 60] }
+
+[poses.step_left]
+body = { move = [0, -0.017, 0] }
+left_leg = [25, 0, 0]
+"left_leg/foot" = [-25, 0, 0]
+right_leg = [-25, 0, 0]
+"right_leg/foot" = [25, 0, 0]
+left_arm = [-25, 0, 0]
+right_arm = [25, 0, 0]
+
+[poses.step_right]
+body = { move = [0, -0.017, 0] }
+right_leg = [25, 0, 0]
+"right_leg/foot" = [-25, 0, 0]
+left_leg = [-25, 0, 0]
+"left_leg/foot" = [25, 0, 0]
+right_arm = [-25, 0, 0]
+left_arm = [25, 0, 0]
+
+[poses.wave_up]
+right_arm = [170, 0, 0]
+
+[poses.wave_a]
+right_arm = [170, 0, 20]
+
+[poses.wave_b]
+right_arm = [170, 0, -20]
+
+[animations.walk]
+loop = true
+keys = [
+  { at = 0, pose = "step_left" },
+  { at = 0.2, pose = "rest" },
+  { at = 0.4, pose = "step_right" },
+  { at = 0.6, pose = "rest" },
+  { at = 0.8, pose = "step_left" },
+]
+
+[animations.wave]
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 0.4, pose = "wave_up" },
+  { at = 0.6, pose = "wave_a" },
+  { at = 0.8, pose = "wave_b" },
+  { at = 1, pose = "wave_a" },
+  { at = 1.2, pose = "wave_b" },
+  { at = 1.4, pose = "wave_up" },
+  { at = 1.8, pose = "rest" },
+]

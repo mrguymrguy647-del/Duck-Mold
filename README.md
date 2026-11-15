@@ -244,6 +244,79 @@ every face's name.
 
 ![A wall in Face mode: the glass of its framed window selected, with the Changes list on the right](docs/studio-shaping.png)
 
+**Posing.** Press **O** (or click **Pose**) and the model stands in one
+of its poses; the list on the right has `rest` and the recipe's poses.
+
+- Click a part: rings appear at its join, one for each direction its
+  limits let it turn (a knee has one, a fixed part none, and the line
+  under the picture says so). Drag a ring to turn the part; what hangs
+  from it follows. It snaps to 5 degrees (Ctrl: free) and stops at its
+  limit. **G** gives arrows instead, to move it (a crouch, a jump);
+  **R** rings again.
+- Letting go writes one `set-pose` line. A drag in `rest` makes a new
+  pose, `pose`, rather than change the model itself.
+- The panel has the selected part's turn and move to type, **Back to
+  rest**, and its **Limits** (the same in Part mode, folded). **New**,
+  **Copy**, **Mirror** (step_left makes step_right), **Rename** and
+  **Remove** are under the list. The parts a pose turns are marked `*`
+  in the list of parts.
+- A pose that leaves a part floating says so in Problems.
+- Escape lets go of the part, then of Pose mode.
+
+![The robot in Pose mode: waving, its head selected with a ring for each way it may turn, and the poses on the right](docs/studio-posing.png)
+
+**The timeline.** In Pose mode the timeline runs along the bottom.
+Pick an animation (or make one with **New**): its keys are diamonds,
+each with its pose's name.
+
+- Click a key: time goes there, and its pose is the one a drag
+  changes. (If other keys use the same pose, the status line says so:
+  they change with it.)
+- Drag along the ruler to move through time; the model moves with it.
+  Turning a part between two keys makes a new pose there (`wave_7`)
+  with a key.
+- Drag a key to change its time (it snaps to 0.05 s and can't pass its
+  neighbours; Ctrl: free). Right-click a key to remove it or give it
+  another pose. **+ Key** adds the pose chosen at the time shown.
+- **Play** (Space) plays it; **Loop** and **Smooth** are the
+  animation's own settings; **Ghosts** draws the poses of the keys
+  before (blue) and after (orange) faintly.
+- Every change is one edit: `move-key`, `set-key`, `remove-key`,
+  `add-key`, `set-animation`, `add-animation`. Moving through time,
+  playing and ghosts change nothing in the file.
+
+In Part mode, a model with animations has a **Play** button at the top
+right of the view, with the animation to play: the model moves, and
+comes back to rest when it stops.
+
+![The timeline: the robot's wave, half way between two keys, with the ghosts of both](docs/studio-timeline.png)
+
+**The animation library.** Under the parts list, switch from
+**Library** to **Animations**. It lists the six **starters** that come
+with Duck Mold, and the animations saved in the folder `animations`
+next to the recipe:
+
+| Starter | For | What it does |
+|---|---|---|
+| `idle` | two legs | Stands and breathes: the head nods, the arms sway. Loops. |
+| `walk` | two legs | Legs and arms swing against each other. Loops, in place. |
+| `wave` | two legs | Raises the right arm, waves twice, lowers it. |
+| `jump` | two legs | Crouches, rises 40 cm, lands, straightens. |
+| `open` | a door | The part called `door` swings 100 degrees. Backwards, it closes. |
+| `roll` | four wheels | Each wheel turns once round a second, steadily, rolling forward. Loops. |
+
+"Two legs" means parts called `body`, `head`, `left_arm`,
+`right_arm`, `left_leg` and `right_leg`, standing with the arms down:
+name a character's parts so and the starters work on it. **Add** copies
+an animation into the model with the poses it uses (`add-animation
+--from`, or `--starter`); from then on it is the model's own, to change
+in Pose mode. Add is greyed out when the model has none of the parts it
+moves. **Save** writes one of the model's animations to `animations/`
+(`duck-mold save-animation`), and every model in that folder can then
+take it.
+
+![The animation library: the six starters, the door's and the wheels' greyed out for the robot](docs/studio-animations.png)
+
 **Adding parts.** There are two ways.
 
 - **Add**, in the top bar, lists the shapes (each with a small
@@ -361,6 +434,9 @@ keys, About). Every line shows its key.
 | Tab | Shape the selected box: Face mode. Tab again: back to parts |
 | E | The selected box's edges: click one to move it. E again: back to parts |
 | C | The selected box's corners: click one to move it. C again: back to parts |
+| O | Pose mode: turn parts about their joins, in a pose. O again: back to parts |
+| R, G (posing) | Turn with rings, or move with arrows |
+| Space | Play the animation, or stop it |
 | T, G, R, S, I, K (shaping) | The Pull, Move, Turn, Scale, Inset and Cut tools (Edge mode: G and K) |
 | Ctrl held while dragging | No snapping |
 | Delete or Backspace | Remove what is selected |
@@ -422,7 +498,8 @@ only: nothing can be changed there.
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
-| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`): a copy of that example, with the files it uses. Never writes over a file. |
+| `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
+| `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
 | `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
 | `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |
 | `duck-mold guide` | Prints the guide for AI agents. |
@@ -458,8 +535,8 @@ robot  (examples/robot.toml)
     ...
   floating     none
   overlapping  none
-  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out
-  animations   idle (2 s, loops), walk (0.8 s, loops), wave (1.5 s)
+  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out, jump_crouch, jump_up
+  animations   idle (2 s, loops), walk (0.8 s, loops), wave (1.5 s), jump (1.3 s)
 ok: no problems found
 ```
 
@@ -527,7 +604,7 @@ A recipe can be written as TOML (the examples) or as JSON
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
 | [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, framed windows (one box inset to a frame and a pane, defined once) and a chimney placed by sockets, and a skylight on the roof's `slope`. |
-| [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. |
+| [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. It moves: limits on its joins, eight poses and four animations (`idle`, `walk`, `wave`, and `jump` from the starters). |
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
 | [duck.toml](examples/duck.toml) | A ball stretched into a body with a three-number `scale`, parts placed at points of a round surface, one wing used twice. Its picture is the Studio's icon. |
@@ -541,6 +618,9 @@ A recipe can be written as TOML (the examples) or as JSON
 | [chair.toml](examples/chair.toml) | Shaping: a chair from one box. Four cuts slice the seat's edges; four legs are pulled down from the corners and the back pulled up from the back strip. |
 | [window_wall.toml](examples/window_wall.toml) | Shaping: a wall with a framed window, made by two insets and a pull, painted by face name, with a socket on a face an inset made. |
 | [rock.toml](examples/rock.toml) | Shaping: a box cut three ways through its middle, so it has 26 corners, with its corners moved in and out by name. |
+| [door.toml](examples/door.toml) | A door that opens: a hinge socket at a point, turned with `set-socket --facing`, the starter `open` fitted to it, and a key that turns the handle first. |
+| [cart.toml](examples/cart.toml) | A hand cart whose wheels roll: a wheel defined once and used four times, and the starter `roll`. |
+| [gnome.toml](examples/gnome.toml) | A second character with the robot's six part names: it takes the robot's walk from [animations/walk.toml](examples/animations/walk.toml) (written by `save-animation`), fitted to its shorter legs, and waves with the starter `wave`. |
 
 Each is commented line by line.
 
@@ -582,6 +662,8 @@ see the handoff note.
 | [PHASE2_REPORT.md](PHASE2_REPORT.md) | Phase 2: the Studio, the edit commands, undo, the parts library, the Windows download. |
 | [PHASE3_REPORT.md](PHASE3_REPORT.md) | Phase 3: handles, twelve shapes with bevel and taper, several parts, views, colour, the start page and the tour, with a picture of each. |
 | [PHASE4_REPORT.md](PHASE4_REPORT.md) | Phase 4: shaping a box by hand (faces, edges, corners, cuts), shaped parts used again, and the chair, wall and rock examples, with a picture of each screen. |
+| [PHASE5A_REPORT.md](PHASE5A_REPORT.md) | The first half of Phase 5: limits, poses and animations in the recipe, the `.glb` as a tree of parts, and Duck Forge playing them. |
+| [PHASE5_REPORT.md](PHASE5_REPORT.md) | All of Phase 5, motion: Pose mode, the timeline, the animation library and its starters, the door, cart and gnome, a strip of every example animation, and what Phase 6 should start with. |
 
 ## Project layout
 

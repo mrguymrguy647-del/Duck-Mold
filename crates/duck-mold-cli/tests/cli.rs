@@ -1627,12 +1627,29 @@ fn animations_are_made_checked_and_drawn_from_the_command_line() {
     assert_eq!(report["strip"][1]["at"], 0.5);
     assert_eq!(report["strip"][1]["left"], 129);
     assert_eq!(report["animation"], "sway");
+    // From straight above, too.
+    let output = run(
+        &folder,
+        &[
+            "render",
+            "tree.toml",
+            "--animation",
+            "sway",
+            "--view",
+            "top",
+            "-o",
+            "top.png",
+            "--json",
+        ],
+    );
+    assert_eq!(json(&output)["view"], "top");
+    assert!(folder.join("top.png").is_file());
     for (words, said) in [
         (
             &["--frames", "1"][..],
             "a strip has from 2 to 60 frames, not 1",
         ),
-        (&["--view", "top"], "there is no view \"top\""),
+        (&["--view", "under"], "there is no view \"under\""),
     ] {
         let mut arguments = vec!["render", "tree.toml", "--animation", "sway"];
         arguments.extend_from_slice(words);
@@ -1827,4 +1844,159 @@ fn poses_are_made_checked_and_drawn_from_the_command_line() {
     );
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(json(&output)["errors"][0]["code"], "unknown_pose");
+}
+
+#[test]
+fn save_animation_and_add_animation_from_share_a_walk() {
+    let folder = folder("cli_animation_library");
+    std::fs::copy(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/robot.toml"),
+        folder.join("robot.toml"),
+    )
+    .unwrap();
+    let saved = run(
+        &folder,
+        &[
+            "save-animation",
+            "robot.toml",
+            "walk",
+            "animations/walk.toml",
+        ],
+    );
+    assert!(saved.status.success(), "{}", stderr(&saved));
+    assert!(stdout(&saved).starts_with(
+        "wrote animations/walk.toml\n# Saved by `duck-mold save-animation` from robot.toml.\n"
+    ));
+    let file = std::fs::read_to_string(folder.join("animations/walk.toml")).unwrap();
+    assert!(file.contains("[animations.walk]"));
+    // Never over a file.
+    let again = run(
+        &folder,
+        &[
+            "save-animation",
+            "robot.toml",
+            "walk",
+            "animations/walk.toml",
+            "--json",
+        ],
+    );
+    assert_eq!(again.status.code(), Some(2));
+    assert!(
+        json(&again)
+            .to_string()
+            .contains("never writes over a file")
+    );
+    // --json says what was written.
+    let wave = run(
+        &folder,
+        &[
+            "save-animation",
+            "robot.toml",
+            "wave",
+            "animations/wave.toml",
+            "--json",
+        ],
+    );
+    let said = json(&wave);
+    assert_eq!(said["wrote"], "animations/wave.toml");
+    assert_eq!(said["animation"], "wave");
+
+    // Another copy of the robot takes the walk under another name.
+    std::fs::copy(folder.join("robot.toml"), folder.join("robot_two.toml")).unwrap();
+    let added = run(
+        &folder,
+        &[
+            "edit",
+            "robot_two.toml",
+            "add-animation",
+            "stroll",
+            "--from",
+            "animations/walk.toml",
+        ],
+    );
+    assert!(added.status.success(), "{}", stderr(&added));
+    assert!(stdout(&added).starts_with("edited robot_two.toml: added the animation \"stroll\", a copy of \"walk\" from \"animations/walk.toml\""));
+    // From a whole recipe with several, --take names the one.
+    let taken = run(
+        &folder,
+        &[
+            "edit",
+            "robot_two.toml",
+            "add-animation",
+            "hello",
+            "--from",
+            "robot.toml",
+            "--take",
+            "wave",
+        ],
+    );
+    assert!(taken.status.success(), "{}", stderr(&taken));
+    // A starter.
+    let jump = run(
+        &folder,
+        &[
+            "edit",
+            "robot_two.toml",
+            "add-animation",
+            "hop",
+            "--starter",
+            "jump",
+        ],
+    );
+    assert!(jump.status.success(), "{}", stderr(&jump));
+    let text = std::fs::read_to_string(folder.join("robot_two.toml")).unwrap();
+    for table in [
+        "[animations.stroll]",
+        "[animations.hello]",
+        "[animations.hop]",
+    ] {
+        assert!(text.contains(table), "{table}");
+    }
+    // A door starter on a robot: refused, with the parts it lacks.
+    let open = run(
+        &folder,
+        &[
+            "edit",
+            "robot_two.toml",
+            "add-animation",
+            "open",
+            "--starter",
+            "open",
+        ],
+    );
+    assert_eq!(open.status.code(), Some(2));
+    assert!(
+        stderr(&open)
+            .contains("the animation moves the part \"door\", which this model doesn't have"),
+        "{}",
+        stderr(&open)
+    );
+    // --from and --starter together, and --take without --from, are
+    // mistakes of the command.
+    let both = run(
+        &folder,
+        &[
+            "edit",
+            "robot_two.toml",
+            "add-animation",
+            "x",
+            "--from",
+            "a.toml",
+            "--starter",
+            "walk",
+        ],
+    );
+    assert_eq!(both.status.code(), Some(2));
+    let take = run(
+        &folder,
+        &[
+            "edit",
+            "robot_two.toml",
+            "add-animation",
+            "x",
+            "--take",
+            "walk",
+        ],
+    );
+    assert_eq!(take.status.code(), Some(2));
 }

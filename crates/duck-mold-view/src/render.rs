@@ -471,8 +471,20 @@ impl Strip {
 /// `back` or `three-quarter`.
 fn view_named(name: &str) -> Option<&'static View> {
     let name = name.replace('-', "_");
-    VIEWS.iter().find(|view| view.name == name)
+    VIEWS.iter().chain([&TOP]).find(|view| view.name == name)
 }
+
+/// The view from straight above, for a strip: the model's front at the
+/// bottom of the picture. (Not one of the sheet's four.)
+const TOP: View = View {
+    name: "top",
+    label: "top",
+    round: 0.0,
+    above: 90.0,
+};
+
+/// The views a strip can be drawn from, as `--view` takes them.
+pub const STRIP_VIEWS: [&str; 5] = ["front", "right", "back", "three-quarter", "top"];
 
 /// The times of a strip's frames: evenly spaced, from the animation's
 /// start. One that plays once ends on its last moment; one that loops
@@ -658,7 +670,7 @@ pub fn render_animation_file(
                 format!("there is no view \"{view}\""),
             )
             .got(view)
-            .one_of(view, ["front", "right", "back", "three-quarter"]),
+            .one_of(view, STRIP_VIEWS),
         );
     }
     let built = tools::build(path)?;

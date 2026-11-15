@@ -932,6 +932,7 @@ fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
             socket: "base.spot".into(),
             on: None,
             shift: Some([-0.5, 0.0, 0.25]),
+            at: None,
             facing: None,
         },
     );
@@ -950,6 +951,7 @@ fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
         socket: "base.spot".into(),
         on: None,
         shift: None,
+        at: None,
         facing: Some(way.into()),
     };
     let turned = done(&slid.text, Syntax::Toml, &facing("front"));
@@ -978,10 +980,131 @@ fn a_socket_is_declared_and_slid_and_what_is_joined_moves_with_it() {
             socket: "base.top".into(),
             on: None,
             shift: Some([0.0; 3]),
+            at: None,
             facing: None,
         },
     );
     assert!(failure.report().errors[0].message.contains("add-socket"));
+}
+
+#[test]
+fn set_socket_turns_and_moves_a_socket_at_a_point() {
+    // A hinge at the frame's edge: a point, written with "at".
+    const HINGE: &str = r##"version = 0
+name = "hinge"
+
+[palette]
+wood = "#8B5A2B"
+
+[[parts]]
+name = "frame"
+shape = "box"
+size = [0.1, 2, 0.1]
+color = "wood"
+sockets = { hinge = { at = [0.05, 0, 0] } }
+
+[[parts]]
+name = "door"
+shape = "box"
+size = [0.9, 2, 0.05]
+color = "wood"
+attach = "left"
+to = "frame.hinge"
+"##;
+    let socket =
+        |at: Option<[f64; 3]>, on: Option<&str>, shift: Option<[f64; 3]>, facing: Option<&str>| {
+            Edit::SetSocket {
+                socket: "frame.hinge".into(),
+                on: on.map(Into::into),
+                shift,
+                at,
+                facing: facing.map(Into::into),
+            }
+        };
+    // Facing: the door, joined by its left, turns to match.
+    let turned = done(
+        HINGE,
+        Syntax::Toml,
+        &socket(None, None, None, Some("right")),
+    );
+    assert_eq!(
+        changed(HINGE, &turned.text).1,
+        ["sockets = { hinge = { at = [0.05, 0, 0], facing = \"right\" } }"]
+    );
+    assert_eq!(
+        turned.summary,
+        "turned the socket frame.hinge to face right"
+    );
+    let door = |applied: &Applied| {
+        part(applied.model.as_ref().unwrap(), "door")
+            .bounds
+            .unwrap()
+    };
+    // Up (as it was), the door stood on the hinge; facing right it
+    // stands out to the right, as a door on a hinge does.
+    assert!(door(&turned).size().x > 0.8, "{:?}", door(&turned));
+    let frame = part(turned.model.as_ref().unwrap(), "frame")
+        .bounds
+        .unwrap();
+    assert!(
+        (door(&turned).min.x - frame.max.x).abs() < 1e-6,
+        "{:?}",
+        door(&turned)
+    );
+
+    // Moved to another point, keeping its facing.
+    let moved = done(
+        &turned.text,
+        Syntax::Toml,
+        &socket(Some([0.05, -1.0, 0.0]), None, None, None),
+    );
+    assert_eq!(
+        changed(&turned.text, &moved.text).1,
+        ["sockets = { hinge = { at = [0.05, -1, 0], facing = \"right\" } }"]
+    );
+    assert_eq!(moved.summary, "moved the socket frame.hinge");
+
+    // "out" takes the facing away: up, as when nothing says.
+    let back = done(
+        &turned.text,
+        Syntax::Toml,
+        &socket(None, None, None, Some("out")),
+    );
+    assert_eq!(back.text, HINGE);
+    assert_eq!(
+        back.summary,
+        "turned the socket frame.hinge to face up, as it does when nothing says"
+    );
+
+    // Onto a side, and back to a point.
+    let on_side = done(
+        HINGE,
+        Syntax::Toml,
+        &socket(None, Some("right"), Some([0.0, -0.5, 0.0]), None),
+    );
+    assert_eq!(
+        changed(HINGE, &on_side.text).1,
+        ["sockets = { hinge = { on = \"right\", shift = [0, -0.5, 0] } }"]
+    );
+    let to_point = done(
+        &on_side.text,
+        Syntax::Toml,
+        &socket(Some([0.05, 0.0, 0.0]), None, None, None),
+    );
+    assert_eq!(to_point.text, HINGE);
+
+    // A shift is for a side.
+    let failure = refused(HINGE, &socket(None, None, Some([0.0, 1.0, 0.0]), None));
+    let error = &failure.report().errors[0];
+    assert_eq!(error.code, Code::Conflict);
+    assert!(
+        error.message.contains("give --at x,y,z to move it"),
+        "{}",
+        error.message
+    );
+    // One place, not two.
+    let failure = refused(HINGE, &socket(Some([0.0; 3]), Some("top"), None, None));
+    assert!(failure.report().errors[0].message.contains("not both"));
 }
 
 // ---- parts inside definitions and files ---------------------------------------
@@ -2389,6 +2512,7 @@ fn json_recipes_are_edited_the_same_way() {
             socket: "stem.badge".into(),
             on: Some("back".into()),
             shift: Some([0.0, -0.5, 0.0]),
+            at: None,
             facing: None,
         },
         Edit::Remove {
@@ -2759,6 +2883,7 @@ fn every_kind_of_edit_has_a_name() {
             socket: String::new(),
             on: None,
             shift: None,
+            at: None,
             facing: None,
         },
         Edit::RenameSocket {
@@ -2860,6 +2985,8 @@ fn every_kind_of_edit_has_a_name() {
         Edit::AddAnimation {
             name: String::new(),
             looping: false,
+            from: None,
+            skip_missing: false,
         },
         Edit::SetAnimation {
             animation: String::new(),

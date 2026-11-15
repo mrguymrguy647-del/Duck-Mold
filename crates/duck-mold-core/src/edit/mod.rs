@@ -19,7 +19,7 @@ pub mod doc;
 mod motion;
 mod spot;
 
-pub use motion::LimitsTo;
+pub use motion::{LimitsTo, Offered, animation_recipe, animations_in};
 pub use spot::{Spot, spot};
 
 use std::path::Path;
@@ -309,9 +309,13 @@ pub enum Edit {
         on: Option<String>,
         /// A new slide across the side.
         shift: Option<[f64; 3]>,
+        /// An exact point in the part's own space, in place of a side:
+        /// `at = [x, y, z]`.
+        at: Option<[f64; 3]>,
         /// Which way it faces: `up`, `down`, `left`, `right`, `front`,
-        /// `back`, or `out` (straight out of its side, as a socket faces
-        /// when nothing says otherwise).
+        /// `back`, or `out` (as a socket faces when nothing says
+        /// otherwise: straight out of its side, or up for one at a
+        /// point).
         facing: Option<String>,
     },
     /// Pulls faces of a box out the way they face (in, for a negative
@@ -489,12 +493,19 @@ pub enum Edit {
         /// is mirrored.
         as_name: Option<String>,
     },
-    /// Adds an animation, with no keys yet.
+    /// Adds an animation, with no keys yet; or, `from` a file or a
+    /// starter, a copy of an animation there and the poses it uses.
     AddAnimation {
         /// Its name.
         name: String,
-        /// True if it starts again after its last key.
+        /// True if it starts again after its last key. (A copy loops if
+        /// the one it is copied from does, or if this is true.)
         looping: bool,
+        /// Where to copy it from. `None`: a new animation with no keys.
+        from: Option<AnimationFrom>,
+        /// Leave out what it does to parts this model doesn't have,
+        /// instead of refusing.
+        skip_missing: bool,
     },
     /// Changes whether an animation loops, whether it is smooth, and
     /// how long it lasts. What is `None` stays as it is.
@@ -996,12 +1007,16 @@ fn declared(doc: &Doc, part: &str, name: &str) -> Result<Found, Stop> {
 pub const FACINGS: [&str; 7] = ["out", "up", "down", "left", "right", "front", "back"];
 
 /// Which way a declared socket faces, as one of [`FACINGS`], for a socket
-/// on a side or a face; `None` for one written with `at` or `from`, or
-/// with three numbers in `facing`.
+/// on a side or a face, or at a point (`up` when it doesn't say); `None`
+/// for one written with `from`, or with three numbers in `facing`.
 fn facing_word(doc: &Doc, found: &Found, socket: &str) -> Option<String> {
     let place = with(&with(&found.path(), key("sockets")), key(socket));
-    doc.entry(&place, "on")?;
+    let at_point = doc.entry(&place, "on").is_none();
+    if at_point {
+        doc.entry(&place, "at")?;
+    }
     match doc.entry(&place, "facing") {
+        None if at_point => Some("up".to_owned()),
         None => Some("out".to_owned()),
         Some(entry) => match &entry.node.value {
             Value::Str(word) if FACINGS.contains(&word.as_str()) => Some(word.clone()),
@@ -1179,7 +1194,82 @@ fn part_in<'a>(model: &'a Model, path: &str) -> Option<&'a Part> {
     find(&model.parts, path)
 }
 
-fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Stop> {
+/// Where `add-animation` copies an animation from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum AnimationFrom {
+    /// A file: a recipe, or one `duck-mold save-animation` wrote.
+    File {
+        /// The file, as written from the recipe's folder (or, if it
+        /// isn't there, from the folder the program runs in).
+        file: String,
+        /// Which of its animations to copy. `None`: the one with the
+        /// new animation's name, or, if it has only one, that one.
+        take: Option<String>,
+    },
+    /// One of the starter animations that come inside the program:
+    /// `walk`. See [`crate::starters`].
+    Starter(String),
+}
+
+/// The text an animation is copied from, read as a recipe, and its name
+/// in messages.
+fn animation_source(path: &Path, from: &AnimationFrom) -> Result<(Doc, String), Stop> {
+    let (text, syntax, shown) = match from {
+        AnimationFrom::Starter(name) => {
+            let Some(starter) = crate::starters::starter(name) else {
+                return Err(problem(
+                    Code::UnknownAnimation,
+                    format!("there is no starter animation \"{name}\""),
+                )
+                .got(name.as_str())
+                .one_of(
+                    name,
+                    crate::starters::STARTERS
+                        .iter()
+                        .map(|starter| starter.name.to_owned()),
+                ));
+            };
+            (
+                starter.text.to_owned(),
+                Syntax::Toml,
+                "the starters".to_owned(),
+            )
+        }
+        AnimationFrom::File { file, .. } => {
+            let beside = path.parent().unwrap_or(Path::new("")).join(file);
+            let found = [beside.as_path(), Path::new(file)]
+                .into_iter()
+                .find(|place| place.is_file());
+            let Some(found) = found else {
+                return Err(problem(
+                    Code::Io,
+                    format!(
+                        "there is no file \"{file}\" in the recipe's folder (or the folder the program runs in)"
+                    ),
+                ));
+            };
+            let Some(syntax) = Syntax::from_path(found) else {
+                return Err(problem(
+                    Code::Io,
+                    format!("\"{file}\" isn't a recipe: its name must end in .toml or .json"),
+                ));
+            };
+            let text = std::fs::read_to_string(found)
+                .map_err(|error| problem(Code::Io, format!("can't read \"{file}\": {error}")))?;
+            (text, syntax, format!("\"{file}\""))
+        }
+    };
+    let body = text.strip_prefix('\u{feff}').unwrap_or(&text);
+    let doc = Doc::parse(body, syntax).map_err(|_| {
+        problem(
+            Code::Syntax,
+            format!("{shown} can't be read: check it with duck-mold check"),
+        )
+    })?;
+    Ok((doc, shown))
+}
+
+fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result<Outcome, Stop> {
     match edit {
         Edit::SetLimits { part, limits } => motion::set_limits(doc, part, *limits),
         Edit::SetPose {
@@ -1192,7 +1282,35 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
         Edit::AddPose { name, from } => motion::add_pose(doc, name, from.as_deref()),
         Edit::RenamePose { pose, new_name } => motion::rename_pose(doc, pose, new_name),
         Edit::RemovePose { pose, with_keys } => motion::remove_pose(doc, pose, *with_keys),
-        Edit::AddAnimation { name, looping } => motion::add_animation(doc, name, *looping),
+        Edit::AddAnimation {
+            name,
+            looping,
+            from: None,
+            ..
+        } => motion::add_animation(doc, name, *looping),
+        Edit::AddAnimation {
+            name,
+            looping,
+            from: Some(from),
+            skip_missing,
+        } => {
+            let (source, shown) = animation_source(path, from)?;
+            let take = match from {
+                AnimationFrom::File {
+                    take: Some(take), ..
+                } => take.as_str(),
+                _ => name.as_str(),
+            };
+            motion::add_animation_from(
+                doc,
+                name,
+                take,
+                *looping,
+                (&source, &shown),
+                *skip_missing,
+                model,
+            )
+        }
         Edit::SetAnimation {
             animation,
             looping,
@@ -2513,6 +2631,7 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
             socket,
             on,
             shift,
+            at,
             facing,
         } => {
             let (part, name) = split_socket(socket)?;
@@ -2551,23 +2670,51 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 return Err(issue.got(name).one_of(name, names));
             }
             let place = with(&sockets, key(name));
-            if doc.entry(&place, "on").is_none() {
+            let at_point = doc.entry(&place, "at").is_some();
+            if doc.entry(&place, "on").is_none() && !at_point {
                 return Err(problem(
                     Code::Conflict,
                     format!(
-                        "the socket \"{name}\" isn't on a side of the part (it is written with \"at\" or \"from\"), so it can't be slid or turned with set-socket: change it in the recipe"
+                        "the socket \"{name}\" is passed on from an inner part (it is written with \"from\"), so it keeps that part's place and direction: change that socket instead"
                     ),
                 ));
             }
-            if on.is_none() && shift.is_none() && facing.is_none() {
+            if on.is_none() && shift.is_none() && facing.is_none() && at.is_none() {
                 return Err(problem(
                     Code::MissingField,
-                    "nothing to set: give --shift, --on, --facing, or more than one",
+                    "nothing to set: give --shift, --on, --at, --facing, or more than one",
                 ));
             }
-            const ORDER: [&str; 3] = ["on", "shift", "facing"];
+            if on.is_some() && at.is_some() {
+                return Err(problem(
+                    Code::Conflict,
+                    "a socket's place is given one way: --on (a side) or --at (a point), not both",
+                ));
+            }
+            if shift.is_some() && (at.is_some() || (at_point && on.is_none())) {
+                return Err(problem(
+                    Code::Conflict,
+                    format!(
+                        "--shift slides a socket across a side, and \"{name}\" is{} at an exact point: give --at x,y,z to move it, or --on <side> to put it on a side",
+                        if at.is_some() { " to be" } else { "" }
+                    ),
+                ));
+            }
+            const ORDER: [&str; 4] = ["on", "at", "shift", "facing"];
             if let Some(on) = on {
+                if at_point {
+                    doc.remove_field(&place, "at").map_err(cant)?;
+                }
                 doc.set_field(&place, "on", &text(on), &ORDER)
+                    .map_err(cant)?;
+            }
+            if let Some(point) = at {
+                for field in ["on", "shift"] {
+                    if doc.entry(&place, field).is_some() {
+                        doc.remove_field(&place, field).map_err(cant)?;
+                    }
+                }
+                doc.set_field(&place, "at", &Val::three(*point), &ORDER)
                     .map_err(cant)?;
             }
             if let Some(shift) = shift {
@@ -2586,7 +2733,12 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>) -> Result<Outcome, Sto
                 }
                 None => {}
             }
-            let summary = match (facing, on.is_some() || shift.is_some()) {
+            let summary = match (facing, on.is_some() || shift.is_some() || at.is_some()) {
+                (Some(facing), false) if facing == "out" && at_point => {
+                    format!(
+                        "turned the socket {part}.{name} to face up, as it does when nothing says"
+                    )
+                }
                 (Some(facing), false) if facing == "out" => {
                     format!("turned the socket {part}.{name} to face straight out")
                 }
@@ -3755,7 +3907,7 @@ pub fn apply_many(
     let mut said = Vec::new();
     let mut shared = None;
     for edit in edits {
-        let outcome = run(&mut doc, edit, old_model.as_ref())
+        let outcome = run(&mut doc, edit, old_model.as_ref(), path)
             .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
         said.push(outcome.summary);
         // A new part that stands free, with no place given, is stood on

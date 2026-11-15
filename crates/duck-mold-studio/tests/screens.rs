@@ -2521,3 +2521,332 @@ fn the_part_menu_makes_a_definition_and_saves_to_the_library() {
     assert!(recipe.parent().unwrap().join("parts/crate.toml").exists());
     screen.get_by_label_contains("Saved \"crate\" to the library");
 }
+
+// ---- Phase 5: Pose mode ------------------------------------------------------------
+
+#[test]
+fn o_poses_the_model_the_rings_turn_a_part_and_the_panel_lists_the_poses() {
+    use duck_mold_core::math::Mat3;
+    use duck_mold_view::studio::handles::Grip;
+    use duck_mold_view::studio::{Mode, PoseTool};
+    use egui::Key;
+    let recipe = copy_of("robot.toml", "screens_pose");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    let mode = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().mode();
+
+    // O, or the Pose button.
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Pose);
+    screen.get_by_label("Poses");
+    screen.get_by_label("Click a part to turn it.");
+    for button in ["New", "Copy", "Mirror", "Rename", "Remove", "Turn", "Move"] {
+        assert!(screen.query_all_by_label(button).count() >= 1, "{button}");
+    }
+    screen.get_by_label("Part").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+    screen.get_by_label("Pose").click();
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Pose);
+
+    // A pose in the list: the model stands in it, and the parts it turns
+    // are marked.
+    screen.get_by_label("wave").click();
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().pose(), "wave");
+    screen.get_by_label("left_arm *");
+    screen.get_by_label("head *");
+
+    // A click on the head selects it: its turn in the pose, and its
+    // limits, are in the panel.
+    let head = screen
+        .state()
+        .studio()
+        .unwrap()
+        .shown_model()
+        .unwrap()
+        .part("head")
+        .unwrap()
+        .bounds
+        .unwrap()
+        .center()
+        + screen.state().studio().unwrap().offset();
+    let head = point_on_screen(&screen, head);
+    click_at(&mut screen, head);
+    assert_eq!(selected(&screen).as_deref(), Some("head"));
+    for label in ["Back to rest", "Fixed"] {
+        screen.get_by_label(label);
+    }
+    // Turn and Move twice now: the tools, and the head's numbers.
+    for label in ["Turn", "Move"] {
+        assert_eq!(screen.query_all_by_label(label).count(), 2, "{label}");
+    }
+    screen.get_by_label("Limits");
+    screen.get_by_label("turns x -30..30°, y -80..80°");
+
+    // (The panel settles to its width a frame later.)
+    screen.run_steps(2);
+    // The nod ring, dragged a long way: it stops at the limit, and one
+    // line of the recipe changes.
+    let (from, to) = {
+        let studio = screen.state().studio().unwrap();
+        let from = studio.grip_at(Grip::Ring(0)).unwrap();
+        let model = studio.shown_model().unwrap();
+        let part = model.part("head").unwrap();
+        let centre = part.pivot + studio.offset();
+        let axis = part.axes.column(0).normalized().unwrap();
+        (from, centre + Mat3::around(axis, 70.0) * (from - centre))
+    };
+    let (from, to) = (point_on_screen(&screen, from), point_on_screen(&screen, to));
+    drag(&mut screen, from, to);
+    let lines = new_lines(&recipe);
+    assert_eq!(lines.len(), 1, "{lines:?}");
+    assert!(
+        lines[0] == "head = [30, -15, 0]" || lines[0] == "head = [-30, -15, 0]",
+        "{lines:?}"
+    );
+    screen.get_by_label_contains("Turned \"head\"");
+
+    // Back to rest, from the panel.
+    screen.get_by_label("Back to rest").click();
+    screen.run_steps(2);
+    assert!(
+        !std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("head = [30, -15, 0]")
+    );
+    assert!(
+        !std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("head = [-30, -15, 0]")
+    );
+
+    // G gives arrows, R rings again.
+    screen.key_press(Key::G);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().pose_tool, PoseTool::Move);
+    assert_eq!(
+        screen.state().studio().unwrap().grips(),
+        [Grip::Arrow(0), Grip::Arrow(1), Grip::Arrow(2)]
+    );
+    screen.key_press(Key::R);
+    screen.run_steps(2);
+    assert_eq!(screen.state().studio().unwrap().pose_tool, PoseTool::Turn);
+
+    // Remove asks first when keys use the pose.
+    screen.get_by_label("Remove").click();
+    screen.run_steps(2);
+    screen.get_by_label_contains("Keys of wave use \"wave\"");
+    screen.get_by_label("Keep it").click();
+    screen.run_steps(2);
+    assert!(
+        std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("[poses.wave]")
+    );
+
+    // Escape lets go of the part, then of Pose mode.
+    screen.key_press(Key::Escape);
+    screen.run_steps(2);
+    assert_eq!(selected(&screen), None);
+    screen.key_press(Key::Escape);
+    screen.run_steps(2);
+    assert_eq!(mode(&screen), Mode::Part);
+}
+
+#[test]
+fn the_panel_shows_a_parts_limits_in_part_mode_and_sets_them() {
+    let (recipe, mut screen) = robot_with("screens_limits", "left_leg/foot");
+    // Folded: one line says them. Opened, they can be changed.
+    assert!(screen.query_by_label("Fixed").is_none());
+    screen.get_by_label("turns x -45..45°");
+    screen.get_by_label("Limits").click();
+    screen.run_steps(2);
+    screen.get_by_label("Fixed").click();
+    screen.run_steps(3);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(
+        text.contains("limits = \"fixed\""),
+        "{}",
+        new_lines(&recipe).join("\n")
+    );
+    screen.get_by_label("fixed: it doesn't turn or move");
+}
+
+// ---- Phase 5: the timeline -----------------------------------------------------------
+
+fn studio<'a>(screen: &'a Harness<'static, StudioApp>) -> &'a duck_mold_view::studio::Studio {
+    screen.state().studio().unwrap()
+}
+
+#[test]
+fn the_timeline_shows_the_keys_and_plays_moves_and_changes_them() {
+    use egui::Key;
+    let recipe = copy_of("robot.toml", "screens_timeline");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    // No animation chosen yet.
+    screen.get_by_label("Animation");
+    screen.get_by_label_contains("Choose an animation");
+    // Choose the wave.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("wave"));
+    screen.run_steps(3);
+    for label in ["Play", "Loop", "Smooth", "Ghosts", "+ Key", "0 s of 1.5 s"] {
+        screen.get_by_label(label);
+    }
+
+    // A click on the third key goes to it: its pose is chosen.
+    let third = screen.state().timeline().key_on_screen(0.6).unwrap();
+    click_at(&mut screen, third);
+    assert_eq!(studio(&screen).time(), Some(0.6));
+    assert_eq!(studio(&screen).pose(), "wave_out");
+    // A drag along the ruler moves through time.
+    let (from, to) = {
+        let timeline = screen.state().timeline();
+        (
+            timeline.time_on_screen(0.1).unwrap(),
+            timeline.time_on_screen(0.5).unwrap(),
+        )
+    };
+    drag(&mut screen, from, to);
+    let now = studio(&screen).time().unwrap();
+    assert!((now - 0.5).abs() < 0.02, "{now}");
+    // A key dragged: it snaps, and one line changes.
+    let (from, to) = {
+        let timeline = screen.state().timeline();
+        (
+            timeline.key_on_screen(0.6).unwrap(),
+            timeline.key_on_screen(0.72).unwrap(),
+        )
+    };
+    drag(&mut screen, from, to);
+    let lines = new_lines(&recipe);
+    assert_eq!(lines, ["  { at = 0.7, pose = \"wave_out\" },"], "{lines:?}");
+    // Loop is a switch: one line.
+    screen.get_by_label("Loop").click();
+    screen.run_steps(2);
+    assert!(
+        std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("[animations.wave]\nloop = true\n")
+    );
+    // Space plays, and stops.
+    screen.key_press(Key::Space);
+    screen.run_steps(2);
+    assert!(studio(&screen).is_playing());
+    screen.get_by_label("Stop");
+    screen.key_press(Key::Space);
+    screen.run_steps(2);
+    assert!(!studio(&screen).is_playing());
+    // Ghosts off.
+    screen.get_by_label("Ghosts").click();
+    screen.run_steps(2);
+    assert!(!studio(&screen).ghosts());
+}
+
+#[test]
+fn the_play_button_in_the_view_plays_an_animation_in_part_mode() {
+    use egui::Key;
+    let recipe = copy_of("robot.toml", "screens_play");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+
+    assert_eq!(studio(&screen).mode(), duck_mold_view::studio::Mode::Part);
+    // The first animation, ready to play.
+    screen.get_by_label("Animation to play");
+    screen.get_by_label("Play").click();
+    screen.run_steps(2);
+    assert!(studio(&screen).is_playing());
+    assert_eq!(studio(&screen).animation(), Some("idle"));
+    screen.get_by_label("Stop").click();
+    screen.run_steps(2);
+    assert!(!studio(&screen).is_playing());
+    // Space too.
+    screen.key_press(Key::Space);
+    screen.run_steps(2);
+    assert!(studio(&screen).is_playing());
+    // A model with no animations has no Play button.
+    let crate_recipe = copy_of("crate.toml", "screens_play_crate");
+    let mut plain = harness(StudioApp::with_file(&crate_recipe, false), false);
+    plain.run_steps(2);
+    assert!(plain.query_by_label("Play").is_none());
+}
+
+#[test]
+fn the_animations_list_adds_a_starter_and_saves_an_animation() {
+    let recipe = copy_of("gnome.toml", "screens_animations");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.get_by_label("Animations").click();
+    screen.run_steps(2);
+    screen.get_by_label("Starters");
+    screen.get_by_label("Saved, in animations/");
+    screen.get_by_label_contains("None yet.");
+    // The door's and the wheels' can't be added to a gnome.
+    assert!(
+        screen
+            .get_by_label("Add open")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        screen
+            .get_by_label("Add roll")
+            .accesskit_node()
+            .is_disabled()
+    );
+    assert!(
+        !screen
+            .get_by_label("Add jump")
+            .accesskit_node()
+            .is_disabled()
+    );
+
+    // The panel is short and scrolls: the buttons below its edge are
+    // pressed the way a screen reader presses them.
+    screen.get_by_label("Add jump").click_accesskit();
+    screen.run_steps(2);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(
+        text.contains("[animations.jump]"),
+        "{}",
+        studio(&screen).status()
+    );
+    assert_eq!(studio(&screen).animation(), Some("jump"));
+    assert!(
+        studio(&screen)
+            .status()
+            .starts_with("Added the animation \"jump\" from the starters"),
+        "{}",
+        studio(&screen).status()
+    );
+
+    // Save the jump: it shows under Saved.
+    screen.get_by_label("Animation to save");
+    screen.get_by_label("Save the animation").click_accesskit();
+    screen.run_steps(2);
+    let saved = recipe.parent().unwrap().join("animations/jump.toml");
+    assert!(saved.exists(), "{}", studio(&screen).status());
+    assert!(
+        studio(&screen)
+            .status()
+            .starts_with("Saved the animation \"jump\" to the library"),
+        "{}",
+        studio(&screen).status()
+    );
+    screen.get_by_label(
+        "animations/jump.toml 5 keys, 1.3 s. Moves body, left_leg, right_leg, left_arm, right_arm.",
+    );
+    // Back to the parts library.
+    screen.get_by_label("Library").click();
+    screen.run_steps(2);
+    screen.get_by_label_contains("No parts here yet.");
+}

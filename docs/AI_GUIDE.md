@@ -611,8 +611,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
 | `duck-mold edit <recipe> remove-color <name>` | Takes a colour out of the palette. Refused if anything is painted with it, naming what; `--replace-with <other colour>` paints those with the other colour first. |
 | `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
-| `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared that way: `--shift x,y,z`, `--on <side>`. Whatever is joined to it moves with it. |
-| `duck-mold edit <recipe> set-socket <part.socket> --facing <way>` | Turns a socket declared that way: `up`, `down`, `left`, `right`, `front`, `back` writes `facing`; `out` takes it away, so the socket faces straight out of its side again. Whatever is joined to it turns to match. |
+| `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared on a side or at a point: `--shift x,y,z` and `--on <side>` for one on a side; `--at x,y,z` for an exact point in the part's own space (it also turns one on a side into one at a point, and `--on` does the opposite). Whatever is joined to it moves with it. |
+| `duck-mold edit <recipe> set-socket <part.socket> --facing <way>` | Turns a socket on a side or at a point: `up`, `down`, `left`, `right`, `front`, `back` writes `facing`; `out` takes it away, so the socket faces as it does when nothing says (straight out of its side; up, for one at a point). Whatever is joined to it turns to match: a door's hinge at a point, `--facing right`, stands the door out to the right. |
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
@@ -622,7 +622,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> rename-pose <pose> <new name>` | Renames a pose where it stands. |
 | `duck-mold edit <recipe> remove-pose <pose>` | Removes a pose. Refused while a key of an animation uses it; `--with-keys` takes those keys away too. |
 | `duck-mold edit <recipe> mirror-pose <pose> --as <name>` | The mirror image of a pose, left to right: `left` and `right` swap in the parts' names, turns around y and z go the other way (inside a mirrored part they keep their numbers), a move to one side goes to the other. `--as` an existing pose replaces it; without `--as` the pose itself is mirrored. Make `step_left`, then `mirror-pose step_left --as step_right`. |
-| `duck-mold edit <recipe> add-animation <name>` | A new animation with no keys yet (section 11). `--loop`: it starts again after its last key. |
+| `duck-mold edit <recipe> add-animation <name>` | A new animation with no keys yet (section 11). `--loop`: it starts again after its last key. Or a copy of one, with the poses it uses: `--from <file>` (another recipe, or a file `save-animation` wrote; `--take <animation>` when the file has several) or `--starter idle\|walk\|wave\|jump\|open\|roll`. Refused if it moves parts this model lacks; `--skip-missing` leaves those out (section 11, "Sharing animations"). |
 | `duck-mold edit <recipe> add-key <animation> <pose> --at <seconds>` | The animation reaches that pose at that time. The key goes where its time puts it; the first key is at 0. The pose is one of the recipe's, or `rest`. |
 | `duck-mold edit <recipe> move-key <animation> <number> --at <seconds>` | Gives a key another time. Keys are numbered from 1, as `inspect --animation` prints them. Key 1 stays at 0. |
 | `duck-mold edit <recipe> set-key <animation> <number> --pose <pose>` | Gives a key another pose. |
@@ -664,6 +664,12 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   with the palette colours it uses and none of where it stands: put it
   in the `parts` folder next to a recipe and it is in the Studio's
   library. It never writes over a file.
+- **`duck-mold save-animation <recipe> <animation> <file>`** (not an
+  `edit` either) writes an animation and the poses it uses to a small
+  file of their own, for another model to take with `add-animation
+  --from`. Put it in the `animations` folder next to a recipe and it is
+  in the Studio's Animations list. It never writes over a file;
+  `--json` gives `wrote`, `animation` and `text`.
 - **A part made from a defined part** (`left_eye`, which is `use =
   "eye"`): `set --shape`, `--size`, `--radius`, `--height`,
   `--segments`, `--color` and `--face-color` change the definition,
@@ -684,12 +690,23 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   Pull arrow is a `pull`, of its Inset knob an `inset`, and the panel's
   Changes list is `set-change` and `remove-change`. Read the result
   with `inspect --faces`.
+- In the Studio, Pose mode (O) turns parts by their rings: a drag is
+  one `set-pose`, and the poses list's New, Copy, Mirror, Rename and
+  Remove are `add-pose`, `add-pose --from`, `mirror-pose`,
+  `rename-pose` and `remove-pose`. The Limits in the panel are
+  `set-limits`. Its timeline's changes are `move-key`, `set-key`,
+  `remove-key`, `add-key`, `set-animation` and `add-animation`; a turn
+  between two keys is `add-pose`, a `set-pose` for every part the
+  animation moves, and `add-key`, together. The library's Animations
+  list: Add is `add-animation --from` (or `--starter`) with
+  `--skip-missing`, under the animation's own name or with a number;
+  Save is `save-animation` into `animations/`.
 - **`pull`, `inset`, `set-change` and `remove-change` on a part made
   from a defined part** change the definition, like `set --shape`.
 - **`set --shape` to anything but a box drops a box's changes** (only a
   box can be shaped), and says so: `dropped 3 changes`.
 - Not edits: `mirror` (except through `duplicate --mirror`), sockets
-  written with `at` or `from`, and `define`. Type those in the recipe.
+  passed on with `from`, and `define`. Type those in the recipe.
 
 ## 11. Models that move
 
@@ -883,8 +900,8 @@ loop `ends_as_it_starts`. The plain `inspect --json` lists
 <name>`: a strip of 8 frames side by side, evenly spaced in time, all
 from the same place, each with its time in its corner, written as
 `<recipe>.<animation>.strip.png`. `--frames <2 to 60>` for another
-number; `--view front|right|back|three-quarter` for where they are
-drawn from (a walk shows best from `right`, a wave from `front`). Read
+number; `--view front|right|back|three-quarter|top` for where they are
+drawn from (a walk shows best from `right`, a wave from `front`, a door swinging from `top`, straight above with the front at the bottom). Read
 the picture to see the motion; `--json` says where each frame is
 (`strip`: `at`, `left`, `top`, `size`).
 
@@ -900,6 +917,49 @@ duck-mold render robot.toml --animation walk --view right
 Renaming a pose renames it in every key that uses it. A pose that keys
 use can't be removed from under them: change the keys, or
 `remove-pose <pose> --with-keys`.
+
+### Sharing animations
+
+An animation only names parts. So a walk made on one model works on any
+model whose parts have the same names. **The names for a two-legged
+character**: `body`, `head`, `left_arm`, `right_arm`, `left_leg`,
+`right_leg`, each standing at rest with the arms hanging down. Name
+them so and the starters work at once.
+
+**The starters** come inside the program:
+
+| Starter | For | What it does |
+|---|---|---|
+| `idle` | two legs (`head`, `left_arm`, `right_arm`) | Stands and breathes: the head nods a little and the arms sway. Loops. |
+| `walk` | two legs (`left_leg`, `right_leg`, `left_arm`, `right_arm`) | Legs and arms swing against each other. Loops, in place. |
+| `wave` | two legs (`right_arm`) | Raises the right arm, waves twice, lowers it. |
+| `jump` | two legs (`body`, both legs, both arms) | Crouches, rises 40 cm, lands, straightens. |
+| `open` | a part called `door` | Swings 100 degrees on its hinge in a second. Played backwards, it closes. |
+| `roll` | `wheel_front_left`, `wheel_front_right`, `wheel_back_left`, `wheel_back_right` | Each turns once round a second (`[-360, 0, 0]`), steadily (`smooth = false`), rolling forward. Loops. |
+
+```bash
+duck-mold edit duck.toml add-animation walk --starter walk
+duck-mold save-animation robot.toml walk animations/walk.toml
+duck-mold edit duck.toml add-animation walk --from animations/walk.toml
+duck-mold edit duck.toml add-animation hello --from robot.toml --take wave
+```
+
+- **A copy is the model's own.** Its poses and its keys are written into
+  the recipe; change them to suit (longer legs, a slower walk) and
+  nothing else changes.
+- **Pose names**: a pose whose name is free comes in as it is; one that
+  is taken by a pose saying the same is used as it is; one taken by a
+  different pose comes in with a number (`step_left_2`) and the keys
+  use that. The summary says which.
+- **Missing parts**: refused, naming them. `--skip-missing` takes the
+  rest and says what it left out.
+- **Turns are about each part's own axes**, so check the result: render
+  a strip. A starter only knows the six names: feet that stick out of a
+  leg can dig in as it swings (the robot's own walk turns its feet back;
+  add such turns to the copied poses with `set-pose`).
+- The file `save-animation` writes: a comment line, `version`, `name`,
+  the poses it uses, the animation. Any recipe with animations can be
+  copied from too.
 
 ### In a game
 
@@ -950,9 +1010,10 @@ has limits, six poses and three animations to copy from.
 Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
-bones, animation, colliders or LODs (`bones`, `colliders` and `lods` are
-reserved names). There is a window, Duck Mold Studio, but it is for
-people: everything it does, you do with `edit`.
+bones, colliders or LODs (`bones`, `colliders` and `lods` are reserved
+names; parts turn on their joins instead of bending on bones). There is
+a window, Duck Mold Studio, but it is for people: everything it does,
+you do with `edit`.
 
 ## 14. Files for reference
 

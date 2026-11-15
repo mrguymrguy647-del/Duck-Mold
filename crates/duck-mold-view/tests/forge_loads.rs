@@ -7,7 +7,7 @@ use std::path::Path;
 use duckforge::glb::GlbModel;
 use duckforge::prelude::Mesh;
 
-const EXAMPLES: [&str; 18] = [
+const EXAMPLES: [&str; 21] = [
     "crate",
     "table",
     "tree",
@@ -26,6 +26,9 @@ const EXAMPLES: [&str; 18] = [
     "chair",
     "window_wall",
     "rock",
+    "door",
+    "cart",
+    "gnome",
 ];
 
 #[test]
@@ -65,22 +68,45 @@ fn duck_forge_loads_every_golden_model() {
     assert!(robot.socket("head.top").is_some());
 }
 
-/// The robot, built from its recipe and loaded by Duck Forge from its
-/// golden file: Duck Forge's own player (`AnimatedModel`, the code a
-/// game uses) puts it where Duck Mold does, all through every one of its
-/// animations.
+/// The examples that move, each with sockets on parts that move.
+const MOVING: [(&str, &[&str]); 4] = [
+    (
+        "robot",
+        &["head.top", "left_arm.grip", "right_leg/foot.bottom"],
+    ),
+    ("door", &["handle.front", "door.front"]),
+    ("cart", &["wheel_front_left/spoke.bottom"]),
+    (
+        "gnome",
+        &["hat.top", "left_arm/hand.bottom", "right_leg/foot.bottom"],
+    ),
+];
+
+/// Every example that moves, built from its recipe and loaded by Duck
+/// Forge from its golden file: Duck Forge's own player (`AnimatedModel`,
+/// the code a game uses) puts it where Duck Mold does, all through every
+/// one of its animations.
 #[test]
-fn duck_forge_plays_the_robots_animations_as_duck_mold_poses_them() {
+fn duck_forge_plays_every_animation_as_duck_mold_poses_it() {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    for (name, watched) in MOVING {
+        plays_as_duck_mold_poses_it(&root, name, watched);
+    }
+    robots_poses_hold(&root);
+}
+
+/// One example, played by Duck Forge, against Duck Mold's own posing.
+fn plays_as_duck_mold_poses_it(root: &Path, name: &str, watched: &[&str]) {
     use duck_mold_core::motion::{Motion, frame_times, posed};
     use duckforge::glb::AnimatedModel;
 
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let built = duck_mold_core::tools::build(&root.join("examples/robot.toml"))
-        .unwrap_or_else(|_| panic!("the robot builds"));
+    let built = duck_mold_core::tools::build(&root.join(format!("examples/{name}.toml")))
+        .unwrap_or_else(|_| panic!("{name} builds"));
     let model = built.model;
-    assert_eq!(model.animations.len(), 3);
+    assert!(!model.animations.is_empty(), "{name}");
+    let file = root.join(format!("tests/golden/{name}.glb"));
     for animation in &model.animations {
-        let mut robot = AnimatedModel::load(root.join("tests/golden/robot.glb")).unwrap();
+        let mut robot = AnimatedModel::load(&file).unwrap();
         assert!(robot.animations().contains(&animation.name.as_str()));
         robot.set_blend(0.0);
         robot.play(&animation.name);
@@ -103,32 +129,55 @@ fn duck_forge_plays_the_robots_animations_as_duck_mold_poses_them() {
             ] {
                 assert!(
                     (f64::from(found) - wanted).abs() < 1e-3,
-                    "{} at {at}: {found} against {wanted}",
+                    "{name} {} at {at}: {found} against {wanted}",
                     animation.name
                 );
             }
             // ...and where a hat would sit, and a sword be held.
             let sockets = here.named_sockets();
-            for name in ["head.top", "left_arm.grip", "right_leg/foot.bottom"] {
-                let wanted = sockets.iter().find(|socket| socket.name == name).unwrap();
-                let found = robot.socket(name).unwrap().position();
+            for socket in watched {
+                let wanted = sockets
+                    .iter()
+                    .find(|known| known.name == *socket)
+                    .unwrap_or_else(|| panic!("{name}: {socket}"));
+                let found = robot.socket(socket).unwrap().position();
                 let apart = ((f64::from(found.x) - wanted.at.x).powi(2)
                     + (f64::from(found.y) - wanted.at.y).powi(2)
                     + (f64::from(found.z) - wanted.at.z).powi(2))
                 .sqrt();
                 assert!(
                     apart < 1e-3,
-                    "{name} in {} at {at}: {apart}",
+                    "{name}: {socket} in {} at {at}: {apart}",
                     animation.name
                 );
             }
         }
         // It loops, or stops at its end, as the recipe says.
         robot.update(0.5);
-        assert_eq!(robot.is_playing(), animation.looping, "{}", animation.name);
-        assert_eq!(robot.finished(), !animation.looping, "{}", animation.name);
+        assert_eq!(
+            robot.is_playing(),
+            animation.looping,
+            "{name} {}",
+            animation.name
+        );
+        assert_eq!(
+            robot.finished(),
+            !animation.looping,
+            "{name} {}",
+            animation.name
+        );
     }
-    // And its poses are there to hold, by the recipe's names.
+}
+
+/// The robot's poses are there to hold, by the recipe's names.
+fn robots_poses_hold(root: &Path) {
+    use duck_mold_core::motion::posed;
+    use duckforge::glb::AnimatedModel;
+
+    let model = duck_mold_core::tools::build(&root.join("examples/robot.toml"))
+        .unwrap_or_else(|_| panic!("the robot builds"))
+        .model;
+    assert_eq!(model.animations.len(), 4);
     let mut robot = AnimatedModel::load(root.join("tests/golden/robot.glb")).unwrap();
     let names: Vec<&str> = model.poses.iter().map(|pose| pose.name.as_str()).collect();
     assert_eq!(robot.poses(), names);

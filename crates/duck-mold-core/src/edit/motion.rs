@@ -1228,3 +1228,413 @@ pub(super) fn remove_key(doc: &mut Doc, animation: &str, number: usize) -> Resul
         touched: None,
     })
 }
+
+// ---- the animation library ------------------------------------------------------------
+
+/// The poses an animation's keys use, each once, in the order they come
+/// (`rest` isn't one: it is always there).
+fn poses_used(keys: &[(f64, String)]) -> Vec<String> {
+    let mut used: Vec<String> = Vec::new();
+    for (_, pose) in keys {
+        if pose != REST && !used.contains(pose) {
+            used.push(pose.clone());
+        }
+    }
+    used
+}
+
+/// What a pose says, line by line, written again from what it means (so
+/// a pose read from JSON can go into TOML).
+fn pose_vals(doc: &Doc, pose: &str) -> Vec<(String, Val)> {
+    let table = [key(POSES), key(pose)];
+    let Some(node) = doc.node(&table) else {
+        return Vec::new();
+    };
+    let Value::Table(entries) = &node.value else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .filter_map(|entry| Some((entry.key.clone(), super::val_of(&entry.node)?)))
+        .collect()
+}
+
+/// Two poses that say the same, whatever order their lines are in.
+fn same_pose(one: &[(String, Val)], other: &[(String, Val)]) -> bool {
+    let written = |lines: &[(String, Val)]| {
+        let mut lines: Vec<String> = lines
+            .iter()
+            .map(|(part, value)| format!("{part}={}", value.write(Syntax::Toml)))
+            .collect();
+        lines.sort();
+        lines
+    };
+    written(one) == written(other)
+}
+
+/// The paths of every part of a built model.
+fn part_paths(model: &Model) -> Vec<String> {
+    fn walk(parts: &[Part], out: &mut Vec<String>) {
+        for part in parts {
+            out.push(part.path.clone());
+            walk(&part.parts, out);
+        }
+    }
+    let mut out = Vec::new();
+    walk(&model.parts, &mut out);
+    out
+}
+
+/// Names in a sentence: `a, b and c`.
+fn listed(names: &[String]) -> String {
+    match names {
+        [] => String::new(),
+        [one] => format!("\"{one}\""),
+        [rest @ .., last] => format!(
+            "{} and \"{last}\"",
+            rest.iter()
+                .map(|name| format!("\"{name}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    }
+}
+
+/// `add-animation --from`: copies an animation, and the poses its keys
+/// use, from another recipe (or a file `save-animation` wrote, or a
+/// starter) into this one. The source's animation called `name` is
+/// taken, or, if it has only one, that one. A pose whose name is taken
+/// here by a pose that says something else comes in with a number; one
+/// that says the same is used as it is.
+pub(super) fn add_animation_from(
+    doc: &mut Doc,
+    name: &str,
+    wanted: &str,
+    looping: bool,
+    (source, shown): (&Doc, &str),
+    skip_missing: bool,
+    model: Option<&Model>,
+) -> Result<Outcome, Stop> {
+    super::check_name(name)?;
+    if animation_names(doc).iter().any(|known| known == name) {
+        return Err(problem(
+            Code::DuplicateName,
+            format!(
+                "there is already an animation called \"{name}\": choose another name for the copy"
+            ),
+        )
+        .got(name));
+    }
+    let offered = animation_names(source);
+    let taken = if offered.iter().any(|known| known == wanted) {
+        wanted.to_owned()
+    } else if let [only] = offered.as_slice() {
+        only.clone()
+    } else if offered.is_empty() {
+        return Err(problem(
+            Code::UnknownAnimation,
+            format!("{shown} has no animations to copy"),
+        ));
+    } else {
+        return Err(problem(
+            Code::UnknownAnimation,
+            format!(
+                "{shown} has more than one animation and none called \"{wanted}\": name the one to copy"
+            ),
+        )
+        .got(wanted)
+        .one_of(wanted, offered));
+    };
+    let keys = keys_of(source, &taken)?;
+    if keys.is_empty() {
+        return Err(problem(
+            Code::Unsupported,
+            format!("the animation \"{taken}\" in {shown} has no keys: there is nothing to copy"),
+        ));
+    }
+    let Some(model) = model else {
+        return Err(problem(
+            Code::Unsupported,
+            "this recipe has mistakes that stop it being built, so which parts it has isn't known: put them right first",
+        ));
+    };
+    let have = part_paths(model);
+    let used = poses_used(&keys);
+    let mut poses: Vec<(String, Vec<(String, Val)>)> = Vec::new();
+    let mut missing: Vec<String> = Vec::new();
+    for pose in &used {
+        if source.node(&[key(POSES), key(pose)]).is_none() {
+            return Err(problem(
+                Code::UnknownPose,
+                format!(
+                    "a key of \"{taken}\" in {shown} uses the pose \"{pose}\", which isn't there"
+                ),
+            ));
+        }
+        let mut lines = pose_vals(source, pose);
+        for (part, _) in &lines {
+            if !have.contains(part) && !missing.contains(part) {
+                missing.push(part.clone());
+            }
+        }
+        lines.retain(|(part, _)| have.contains(part));
+        poses.push((pose.clone(), lines));
+    }
+    if !missing.is_empty() && !skip_missing {
+        let two_legs = crate::starters::TWO_LEGS.join(", ");
+        return Err(problem(
+            Code::UnknownPart,
+            format!(
+                "the animation moves {} {}, which this model doesn't have. Give the parts those names (a two-legged character's are {two_legs}), or add --skip-missing to take the rest",
+                if missing.len() == 1 {
+                    "the part"
+                } else {
+                    "the parts"
+                },
+                listed(&missing),
+            ),
+        ));
+    }
+    if poses.iter().all(|(_, lines)| lines.is_empty()) && !poses.is_empty() {
+        return Err(problem(
+            Code::UnknownPart,
+            format!(
+                "none of the parts the animation moves are in this model: it moves {}",
+                listed(&missing)
+            ),
+        ));
+    }
+    // Each pose's name here.
+    let mut names: Vec<(String, String)> = Vec::new();
+    let mut added: Vec<String> = Vec::new();
+    let mut numbered: Vec<String> = Vec::new();
+    for (pose, lines) in &poses {
+        check_pose_name(pose)?;
+        let mut count = 1;
+        let here = loop {
+            let candidate = if count == 1 {
+                pose.clone()
+            } else {
+                format!("{pose}_{count}")
+            };
+            if !pose_names(doc).contains(&candidate) {
+                doc.add_named_table(POSES, &candidate, lines)
+                    .map_err(cant)?;
+                added.push(candidate.clone());
+                break candidate;
+            }
+            if same_pose(&pose_vals(doc, &candidate), lines) {
+                break candidate;
+            }
+            count += 1;
+        };
+        if here != *pose {
+            numbered.push(format!("\"{pose}\" as \"{here}\""));
+        }
+        names.push((pose.clone(), here));
+    }
+    let table = [key(ANIMATIONS), key(&taken)];
+    let setting = |field: &str| {
+        source
+            .node(&with(&table, key(field)))
+            .and_then(|node| node.value.as_bool())
+    };
+    let mut fields = Vec::new();
+    let loops = looping || setting("loop") == Some(true);
+    if loops {
+        fields.push(("loop".to_owned(), Val::Raw("true".to_owned())));
+    }
+    if setting("smooth") == Some(false) {
+        fields.push(("smooth".to_owned(), Val::Raw("false".to_owned())));
+    }
+    let renamed = |pose: &str| {
+        names
+            .iter()
+            .find(|(from, _)| from == pose)
+            .map_or(pose.to_owned(), |(_, here)| here.clone())
+    };
+    fields.push((
+        "keys".to_owned(),
+        Val::Lines(
+            keys.iter()
+                .map(|(at, pose)| key_val(*at, &renamed(pose)))
+                .collect(),
+        ),
+    ));
+    doc.add_named_table(ANIMATIONS, name, &fields)
+        .map_err(cant)?;
+    let mut summary = if taken == name {
+        format!(
+            "added the animation \"{name}\" from {shown}, with {} keys",
+            keys.len()
+        )
+    } else {
+        format!(
+            "added the animation \"{name}\", a copy of \"{taken}\" from {shown}, with {} keys",
+            keys.len()
+        )
+    };
+    match added.as_slice() {
+        [] => {}
+        [one] => summary.push_str(&format!(" and the pose \"{one}\"")),
+        _ => summary.push_str(&format!(" and the poses {}", listed(&added))),
+    }
+    if !numbered.is_empty() {
+        summary.push_str(&format!(
+            " (names taken by other poses here, so they came in as: {})",
+            numbered.join(", ")
+        ));
+    }
+    let reused: Vec<String> = names
+        .iter()
+        .map(|(_, here)| here.clone())
+        .filter(|here| !added.contains(here))
+        .collect();
+    if !reused.is_empty() {
+        summary.push_str(&format!(
+            "; it uses {} {} already here, which {} the same",
+            if reused.len() == 1 {
+                "the pose"
+            } else {
+                "the poses"
+            },
+            listed(&reused),
+            if reused.len() == 1 { "says" } else { "say" },
+        ));
+    }
+    if !missing.is_empty() {
+        summary.push_str(&format!(
+            "; it left out what it does to {}, which this model doesn't have",
+            listed(&missing)
+        ));
+    }
+    Ok(Outcome {
+        summary,
+        touched: None,
+    })
+}
+
+/// An animation of a recipe and the poses it uses, as a small file of
+/// their own: what `duck-mold save-animation` writes, and what
+/// `add-animation --from` reads. `display` is the recipe's name, for the
+/// first line. Always TOML.
+pub fn animation_recipe(
+    text: &str,
+    syntax: Syntax,
+    display: &str,
+    animation: &str,
+) -> Result<String, crate::tools::Failure> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let usage = |stop: Stop| crate::tools::Failure::Usage(Box::new(stop.0.in_file(display)));
+    let doc = Doc::parse(text, syntax).map_err(|_| {
+        usage(problem(
+            Code::Syntax,
+            format!("\"{display}\" can't be read: check it with duck-mold check"),
+        ))
+    })?;
+    require_animation(&doc, animation).map_err(usage)?;
+    let keys = keys_of(&doc, animation).map_err(usage)?;
+    let used = poses_used(&keys);
+    let mut parts: Vec<String> = Vec::new();
+    let mut out = format!("# Saved by `duck-mold save-animation` from {display}.\n");
+    let mut body = String::new();
+    for pose in &used {
+        let lines = pose_vals(&doc, pose);
+        if doc.node(&[key(POSES), key(pose)]).is_none() {
+            return Err(usage(problem(
+                Code::UnknownPose,
+                format!(
+                    "a key of \"{animation}\" uses the pose \"{pose}\", which isn't in the recipe: put that right first"
+                ),
+            )));
+        }
+        body.push_str(&format!(
+            "\n[{}]\n",
+            Doc::header_name(&[key(POSES), key(pose)])
+        ));
+        for (part, value) in &lines {
+            if !parts.contains(part) {
+                parts.push(part.clone());
+            }
+            body.push_str(&format!(
+                "{}\n",
+                super::doc::field_text(part, value, Syntax::Toml)
+            ));
+        }
+    }
+    let table = [key(ANIMATIONS), key(animation)];
+    body.push_str(&format!("\n[{}]\n", Doc::header_name(&table)));
+    for field in ["loop", "smooth"] {
+        if let Some(on) = doc
+            .node(&with(&table, key(field)))
+            .and_then(|node| node.value.as_bool())
+        {
+            body.push_str(&format!("{field} = {on}\n"));
+        }
+    }
+    let keys = Val::Lines(keys.iter().map(|(at, pose)| key_val(*at, pose)).collect());
+    body.push_str(&format!("keys = {}\n", keys.write(Syntax::Toml)));
+    if !parts.is_empty() {
+        out.push_str(&format!("# It moves: {}.\n", parts.join(", ")));
+    }
+    out.push_str(&format!(
+        "# To use it: duck-mold edit <recipe> add-animation {animation} --from <this file>\n"
+    ));
+    out.push_str(&format!(
+        "version = 0\nname = {}\n",
+        Val::Str(animation.to_owned()).write(Syntax::Toml)
+    ));
+    out.push_str(&body);
+    Ok(out)
+}
+
+/// An animation a file offers to copy: what the animation library
+/// shows of it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Offered {
+    /// Its name.
+    pub name: String,
+    /// The parts it moves, in the order its poses name them.
+    pub parts: Vec<String>,
+    /// How many keys it has.
+    pub keys: usize,
+    /// How long it lasts, in seconds: its last key's time.
+    pub length: f64,
+    /// True if it loops.
+    pub looping: bool,
+}
+
+/// The animations in a recipe's text (or a file `save-animation`
+/// wrote), each with the parts it moves. `None` if the text can't be
+/// read; an animation whose keys can't be read is left out.
+pub fn animations_in(text: &str, syntax: Syntax) -> Option<Vec<Offered>> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let doc = Doc::parse(text, syntax).ok()?;
+    Some(
+        animation_names(&doc)
+            .into_iter()
+            .filter_map(|name| {
+                let keys = keys_of(&doc, &name).ok()?;
+                let mut parts: Vec<String> = Vec::new();
+                for pose in poses_used(&keys) {
+                    for (part, _) in pose_vals(&doc, &pose) {
+                        if !parts.contains(&part) {
+                            parts.push(part);
+                        }
+                    }
+                }
+                let looping = doc
+                    .node(&[key(ANIMATIONS), key(&name), key("loop")])
+                    .and_then(|node| node.value.as_bool())
+                    == Some(true);
+                Some(Offered {
+                    length: keys.iter().map(|(at, _)| *at).fold(0.0, f64::max),
+                    keys: keys.len(),
+                    parts,
+                    looping,
+                    name,
+                })
+            })
+            .collect(),
+    )
+}

@@ -3,7 +3,7 @@
 //! `Edit` values from clicks, so whatever it can do, this can.
 
 use clap::{Args, Subcommand};
-use duck_mold_core::edit::{Changes, Edit, Free, LimitsTo, Made, Sizes};
+use duck_mold_core::edit::{AnimationFrom, Changes, Edit, Free, LimitsTo, Made, Sizes};
 use duck_mold_core::recipe::Turns;
 
 /// One change to a recipe. (Each variant's name is the command's, so
@@ -217,8 +217,14 @@ pub enum Change {
         /// A new slide across the side: x,y,z.
         #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
         shift: Option<String>,
+        /// An exact point in the part's own space instead of a side:
+        /// x,y,z. Moves a socket written with "at", or puts one that was
+        /// on a side there.
+        #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
+        at: Option<String>,
         /// Which way it faces: up, down, left, right, front, back, or out
-        /// (straight out of its side, as it faces when nothing says).
+        /// (as it faces when nothing says: straight out of its side, or
+        /// up for a socket at a point).
         #[arg(long, value_name = "WAY")]
         facing: Option<String>,
     },
@@ -365,13 +371,36 @@ pub enum Change {
         #[arg(long)]
         with_keys: bool,
     },
-    /// Add an animation, with no keys yet: give it keys with add-key.
+    /// Add an animation, with no keys yet: give it keys with add-key. Or
+    /// copy one in, with the poses it uses: --from a file (another
+    /// recipe, or one save-animation wrote) or --starter idle, walk,
+    /// wave, jump, open or roll.
     AddAnimation {
         /// The new animation's name.
         name: String,
         /// It starts again after its last key.
         #[arg(long = "loop")]
         looping: bool,
+        /// Copy it from this file, written from the recipe's folder:
+        /// animations/walk.toml. The file's animation with this name is
+        /// taken, or its only one.
+        #[arg(long, conflicts_with = "starter")]
+        from: Option<String>,
+        /// With --from: which of the file's animations to copy, when it
+        /// has several and none has the new animation's name.
+        #[arg(long, requires = "from")]
+        take: Option<String>,
+        /// Copy one of the starters that come with the program: idle,
+        /// walk, wave and jump (for body, head, left_arm, right_arm,
+        /// left_leg, right_leg), open (for door), roll (for
+        /// wheel_front_left, wheel_front_right, wheel_back_left,
+        /// wheel_back_right).
+        #[arg(long)]
+        starter: Option<String>,
+        /// Leave out what it does to parts this model doesn't have,
+        /// instead of refusing.
+        #[arg(long)]
+        skip_missing: bool,
     },
     /// Change whether an animation loops, whether it is smooth, and how
     /// long it lasts.
@@ -923,9 +952,25 @@ impl Change {
                 pose: pose.clone(),
                 with_keys: *with_keys,
             },
-            Change::AddAnimation { name, looping } => Edit::AddAnimation {
+            Change::AddAnimation {
+                name,
+                looping,
+                from,
+                take,
+                starter,
+                skip_missing,
+            } => Edit::AddAnimation {
                 name: name.clone(),
                 looping: *looping,
+                from: match (from, starter) {
+                    (Some(file), _) => Some(AnimationFrom::File {
+                        file: file.clone(),
+                        take: take.clone(),
+                    }),
+                    (None, Some(starter)) => Some(AnimationFrom::Starter(starter.clone())),
+                    (None, None) => None,
+                },
+                skip_missing: *skip_missing,
             },
             Change::SetAnimation {
                 animation,
@@ -1045,6 +1090,7 @@ impl Change {
                 socket,
                 on,
                 shift,
+                at,
                 facing,
             } => Edit::SetSocket {
                 socket: socket.clone(),
@@ -1053,6 +1099,7 @@ impl Change {
                     .as_deref()
                     .map(|shift| three("--shift", shift))
                     .transpose()?,
+                at: at.as_deref().map(|at| three("--at", at)).transpose()?,
                 facing: facing.clone(),
             },
         })

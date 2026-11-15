@@ -1,0 +1,15 @@
+# Starter animation `open`, for a part called `door`: it swings 100
+# degrees on its hinge in one second. Played backwards, it closes.
+# It moves: door.
+# To use it: duck-mold edit <recipe> add-animation open --starter open
+version = 0
+name = "open"
+
+[poses.door_open]
+door = [0, -100, 0]
+
+[animations.open]
+keys = [
+  { at = 0, pose = "rest" },
+  { at = 1, pose = "door_open" },
+]

@@ -285,13 +285,19 @@ change-over from one animation to another and the game's own turns are
 
 `tests/golden/*.glb` in this repository, all laid out as a tree: crate
 (12 triangles), table (60), tree (70), house (120, with one assembly,
-its roof), robot (384, with four: its arms and legs; three animations,
-`idle`, `walk` and `wave`, and six poses), snowman (600),
-and the other examples. For each of the robot's animations there is a
-`robot.<animation>.inspect.json` (what `duck-mold inspect --animation
-<name> --json` says: its length, whether it loops, how many frames, how
-far the lowest point leaves the ground) and a `robot.<animation>.strip.png`
-(eight frames of it, side by side). `tests/before-phase5/` holds the crate, the
+its roof), robot (384, with four: its arms and legs; four animations,
+`idle`, `walk`, `wave` and `jump`, and eight poses), snowman (600),
+and the other examples. Three more move: door (60; `open`), cart (436,
+four wheels that are assemblies; `roll`) and gnome (432; `walk`, the
+robot's walk copied in from a saved file, and `wave`). For each
+animation there is a `<model>.<animation>.inspect.json` (what
+`duck-mold inspect --animation <name> --json` says: its length, whether
+it loops, how many frames, how far the lowest point leaves the ground)
+and a `<model>.<animation>.strip.png` (eight frames of it, side by
+side). Duck Forge keeps copies of the four models that move, with those
+reports, in `tests/fixtures/duck_mold/`, and its tests play every one of
+the eight animations frame by frame against them. The reader didn't
+change in Phase 5b: still version 5. `tests/before-phase5/` holds the crate, the
 house and the robot as Duck Mold 0.4 wrote them, one list of triangles
 each, to test that files from before still load as the same models;
 Duck Forge keeps the same three in `tests/fixtures/duck_mold_before_tree/`.
