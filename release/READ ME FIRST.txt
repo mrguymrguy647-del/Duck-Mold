@@ -92,6 +92,32 @@ MODELS THAT MOVE  (new in 0.5)
   plays them by name: robot.play("walk").
 
 
+FOR GAMES: WHAT WAS HIT, AND FOOTSTEPS  (new in 0.6)
+  - Hit shapes: "Hits", at the top, outlines a simple box, ball or
+    capsule round each part, in cyan. A game tests them to know which
+    part a click or a bullet found. Select a part to choose its own
+    shape in the panel on the right (or "none" for a part too small to
+    aim at); with nothing selected, the panel says what the whole model
+    has. New models start with a shape for every part.
+  - Events: in Pose mode, right-click a key on the timeline, type a
+    name (footstep) and click "Add event". A small cyan flag shows it.
+    A game hears it each time the animation passes that key: a step
+    sound, a puff of dust. The robot's walk has footsteps already.
+  - "Fit to ground", beside Loop and Smooth, stands every pose of the
+    animation on the ground, so a walk copied onto shorter legs
+    doesn't sink into it.
+  - Right-click a key: "Make this key's pose its own" gives it a copy
+    of a pose other keys share, so a drag changes only it.
+  - The timeline zooms: Ctrl and the mouse wheel, or the - and +
+    buttons; "Fit" shows it all again.
+
+  On the command line:
+
+    duck-mold render examples\robot.toml --colliders
+    duck-mold inspect examples\robot.toml --animation walk
+    duck-mold edit examples\gnome.toml fit-ground walk
+
+
 YOUR MODELS ARE TEXT FILES
   A model is a recipe: a .toml file that lists its parts and where they
   join. The Studio changes that file every time you change something,

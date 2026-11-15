@@ -721,6 +721,7 @@ see the handoff note.
 | [PHASE4_REPORT.md](PHASE4_REPORT.md) | Phase 4: shaping a box by hand (faces, edges, corners, cuts), shaped parts used again, and the chair, wall and rock examples, with a picture of each screen. |
 | [PHASE5A_REPORT.md](PHASE5A_REPORT.md) | The first half of Phase 5: limits, poses and animations in the recipe, the `.glb` as a tree of parts, and Duck Forge playing them. |
 | [PHASE5_REPORT.md](PHASE5_REPORT.md) | All of Phase 5, motion: Pose mode, the timeline, the animation library and its starters, the door, cart and gnome, a strip of every example animation, and what Phase 6 should start with. |
+| [PHASE6_REPORT.md](PHASE6_REPORT.md) | Phase 6, game-ready: hit shapes, events on keys, fitting to the ground, a timeline that zooms, Duck Forge's `robot_click`, and what Phase 7 should start with. |
 
 ## Project layout
 
