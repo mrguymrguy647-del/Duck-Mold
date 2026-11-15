@@ -418,7 +418,7 @@ cargo run --example robot_click
 
 | | |
 |---|---|
-| Duck Mold | Every step's CI run so far is green on Windows and Linux (steps 1 to 6; steps 7 and 8, the version and this report are below). |
+| Duck Mold | Green on Windows and Linux for steps 1 to 6, and for the report's commit, which also holds steps 7 and 8 and the version: their own runs were stopped when the next commit arrived, as the workflow does ([run](https://github.com/mrguymrguy647-del/Duck-Mold/actions/runs/43694440386)). |
 | Duck Forge, [Duck-Forge#14](https://github.com/mrguymrguy647-del/Duck-Forge/pull/14) | Green: the engine's tests on Windows, five times, and the Studio, zip and installer. |
-| Duck Forge, [Duck-Forge#15](https://github.com/mrguymrguy647-del/Duck-Forge/pull/15) | See below. |
-| The Windows zip | See below. |
+| Duck Forge, [Duck-Forge#15](https://github.com/mrguymrguy647-del/Duck-Forge/pull/15) | The engine's tests on Windows, five times: green. The Studio's check first failed: its list of the games that come with Duck Forge didn't have the new `robot_click`. Fixed in commit `f517976`; that run is below. |
+| The Windows zip | Built: `DuckMold-0.6.0-windows.zip` (8.8 MB), under "Artifacts" at the bottom of [this Release run](https://github.com/mrguymrguy647-del/Duck-Mold/actions/runs/43694440437). It is kept there for 90 days. It isn't a published release: say when you want one. |
