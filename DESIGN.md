@@ -4387,6 +4387,23 @@ for shape in robot.hit_shapes(&place) { /* shape.part, shape.kind, ... */ }
   exact opposite of `world_to_screen`, so a click lands on what is drawn
   under the mouse.
 
+*As built (step 2):* as above, with these changes.
+
+- **The result is `PartHit`, not `Hit`**: Duck Forge's prelude already
+  has a `Hit` (a moving box meeting another, in 2D). The shapes are
+  `HitShape { part, volume }`, the volume a `HitVolume::Box`, `Ball` or
+  `Capsule` in the world.
+- **`ctx.mouse_ray(&camera)`** was added beside `ray_through`: a game's
+  `update` has no canvas, and that is where clicks are handled. It is
+  `None` while the pointer is off the window.
+- **The shapes are in the file at rest, in the model's own space**, not
+  in each part's space: like the sockets, with the node that carries
+  each. The reader moves them with the same join stands as the corners
+  and the sockets (`GlbHitShape::moved`), so the three can't disagree.
+- A ray that starts inside a shape hits it at distance 0. A ray that
+  only touches a box's edge or corner and goes on outside it may be
+  counted either way; Duck Forge's tests allow both.
+
 ### Events: named moments on keys
 
 An **event** is a name on a key: `{ at = 0.4, pose = "step_right",
@@ -4537,7 +4554,9 @@ exactly. Only that one number of each pose changes.
   corner of the file (`extras`), in the part's own space, measured
   from its pivot: its kind, its middle, and its size, radius, length
   and direction. A shape round the whole model is on the model's
-  object.
+  object. (*As built:* one list, `colliders`, in the model's own space
+  at rest, each with the node that carries it, like the sockets; see
+  the step 2 note above.)
 - **Events**: each animation's events, in Duck Mold's corner of the
   file: name and time. glTF has no events of its own; other programs
   ignore them, and the validator passes.
@@ -4554,11 +4573,12 @@ exactly. Only that one number of each pose changes.
 | `Ray`, `Ray::new(from, direction)` | A starting point and a direction. |
 | `Camera3D::ray_through(pixel, &canvas)` | The ray from the camera through a point of the canvas. |
 | `GlbModel::colliders` | The hit shapes the file holds. |
-| `AnimatedModel::hit_ray(ray, &place) -> Option<Hit>` | The first part a ray hits, as the model stands now. |
-| `AnimatedModel::hit_segment(from, to, &place) -> Option<Hit>` | The same between two points. |
-| `AnimatedModel::hits_ball(center, radius, &place) -> Vec<Hit>` | Every part a ball touches, nearest first. |
+| `AnimatedModel::hit_ray(ray, &place) -> Option<PartHit>` | The first part a ray hits, as the model stands now. |
+| `AnimatedModel::hit_segment(from, to, &place) -> Option<PartHit>` | The same between two points. |
+| `AnimatedModel::hits_ball(center, radius, &place) -> Vec<PartHit>` | Every part a ball touches, nearest first. |
 | `AnimatedModel::hit_shapes(&place) -> Vec<HitShape>` | The hit shapes as they are now, to draw. |
-| `Hit { part, point, normal, distance }` | What was hit. |
+| `PartHit { part, point, normal, distance }` | What was hit (*as built*: named so beside Duck Forge's own `Hit`). |
+| `Context::mouse_ray(&camera)` | *As built*: the ray under the mouse, in `update`. |
 | `AnimatedModel::events() -> &[AnimationEvent]` | The events passed during the last `update`. |
 | `AnimationEvent { name, animation, at }` | One of them. |
 | `examples/robot_click/` | The robot walking about; footsteps make a sound and a puff; a click names the part and makes it flash. |

@@ -18,8 +18,9 @@ Duck Forge's `src/glb.rs` holds the same lines, byte for byte. Each
 project keeps its own introduction and imports above the markers, and
 Duck Forge its own functions below them (`GlbModel::load`, `to_mesh`,
 `part`, `socket`, `GlbPart::range`, `GlbSocket::position` and
-`direction`, `Mesh::load_glb`, and `AnimatedModel`). The first marker
-says the reader's version; this note describes **version 5**.
+`direction`, `Mesh::load_glb`, `AnimatedModel`, and the hit tests in
+`src/hits.rs`). The first marker says the reader's version; this note
+describes **version 6**.
 
 To change the reader: change it here, raise the version in both marker
 lines, run Duck Mold's tests, then copy the lines between the markers
@@ -37,6 +38,7 @@ diff <(sed -n '/^\/\/ ==== Duck Mold/,/^\/\/ ==== end of Duck Mold/p' Duck-Mold/
 | 3 | Sockets (below): `GlbModel.sockets`, so a game can ask where `head.top` is. Duck Mold's Phase 1. |
 | 4 | Files laid out as a **tree of parts** (below): `GlbModel.joins` (what every part turns about and hangs from) and `GlbSocket.join` (the part that carries a socket). Files from before are read exactly as they were. A file from a newer Duck Mold than the reader knows is refused with a sentence that says to update Duck Forge. Duck Mold's Phase 5, step 1. |
 | 5 | **Animations and poses** (below): `GlbModel.animations` and `poses`, each join's `turns_in`, and what it takes to play them: `GlbAnimation::at` (how an animation has every join at a time), `GlbPlace` (how a join stands, and `towards`, a place between two), `GlbModel::stands` and `posed` (where that puts every corner and socket) and `turn_by` (a join's turn from degrees). Duck Mold's Phase 5, step 5. |
+| 6 | **Hit shapes** (below): `GlbModel.colliders`, a box, a ball or a capsule round each part that has one, each with the join that carries it, and `GlbHitShape::moved` (where a join's stand puts it). Duck Mold's Phase 6, step 2. |
 
 **Which Duck Forge reads which file.** The file says how it is laid out
 in `extras.duck_mold.version`: 0 for one object with one list of
@@ -45,7 +47,9 @@ versions 4 and 5 read both. A reader from before refuses a tree with a
 sentence, rather than drawing one part of it, so **update Duck Forge
 before exporting with Duck Mold 0.5**. Animations and poses didn't
 change that number: they are added beside the model, so reader version
-4 loads a file that has them as the same model, standing still.
+4 loads a file that has them as the same model, standing still. Nor did
+hit shapes: a reader from before version 6 loads a file that has them,
+without them.
 
 ## What a Duck Mold `.glb` is
 
@@ -134,6 +138,20 @@ One file, glTF 2.0 binary. Always the same narrow shape:
      x** of each. Absent, they are the model's own right, up and
      forward. It is there for a part inside one that is turned or a
      mirror image (the robot's right arm).
+   - `colliders`: `[{ "part": "body", "node": 1, "shape": "box", "center": [x, y, z], "axes": [[x, y, z], [x, y, z], [x, y, z]], "half": [x, y, z] }, { "part": "head", "node": 3, "shape": "sphere", "center": [x, y, z], "radius": r }, { "part": "antenna", "node": 5, "shape": "capsule", "a": [x, y, z], "b": [x, y, z], "radius": r }, ...]`:
+     the model's **hit shapes**, where they are at rest, in the
+     recipe's order: a box (its middle, its three directions, each 1
+     long, and how far it reaches from the middle along each), a ball
+     (its middle and radius) or a capsule (every point within `radius`
+     of the straight line from `a` to `b`). All points and directions
+     are in glTF's directions: **negate x** of each. `part` is the
+     part's path, like a socket's (`left_arm/hand`); it is empty for
+     one shape round the whole model (a recipe's `colliders = "box"`).
+     `node` is the node that carries it (0, the model, for one round
+     the whole model), as for a socket. Absent in a model without hit
+     shapes, and in every file from before Duck Mold 0.6: read that as
+     none. A part the recipe gave `collider = "none"` simply isn't
+     listed.
    - `animations`: `[{ "name": "walk", "animation": 1, "loop": true, "length": 0.8 }, ...]`:
      the model's animations in the recipe's order. `animation` picks an
      entry of the file's own `animations` (below); it is absent for an
@@ -272,6 +290,22 @@ canvas.draw_mesh(robot.mesh(), &Transform::at(position), &camera); // in draw()
 README and guide say what each does. `examples/robot_walk/` is the
 robot standing idle, walking and waving, with a hat on.
 
+Hit shapes, where the recipe has them (`colliders = "parts"`):
+
+```rust
+let ray = camera.ray_through(mouse, canvas);    // or ctx.mouse_ray(&camera) in update()
+if let Some(hit) = robot.hit_ray(ray, &place) { // the first part on it, as it stands now
+    println!("{} at {:?}", hit.part, hit.point); // "head", "left_arm/hand"
+}
+```
+
+`hit_ray`, `hit_segment`, `hits_ball` and `hit_shapes` (each shape as it
+is now, in the world) are `AnimatedModel`'s, in Duck Forge's
+`src/hits.rs`; where a pose puts each shape is the shared reader's
+`GlbHitShape::moved`, with the same join stands as the corners and the
+sockets. `duck-mold inspect --colliders` lists the shapes, `duck-mold
+render --colliders` draws them.
+
 **Which half is whose.** Where an animation has a join at a time, and
 where that puts the model's corners and sockets, is in the shared
 reader (`GlbAnimation::at`, `GlbModel::stands`, `posed`, `turn_by`,
@@ -297,7 +331,12 @@ and a `<model>.<animation>.strip.png` (eight frames of it, side by
 side). Duck Forge keeps copies of the four models that move, with those
 reports, in `tests/fixtures/duck_mold/`, and its tests play every one of
 the eight animations frame by frame against them. The reader didn't
-change in Phase 5b: still version 5. `tests/before-phase5/` holds the crate, the
+change in Phase 5b. In Phase 6 it read hit shapes (version 6): the
+robot, the gnome, the door and the cart have them, and
+`<model>.colliders.json` beside each (what `duck-mold inspect
+--colliders --json` says) lists each shape, its middle and its size;
+Duck Forge keeps copies, and its `tests/duck_mold_hits.rs` hits every
+one in every pose. `tests/before-phase5/` holds the crate, the
 house and the robot as Duck Mold 0.4 wrote them, one list of triangles
 each, to test that files from before still load as the same models;
 Duck Forge keeps the same three in `tests/fixtures/duck_mold_before_tree/`.
