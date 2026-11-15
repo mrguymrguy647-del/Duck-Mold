@@ -3917,3 +3917,64 @@ fn a_parts_hit_shape_and_the_models_line_are_edits() {
             .any(|collider| collider.part.is_empty())
     );
 }
+
+// ---- Phase 6, step 8: a key's pose of its own ----------------------------------------
+
+#[test]
+fn a_key_can_have_its_pose_to_itself_in_one_step() {
+    let recipe = copy_of("robot", "studio_own_pose");
+    let before = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.pose_mode().unwrap();
+    assert!(studio.choose_animation(Some("walk")));
+    // Key 1's step_left is also key 5's.
+    assert_eq!(studio.sharing_pose(1), [("walk".to_owned(), 5)]);
+    let said = studio.own_pose(1).unwrap();
+    assert_eq!(
+        said,
+        "Key 1 has a pose of its own now: \"walk_1\", a copy of \"step_left\". A drag changes only it"
+    );
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    // A copy of the pose, and the key uses it: its event is kept.
+    assert!(
+        text.contains("[poses.walk_1]\nbody = { move = [0, -0.04, 0] }"),
+        "{text}"
+    );
+    assert!(text.contains("{ at = 0, pose = \"walk_1\", event = \"footstep\" }"));
+    assert!(text.contains("{ at = 0.8, pose = \"step_left\" }"));
+    let keys = studio.keys();
+    assert_eq!(
+        (keys[0].pose.as_str(), keys[4].pose.as_str()),
+        ("walk_1", "step_left")
+    );
+    // It is the pose shown, at the key's time, and it is no longer shared.
+    assert_eq!(studio.pose(), "walk_1");
+    assert_eq!(studio.time(), Some(0.0));
+    assert!(studio.sharing_pose(1).is_empty());
+    // The model moves exactly as before: the copy says the same.
+    let walk = |studio: &Studio| {
+        let model = studio.model().unwrap();
+        let played = model.animation("walk").unwrap();
+        let moving = duck_mold_core::motion::Motion::of(model, played);
+        duck_mold_core::motion::posed(model, &moving.joints_at(0.3))
+            .bounds()
+            .unwrap()
+    };
+    let now = walk(&studio);
+    // Asked again: it is its own already, and nothing changes.
+    let again = studio.own_pose(1).unwrap();
+    assert!(again.contains("is its own already"), "{again}");
+    // One undo takes both edits back.
+    studio.undo().unwrap();
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), before);
+    assert_eq!(walk(&studio), now);
+
+    // A rest key gets a pose of its own too: rest can't be changed.
+    let said = studio.own_pose(2).unwrap();
+    assert!(said.contains("\"walk_2\", a copy of \"rest\""), "{said}");
+    assert!(
+        std::fs::read_to_string(&recipe)
+            .unwrap()
+            .contains("{ at = 0.2, pose = \"walk_2\" }")
+    );
+}

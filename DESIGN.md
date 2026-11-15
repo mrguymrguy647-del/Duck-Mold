@@ -4598,6 +4598,16 @@ keys.
     ruler, scrolls. At the start it fits the whole animation, as now;
     **Fit** goes back to that.
 
+*As built (step 8):* "Make this key's pose its own" names the copy
+after the animation and the key (`walk_1` for the walk's key 1, with a
+number added if that is taken), and is greyed in the menu when no other
+key, in any animation, uses the pose; a `rest` key always can, since
+rest itself can't change. The zoom goes from the whole animation to a
+fortieth of it; shown less than 0.6 s at a time, the ruler marks
+hundredths and numbers tenths. The `-` and `+` buttons and Fit are at
+the end of the row above the ruler; the bar under the ruler shows where
+the part in view is. Each animation starts fitted.
+
 ### How the `.glb` changes
 
 - **Hit shapes**: each part's object gets its hit shape in Duck Mold's

@@ -278,6 +278,13 @@ each with its pose's name.
 - Drag a key to change its time (it snaps to 0.05 s and can't pass its
   neighbours; Ctrl: free). Right-click a key to remove it or give it
   another pose. **+ Key** adds the pose chosen at the time shown.
+- **Make this key's pose its own** (right-click a key): when other keys
+  use the same pose (a walk's first and last key), the key gets a copy
+  (`walk_1`), so a drag changes only it. One step to undo.
+- **Zoom and scroll**: Ctrl and the mouse wheel (or `-` and `+`, with
+  the pointer on the ruler, or the `-` and `+` buttons) zoom about the
+  pointer; the wheel, or a drag of the bar under the ruler, scrolls;
+  **Fit** shows the whole animation again.
 - **Events** are names on keys that a game hears when the animation
   passes them: the robot's walk has a `footstep` on each step. They
   show as small cyan flags under their keys. Right-click a key, type a

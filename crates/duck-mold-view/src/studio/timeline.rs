@@ -609,6 +609,82 @@ impl Studio {
         done
     }
 
+    /// The keys, in any animation, that use the same pose as key
+    /// `number` of the one chosen, but for that key itself: each as the
+    /// animation and the key's number.
+    pub fn sharing_pose(&self, number: usize) -> Vec<(String, usize)> {
+        let (Some(model), Some(chosen)) = (self.model(), self.animation.as_deref()) else {
+            return Vec::new();
+        };
+        let Some(pose) = self
+            .keys()
+            .into_iter()
+            .find(|key| key.number == number)
+            .map(|key| key.pose)
+        else {
+            return Vec::new();
+        };
+        model
+            .animations
+            .iter()
+            .flat_map(|animation| {
+                animation
+                    .keys
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, key)| key.pose == pose)
+                    .map(|(at, _)| (animation.name.clone(), at + 1))
+                    .collect::<Vec<_>>()
+            })
+            .filter(|(animation, at)| !(animation == chosen && *at == number))
+            .collect()
+    }
+
+    /// A key's menu: "Make this key's pose its own". If other keys use
+    /// its pose (or it is `rest`, which can't be changed), the key gets a
+    /// copy of the pose under a new name (`walk_2`), so a drag changes
+    /// only it: `add-pose --from` and `set-key`, one step to undo. Then
+    /// the copy is the pose shown.
+    pub fn own_pose(&mut self, number: usize) -> Result<String, String> {
+        let animation = self.chosen_or_why()?;
+        let Some(key) = self.keys().into_iter().find(|key| key.number == number) else {
+            let why = format!("\"{animation}\" has no key {number}");
+            self.say(why.clone());
+            return Err(why);
+        };
+        if key.pose != REST && self.sharing_pose(number).is_empty() {
+            let said = format!(
+                "Key {number}'s pose, \"{}\", is its own already: no other key uses it",
+                key.pose
+            );
+            self.say(said.clone());
+            return Ok(said);
+        }
+        let name = edit::unused_name(&format!("{animation}_{number}"), &self.pose_names());
+        let edits = [
+            Edit::AddPose {
+                name: name.clone(),
+                from: (key.pose != REST).then(|| key.pose.clone()),
+            },
+            Edit::SetKey {
+                animation,
+                key: number,
+                pose: name.clone(),
+            },
+        ];
+        let said = format!(
+            "Key {number} has a pose of its own now: \"{name}\", a copy of \"{}\". A drag changes only it",
+            key.pose
+        );
+        let done = self.apply_as(&edits, Some(said));
+        if done.is_ok() {
+            self.pose = name;
+            self.set_time(key.at);
+            self.refresh_pose();
+        }
+        done
+    }
+
     /// A key's menu: an event on it (`set-event`), for a game to hear
     /// when the animation passes the key.
     pub fn add_event(&mut self, number: usize, name: &str) -> Result<String, String> {

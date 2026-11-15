@@ -623,6 +623,16 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "timeline-event-menu"));
         screen.key_press(egui::Key::Escape);
         screen.run_steps(2);
+        // Zoomed in three times on the walk's middle, scrolled there.
+        screen.get_by_label("+").click();
+        screen.run_steps(2);
+        screen.get_by_label("+").click();
+        screen.run_steps(2);
+        screen.get_by_label("+").click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "timeline-zoomed"));
+        screen.get_by_label("Fit").click();
+        screen.run_steps(2);
     }
 
     // Play in Part mode: the robot waving, part way through.

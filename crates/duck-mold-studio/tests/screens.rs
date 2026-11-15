@@ -3044,6 +3044,30 @@ fn a_keys_menu_adds_and_removes_its_events() {
     screen.run_steps(3);
     assert!(new_lines(&recipe).is_empty());
     screen.get_by_label_contains("can't be a name");
+
+    // "Make this key's pose its own": key 3's step_right is used by no
+    // other key, so that line is greyed; key 1's is shared with key 5.
+    // (A click away closes the menu still open.)
+    click_at(&mut screen, IN_VIEW);
+    let third = screen.state().timeline().key_on_screen(0.4).unwrap();
+    right_click_at(&mut screen, third);
+    assert!(
+        screen
+            .get_by_label("Make this key's pose its own")
+            .accesskit_node()
+            .is_disabled()
+    );
+    click_at(&mut screen, IN_VIEW);
+    let first = screen.state().timeline().key_on_screen(0.0).unwrap();
+    right_click_at(&mut screen, first);
+    screen.get_by_label("Make this key's pose its own").click();
+    screen.run_steps(3);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(
+        text.contains("{ at = 0, pose = \"walk_1\", event = \"footstep\" }"),
+        "{text}"
+    );
+    assert_eq!(studio(&screen).pose(), "walk_1");
 }
 
 #[test]
@@ -3089,4 +3113,78 @@ fn fit_to_ground_stands_the_animations_poses_on_the_ground() {
             .unwrap()
             .contains("body = { move = [0, -0.06, 0] }")
     );
+}
+
+#[test]
+fn the_timeline_zooms_and_scrolls() {
+    use egui::Key;
+    let recipe = copy_of("robot.toml", "screens_timeline_zoom");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen.key_press(Key::O);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("idle"));
+    screen.run_steps(3);
+    let apart = |screen: &Harness<'static, StudioApp>| {
+        let timeline = screen.state().timeline();
+        timeline.key_on_screen(1.2).unwrap().x - timeline.key_on_screen(0.0).unwrap().x
+    };
+    // At first it shows the whole animation.
+    assert_eq!(screen.state().timeline().zoomed(), (1.0, 0.0));
+    let whole = apart(&screen);
+    // + zooms in, about the middle.
+    screen.get_by_label("+").click();
+    screen.run_steps(2);
+    assert_eq!(screen.state().timeline().zoomed().0, 1.5);
+    assert!(
+        (apart(&screen) - whole * 1.5).abs() < 0.5,
+        "{}",
+        apart(&screen)
+    );
+    // Ctrl and the wheel, on the ruler: zoom about the pointer, which
+    // stays on the same time.
+    let on = screen.state().timeline().time_on_screen(1.2).unwrap();
+    screen.hover_at(on);
+    screen.step();
+    screen.event(egui::Event::Zoom(2.0));
+    screen.run_steps(2);
+    assert_eq!(screen.state().timeline().zoomed().0, 3.0);
+    let still = screen.state().timeline().time_on_screen(1.2).unwrap();
+    assert!((still.x - on.x).abs() < 0.5, "{on:?} {still:?}");
+    // The wheel scrolls it: later times come into view.
+    let (_, before) = screen.state().timeline().zoomed();
+    screen.event(egui::Event::MouseWheel {
+        unit: egui::MouseWheelUnit::Point,
+        delta: egui::vec2(0.0, -200.0),
+        phase: egui::TouchPhase::Move,
+        source: egui::MouseWheelSource::Unknown,
+        modifiers: egui::Modifiers::NONE,
+    });
+    screen.run_steps(4);
+    let (_, after) = screen.state().timeline().zoomed();
+    assert!(after > before, "{before} {after}");
+    // - zooms out with the pointer on it; Fit shows it all again.
+    screen.key_press(Key::Minus);
+    screen.run_steps(2);
+    assert_eq!(screen.state().timeline().zoomed().0, 2.0);
+    screen.get_by_label("Fit").click();
+    screen.run_steps(2);
+    assert_eq!(screen.state().timeline().zoomed(), (1.0, 0.0));
+    assert!((apart(&screen) - whole).abs() < 0.5);
+    // Another animation starts fitted.
+    screen.get_by_label("+").click();
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .choose_animation(Some("walk"));
+    screen.run_steps(3);
+    assert_eq!(screen.state().timeline().zoomed(), (1.0, 0.0));
+    // Nothing of it is the recipe's.
+    assert_eq!(screen.state().studio().unwrap().can_undo(), None);
 }

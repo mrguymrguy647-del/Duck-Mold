@@ -710,6 +710,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   `set-limits`. Its timeline's changes are `move-key`, `set-key`,
   `remove-key`, `add-key`, `set-event`, `remove-event` (a key's menu:
   Add event, and Remove for each), `fit-ground` (Fit to ground),
+  "Make this key's pose its own" (`add-pose <animation>_<key> --from
+  <pose>` and `set-key`, together: run both),
   `set-animation` and `add-animation`; a turn
   between two keys is `add-pose`, a `set-pose` for every part the
   animation moves, and `add-key`, together. The library's Animations
