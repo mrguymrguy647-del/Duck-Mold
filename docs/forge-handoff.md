@@ -20,7 +20,7 @@ Duck Forge its own functions below them (`GlbModel::load`, `to_mesh`,
 `part`, `socket`, `GlbPart::range`, `GlbSocket::position` and
 `direction`, `Mesh::load_glb`, `AnimatedModel`, and the hit tests in
 `src/hits.rs`). The first marker says the reader's version; this note
-describes **version 6**.
+describes **version 7**.
 
 To change the reader: change it here, raise the version in both marker
 lines, run Duck Mold's tests, then copy the lines between the markers
@@ -38,6 +38,7 @@ diff <(sed -n '/^\/\/ ==== Duck Mold/,/^\/\/ ==== end of Duck Mold/p' Duck-Mold/
 | 3 | Sockets (below): `GlbModel.sockets`, so a game can ask where `head.top` is. Duck Mold's Phase 1. |
 | 4 | Files laid out as a **tree of parts** (below): `GlbModel.joins` (what every part turns about and hangs from) and `GlbSocket.join` (the part that carries a socket). Files from before are read exactly as they were. A file from a newer Duck Mold than the reader knows is refused with a sentence that says to update Duck Forge. Duck Mold's Phase 5, step 1. |
 | 5 | **Animations and poses** (below): `GlbModel.animations` and `poses`, each join's `turns_in`, and what it takes to play them: `GlbAnimation::at` (how an animation has every join at a time), `GlbPlace` (how a join stands, and `towards`, a place between two), `GlbModel::stands` and `posed` (where that puts every corner and socket) and `turn_by` (a join's turn from degrees). Duck Mold's Phase 5, step 5. |
+| 7 | **Events** (below): `GlbAnimation.events`, the names an animation's keys mark (`footstep`) with their times, each a `GlbEvent { name, at }`. Duck Mold's Phase 6, step 5. |
 | 6 | **Hit shapes** (below): `GlbModel.colliders`, a box, a ball or a capsule round each part that has one, each with the join that carries it, and `GlbHitShape::moved` (where a join's stand puts it). Duck Mold's Phase 6, step 2. |
 
 **Which Duck Forge reads which file.** The file says how it is laid out
@@ -49,7 +50,8 @@ before exporting with Duck Mold 0.5**. Animations and poses didn't
 change that number: they are added beside the model, so reader version
 4 loads a file that has them as the same model, standing still. Nor did
 hit shapes: a reader from before version 6 loads a file that has them,
-without them.
+without them. Events are the same: a reader from before version 7 plays
+the animations and never hears them.
 
 ## What a Duck Mold `.glb` is
 
@@ -152,10 +154,14 @@ One file, glTF 2.0 binary. Always the same narrow shape:
      shapes, and in every file from before Duck Mold 0.6: read that as
      none. A part the recipe gave `collider = "none"` simply isn't
      listed.
-   - `animations`: `[{ "name": "walk", "animation": 1, "loop": true, "length": 0.8 }, ...]`:
+   - `animations`: `[{ "name": "walk", "animation": 1, "loop": true, "length": 0.8, "events": [{ "name": "footstep", "at": 0.0 }, ...] }, ...]`:
      the model's animations in the recipe's order. `animation` picks an
      entry of the file's own `animations` (below); it is absent for an
-     animation that moves nothing. `length` is in seconds.
+     animation that moves nothing. `length` is in seconds. `events`
+     (absent when it has none, and in every file from before Duck Mold
+     0.6) are the names its keys mark, each with its key's time, in the
+     order the keys come; one key can have several. Each `at` is from 0
+     to `length`, and none is earlier than the one before.
    - `poses`: `[{ "name": "wave", "joints": [{ "node": 8, "rotation": [x, y, z, w], "translation": [x, y, z] }, ...] }, ...]`:
      each named pose, as the nodes that aren't as they are at rest.
      `rotation` and `translation` are written as an animation writes
@@ -306,6 +312,20 @@ is now, in the world) are `AnimatedModel`'s, in Duck Forge's
 sockets. `duck-mold inspect --colliders` lists the shapes, `duck-mold
 render --colliders` draws them.
 
+Events, where the recipe has them, after each `update`:
+
+```rust
+robot.update(ctx.dt());
+for event in robot.events() {            // what the animation passed just now
+    if event.name == "footstep" { /* a sound, a puff of dust */ }
+}
+```
+
+Each is heard exactly once each time its key is passed. Duck Forge's
+README and `docs/decisions.md` give the rules (the start, a loop's
+join, backwards, long updates); `duck-mold inspect --animation walk`
+says when each is heard.
+
 **Which half is whose.** Where an animation has a join at a time, and
 where that puts the model's corners and sockets, is in the shared
 reader (`GlbAnimation::at`, `GlbModel::stands`, `posed`, `turn_by`,
@@ -336,7 +356,11 @@ robot, the gnome, the door and the cart have them, and
 `<model>.colliders.json` beside each (what `duck-mold inspect
 --colliders --json` says) lists each shape, its middle and its size;
 Duck Forge keeps copies, and its `tests/duck_mold_hits.rs` hits every
-one in every pose. `tests/before-phase5/` holds the crate, the
+one in every pose. Then events (version 7): the robot's and gnome's
+`walk`, the robot's `jump` and the door's `open` have them, and their
+`<model>.<animation>.inspect.json` lists them under `events`; Duck
+Forge's `tests/duck_mold_events.rs` plays every animation and checks
+each is heard exactly once per pass. `tests/before-phase5/` holds the crate, the
 house and the robot as Duck Mold 0.4 wrote them, one list of triangles
 each, to test that files from before still load as the same models;
 Duck Forge keeps the same three in `tests/fixtures/duck_mold_before_tree/`.

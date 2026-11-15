@@ -329,6 +329,16 @@ struct AnimationEntry {
     looping: bool,
     /// How long it lasts, in seconds.
     length: f64,
+    /// The moments its keys mark, in the order they are reached.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    events: Vec<EventEntry>,
+}
+
+/// One event of an animation: a name, and the time of its key.
+#[derive(Serialize)]
+struct EventEntry {
+    name: String,
+    at: f64,
 }
 
 /// A named pose: the objects that aren't as they are at rest.
@@ -982,6 +992,16 @@ fn motions(
             animation: place_in_file,
             looping: animation.looping,
             length: animation.length(),
+            events: animation
+                .keys
+                .iter()
+                .flat_map(|key| {
+                    key.events.iter().map(|name| EventEntry {
+                        name: name.clone(),
+                        at: key.at,
+                    })
+                })
+                .collect(),
         });
     }
 

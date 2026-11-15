@@ -27,7 +27,7 @@
 
 use std::collections::HashMap;
 
-// ==== Duck Mold's .glb reader, version 6 ====================================
+// ==== Duck Mold's .glb reader, version 7 ====================================
 //
 // Version 6: the model's hit shapes (colliders), in `colliders`: a box, a
 // ball or a capsule for each part that has one, at rest, each carried by
@@ -265,6 +265,18 @@ pub struct GlbAnimation {
     pub times: Vec<f32>,
     /// What it moves.
     pub tracks: Vec<GlbTrack>,
+    /// The moments its keys mark, for a game to hear, in the order they
+    /// are reached. Empty in files from before version 7.
+    pub events: Vec<GlbEvent>,
+}
+
+/// An event: a name a key of an animation marks, and its key's time.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlbEvent {
+    /// Its name: `footstep`.
+    pub name: String,
+    /// Seconds from the animation's start.
+    pub at: f32,
 }
 
 /// One join's way through an animation.
@@ -1048,12 +1060,41 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
                 }
             }
         }
+        let length = entry["length"].as_f64().unwrap_or(0.0) as f32;
+        let mut events: Vec<GlbEvent> = Vec::new();
+        for event in entry["events"]
+            .as_array()
+            .map(Vec::as_slice)
+            .unwrap_or_default()
+        {
+            let event_name = event["name"]
+                .as_str()
+                .filter(|event_name| !event_name.is_empty())
+                .ok_or_else(|| format!("{what} has an event with no name"))?;
+            let at = event["at"]
+                .as_f64()
+                .ok_or_else(|| format!("{what} has an event, \"{event_name}\", with no time"))?
+                as f32;
+            if !(0.0..=length).contains(&at) {
+                return Err(format!(
+                    "{what} has an event, \"{event_name}\", at a time outside it"
+                ));
+            }
+            if events.last().is_some_and(|before| before.at > at) {
+                return Err(format!("{what} has events out of order"));
+            }
+            events.push(GlbEvent {
+                name: event_name.to_owned(),
+                at,
+            });
+        }
         animations.push(GlbAnimation {
             name: name.to_owned(),
             looping: entry["loop"].as_bool().unwrap_or(false),
-            length: entry["length"].as_f64().unwrap_or(0.0) as f32,
+            length,
             times,
             tracks,
+            events,
         });
     }
     let mut poses = Vec::new();
@@ -1298,4 +1339,4 @@ fn srgb(linear: f32) -> u8 {
     (curved * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-// ==== end of Duck Mold's .glb reader, version 6 =============================
+// ==== end of Duck Mold's .glb reader, version 7 =============================

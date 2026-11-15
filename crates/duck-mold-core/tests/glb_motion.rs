@@ -761,3 +761,116 @@ fn a_damaged_hit_shape_is_refused_with_a_sentence() {
         assert!(error.contains(said), "{error}");
     }
 }
+
+// ---- Phase 6, step 5: events ------------------------------------------------------------
+
+#[test]
+fn every_event_is_in_the_file_with_its_time() {
+    // The robot: footsteps on its walk, takeoff and land on its jump.
+    let text = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/robot.toml"),
+    )
+    .unwrap();
+    let mut issues = Vec::new();
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let loaded = duck_mold_core::load::load_text(
+        &text,
+        duck_mold_core::source::Syntax::Toml,
+        "robot.toml",
+        &examples,
+        &mut issues,
+    );
+    let model = duck_mold_core::assemble::assemble(&loaded, &mut issues).unwrap();
+    let read = read(&model);
+    for (mold, file) in model.animations.iter().zip(&read.animations) {
+        let wanted: Vec<(String, f32)> = mold
+            .keys
+            .iter()
+            .flat_map(|key| key.events.iter().map(|name| (name.clone(), key.at as f32)))
+            .collect();
+        let found: Vec<(String, f32)> = file
+            .events
+            .iter()
+            .map(|event| (event.name.clone(), event.at))
+            .collect();
+        assert_eq!(found, wanted, "{}", mold.name);
+    }
+    let walk = read.animations.iter().find(|a| a.name == "walk").unwrap();
+    assert_eq!(walk.events.len(), 2);
+    let jump = read.animations.iter().find(|a| a.name == "jump").unwrap();
+    assert_eq!(
+        jump.events,
+        [
+            forge::GlbEvent {
+                name: "takeoff".into(),
+                at: 0.3
+            },
+            forge::GlbEvent {
+                name: "land".into(),
+                at: 1.0
+            }
+        ]
+    );
+    // An animation without any has none, and its entry says nothing.
+    let wave = read.animations.iter().find(|a| a.name == "wave").unwrap();
+    assert!(wave.events.is_empty());
+}
+
+#[test]
+fn a_damaged_event_is_refused_with_a_sentence() {
+    // (The first animation, hello.)
+    let model = built(&PUPPET.replacen(
+        "keys = [\n  { at = 0, pose = \"rest\" },",
+        "keys = [\n  { at = 0, pose = \"rest\", event = [\"tick\", \"tock\"] },",
+        1,
+    ));
+    let bytes = write_glb(&model);
+    let json_length = u32::from_le_bytes(bytes[12..16].try_into().unwrap()) as usize;
+    let json = std::str::from_utf8(&bytes[20..20 + json_length]).unwrap();
+    assert!(
+        json.contains("\"events\":[{\"name\":\"tick\",\"at\":0.0}"),
+        "{json}"
+    );
+    let change = |from: &str, to: &str| {
+        assert!(json.contains(from), "{from}");
+        let mut json = json.replacen(from, to, 1).into_bytes();
+        while !json.len().is_multiple_of(4) {
+            json.push(b' ');
+        }
+        let bin = &bytes[20 + json_length..];
+        let mut glb = Vec::new();
+        glb.extend(b"glTF");
+        glb.extend(2u32.to_le_bytes());
+        glb.extend(((12 + 8 + json.len() + bin.len()) as u32).to_le_bytes());
+        glb.extend((json.len() as u32).to_le_bytes());
+        glb.extend(b"JSON");
+        glb.extend(json);
+        glb.extend(bin);
+        glb
+    };
+    for (from, to, said) in [
+        (
+            "{\"name\":\"tick\",\"at\":0.0}",
+            "{\"name\":\"\",\"at\":0.0}",
+            "has an event with no name",
+        ),
+        (
+            "{\"name\":\"tick\",\"at\":0.0}",
+            "{\"name\":\"tick\"}",
+            "\"tick\", with no time",
+        ),
+        (
+            "{\"name\":\"tick\",\"at\":0.0}",
+            "{\"name\":\"tick\",\"at\":99}",
+            "at a time outside it",
+        ),
+        (
+            "{\"name\":\"tick\",\"at\":0.0},{\"name\":\"tock\",\"at\":0.0}",
+            "{\"name\":\"tick\",\"at\":0.5},{\"name\":\"tock\",\"at\":0.0}",
+            "has events out of order",
+        ),
+    ] {
+        let error = forge::read_duck_mold_glb(&change(from, to)).unwrap_err();
+        assert!(error.contains(said), "{error}");
+    }
+}

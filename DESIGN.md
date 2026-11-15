@@ -4489,6 +4489,16 @@ key. In the Studio the flags are cyan, like the hit shapes, and the
 ruler is a little taller to hold them. A key's menu has a name to type
 and **Add event** in place of an "Add event..." line opening a box.
 
+*As built (step 5):* as above. In the file each animation's entry has
+`events: [{ name, at }]`, in key order, left out when there are none.
+The reader (version 7) refuses an event with no name, no time, a time
+outside the animation, or out of order. In Duck Forge, `AnimatedModel`
+follows time as one line across a loop's rounds and hears every event
+on the stretch each update covers; the first update after `play` or
+`restart` includes the starting moment; at speed 0 that waits until time
+moves. The list is emptied by the next `update`, also when stopped.
+`AnimationEvent` is in `duckforge::glb`, not the prelude.
+
 ### Fitting to the ground
 
 A walk copied from the robot onto the gnome sank the gnome's feet 2 cm
