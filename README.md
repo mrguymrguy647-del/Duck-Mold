@@ -419,11 +419,15 @@ these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
   something stands on it, so you can see what touches the ground and
   what hangs over it. It is the Studio's only: `render`'s pictures and
   the exported model have none.
+- **Hits** outlines every hit shape in cyan over the model (below,
+  *Hit shapes, for games*), following the pose and the animation as it
+  plays; the selected part's is lighter. It changes nothing in the
+  file.
 
 **The menus.** File (New model, Open, Open an example, Opened lately,
 Export, Render picture, Back to the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
 Unjoin, Remove, Tidy sockets, Select all), View (the four views, Frame, Grid,
-Wireframe, Shadow, Hide, Show everything hidden) and Help (Show the tips again, The
+Wireframe, Shadow, Hit shapes, Hide, Show everything hidden) and Help (Show the tips again, The
 keys, About). Every line shows its key.
 
 **The keys.** (Help > The keys shows this list in the Studio.)
@@ -643,6 +647,17 @@ recipe with `colliders = "parts"`. The robot, gnome, door and cart
 examples have them.
 
 ![The robot with its hit shapes outlined](tests/golden/robot.colliders.png)
+
+**In the Studio**, the Hits switch in the top bar draws them. The
+properties panel's **Hit shape** list sets the selected part's: what
+the model's line gives it (`fitted: box`), a box, a sphere or a
+capsule fitted to it, or none. A shape it says for itself shows its
+middle and size (or radius and length) to type, and **Fit again**
+forgets typed numbers. With nothing selected, the panel's **Hit
+shapes** list is the model's line: none, each part, or one capsule,
+box or ball round the whole model.
+
+![The Studio with Hits on and the head's hit shape in the panel](crates/duck-mold-studio/tests/screens/hits.png)
 
 ## Using a model in Duck Forge
 

@@ -4533,6 +4533,16 @@ exactly. Only that one number of each pose changes.
   again**. Each change is one `set-collider`. With nothing selected,
   the panel has the model's line: **Hit shapes: none / each part / one
   capsule / one box / one ball** (`set-colliders`).
+- *As built (step 3):* as above. The section is below Limits, in Part
+  mode. The list's first line says what the model's line gives the
+  part (`fitted: box`, `fitted: none`, `the model's` for one shape
+  round all of it). A shape fitted to the part shows its numbers too:
+  typing one makes the shape the part's own, with the rest as fitted,
+  in one `set-collider`. Fit again shows only for a shape with numbers
+  of its own. The number fields are named `Middle`, `Box size`,
+  `Ball radius`, `Capsule radius` and `Length`, so that they aren't
+  mistaken for the part's own Size and Radius. The panel is longer
+  for it and scrolls, as before. The Hits switch has no key.
 - **The timeline** shows each key's events as small flags under its
   diamond, with their names. Right-click a key: **Add event...**
   (a name to type), and each event with **Remove**. (`set-event`,

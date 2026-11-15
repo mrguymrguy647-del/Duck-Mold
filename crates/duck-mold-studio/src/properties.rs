@@ -63,6 +63,8 @@ pub struct Draft {
     change_xyz: Vec<[f64; 3]>,
     /// Pose mode's panel, and a part's limits.
     pub posing: crate::posing::PoseDraft,
+    /// The numbers of the part's hit shape, as they are being typed.
+    hits: crate::hits::HitDraft,
 }
 
 impl Draft {
@@ -571,6 +573,12 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
         ui.label(RichText::new("Properties").strong());
         ui.separator();
         ui.label(RichText::new("Click a part to select it.").weak());
+        if let Some(edit) = crate::hits::model_line(ui, studio) {
+            draft.failed = studio.apply(&edit).err();
+        }
+        if let Some(why) = &draft.failed {
+            ui.colored_label(theme::BAD, why);
+        }
         if studio.hidden_count() > 0 {
             ui.add_space(6.0);
             if ui
@@ -1259,6 +1267,13 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 limits,
             });
             draft.posing = Default::default();
+        }
+
+        // ---- its hit shape
+        if !studio.is_shaping()
+            && let Some(edit) = crate::hits::part_section(ui, studio, &path, &mut draft.hits)
+        {
+            edits.push(edit);
         }
 
         // ---- the whole part

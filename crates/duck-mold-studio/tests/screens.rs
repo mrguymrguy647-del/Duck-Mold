@@ -426,14 +426,14 @@ fn a_part_from_a_definition_says_so_before_any_edit() {
 #[test]
 fn duplicate_mirror_copy_and_remove_are_buttons() {
     let (recipe, mut screen) = robot_with("screens_panel_buttons", "antenna_tip");
-    screen.get_by_label("Duplicate").click();
+    screen.get_by_label("Duplicate").click_accesskit();
     screen.run_steps(3);
     let copy = selected(&screen).unwrap();
     assert_ne!(copy, "antenna_tip");
     assert!(new_lines(&recipe).contains(&format!("name = \"{copy}\"")));
 
     // Nothing hangs from the copy: it goes at once.
-    screen.get_by_label("Remove").click();
+    screen.get_by_label("Remove").click_accesskit();
     screen.run_steps(3);
     assert_eq!(selected(&screen), None);
     assert!(new_lines(&recipe).is_empty(), "{:?}", new_lines(&recipe));
@@ -445,14 +445,14 @@ fn duplicate_mirror_copy_and_remove_are_buttons() {
         .unwrap()
         .select(Some("head"));
     screen.run_steps(2);
-    screen.get_by_label("Remove").click();
+    screen.get_by_label("Remove").click_accesskit();
     screen.run_steps(2);
     screen.get_by_label("4 other parts hang from this one. Remove them too?");
     assert!(screen.state().studio().unwrap().part("head").is_some());
-    screen.get_by_label("Keep them").click();
+    screen.get_by_label("Keep them").click_accesskit();
     screen.run_steps(2);
     assert!(screen.state().studio().unwrap().part("head").is_some());
-    screen.get_by_label("Remove").click();
+    screen.get_by_label("Remove").click_accesskit();
     screen.run_steps(2);
     screen.get_by_label("Remove them all").click();
     screen.run_steps(3);
@@ -464,7 +464,7 @@ fn duplicate_mirror_copy_and_remove_are_buttons() {
 
     // A mirror copy of the left arm is a right arm.
     let (recipe, mut screen) = robot_with("screens_panel_mirror", "left_leg");
-    screen.get_by_label("Mirror copy").click();
+    screen.get_by_label("Mirror copy").click_accesskit();
     screen.run_steps(3);
     let lines = new_lines(&recipe);
     // A new part, mirrored, on the socket of the other side.
@@ -778,7 +778,7 @@ fn the_panel_has_position_rotation_and_scale_and_unjoin() {
     let (robot, mut joined) = robot_with("screens_handles_unjoin", "head");
     assert!(joined.query_by_label("Position").is_none());
     assert!(joined.query_all_by_label("Scale").count() >= 1);
-    joined.get_by_label("Unjoin").click();
+    joined.get_by_label("Unjoin").click_accesskit();
     joined.run_steps(3);
     let lines = new_lines(&robot);
     assert!(
@@ -2849,4 +2849,127 @@ fn the_animations_list_adds_a_starter_and_saves_an_animation() {
     screen.get_by_label("Library").click();
     screen.run_steps(2);
     screen.get_by_label_contains("No parts here yet.");
+}
+
+// ---- hit shapes ---------------------------------------------------------------------
+
+#[test]
+fn the_hits_switch_and_the_panels_hit_shape() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_hits", "head");
+    let studio = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().hits;
+    let text = || std::fs::read_to_string(&recipe).unwrap();
+    // The switch in the top bar, and the View menu's line.
+    assert!(!studio(&screen));
+    screen.get_by_label("Hits").click();
+    screen.run_steps(2);
+    assert!(studio(&screen));
+    screen.get_by_label("View").click();
+    screen.run_steps(3);
+    screen.get_by_label_contains("Hit shapes: on").click();
+    screen.run_steps(3);
+    assert!(!studio(&screen));
+    assert!(new_lines(&recipe).is_empty(), "looking changes nothing");
+
+    // The head's: a ball, as its recipe says, with its radius.
+    screen.get_by_label("sphere r 0.32");
+    screen.get_by_role_and_label(Role::SpinButton, "Ball radius");
+    // A box instead: one edit.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Hit shape")
+        .click();
+    screen.run_steps(2);
+    screen.query_all_by_label("box").last().unwrap().click();
+    screen.run_steps(3);
+    assert!(text().contains("collider = \"box\""), "{}", text());
+    screen.get_by_label_contains("\"head\" has a box for its hit shape");
+    assert_eq!(
+        screen
+            .query_all_by_role_and_label(Role::SpinButton, "Box size")
+            .count(),
+        3
+    );
+    // None: a click on it names nothing.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Hit shape")
+        .click();
+    screen.run_steps(2);
+    screen.query_all_by_label("none").last().unwrap().click();
+    screen.run_steps(3);
+    assert!(text().contains("collider = \"none\""), "{}", text());
+    screen.get_by_label("None: a ray goes on to what is behind it.");
+    // Back to what the model's line gives every part: the head's own
+    // line goes, and, being a box, it is fitted a box.
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Hit shape")
+        .click();
+    screen.run_steps(2);
+    screen
+        .query_all_by_label("fitted: none")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    let lines = new_lines(&recipe);
+    assert!(
+        lines.iter().all(|line| !line.contains("collider")),
+        "{lines:?}"
+    );
+    screen.get_by_label("box 0.42 x 0.32 x 0.36");
+    // Undo goes back a step at a time.
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
+    screen.run_steps(3);
+    assert!(text().contains("collider = \"none\""));
+}
+
+#[test]
+fn with_nothing_selected_the_panel_has_the_models_hit_shapes() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_hits_model", "head");
+    screen.state_mut().studio_mut().unwrap().select(None);
+    screen.run_steps(2);
+    screen.get_by_label("15, one for each part but 4 that say none.");
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Hit shapes")
+        .click();
+    screen.run_steps(2);
+    screen
+        .query_all_by_label("one capsule")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("colliders = \"capsule\""), "{text}");
+    screen.get_by_label("One capsule round the whole model, and the parts that say their own.");
+}
+
+#[test]
+fn typing_a_hit_shapes_number_makes_it_the_parts_own_and_fit_again_forgets_it() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_hit_numbers", "head");
+    let text = || std::fs::read_to_string(&recipe).unwrap();
+    let field = screen.get_by_role_and_label(Role::SpinButton, "Ball radius");
+    field.focus();
+    screen.run_steps(2);
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    screen.run_steps(1);
+    screen
+        .get_by_role_and_label(Role::SpinButton, "Ball radius")
+        .type_text("0.25");
+    screen.run_steps(1);
+    screen.key_press(egui::Key::Enter);
+    screen.run_steps(3);
+    // Its own ball, with that radius (its middle the part's, so not written).
+    let now = text();
+    assert!(
+        now.contains("collider = { shape = \"sphere\", radius = 0.25 }"),
+        "{now}"
+    );
+    screen.get_by_label("sphere r 0.25");
+    // Fit again: back to the fitted ball.
+    screen.get_by_label("Fit again").click_accesskit();
+    screen.run_steps(3);
+    assert!(text().contains("collider = \"sphere\""), "{}", text());
+    screen.get_by_label("sphere r 0.32");
 }

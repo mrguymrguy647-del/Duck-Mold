@@ -693,6 +693,11 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   Pull arrow is a `pull`, of its Inset knob an `inset`, and the panel's
   Changes list is `set-change` and `remove-change`. Read the result
   with `inspect --faces`.
+- In the Studio, the panel's Hit shape list and numbers are
+  `set-collider` (the list's first line, what the model's line gives,
+  is `set-collider <part> fitted`), Fit again is `set-collider <part>
+  <shape>` with no numbers, and with nothing selected the panel's Hit
+  shapes list is `set-colliders`. The Hits switch only draws them.
 - In the Studio, Pose mode (O) turns parts by their rings: a drag is
   one `set-pose`, and the poses list's New, Copy, Mirror, Rename and
   Remove are `add-pose`, `add-pose --from`, `mirror-pose`,
