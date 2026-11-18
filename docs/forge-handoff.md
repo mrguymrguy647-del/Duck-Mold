@@ -20,7 +20,7 @@ Duck Forge its own functions below them (`GlbModel::load`, `to_mesh`,
 `part`, `socket`, `GlbPart::range`, `GlbSocket::position` and
 `direction`, `Mesh::load_glb`, `AnimatedModel`, and the hit tests in
 `src/hits.rs`). The first marker says the reader's version; this note
-describes **version 8**.
+describes **version 9**.
 
 To change the reader: change it here, raise the version in both marker
 lines, run Duck Mold's tests, then copy the lines between the markers
@@ -41,6 +41,7 @@ diff <(sed -n '/^\/\/ ==== Duck Mold/,/^\/\/ ==== end of Duck Mold/p' Duck-Mold/
 | 7 | **Events** (below): `GlbAnimation.events`, the names an animation's keys mark (`footstep`) with their times, each a `GlbEvent { name, at }`. Duck Mold's Phase 6, step 5. |
 | 6 | **Hit shapes** (below): `GlbModel.colliders`, a box, a ball or a capsule round each part that has one, each with the join that carries it, and `GlbHitShape::moved` (where a join's stand puts it). Duck Mold's Phase 6, step 2. |
 | 8 | **Far-away versions** (below): `GlbModel.far`, each a `GlbFar { distance, model }` whose model is the same model with fewer triangles (the same parts, joins, sockets, animations and hit shapes; its own triangle ranges and vertex ranges). Read from glTF's `MSFT_lod`. Duck Mold's Phase 7a, step 8. |
+| 9 | **Images** (below): `GlbModel.picture`, the one picture all of a model's images are on, as the bytes of the PNG inside the file, and `GlbTriangle.on_picture`, where a triangle with an image has its three corners on that picture. A file with images says layout 2 (`extras.duck_mold.version`), which this version reads and every reader before it refuses. Duck Mold's Phase 7b, step 2. |
 
 **Which Duck Forge reads which file.** The file says how it is laid out
 in `extras.duck_mold.version`: 0 for one object with one list of
@@ -54,6 +55,14 @@ hit shapes: a reader from before version 6 loads a file that has them,
 without them. Events are the same: a reader from before version 7 plays
 the animations and never hears them. And far-away versions: a reader
 from before version 8 draws the model itself at every distance.
+
+**Images are different.** A reader that skipped them would draw every
+face with an image plain white, without a word. So a file with images
+says `version` 2, and a reader from before version 9 refuses it with
+*"this .glb was written by a newer Duck Mold than this reader knows:
+update Duck Forge"*: **update Duck Forge before exporting a model with
+images.** A file without images still says 1, and is byte for byte what
+Duck Mold 0.7 wrote.
 
 ## What a Duck Mold `.glb` is
 
@@ -244,9 +253,11 @@ file from before has no joins: it can be drawn, not posed.
 ## What the loader can ignore
 
 `NORMAL` (Duck Forge works out a face's direction from its corners),
-`materials` (one plain matt material, always the same), `asset`,
-`scenes`, the accessors' `min` and `max`, the views' `byteStride`, and
-anything else. There are no textures, UVs, cameras, lights or skins.
+`asset`, `scenes`, the accessors' `min` and `max`, the views'
+`byteStride`, and anything else. There are no cameras, lights or skins.
+In a file without images, `materials` is one plain matt material,
+always the same, and there are no textures or UVs; a file with images
+is described under "Images" below.
 A reader that only draws the model can ignore `animations`, `poses`
 and `turns_in` too.
 
@@ -383,6 +394,10 @@ the file holds 32-bit ones, so positions agree to about 0.00001, not
 exactly. The official Khronos glTF validator reports no errors,
 warnings, infos or hints on any of them.
 
+`plank_crate.glb` (12 triangles, all with an image: planks on its four
+sides, a lid on its top and bottom) is the first file with images; its
+`inspect.json` lists them under `images`, with the sheet's size.
+
 A good first test: load `crate.glb` and check that every triangle's
 front faces away from the crate's middle. That's Duck Forge's own
 `assert_faces_point_outward`, with one change: the crate stands on
@@ -399,6 +414,67 @@ them `#B07A3F` and 4 `#8A5A2B`.
 model **faces forward (+z)**, so its `front` is +z. The cube's comments
 (and `Mesh::block`'s) now say `near (-z)` and `far (+z)`, and Duck
 Forge's guide, section 11, says a model faces +z.
+
+## Images (reader version 9)
+
+A recipe can put an image (a PNG) on a part or on single faces. In the
+file, a model with images has everything a model without them has, and:
+
+- **`extras.duck_mold.version` is 2.**
+- **One picture, inside the file**: every image the model uses, side by
+  side on one sheet, a PNG. `images[0]` has `mimeType` `image/png` and a
+  `bufferView` that says where its bytes are in block 2 (after all the
+  numbers; zeros follow it up to a multiple of 4). An image with
+  see-through pixels is already laid over the colour of the face it is
+  on, so every pixel of the sheet is solid; the same image over two
+  colours is on the sheet twice. The sheet's sides are powers of two, at
+  most 4096.
+- **`materials[0].pbrMetallicRoughness.baseColorTexture`** is
+  `{ "index": 0 }`; `textures[0]` is `{ "sampler": 0, "source": 0 }`;
+  `samplers[0]` is `{ "magFilter": 9728, "minFilter": 9728, "wrapS":
+  33071, "wrapT": 33071 }`: the nearest pixel, near and far, never a
+  blend, and no repeating. **Draw it with sharp pixels.**
+- **Every primitive has `TEXCOORD_0`**: `VEC2` of 5126, one for each
+  corner, in a fifth shared buffer view. Each is how far across the
+  sheet from its left edge (0) to its right (1), and how far down from
+  its top (0) to its bottom (1). They need no change for Duck Forge's
+  directions: only the triangle's second and third corner swap, as
+  always.
+- **A corner of a face without an image** is written at one fixed place
+  on the sheet, which is plain white: `extras.duck_mold.images.plain_at`,
+  `[across, down]`. So another glTF program multiplies white by the
+  corner's colour and shows the colour. **A triangle whose three corners
+  are all exactly at `plain_at` has no image.**
+- **A corner of a face with an image** has `COLOR_0` white (1, 1, 1):
+  the picture shows as it was painted.
+- `extras.duck_mold.images` also has `sheet`, `[width, height]` in
+  pixels, and `files`: `[{ "file": "textures/robot_face.png", "at": [x,
+  y, width, height], "over": "steel" }, ...]`, each image's place on the
+  sheet and the palette colour it was laid over (absent for a solid
+  image). A loader doesn't need `files`.
+- Far-away versions' meshes have `TEXCOORD_0` too, onto the same sheet.
+- The Khronos validator reports no errors, warnings, infos or hints.
+
+The reader gives:
+
+- `GlbModel.picture`: `Some(GlbPicture { png, width, height })`, the PNG's
+  bytes as they are in the file and the sheet's size. The reader doesn't
+  decode it (it still uses only the standard library and `serde_json`):
+  Duck Forge does, below the markers, with the PNG library it has. In a
+  far-away version's model it is `None`: the version shows the model's.
+- `GlbTriangle.on_picture`: `Some([[across, down]; 3])` for a triangle
+  with an image, in the order of `corners`; `None` for a plain one. A
+  triangle with an image has `color` white.
+
+It refuses, with a sentence: a file that says layout 2 and has no
+`images.plain_at` or `sheet`, no texture on its material, a picture
+that isn't inside the file, isn't a PNG or runs past the end of the
+file, a primitive without `TEXCOORD_0`, and a corner with an image that
+is off the sheet (below 0 or above 1).
+
+In Duck Forge, `GlbModel::to_mesh`, `Mesh::load_glb` and `AnimatedModel`
+give a mesh with its `texture` (the sheet) and `uvs` (each triangle's
+places, `None` for a plain one). A game draws it as before.
 
 ## Far-away versions (reader version 8)
 

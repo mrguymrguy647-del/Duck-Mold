@@ -830,7 +830,7 @@ fn a_file_from_before_assemblies_still_reads() {
 fn a_file_from_a_newer_duck_mold_is_refused_with_a_sentence() {
     let newer = with_json(&write_glb(&built(TOWER)), |json| {
         assert!(json.contains("\"version\":1,\"name\":\"tower\""));
-        json.replacen("\"version\":1,\"name\"", "\"version\":2,\"name\"", 1)
+        json.replacen("\"version\":1,\"name\"", "\"version\":3,\"name\"", 1)
     });
     let error = forge::read_duck_mold_glb(&newer).unwrap_err();
     assert!(error.contains("newer Duck Mold"), "{error}");

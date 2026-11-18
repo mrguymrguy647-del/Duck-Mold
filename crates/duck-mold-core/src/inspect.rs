@@ -882,8 +882,12 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
     }
 
     // ---- images
+    // (Not for a model read back from a `.glb`: its images are already
+    // one picture, and the recipe that made it is the place to fix.)
     let images = images_report(model);
+    let from_recipe = model.leaves().iter().any(|part| !part.loc.file.is_empty());
     if let Some(images) = &images
+        && from_recipe
         && let Some(warning) = mixed_pixels(images, source)
     {
         warnings.push(warning);

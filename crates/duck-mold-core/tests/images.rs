@@ -820,7 +820,7 @@ fn inspect_lists_the_images_where_they_are_and_how_big_their_pixels_are() {
     let report = inspect(&model, "test.toml", Vec::new());
     let text = report.to_text();
     assert!(
-        text.contains("  images       2 files on 7 faces; 16 x 8 pixels together in the .glb\n"),
+        text.contains("  images       2 files on 7 faces; 16 x 16 pixels together in the .glb\n"),
         "{text}"
     );
     assert!(
@@ -833,7 +833,7 @@ fn inspect_lists_the_images_where_they_are_and_how_big_their_pixels_are() {
     );
     let json = serde_json::to_value(&report).unwrap();
     let images = &json["images"];
-    assert_eq!(images["sheet"], serde_json::json!([16, 8]));
+    assert_eq!(images["sheet"], serde_json::json!([16, 16]));
     assert_eq!(images["files"][0]["file"], "textures/mouth.png");
     assert_eq!(images["files"][0]["solid"], false);
     assert_eq!(

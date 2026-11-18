@@ -27,8 +27,9 @@ use std::process::Command;
 #[allow(dead_code)]
 mod forge;
 
-const EXAMPLES: [&str; 21] = [
+const EXAMPLES: [&str; 22] = [
     "crate",
+    "plank_crate",
     "table",
     "tree",
     "house",
@@ -50,6 +51,9 @@ const EXAMPLES: [&str; 21] = [
     "cart",
     "gnome",
 ];
+
+/// The examples with images.
+const WITH_IMAGES: [&str; 1] = ["plank_crate"];
 
 /// The top of the repository.
 fn root() -> PathBuf {
@@ -400,7 +404,21 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
             .collect();
         assert_eq!(palette, expected, "{name}");
         // Every triangle has one of the palette's colours, and each
-        // colour paints as many triangles as the report says.
+        // colour paints as many triangles as the report says. (A
+        // triangle with an image is white in the file, whatever colour
+        // is under its image, so it is counted apart.)
+        let with_image = model
+            .triangles
+            .iter()
+            .filter(|triangle| triangle.on_picture.is_some())
+            .count();
+        assert_eq!(
+            with_image > 0,
+            WITH_IMAGES.contains(&name),
+            "{name}: {with_image} triangles with an image"
+        );
+        assert_eq!(model.picture.is_some(), with_image > 0, "{name}");
+        let mut painted_in_all = 0;
         for (color, entry) in model
             .palette
             .iter()
@@ -409,13 +427,37 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
             let painted = model
                 .triangles
                 .iter()
-                .filter(|triangle| triangle.color == color.rgb)
+                .filter(|triangle| triangle.on_picture.is_none() && triangle.color == color.rgb)
                 .count();
+            painted_in_all += painted;
+            if with_image == 0 {
+                assert_eq!(
+                    painted as u64,
+                    entry["triangles"].as_u64().unwrap(),
+                    "{name}: {}",
+                    color.name
+                );
+            } else {
+                assert!(
+                    painted as u64 <= entry["triangles"].as_u64().unwrap(),
+                    "{name}: {}",
+                    color.name
+                );
+            }
+        }
+        if with_image > 0 {
+            let unpainted = report["unpainted_triangles"].as_u64().unwrap_or(0) as usize;
+            assert!(
+                painted_in_all + with_image + unpainted >= model.triangles.len(),
+                "{name}: every triangle has a colour or an image"
+            );
+            // The picture is the size the report says the images are
+            // together.
+            let picture = model.picture.as_ref().unwrap();
             assert_eq!(
-                painted as u64,
-                entry["triangles"].as_u64().unwrap(),
-                "{name}: {}",
-                color.name
+                serde_json::json!([picture.width, picture.height]),
+                report["images"]["sheet"],
+                "{name}"
             );
         }
         // The model stands on the ground and is the size the report says.
@@ -614,7 +656,18 @@ fn inspecting_a_golden_glb_gives_the_recipes_tree_of_parts() {
             "floating",
             "overlapping",
         ] {
+            // In the file, a face with an image is white under it: its
+            // colour isn't counted there.
+            if field == "palette" && WITH_IMAGES.contains(&name) {
+                continue;
+            }
             assert_eq!(from_glb[field], from_recipe[field], "{name}: {field}");
         }
+        // A model with images still has them, read back from its file.
+        assert_eq!(
+            from_glb["images"].is_object(),
+            from_recipe["images"].is_object(),
+            "{name}"
+        );
     }
 }

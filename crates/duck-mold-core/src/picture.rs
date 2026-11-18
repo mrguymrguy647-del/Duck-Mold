@@ -94,6 +94,12 @@ pub struct BadPicture {
 /// interlaced); what comes out is always red, green, blue and how
 /// solid, 8 bits each.
 pub fn read_png(bytes: &[u8], file: &str) -> Result<Picture, BadPicture> {
+    read_png_up_to(bytes, file, MAX_SIDE)
+}
+
+/// [`read_png`], for a picture that may be up to `most` pixels along a
+/// side: the sheet inside a `.glb` can be bigger than one image.
+pub fn read_png_up_to(bytes: &[u8], file: &str, most: u32) -> Result<Picture, BadPicture> {
     const PNG_START: [u8; 8] = [0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
     if !bytes.starts_with(&PNG_START) {
         let what = if bytes.starts_with(&[0xFF, 0xD8]) {
@@ -128,10 +134,10 @@ pub fn read_png(bytes: &[u8], file: &str) -> Result<Picture, BadPicture> {
     if width == 0 || height == 0 {
         return Err(damaged("it has no pixels"));
     }
-    if width > MAX_SIDE || height > MAX_SIDE {
+    if width > most || height > most {
         return Err(BadPicture {
             what: format!(
-                "is {width} x {height} pixels, and an image can be {MAX_SIDE} x {MAX_SIDE} at most"
+                "is {width} x {height} pixels, and an image can be {most} x {most} at most"
             ),
             fix: "Make it smaller",
         });
@@ -275,9 +281,17 @@ pub struct ImageSheet {
     /// The images on it.
     pub cells: Vec<Cell>,
     /// For each face of the model, which of `cells` it shows. `None`
-    /// for a face without an image.
+    /// for a face without an image. (For a face of a far-away version,
+    /// ask [`ImageSheet::cell`].)
     pub cell_of: Vec<Option<usize>>,
+    /// A place on the sheet that is plain white, across and down from 0
+    /// to 1: where a `.glb` points the corners of a face without an
+    /// image, so that the face shows its own colour.
+    pub plain: [f64; 2],
 }
+
+/// How big the plain white block on the sheet is, along each side.
+const PLAIN: i64 = 2;
 
 /// The pixels kept free round each image on the sheet, filled with the
 /// image's own edge, so its neighbour never shows at an edge.
@@ -311,9 +325,19 @@ struct Plan {
 fn plan(model: &Model) -> Result<Option<Plan>, String> {
     let mut wanted: Vec<Wanted> = Vec::new();
     let mut cell_of = Vec::with_capacity(model.faces.len());
-    for face in &model.faces {
+    // The model's own faces, then those of its far-away versions, which
+    // show the same images (a simpler shape can reach a little further
+    // past the ends of a wrapped image).
+    let own = model.faces.iter().map(|face| (face, true));
+    let far = model
+        .far
+        .iter()
+        .flat_map(|far| far.model.faces.iter().map(|face| (face, false)));
+    for (face, is_own) in own.chain(far) {
         let Some(image) = &face.image else {
-            cell_of.push(None);
+            if is_own {
+                cell_of.push(None);
+            }
             continue;
         };
         let picture = &model.pictures[image.picture];
@@ -351,13 +375,15 @@ fn plan(model: &Model) -> Result<Option<Plan>, String> {
                 wanted.len() - 1
             }
         };
-        cell_of.push(Some(at));
+        if is_own {
+            cell_of.push(Some(at));
+        }
     }
     if wanted.is_empty() {
         return Ok(None);
     }
 
-    let sizes: Vec<(i64, i64)> = wanted
+    let mut sizes: Vec<(i64, i64)> = wanted
         .iter()
         .map(|cell| {
             (
@@ -366,9 +392,11 @@ fn plan(model: &Model) -> Result<Option<Plan>, String> {
             )
         })
         .collect();
+    // Last, the plain white block.
+    sizes.push((PLAIN + 2 * BORDER, PLAIN + 2 * BORDER));
     // Tallest first, in rows: the smallest sheet they fit on, trying
     // 16 x 8, 16 x 16, 32 x 16, 32 x 32...
-    let mut order: Vec<usize> = (0..wanted.len()).collect();
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
     order.sort_by_key(|&at| (-sizes[at].1, -sizes[at].0, at));
     let mut side = 16u32;
     while side <= MAX_SHEET {
@@ -461,13 +489,41 @@ impl ImageSheet {
                 y: top + BORDER - cell.down.0,
             });
         }
+        // The plain white block.
+        let (left, top) = places[wanted.len()];
+        let (wide, high) = sizes[wanted.len()];
+        for row in 0..high {
+            for column in 0..wide {
+                pixels[((top + row) * i64::from(width) + left + column) as usize] = [255; 4];
+            }
+        }
+        let middle = (BORDER + PLAIN / 2) as f64;
         Ok(Some(ImageSheet {
             width,
             height,
             pixels,
             cells,
             cell_of,
+            plain: [
+                (left as f64 + middle) / f64::from(width),
+                (top as f64 + middle) / f64::from(height),
+            ],
         }))
+    }
+
+    /// Which of `cells` a face shows: a face of the model the sheet
+    /// was made for, or of one of its far-away versions. `None` for a
+    /// face without an image.
+    pub fn cell(&self, model: &Model, face: &crate::model::Face) -> Option<usize> {
+        let image = face.image.as_ref()?;
+        let over = if model.pictures.get(image.picture)?.is_solid() {
+            None
+        } else {
+            face.color
+        };
+        self.cells
+            .iter()
+            .position(|cell| cell.picture == image.picture && cell.over == over)
     }
 
     /// Where a point of a face's image is on the sheet, from 0 to 1
