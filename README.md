@@ -455,7 +455,10 @@ The four switches sit along the picture's bottom right:
 - **Hits** outlines every hit shape in cyan over the model (below,
   *Hit shapes, for games*), following the pose and the animation as it
   plays; the selected part's is lighter. It changes nothing in the
-  file.
+  file. With Hits on, **a click picks what a game's click would**: the
+  part whose hit shape is first under the mouse. The status bar says
+  what it hit ("A game's click here hits: head (its ball), 4.7 m away"),
+  or that it hits nothing, and why ("antenna_tip has no hit shape").
 
 **The menus.** File (New model, Open, Open an example, Opened lately,
 Export, Render picture, Back to the start page; a `.glb` or other mesh
@@ -599,7 +602,7 @@ only: nothing can be changed there.
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. `--ray x,y,z --toward x,y,z` says what a game's click or shot along that ray would hit (with `--pose`, or `--animation` and `--at`, as the model stands then). |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |

@@ -574,6 +574,46 @@ impl Studio {
         false
     }
 
+    /// A click with Hits on: the part whose hit shape is first on the ray
+    /// from the eye through the pointer is selected, as a game's click
+    /// would find it, and the status line says what it hit; a click a
+    /// game's would miss selects nothing, and says why.
+    fn click_hit_shape(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<&str> {
+        self.hover(size, Some(at));
+        let (eye, way) = self.pointer_ray(at);
+        let found = self
+            .shown_model()
+            .and_then(|model| crate::ray::first_hit(model, eye - self.offset(), way));
+        self.also.clear();
+        let said = match &found {
+            Some(hit) if !hit.part.is_empty() => {
+                self.selected = Some(hit.part.clone());
+                format!(
+                    "A game's click here hits: {} (its {}), {:.1} m away",
+                    hit.part, hit.shape, hit.distance
+                )
+            }
+            Some(hit) => {
+                self.selected = None;
+                format!(
+                    "A game's click here hits the {} round the whole model, {:.1} m away",
+                    hit.shape, hit.distance
+                )
+            }
+            None => {
+                self.selected = None;
+                match self.part_under(size, at) {
+                    Some(part) => {
+                        format!("A game's click here hits nothing: {part} has no hit shape")
+                    }
+                    None => "A game's click here hits nothing".to_owned(),
+                }
+            }
+        };
+        self.say(said);
+        self.selected.as_deref()
+    }
+
     /// The part with this path.
     pub fn part(&self, path: &str) -> Option<&Part> {
         fn find<'a>(parts: &'a [Part], path: &str) -> Option<&'a Part> {
@@ -668,6 +708,11 @@ impl Studio {
     /// the first click on a robot's hand selects its arm, and the second
     /// the hand.
     pub fn click(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<&str> {
+        // With Hits on, what a game's click here would hit: the first
+        // hit shape on the ray, as the model stands.
+        if self.hits {
+            return self.click_hit_shape(size, at);
+        }
         // (Picked from what is shown: in Pose mode, the model in its
         // pose.)
         let hit = self.shown_model().and_then(|model| {

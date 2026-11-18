@@ -83,6 +83,28 @@ enum Command {
         /// it leaves the ground, and whether a loop ends as it starts.
         #[arg(long, value_name = "NAME", conflicts_with_all = ["pose", "sockets", "faces", "joins", "colliders"])]
         animation: Option<String>,
+        /// What a game's click or shot would hit: the first hit shape on a
+        /// ray from this point (x,y,z, in metres, in the model), going
+        /// --toward. With --pose, or --animation and --at, as the model
+        /// stands then.
+        #[arg(
+            long,
+            value_name = "X,Y,Z",
+            requires = "toward",
+            allow_hyphen_values = true
+        )]
+        ray: Option<String>,
+        /// Which way the ray goes, for --ray: x,y,z (any length).
+        #[arg(
+            long,
+            value_name = "X,Y,Z",
+            requires = "ray",
+            allow_hyphen_values = true
+        )]
+        toward: Option<String>,
+        /// For --ray with --animation: the time, in seconds.
+        #[arg(long, value_name = "SECONDS", requires = "ray")]
+        at: Option<f64>,
     },
     /// Build a recipe and write the model as a .glb file.
     ///
@@ -247,6 +269,47 @@ fn main() -> ExitCode {
         Command::Inspect {
             file,
             json,
+            pose,
+            animation,
+            ray: Some(ray),
+            toward: Some(toward),
+            at,
+            ..
+        } => {
+            let point = |text: &str, what: &str| {
+                duck_mold_view::ray::parse_point(text).ok_or_else(|| {
+                    tools::Failure::Usage(Box::new(duck_mold_core::issue::Issue::error(
+                        duck_mold_core::issue::Code::OutOfRange,
+                        "",
+                        format!("--{what} needs three numbers: x,y,z, like --{what} 0,1.4,5"),
+                    )))
+                })
+            };
+            let asked = point(&ray, "ray").and_then(|from| Ok((from, point(&toward, "toward")?)));
+            let report = asked.and_then(|(from, toward)| {
+                duck_mold_view::ray::ray_file(
+                    &file,
+                    from,
+                    toward,
+                    pose.as_deref(),
+                    animation.as_deref().map(|name| (name, at.unwrap_or(0.0))),
+                )
+            });
+            match report {
+                Ok(report) => {
+                    if json {
+                        say_json(&report);
+                    } else {
+                        say(report.to_text().trim_end());
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(failure) => fail(&failure, json),
+            }
+        }
+        Command::Inspect {
+            file,
+            json,
             animation: Some(animation),
             ..
         } => match tools::inspect_animation_file(&file, &animation) {
@@ -270,6 +333,7 @@ fn main() -> ExitCode {
             colliders,
             pose,
             animation: None,
+            ..
         } => match tools::inspect_file_listing(
             &file,
             &tools::Also {

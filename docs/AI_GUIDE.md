@@ -1042,7 +1042,17 @@ duck-mold edit robot.toml set-collider head sphere   # a ball round the head ins
 duck-mold edit robot.toml set-collider left_eye none # no hit shape: too small to aim at
 duck-mold inspect robot.toml --colliders             # every shape and its numbers
 duck-mold render robot.toml --colliders              # outlined in cyan over the model
+duck-mold inspect robot.toml --ray 0,1.4,5 --toward 0,0,-1   # what a click there hits
 ```
+
+- `inspect --ray x,y,z --toward x,y,z` is what a game's click or shot
+  would hit: the first hit shape on that ray, with Duck Forge's own test.
+  It prints the part, its shape, how far away and where (`hits head (its
+  ball), 4.696 m away, at (0, 1.4, 0.304)`), or `hits nothing`. Points are
+  in metres in the model, as a game has them. `--pose <name>`, or
+  `--animation <name> --at <seconds>`, tests the model as it stands then.
+  `--json` gives `{ok, source, from, toward, stands, hit: {part, shape,
+  point, distance} or null, hit_shapes}`.
 
 - `colliders = "parts"` at the top gives every part the shape that
   suits it: a sphere for a sphere; a capsule for a cylinder, capsule or

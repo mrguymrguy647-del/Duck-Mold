@@ -4085,3 +4085,92 @@ fn a_key_can_have_its_pose_to_itself_in_one_step() {
             .contains("{ at = 0.2, pose = \"walk_2\" }")
     );
 }
+
+// ---- picking by hit shape (Phase 7a) ----------------------------------------------
+
+#[test]
+fn with_hits_on_a_click_picks_what_a_games_click_would() {
+    let recipe = copy_of("robot", "studio_pick_hits");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hits = true;
+    // The head: its ball.
+    let head = studio.part("head").unwrap().bounds.unwrap().center();
+    assert_eq!(studio.click(VIEW, seen(&studio, head)), Some("head"));
+    assert!(
+        studio
+            .status()
+            .starts_with("A game's click here hits: head (its ball), "),
+        "{}",
+        studio.status()
+    );
+    // An eye has no hit shape: a game's click there goes on to the
+    // head's ball behind it, so the head is what it hits.
+    let eye = studio.part("left_eye").unwrap().bounds.unwrap();
+    let front = eye.center() + vec3(0.0, 0.0, eye.half().z);
+    assert_eq!(studio.click(VIEW, seen(&studio, front)), Some("head"));
+    // Off the model: nothing, and nothing selected.
+    assert_eq!(studio.click(VIEW, (2.0, 2.0)), None);
+    assert_eq!(studio.status(), "A game's click here hits nothing");
+    // With Hits off, the triangles pick: the eye itself.
+    studio.hits = false;
+    assert_eq!(studio.click(VIEW, seen(&studio, front)), Some("left_eye"));
+}
+
+#[test]
+fn a_part_with_no_hit_shape_on_its_own_says_so() {
+    // The antenna's tip has no hit shape, and nothing is behind it.
+    let recipe = copy_of("robot", "studio_pick_hits_tip");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hits = true;
+    let tip = studio.part("antenna_tip").unwrap().bounds.unwrap().center();
+    assert_eq!(studio.click(VIEW, seen(&studio, tip)), None);
+    assert_eq!(
+        studio.status(),
+        "A game's click here hits nothing: antenna_tip has no hit shape"
+    );
+}
+
+#[test]
+fn inspect_ray_names_the_first_hit_shape() {
+    use duck_mold_view::ray::{parse_point, ray_file};
+    let recipe = copy_of("robot", "studio_inspect_ray");
+    let report = ray_file(
+        &recipe,
+        vec3(0.0, 1.4, 5.0),
+        vec3(0.0, 0.0, -1.0),
+        None,
+        None,
+    )
+    .unwrap();
+    let hit = report.hit.clone().unwrap();
+    assert_eq!((hit.part.as_str(), hit.shape), ("head", "ball"));
+    assert!((hit.distance - 4.6956).abs() < 0.001, "{}", hit.distance);
+    assert!(
+        report
+            .to_text()
+            .contains("hits         head (its ball), 4.696 m away")
+    );
+    // Past the side of the model: nothing.
+    let report = ray_file(
+        &recipe,
+        vec3(3.0, 1.4, 5.0),
+        vec3(0.0, 0.0, -1.0),
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(report.hit, None);
+    assert!(report.to_text().contains("hits         nothing\n"));
+    // In a pose, the model stands as the pose puts it.
+    let pose = ray_file(
+        &recipe,
+        vec3(0.0, 1.4, 5.0),
+        vec3(0.0, 0.0, -1.0),
+        Some("wave"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(pose.stands, "in the pose \"wave\"");
+    assert_eq!(parse_point("1, 2,3"), Some(vec3(1.0, 2.0, 3.0)));
+    assert_eq!(parse_point("1,2"), None);
+}
