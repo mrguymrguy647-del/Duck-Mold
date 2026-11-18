@@ -1938,9 +1938,15 @@ pub struct BrokenAt {
     pub at: f64,
 }
 
+/// Sinking deeper than this between keys is warned about: 3 mm.
+const DIP: f64 = 0.003;
+/// A key this near the ground stands on it, for that warning: 1 mm.
+const KEY_ON_GROUND: f64 = 0.001;
+
 /// Looks at every frame of an animation (thirty a second, and its end)
 /// and reports the worst it finds, and when. `rest` is the report on
-/// the model as it is built; its warnings are passed on.
+/// the model as it is built; its warnings are passed on, with one more
+/// if it sinks into the ground between keys that stand on it.
 pub fn inspect_animation(
     rest: &Inspection,
     model: &Model,
@@ -1956,11 +1962,14 @@ pub fn inspect_animation(
     let mut overlapping: Vec<OverlapAt> = Vec::new();
     // Each broken limit with how far past it is at its worst.
     let mut broken: Vec<(BrokenAt, Option<usize>, f64)> = Vec::new();
+    // Each frame's lowest point, for the dips between keys.
+    let mut lows: Vec<(f64, f64)> = Vec::new();
     for &at in &times {
         let joints = moving.joints_at(at);
         let posed = motion::posed(model, &joints);
         let frame = inspect(&posed, source, Vec::new());
         let low = frame.ground.lowest_y;
+        lows.push((at, low));
         match &mut ground {
             None => {
                 ground = Some(GroundOverTime {
@@ -2059,6 +2068,49 @@ pub fn inspect_animation(
         highest_at: 0.0,
     });
     let limits_broken: Vec<BrokenAt> = broken.into_iter().map(|(entry, _, _)| entry).collect();
+    let mut warnings = rest.warnings.clone();
+    // Sinking between two keys that stand on the ground: the smooth curve
+    // between them dips. `fit-ground` adds a key there.
+    let key_low = |at: f64| {
+        let posed = motion::posed(model, &moving.joints_at(at));
+        posed.bounds().map(|bounds| bounds.min.y)
+    };
+    let mut deepest: Option<(f64, f64)> = None;
+    // Only where fit-ground can mend it: a model with a body that every
+    // other part hangs from.
+    let pairs = if crate::edit::body_part(model).is_some() {
+        animation.keys.windows(2)
+    } else {
+        [].windows(2)
+    };
+    for pair in pairs {
+        let (from, to) = (pair[0].at, pair[1].at);
+        let stands = |at: f64| key_low(at).is_some_and(|low| low.abs() <= KEY_ON_GROUND);
+        if !stands(from) || !stands(to) {
+            continue;
+        }
+        for &(at, low) in &lows {
+            if at > from && at < to && low < -DIP && deepest.is_none_or(|(known, _)| low < known) {
+                deepest = Some((low, at));
+            }
+        }
+    }
+    if let Some((low, at)) = deepest {
+        warnings.push(
+            Issue::warning(
+                Code::DipsBetweenKeys,
+                format!("animations.{}", animation.name),
+                format!(
+                    "\"{}\" sinks {} into the ground at {}, between two keys that stand on it; `duck-mold edit {source} fit-ground {}` adds a key there that stands on the ground",
+                    animation.name,
+                    length(-low),
+                    seconds(at),
+                    animation.name
+                ),
+            )
+            .in_file(source),
+        );
+    }
     let ends_as_it_starts = animation
         .looping
         .then(|| motion::ends_as_it_starts(model, animation));
@@ -2126,7 +2178,7 @@ pub fn inspect_animation(
         overlapping,
         limits_broken,
         ends_as_it_starts,
-        warnings: rest.warnings.clone(),
+        warnings,
         errors: Vec::new(),
     }
 }

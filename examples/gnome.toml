@@ -246,6 +246,24 @@ right_leg = [10, 0, 0]
 left_arm = [160, 0, 0]
 right_arm = [160, 0, 0]
 
+[poses.jump_2]
+body = { move = [0, -0.003, 0] }
+left_arm = [-16, 0, 0]
+right_arm = [-16, 0, 0]
+left_leg = [-10, 0, 0]
+"left_leg/foot" = [10, 0, 0]
+right_leg = [-10, 0, 0]
+"right_leg/foot" = [10, 0, 0]
+
+[poses.jump_3]
+body = { move = [0, -0.003, 0] }
+left_arm = [-16, 0, 0]
+right_arm = [-16, 0, 0]
+left_leg = [-10, 0, 0]
+"left_leg/foot" = [10, 0, 0]
+right_leg = [-10, 0, 0]
+"right_leg/foot" = [10, 0, 0]
+
 [animations.walk]
 loop = true
 keys = [
@@ -271,8 +289,10 @@ keys = [
 [animations.jump]
 keys = [
   { at = 0, pose = "rest" },
+  { at = 0.13, pose = "jump_2" },
   { at = 0.3, pose = "jump_crouch", event = "takeoff" },
   { at = 0.65, pose = "jump_up" },
   { at = 1, pose = "jump_crouch", event = "land" },
+  { at = 1.17, pose = "jump_3" },
   { at = 1.3, pose = "rest" },
 ]

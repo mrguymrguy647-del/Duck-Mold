@@ -301,7 +301,9 @@ each with its pose's name.
 - **Fit to ground** stands every pose the animation uses on the ground:
   in each, the body moves up or down until the lowest point touches
   it, so a walk copied onto shorter legs doesn't sink. A leap is left
-  alone. On the command line: `duck-mold edit gnome.toml fit-ground
+  alone. Where the smooth curve between two keys still sinks more than
+  3 mm, it adds a key there that stands on the ground (`jump_2`...), and
+  says so. On the command line: `duck-mold edit gnome.toml fit-ground
   walk`.
 - Every change is one edit: `move-key`, `set-key`, `remove-key`,
   `add-key`, `set-event`, `remove-event`, `fit-ground`,
@@ -639,7 +641,7 @@ robot  (examples/robot.toml)
     ...
   floating     none
   overlapping  none
-  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out, jump_crouch, jump_up
+  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out, jump_crouch, jump_up, jump_2, jump_3
   animations   idle (2 s, loops), walk (0.8 s, loops), wave (1.5 s), jump (1.3 s)
 ok: no problems found
 ```

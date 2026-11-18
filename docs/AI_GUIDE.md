@@ -520,6 +520,7 @@ Warnings (the model is still built; exit code 0):
 | `unknown_animation` | A command names an animation the recipe doesn't have. |
 | `hidden` | A part is entirely inside another. |
 | `off_ground` | The model's lowest point isn't at y = 0. |
+| `dips_between_keys` | `inspect --animation`: the animation sinks more than 3 mm into the ground between two keys that stand on it. `fit-ground <animation>` adds a key there. |
 | `skipped` | Something in a mesh file was passed over. |
 
 ## 9. How to build common things
@@ -634,7 +635,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> remove-key <animation> <number>` | Removes a key. If it is the first, the keys after it move earlier so the animation still starts at 0. |
 | `duck-mold edit <recipe> set-event <animation> <number> <name>` | Puts an event on a key: a name a game hears each time the animation passes that key (`footstep`). A key keeps the events it had; one already there is refused. |
 | `duck-mold edit <recipe> remove-event <animation> <number> [<name>]` | Takes an event off a key; without a name, every event on it. |
-| `duck-mold edit <recipe> fit-ground <animation>` | Stands each pose the animation's keys use on the ground: the body (the part every other part hangs from) moves up or down in it until the lowest point touches. Only that number changes. A pose that lifts the body (a leap) is left alone; `--all` fits it too; `--part <part>` says which part to move when more than one has others hanging from it. The summary names other animations that use the same poses, and how far it still sinks between keys. |
+| `duck-mold edit <recipe> fit-ground <animation>` | Stands each pose the animation's keys use on the ground: the body (the part every other part hangs from) moves up or down in it until the lowest point touches. Only that number changes. A pose that lifts the body (a leap) is left alone; `--all` fits it too; `--part <part>` says which part to move when more than one has others hanging from it. Then, where the smooth curve between two keys still sinks more than 3 mm into the ground, it adds a key there (at most 6): a new pose named after the animation (`jump_2`, `jump_3`...), made from where every part is at that moment with the body lifted onto the ground, at least 0.05 s from the keys beside it. `--keys-only` adds none. The summary names other animations that use the same poses, the keys it added, and how far it still sinks between keys. |
 | `duck-mold edit <recipe> set-animation <animation> --loop true\|false --smooth true\|false --length <seconds>` | Any of the three. `--length` scales every key's time: the whole animation gets faster or slower. |
 | `duck-mold edit <recipe> rename-animation <animation> <new name>` | Renames an animation where it stands. |
 | `duck-mold edit <recipe> remove-animation <animation>` | Removes an animation. Its poses stay. |
@@ -1016,8 +1017,10 @@ duck-mold edit duck.toml add-animation hello --from robot.toml --take wave
   key's pose on the ground (shorter legs sink into it, longer ones
   float). Turn the feet flat first if the legs tip them (as below):
   fitting a toe that digs in lifts the whole body. It leaves a leap
-  alone. Between keys a fast turn can still dip a little: the summary
-  says how much; keep it under half a centimetre.
+  alone. Between keys, where a fast turn still dips more than 3 mm, it
+  adds a key that stands on the ground; the summary says where, and how
+  far it still sinks. `inspect --animation` warns `dips_between_keys`
+  when it sinks between two keys that stand on the ground.
 - **Turns are about each part's own axes**, so check the result: render
   a strip. A starter only knows the six names: feet that stick out of a
   leg can dig in as it swings (the robot's own walk turns its feet back;

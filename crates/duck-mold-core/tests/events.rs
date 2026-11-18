@@ -445,8 +445,8 @@ fn inspect_says_when_each_event_is_heard() {
     assert_eq!(
         jump.event_lines(),
         [
-            "takeoff at 0.3 s (key 2): once",
-            "land at 1 s (key 4): once"
+            "takeoff at 0.3 s (key 3): once",
+            "land at 1 s (key 5): once"
         ]
     );
     // An animation with none has no events line, and none in its JSON.

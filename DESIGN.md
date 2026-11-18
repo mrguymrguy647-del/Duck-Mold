@@ -5238,6 +5238,17 @@ about.
 **The robot's jump is fitted with it.** Its golden files change, and so do
 Duck Forge's copies of the robot (in the LOD pull request).
 
+*As built (step 5):* as above, with three things to know.
+
+- The added pose's numbers are tidied as a recipe writes them (turns to
+  0.1°, moves to 0.01 mm) before the body is lifted, so it stands on the
+  ground to within 0.01 mm.
+- The warning is given only for a model with a body that every other
+  part hangs from, so `fit-ground` can mend it.
+- Besides the robot's jump, the gnome's jump (it sank 4 mm) and the
+  cart's roll (3 mm: a twelve-sided wheel rolling lifts its axle) were
+  fitted, so that no example warns.
+
 ### 2. A physics body from the hit shapes
 
 Duck Forge's physics has two shapes:

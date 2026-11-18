@@ -662,7 +662,9 @@
     "wave_a",
     "wave_b",
     "jump_crouch",
-    "jump_up"
+    "jump_up",
+    "jump_2",
+    "jump_3"
   ],
   "animations": [
     {
@@ -681,7 +683,7 @@
       "name": "jump",
       "length": 1.3,
       "loops": false,
-      "keys": 5
+      "keys": 7
     }
   ],
   "warnings": [],

@@ -511,6 +511,7 @@ impl Studio {
             animation,
             part: None,
             all: false,
+            keys_only: false,
         });
         if done.is_ok() {
             let now = self.at_time.unwrap_or(0.0);

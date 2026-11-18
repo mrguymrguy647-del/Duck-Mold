@@ -522,7 +522,9 @@ pub enum Change {
     /// the body (the part every other part hangs from) is moved up or
     /// down so the model's lowest point is on the ground. Only that one
     /// number of each pose changes. A pose that lifts the body (a leap)
-    /// is left alone unless --all.
+    /// is left alone unless --all. Then, where the model still sinks more
+    /// than 3 mm between two keys, a key is added there with a new pose
+    /// that stands on the ground (at most 6), unless --keys-only.
     FitGround {
         /// The animation.
         animation: String,
@@ -533,6 +535,9 @@ pub enum Change {
         /// Fit the poses that lift the body too.
         #[arg(long)]
         all: bool,
+        /// Only fit the keys' poses: add no keys between them.
+        #[arg(long)]
+        keys_only: bool,
     },
     /// Take an event off a key; without a name, every event on it.
     RemoveEvent {
@@ -1104,10 +1109,12 @@ impl Change {
                 animation,
                 part,
                 all,
+                keys_only,
             } => Edit::FitGround {
                 animation: animation.clone(),
                 part: part.clone(),
                 all: *all,
+                keys_only: *keys_only,
             },
             Change::RemoveEvent {
                 animation,

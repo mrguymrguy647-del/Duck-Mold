@@ -3039,6 +3039,7 @@ fn every_kind_of_edit_has_a_name() {
             animation: String::new(),
             part: None,
             all: false,
+            keys_only: true,
         },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();

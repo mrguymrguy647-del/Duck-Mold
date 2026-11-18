@@ -78,6 +78,9 @@ pub enum Code {
     Hidden,
     /// A model that does not rest on the ground.
     OffGround,
+    /// An animation that sinks into the ground between two keys that
+    /// stand on it.
+    DipsBetweenKeys,
     /// A note about a mesh file: something in it was skipped.
     Skipped,
     /// A change to a shape that would squeeze a face flat, turn the
@@ -131,6 +134,7 @@ impl Code {
             Code::Floating => "floating",
             Code::Hidden => "hidden",
             Code::OffGround => "off_ground",
+            Code::DipsBetweenKeys => "dips_between_keys",
             Code::Skipped => "skipped",
             Code::BadShape => "bad_shape",
             Code::LimitBroken => "limit_broken",

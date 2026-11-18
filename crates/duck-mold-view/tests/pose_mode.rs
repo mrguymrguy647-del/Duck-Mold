@@ -115,6 +115,8 @@ fn pose_mode_shows_the_poses_and_stands_the_model_in_one() {
             "breathe_out",
             "jump_crouch",
             "jump_up",
+            "jump_2",
+            "jump_3",
         ]
     );
     assert_eq!(studio.pose(), "rest");

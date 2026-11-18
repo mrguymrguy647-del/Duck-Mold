@@ -17,6 +17,7 @@
 
 pub mod doc;
 mod ground;
+pub use ground::{DIP, body_part, deepest_between_keys};
 mod hits;
 mod motion;
 mod spot;
@@ -612,6 +613,9 @@ pub enum Edit {
         part: Option<String>,
         /// Fits poses that lift the body too (a leap).
         all: bool,
+        /// Only the keys' poses: no keys are added where it sinks between
+        /// keys.
+        keys_only: bool,
     },
 }
 
@@ -1407,7 +1411,16 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
             animation,
             part,
             all,
-        } => ground::fit_ground(doc, animation, part.as_deref(), *all, model, path),
+            keys_only,
+        } => ground::fit_ground(
+            doc,
+            animation,
+            part.as_deref(),
+            *all,
+            *keys_only,
+            model,
+            path,
+        ),
         Edit::MirrorPose { pose, as_name } => {
             motion::mirror_pose(doc, pose, as_name.as_deref(), model)
         }
