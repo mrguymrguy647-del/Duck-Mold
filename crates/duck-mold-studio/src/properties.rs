@@ -102,6 +102,133 @@ impl Draft {
 
 /// In Face mode: the faces selected, each with the way it faces and how
 /// big it is.
+/// With nothing selected: the model itself. Its name and size, what it
+/// is made of, and what it does in a game.
+fn model_section(ui: &mut egui::Ui, studio: &Studio) {
+    ui.label(RichText::new("Model").strong());
+    ui.separator();
+    let Some(report) = studio.report() else {
+        ui.label(RichText::new("Nothing is built yet: the file has a mistake.").weak());
+        return;
+    };
+    let animations = studio.animation_names();
+    let poses = studio.pose_names().len().saturating_sub(1);
+    egui::Grid::new("duck_mold_model_facts")
+        .num_columns(2)
+        .spacing([12.0, 4.0])
+        .show(ui, |ui| {
+            let mut row = |name: &str, value: String| {
+                ui.label(RichText::new(name).weak());
+                ui.label(value);
+                ui.end_row();
+            };
+            row("Name", report.name.clone());
+            row(
+                "Size",
+                format!(
+                    "{:.2} x {:.2} x {:.2} m",
+                    report.size[0], report.size[1], report.size[2]
+                ),
+            );
+            row(
+                "Made of",
+                format!(
+                    "{}, {} triangles",
+                    count_of(report_parts(&report.parts), "part"),
+                    report.triangles
+                ),
+            );
+            if poses > 0 {
+                row("Poses", count_of(poses, "pose"));
+            }
+            if !animations.is_empty() {
+                row("Moves", animations.join(", "));
+            }
+        });
+    ui.add_space(6.0);
+    ui.label(RichText::new("Click a part to select it.").weak());
+}
+
+/// The selected part's facts as plain words, for a window that only
+/// looks.
+fn facts_only(ui: &mut egui::Ui, studio: &Studio, path: &str, facts: &Facts) {
+    egui::Grid::new("duck_mold_facts_only")
+        .num_columns(2)
+        .spacing([12.0, 4.0])
+        .show(ui, |ui| {
+            let mut row = |name: &str, value: String| {
+                ui.label(RichText::new(name).weak());
+                ui.label(value);
+                ui.end_row();
+            };
+            let made = match (&facts.made, &facts.shape) {
+                (Some(Made::Shape(shape)), _) => shape.clone(),
+                (Some(Made::Use(name)), _) => format!("{name} (defined parts)"),
+                (Some(Made::File(file)), _) => format!("the file {file}"),
+                (None, _) => "parts of its own".to_owned(),
+            };
+            row("Made of", made);
+            if let Some(bounds) = studio.part(path).and_then(|part| part.bounds) {
+                let size = bounds.size();
+                row(
+                    "Size",
+                    format!("{:.2} x {:.2} x {:.2} m", size.x, size.y, size.z),
+                );
+            }
+            if let Some(color) = &facts.color {
+                row("Colour", color.clone());
+            }
+            match &facts.to {
+                Some(to) => {
+                    row("Joined to", to.clone());
+                    if facts.twist != 0.0 {
+                        row("Twist", format!("{}°", facts.twist));
+                    }
+                }
+                None => row(
+                    "Stands at",
+                    format!(
+                        "{:.2}, {:.2}, {:.2} m",
+                        facts.position[0], facts.position[1], facts.position[2]
+                    ),
+                ),
+            }
+            if facts.scale != [1.0, 1.0, 1.0] {
+                row(
+                    "Scale",
+                    format!(
+                        "{} x {} x {}",
+                        facts.scale[0], facts.scale[1], facts.scale[2]
+                    ),
+                );
+            }
+            if !facts.sockets.is_empty() {
+                let names: Vec<&str> = facts
+                    .sockets
+                    .iter()
+                    .map(|(name, _)| name.as_str())
+                    .collect();
+                row("Sockets", names.join(", "));
+            }
+        });
+    ui.add_space(6.0);
+    ui.label(RichText::new("Looking only: open the recipe in the Studio to change it.").weak());
+}
+
+/// How many parts a report lists, the parts inside others included.
+fn report_parts(parts: &[duck_mold_core::inspect::PartReport]) -> usize {
+    parts.iter().map(|part| 1 + report_parts(&part.parts)).sum()
+}
+
+/// "1 part", "3 parts".
+fn count_of(count: usize, word: &str) -> String {
+    if count == 1 {
+        format!("1 {word}")
+    } else {
+        format!("{count} {word}s")
+    }
+}
+
 fn faces_section(ui: &mut egui::Ui, studio: &Studio) {
     let Some((part, shaped)) = studio.shaped_selected() else {
         return;
@@ -432,40 +559,70 @@ fn definition_notice(ui: &mut egui::Ui, facts: &Facts) {
 /// "Remove" found some: in a window of its own, in the middle, so it is
 /// seen wherever the panel is scrolled to.
 fn confirm_remove(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
-    let Some(count) = draft.confirm_remove else {
+    if draft.confirm_remove.is_none() {
         return;
+    }
+    let chosen: Vec<String> = studio
+        .selection()
+        .iter()
+        .map(|path| (*path).to_owned())
+        .collect();
+    let hanging = studio.hanging_names();
+    let what = match chosen.as_slice() {
+        [one] => format!("\"{one}\""),
+        many => format!("{} parts", many.len()),
     };
-    let several = studio.selection().len() > 1;
+    let joined = match hanging.len() {
+        1 => format!("1 part is joined to it: {}.", hanging[0]),
+        count => format!("{count} parts are joined to it: {}.", hanging.join(", ")),
+    };
     let mut open = true;
     let mut close = false;
-    egui::Window::new("Remove")
+    egui::Window::new(format!("Remove {what}?"))
         .collapsible(false)
         .resizable(false)
         .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
         .open(&mut open)
         .show(ui.ctx(), |ui| {
-            ui.label(match (count, several) {
-                (1, false) => "Another part hangs from this one. Remove it too?".to_owned(),
-                (1, true) => "Another part hangs from these. Remove it too?".to_owned(),
-                (count, false) => {
-                    format!("{count} other parts hang from this one. Remove them too?")
-                }
-                (count, true) => format!("{count} other parts hang from these. Remove them too?"),
+            ui.set_max_width(460.0);
+            ui.label(if chosen.len() > 1 {
+                joined.replace("to it", "to them")
+            } else {
+                joined
             });
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                if ui.button("Remove them all").clicked() {
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                let all = chosen.len() + hanging.len();
+                if ui
+                    .add(theme::primary_button(&format!("Remove all {all}")))
+                    .clicked()
+                {
                     if let Err(why) = studio.remove_selected(true) {
                         draft.failed = Some(why);
                     }
                     close = true;
                 }
-                if ui.button("Keep them").clicked() {
+                let only = if chosen.len() > 1 {
+                    "Remove only these (the others stay put)".to_owned()
+                } else {
+                    format!("Remove only {what} (they stay put)")
+                };
+                if ui
+                    .button(only)
+                    .on_hover_text("What is joined to it is made free, right where it stands")
+                    .clicked()
+                {
+                    if let Err(why) = studio.remove_selected_only() {
+                        draft.failed = Some(why);
+                    }
+                    close = true;
+                }
+                if ui.button("Cancel").clicked() {
                     close = true;
                 }
             });
         });
-    if close || !open {
+    if close || !open || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
         draft.confirm_remove = None;
     }
 }
@@ -570,9 +727,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
         return;
     }
     let Some(path) = studio.selected().map(str::to_owned) else {
-        ui.label(RichText::new("Properties").strong());
-        ui.separator();
-        ui.label(RichText::new("Click a part to select it.").weak());
+        model_section(ui, studio);
         if let Some(edit) = crate::hits::model_line(ui, studio) {
             draft.failed = studio.apply(&edit).err();
         }
@@ -617,8 +772,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
         draft.of = Some(key);
     }
     if studio.look_only() {
-        ui.label(RichText::new("Looking only: nothing can be changed here.").weak());
-        ui.add_space(4.0);
+        // Only looking: the facts as plain words, not greyed fields.
+        facts_only(ui, studio, &path, &facts);
+        return;
     }
 
     definition_notice(ui, &facts);
@@ -653,6 +809,10 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 if std::mem::take(&mut draft.focus_name) {
                     name.request_focus();
                 }
+                // Escape keeps the name as it was.
+                if name.lost_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape)) {
+                    draft.name = facts.name.clone().unwrap_or_default();
+                }
                 if name.lost_focus()
                     && !draft.name.is_empty()
                     && Some(&draft.name) != facts.name.as_ref()
@@ -663,6 +823,13 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     });
                 }
                 ui.end_row();
+                if name.has_focus() {
+                    ui.label("");
+                    ui.label(
+                        RichText::new("Enter renames it; Escape keeps the name").weak(),
+                    );
+                    ui.end_row();
+                }
 
                 // ---- what it is made of
                 let made_label = ui.label("Made of");
@@ -1152,9 +1319,12 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
             );
             for (at, (name, uses)) in facts.sockets.iter().enumerate() {
                 ui.horizontal(|ui| {
+                    // As wide as the name, so it isn't cut short.
+                    let wide = (draft.socket_names[at].chars().count() as f32 * 7.5 + 16.0)
+                        .clamp(76.0, (ui.available_width() - 120.0).max(76.0));
                     let field = ui
                         .add(
-                            TextEdit::singleline(&mut draft.socket_names[at]).desired_width(76.0),
+                            TextEdit::singleline(&mut draft.socket_names[at]).desired_width(wide),
                         )
                         .on_hover_text("Type a new name: everything joined to it follows");
                     if field.lost_focus()

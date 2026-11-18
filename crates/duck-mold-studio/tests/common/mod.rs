@@ -216,3 +216,20 @@ pub fn face_on_screen(screen: &Harness<'static, StudioApp>, face: &str) -> egui:
         .unwrap_or_else(|| panic!("no face {face} in view"));
     picture_on_screen(screen, at)
 }
+
+/// Opens the list of problems with the button at the bottom left, the
+/// one that says how many there are.
+pub fn open_problems(screen: &mut Harness<'static, StudioApp>) {
+    use egui::accesskit::Role;
+    use egui_kittest::kittest::{Queryable, by};
+    screen
+        .get(by().role(Role::Button).predicate(|node| {
+            node.label().is_some_and(|label| {
+                ["warning", "warnings", "mistake", "mistakes"]
+                    .iter()
+                    .any(|word| label.ends_with(word))
+            })
+        }))
+        .click();
+    screen.run_steps(2);
+}

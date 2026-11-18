@@ -172,6 +172,9 @@ pub const KEYS: [(&str, &str); 28] = [
 pub fn menus(ui: &mut egui::Ui, studio: &Studio, recent: &[std::path::PathBuf]) -> Option<Action> {
     let mut chosen = None;
     let edits = !studio.look_only();
+    // A mesh file (a .glb, .gltf or .obj) is only looked at: it can't be
+    // exported or drawn as a recipe can.
+    let recipe = studio.is_recipe();
     let any = !studio.selection().is_empty();
     let one = studio.selection().len() == 1;
     let mut pick = |ui: &mut egui::Ui, enabled: bool, words: &str, key: &str, action: Action| {
@@ -206,36 +209,41 @@ pub fn menus(ui: &mut egui::Ui, studio: &Studio, recent: &[std::path::PathBuf]) 
             });
         });
         ui.separator();
-        pick(ui, true, "Export", "Ctrl+E", Action::Export);
-        pick(ui, true, "Render picture", "", Action::RenderPicture);
-        ui.separator();
+        if recipe {
+            pick(ui, true, "Export", "Ctrl+E", Action::Export);
+            pick(ui, true, "Render picture", "", Action::RenderPicture);
+            ui.separator();
+        }
         pick(ui, true, "Back to the start page", "", Action::StartPage);
     });
-    ui.menu_button("Edit", |ui| {
-        pick(
-            ui,
-            edits && studio.can_undo().is_some(),
-            "Undo",
-            "Ctrl+Z",
-            Action::Undo,
-        );
-        pick(
-            ui,
-            edits && studio.can_redo().is_some(),
-            "Redo",
-            "Ctrl+Y",
-            Action::Redo,
-        );
-        ui.separator();
-        pick(ui, edits && any, "Duplicate", "Ctrl+D", Action::Duplicate);
-        pick(ui, edits && any, "Mirror copy", "", Action::MirrorCopy);
-        pick(ui, edits && one, "Rename", "F2", Action::Rename);
-        pick(ui, edits && any, "Unjoin", "", Action::Unjoin);
-        pick(ui, edits && any, "Remove", "Delete", Action::Remove);
-        ui.separator();
-        pick(ui, edits, "Tidy sockets", "", Action::TidySockets);
-        pick(ui, true, "Select all", "Ctrl+A", Action::SelectAll);
-    });
+    // Looking only, there is nothing to edit: no Edit menu.
+    if edits {
+        ui.menu_button("Edit", |ui| {
+            pick(
+                ui,
+                edits && studio.can_undo().is_some(),
+                "Undo",
+                "Ctrl+Z",
+                Action::Undo,
+            );
+            pick(
+                ui,
+                edits && studio.can_redo().is_some(),
+                "Redo",
+                "Ctrl+Y",
+                Action::Redo,
+            );
+            ui.separator();
+            pick(ui, edits && any, "Duplicate", "Ctrl+D", Action::Duplicate);
+            pick(ui, edits && any, "Mirror copy", "", Action::MirrorCopy);
+            pick(ui, edits && one, "Rename", "F2", Action::Rename);
+            pick(ui, edits && any, "Unjoin", "", Action::Unjoin);
+            pick(ui, edits && any, "Remove", "Delete", Action::Remove);
+            ui.separator();
+            pick(ui, edits, "Tidy sockets", "", Action::TidySockets);
+            pick(ui, true, "Select all", "Ctrl+A", Action::SelectAll);
+        });
+    }
     ui.menu_button("View", |ui| {
         for (from, key) in Viewpoint::ALL.into_iter().zip(["1", "2", "3", "4"]) {
             let words = match from {

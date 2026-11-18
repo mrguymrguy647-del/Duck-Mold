@@ -101,6 +101,19 @@ impl Recent {
             .collect()
     }
 
+    /// All the files, newest first, whether they are still there or not:
+    /// the start page shows the ones that aren't as "not found".
+    pub fn all_files(&self) -> Vec<&Path> {
+        self.files.iter().map(PathBuf::as_path).collect()
+    }
+
+    /// Takes a file off the list.
+    pub fn forget(&mut self, file: &Path) {
+        let file = whole(file);
+        self.files.retain(|known| *known != file);
+        self.save();
+    }
+
     /// Notes that a file was opened: it goes to the top of the list.
     pub fn opened(&mut self, file: &Path) {
         let file = whole(file);

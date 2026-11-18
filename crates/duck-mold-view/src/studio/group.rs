@@ -290,6 +290,62 @@ impl Studio {
         others.len()
     }
 
+    /// The parts that hang from the selected ones (and aren't selected
+    /// themselves), by path: what Remove asks about.
+    pub fn hanging_names(&self) -> Vec<String> {
+        let chosen = self.selection();
+        let mut others: Vec<String> = chosen
+            .iter()
+            .flat_map(|path| self.hanging_from(path))
+            .filter(|path| !chosen.iter().any(|chosen| within(path, chosen)))
+            .collect();
+        others.sort();
+        others.dedup();
+        others
+    }
+
+    /// Removes the selected parts only: what is joined to them is made
+    /// free first, right where it stands (an `unjoin` edit for each),
+    /// so it stays. One step.
+    pub fn remove_selected_only(&mut self) -> Result<String, String> {
+        let chosen = self.selection_owned();
+        if chosen.is_empty() {
+            return Err("Nothing is selected".to_owned());
+        }
+        let mut edits = Vec::new();
+        for path in &chosen {
+            let name = own_name(path);
+            for part in self.siblings(path) {
+                let joined_here = part
+                    .attached_to
+                    .as_deref()
+                    .and_then(|to| to.rsplit_once('.'))
+                    .is_some_and(|(target, _)| target == name);
+                let path_of = match around(path) {
+                    Some(around) => format!("{around}/{}", part.name),
+                    None => part.name.clone(),
+                };
+                if joined_here && !chosen.contains(&path_of) {
+                    edits.push(Edit::Unjoin { part: path_of });
+                }
+            }
+        }
+        for path in &chosen {
+            edits.push(Edit::Remove {
+                part: path.clone(),
+                with_attached: false,
+            });
+        }
+        let say = Some(if chosen.len() > 1 {
+            format!("Removed {} parts; what hung from them stays", chosen.len())
+        } else {
+            format!("Removed \"{}\"; what hung from it stays", chosen[0])
+        });
+        let said = self.apply_as(&edits, say)?;
+        self.select(None);
+        Ok(said)
+    }
+
     /// Removes every selected part: a `remove` edit for each, as one
     /// step. With `with_attached`, what hangs from them goes too;
     /// without, the edit is refused if anything does.

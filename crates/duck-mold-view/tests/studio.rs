@@ -279,14 +279,22 @@ fn export_and_render_write_next_to_the_recipe_and_say_so() {
     // The file is named from the recipe's folder, as the recipe names
     // files: not by the whole way to it.
     assert!(
-        said.starts_with("Wrote table.glb (") && said.ends_with(" bytes)"),
+        said.starts_with("Wrote table.glb (") && said.ends_with(" KB)"),
         "{said}"
     );
     assert_eq!(studio.status(), said);
     assert_eq!(&std::fs::read(&glb).unwrap()[..4], b"glTF");
+    assert_eq!(studio.last_written(), Some(glb.as_path()));
 
     let said = studio.render_picture().unwrap();
-    assert_eq!(said, "Wrote table.png (513 x 536 pixels)");
+    assert!(
+        said.starts_with("Wrote table.png (513 x 536 pixels, ") && said.ends_with(" KB)"),
+        "{said}"
+    );
+    assert_eq!(
+        studio.last_written(),
+        Some(recipe.with_extension("png").as_path())
+    );
     assert_eq!(
         &std::fs::read(recipe.with_extension("png")).unwrap()[..4],
         b"\x89PNG"

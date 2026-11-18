@@ -142,6 +142,9 @@ pub struct Studio {
     redo: Vec<history::Step>,
     /// Where the undo history is kept on disk, if it is.
     history_file: Option<PathBuf>,
+    /// The file the Studio wrote last (a `.glb`, a picture, the recipe
+    /// saved again), for the window to offer to show in its folder.
+    written: Option<PathBuf>,
     /// True when the file isn't there any more (deleted or moved): the
     /// model stays, and nothing is changed until it is saved again.
     gone: bool,
@@ -222,6 +225,7 @@ impl Studio {
             undo: Vec::new(),
             redo: Vec::new(),
             history_file: None,
+            written: None,
             gone: false,
             settling: None,
             library: library::Library::default(),
@@ -261,6 +265,12 @@ impl Studio {
             || self.shown_as.clone(),
             |name| name.to_string_lossy().into_owned(),
         )
+    }
+
+    /// True for a recipe (`.toml`, `.json`); false for a mesh file
+    /// (`.glb`, `.gltf`, `.obj`), which is only looked at.
+    pub fn is_recipe(&self) -> bool {
+        Syntax::from_path(&self.path).is_some()
     }
 
     /// True when nothing can be edited.
@@ -529,6 +539,7 @@ impl Studio {
             }
         }
         self.gone = false;
+        self.written = Some(self.path.clone());
         self.reload();
         let said = format!("Saved {}", self.title());
         self.say(said.clone());
@@ -1054,8 +1065,9 @@ impl Studio {
         let done = tools::export_file(&self.path, None)
             .map(|exported| {
                 self.shorten(&format!(
-                    "Wrote {} ({} bytes)",
-                    exported.output, exported.bytes
+                    "Wrote {} ({})",
+                    exported.output,
+                    tools::size_in_words(exported.bytes)
                 ))
             })
             .map_err(|failure| self.shorten(&first_error(&failure)));
@@ -1063,6 +1075,9 @@ impl Studio {
             Ok(said) => said.clone(),
             Err(why) => format!("Not exported: {why}"),
         });
+        if done.is_ok() {
+            self.written = Some(self.path.with_extension("glb"));
+        }
         done
     }
 
@@ -1072,8 +1087,11 @@ impl Studio {
         let done = render::render_file(&self.path, None, render::DEFAULT_SIZE, None, false)
             .map(|rendered| {
                 self.shorten(&format!(
-                    "Wrote {} ({} x {} pixels)",
-                    rendered.output, rendered.width, rendered.height
+                    "Wrote {} ({} x {} pixels, {})",
+                    rendered.output,
+                    rendered.width,
+                    rendered.height,
+                    tools::size_in_words(rendered.bytes)
                 ))
             })
             .map_err(|failure| self.shorten(&first_error(&failure)));
@@ -1081,7 +1099,16 @@ impl Studio {
             Ok(said) => said.clone(),
             Err(why) => format!("No picture: {why}"),
         });
+        if done.is_ok() {
+            self.written = Some(self.path.with_extension("png"));
+        }
         done
+    }
+
+    /// The file the Studio wrote last: a `.glb` exported, a picture
+    /// rendered, or the recipe saved again.
+    pub fn last_written(&self) -> Option<&Path> {
+        self.written.as_deref()
     }
 }
 

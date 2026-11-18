@@ -97,8 +97,7 @@ impl Studio {
     /// Goes into Pose mode: the model stands in the pose chosen, and a
     /// drag turns the selected part (O).
     pub fn pose_mode(&mut self) -> Result<String, String> {
-        if self.model().is_none() {
-            let why = "There is no model to pose yet: the recipe has mistakes".to_owned();
+        if let Some(why) = self.why_not_posed() {
             self.say(why.clone());
             return Err(why);
         }
@@ -109,10 +108,30 @@ impl Studio {
         if !self.pose_names().contains(&self.pose) {
             self.pose = REST.to_owned();
         }
+        // An animation chosen in Part mode (with the view's Play list)
+        // stays on the timeline.
         self.refresh_pose();
         let said = "Posing: click a part, then drag a ring to turn it. Pick the pose on the right. O goes back to parts".to_owned();
         self.say(said.clone());
         Ok(said)
+    }
+
+    /// Why the model can't be posed, if it can't: there is no model yet,
+    /// or it is one part, with nothing to turn.
+    pub fn why_not_posed(&self) -> Option<String> {
+        let model = match self.model() {
+            None => {
+                return Some("There is no model to pose yet: the recipe has mistakes".to_owned());
+            }
+            Some(model) => model,
+        };
+        if model.leaves().len() < 2 {
+            return Some(
+                "This model is one part: a pose turns parts about their joins, so add another part first"
+                    .to_owned(),
+            );
+        }
+        None
     }
 
     /// O: into Pose mode, or back to Part mode.

@@ -123,11 +123,14 @@ fn the_screens_look_as_they_did() {
             "version = 0\n[[parts]]\nshape = \"blob\"\n",
         )
         .unwrap();
+        std::fs::write(folder.join("gone.toml"), "").unwrap();
         let list = folder.join("recent.txt");
         let mut recent = Recent::kept_in(list.clone());
-        for name in ["mistake", "my_robot", "castle"] {
+        for name in ["gone", "mistake", "my_robot", "castle"] {
             recent.opened(&folder.join(format!("{name}.toml")));
         }
+        // One opened lately and deleted since.
+        std::fs::remove_file(folder.join("gone.toml")).unwrap();
         let mut screen = harness(
             StudioApp::new()
                 .remembering(Recent::kept_in(list))
@@ -730,6 +733,87 @@ fn the_screens_look_as_they_did() {
         screen.run_steps(3);
         scroll_panel(&mut screen);
         wrong.extend(check(&mut screen, "hits-own"));
+    }
+
+    // Removing a part that others hang from: three clear choices.
+    {
+        let mut screen = robot();
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(2);
+        screen.key_press(egui::Key::Delete);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "remove-asks"));
+    }
+
+    // A recipe that has never built.
+    {
+        let recipe = folder("pictures_never_built").join("broken.toml");
+        std::fs::write(
+            &recipe,
+            "version = 0\nname = \"x\"\n\n[[parts]]\nshape = \"blob\"\n",
+        )
+        .unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "never-built"));
+    }
+
+    // A .glb opened only to look at, with a part selected: plain facts.
+    {
+        let folder = folder("pictures_glb");
+        let recipe = folder.join("robot.toml");
+        std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+        duck_mold_core::tools::export_file(&recipe, None).unwrap();
+        let mut screen = harness(StudioApp::with_file(folder.join("robot.glb"), false), true);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "glb-opened"));
+        let mut screen = harness(StudioApp::with_file(&recipe, true), true);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("left_arm"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "look-only"));
+    }
+
+    // Help: the keys (they scroll) and About.
+    {
+        let mut screen = robot();
+        screen.get_by_label("Help").click();
+        screen.run_steps(3);
+        screen
+            .query_all_by_label_contains("The keys")
+            .last()
+            .unwrap()
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "keys"));
+        let mut screen = robot();
+        screen.get_by_label("Help").click();
+        screen.run_steps(3);
+        screen
+            .query_all_by_label_contains("About Duck Mold Studio")
+            .last()
+            .unwrap()
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "about"));
+    }
+
+    // Export: the note over the picture.
+    {
+        let recipe = copy_of("robot.toml", "pictures_export_note");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        screen.get_by_label("Export").click();
+        screen.run_steps(4);
+        wrong.extend(check(&mut screen, "export-note"));
     }
 
     assert!(

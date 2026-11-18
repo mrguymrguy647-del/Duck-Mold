@@ -35,8 +35,11 @@ const GRID_FINE: Color = Color::rgb(0x33, 0x39, 0x46);
 /// through the recipe's own zero.
 const AXIS_X: Color = Color::rgb(0x9a, 0x45, 0x50);
 const AXIS_Z: Color = Color::rgb(0x45, 0x62, 0x9a);
-/// The ring on the ground at the model's zero point.
-const ZERO_POINT: Color = Color::rgb(0xe8, 0xe8, 0xf0);
+/// The small cross on the ground at the model's zero point: dimmer than
+/// the axes, so it reads as part of the grid, not of the model.
+const ZERO_POINT: Color = Color::rgb(0x76, 0x7c, 0x8c);
+/// How far each arm of that cross reaches, in metres.
+const ZERO_ARM: f64 = 0.12;
 /// Duck yellow: the box round the selected part, and the socket under
 /// the pointer.
 const CHOSEN: Color = Color::rgb(0xff, 0xcc, 0x2e);
@@ -497,13 +500,13 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
             vec3(0.0, 0.0, fz1),
             AXIS_Z,
         );
-        // The model's zero point: where a game holds it.
-        if look.model.is_some()
-            && let Some((x, y)) = orbit.on_screen(offset, width, height)
-        {
-            let centre = vec2(x as f32, y as f32);
-            canvas.fill_circle(centre, 5.0, ZERO_POINT);
-            canvas.fill_circle(centre, 3.0, BACKGROUND);
+        // The model's zero point, where a game holds it: a small cross
+        // lying on the ground.
+        if look.model.is_some() {
+            let at = vec3(offset.x, 0.0, offset.z);
+            for arm in [vec3(ZERO_ARM, 0.0, 0.0), vec3(0.0, 0.0, ZERO_ARM)] {
+                line(&mut canvas, at - arm, at + arm, ZERO_POINT);
+            }
         }
     }
 

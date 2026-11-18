@@ -11,7 +11,7 @@ use duck_mold_core::tools;
 use duck_mold_view::studio::handles::Tool;
 use duck_mold_view::studio::viewport::Viewpoint;
 use duck_mold_view::studio::{FaceTool, Mode, Studio};
-use eframe::egui::{self, Rect, RichText, Sense};
+use eframe::egui::{self, Color32, Rect, RichText, Sense};
 
 use crate::actions::{self, Action};
 use crate::recent::Recent;
@@ -24,6 +24,15 @@ pub struct StudioApp {
     notice: Option<String>,
     /// A crash last time, for the start page to tell about.
     crashed: Option<crate::crash::Crash>,
+    /// Whether the list of problems is open above the status bar.
+    problems_open: bool,
+    /// Whether the file had mistakes last frame: the list opens by
+    /// itself when a new one appears.
+    had_mistakes: bool,
+    /// A note over the picture, for what matters: a file written.
+    note: Option<Note>,
+    /// What the parts list is filtered by: only parts whose path has it.
+    parts_filter: String,
     view: view::View,
     /// The window's title as it was last set.
     titled: String,
@@ -93,6 +102,10 @@ impl StudioApp {
             studio: None,
             notice: None,
             crashed: None,
+            problems_open: false,
+            had_mistakes: false,
+            note: None,
+            parts_filter: String::new(),
             view: view::View::default(),
             titled: String::new(),
             shown_selected: None,
@@ -245,8 +258,17 @@ impl StudioApp {
     /// What the window's title should be.
     pub fn title(&self) -> String {
         match &self.studio {
-            Some(studio) => format!("{} - Duck Mold Studio", studio.title()),
-            None => "Duck Mold Studio".to_owned(),
+            Some(studio) if studio.look_only() => format!(
+                "{} (looking only) - Duck Mold Studio {}",
+                studio.title(),
+                env!("CARGO_PKG_VERSION")
+            ),
+            Some(studio) => format!(
+                "{} - Duck Mold Studio {}",
+                studio.title(),
+                env!("CARGO_PKG_VERSION")
+            ),
+            None => format!("Duck Mold Studio {}", env!("CARGO_PKG_VERSION")),
         }
     }
 
@@ -396,30 +418,45 @@ impl StudioApp {
                 {
                     asked = Some(Action::ShowAll);
                 }
-                ui.separator();
-                if ui
-                    .button("Export")
-                    .on_hover_text("Write the model as a .glb file next to the recipe (Ctrl+E)")
-                    .clicked()
-                {
-                    asked = Some(Action::Export);
-                }
-                if ui
-                    .button("Render picture")
-                    .on_hover_text("Write a picture of the model (four views) next to the recipe")
-                    .clicked()
-                {
-                    asked = Some(Action::RenderPicture);
+                // A mesh file is only looked at: nothing to export.
+                if studio.is_recipe() {
+                    ui.separator();
+                    if ui
+                        .button("Export")
+                        .on_hover_text("Write the model as a .glb file next to the recipe (Ctrl+E)")
+                        .clicked()
+                    {
+                        asked = Some(Action::Export);
+                    }
+                    if ui
+                        .button("Render picture")
+                        .on_hover_text("Write a picture of the model (four views) next to the recipe")
+                        .clicked()
+                    {
+                        asked = Some(Action::RenderPicture);
+                    }
                 }
             });
             ui.add_space(2.0);
         });
 
-        egui::Panel::bottom("duck_mold_problems")
-            .resizable(true)
-            .default_size(96.0)
-            .min_size(56.0)
-            .show(ui, |ui| problems(ui, studio));
+        // One line at the bottom: the problems, and what was done last.
+        // A new mistake opens the list of problems by itself.
+        let mistakes = studio.has_mistakes();
+        if mistakes && !self.had_mistakes {
+            self.problems_open = true;
+        }
+        self.had_mistakes = mistakes;
+        egui::Panel::bottom("duck_mold_status")
+            .exact_size(STATUS_HEIGHT)
+            .show(ui, |ui| status_bar(ui, studio, &mut self.problems_open));
+        if self.problems_open {
+            egui::Panel::bottom("duck_mold_problems")
+                .resizable(true)
+                .default_size(120.0)
+                .min_size(60.0)
+                .show(ui, |ui| problems(ui, studio));
+        }
 
         // The timeline, in Pose mode, above the problems.
         if studio.mode() == Mode::Pose {
@@ -437,36 +474,45 @@ impl StudioApp {
             .show(ui, |ui| {
                 // The library sits under the parts, in the same column.
                 if !studio.look_only() {
+                    // As tall as it needs for its pictures and the
+                    // animations list; it can be dragged taller.
                     egui::Panel::bottom("duck_mold_library")
                         .resizable(true)
-                        .default_size(170.0)
-                        .min_size(80.0)
+                        .default_size(250.0)
+                        .min_size(120.0)
                         .show(ui, |ui| library::panel(ui, studio, &mut self.thumbs));
                 }
-                if let Some(action) =
-                    outliner(ui, studio, &mut self.shown_selected, &mut self.thumbs)
-                {
+                if let Some(action) = outliner(
+                    ui,
+                    studio,
+                    &mut self.shown_selected,
+                    &mut self.thumbs,
+                    &mut self.parts_filter,
+                ) {
                     // From the list there is no point of a surface.
                     self.view.clear_menu_spot();
                     asked = Some(action);
                 }
             });
 
+        // The right column: one column that scrolls, so nothing in it is
+        // ever cut off. The model or the selected part, then the palette
+        // (not in Pose mode, where it does nothing).
         egui::Panel::right("duck_mold_properties")
             .resizable(true)
-            .default_size(270.0)
+            .default_size(280.0)
             .min_size(220.0)
             .show(ui, |ui| {
-                // The palette sits under the properties, in the same
-                // column.
-                egui::Panel::bottom("duck_mold_palette")
-                    .resizable(true)
-                    .default_size(190.0)
-                    .min_size(80.0)
-                    .show(ui, |ui| palette::panel(ui, studio, &mut self.colours));
                 egui::ScrollArea::vertical()
                     .auto_shrink([false, false])
-                    .show(ui, |ui| properties::show(ui, studio, &mut self.draft));
+                    .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
+                    .show(ui, |ui| {
+                        properties::show(ui, studio, &mut self.draft);
+                        if studio.mode() != Mode::Pose {
+                            ui.add_space(12.0);
+                            palette::panel(ui, studio, &mut self.colours);
+                        }
+                    });
             });
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
@@ -481,6 +527,19 @@ impl StudioApp {
                 asked = Some(action);
             }
         });
+        // A note over the top right of the picture, for a few seconds.
+        let now = ui.input(|input| input.time);
+        if let Some(note) = &self.note {
+            if now - note.since > NOTE_SECONDS {
+                self.note = None;
+            } else if let Some((rect, _)) = self.view.place() {
+                if show_note(ui.ctx(), note, rect) {
+                    self.note = None;
+                }
+                ui.ctx()
+                    .request_repaint_after(std::time::Duration::from_millis(200));
+            }
+        }
 
         // Ctrl+Z undoes and Ctrl+Y (or Ctrl+Shift+Z) redoes, unless a
         // text field is being typed in: there they belong to the typing.
@@ -639,14 +698,14 @@ impl StudioApp {
                 Action::NewModel => new_model = true,
                 Action::Open => open_another = true,
                 Action::Export => {
-                    let _ = studio.export();
+                    note_of(&mut self.note, studio.export(), studio, now);
                 }
                 Action::RenderPicture => {
-                    let _ = studio.render_picture();
+                    note_of(&mut self.note, studio.render_picture(), studio, now);
                 }
                 Action::StartPage => to_start = true,
                 Action::SaveAgain => {
-                    let _ = studio.save_again();
+                    note_of(&mut self.note, studio.save_again(), studio, now);
                 }
                 Action::SaveAs => save_as = true,
                 Action::OpenFile(file) => open_file = Some(file),
@@ -772,7 +831,9 @@ impl StudioApp {
         // closes a window that is only for looking, as `preview` always
         // did.
         if ui.input(|input| input.key_pressed(egui::Key::Escape)) {
-            if self.view.is_adding() {
+            if self.problems_open {
+                self.problems_open = false;
+            } else if self.view.is_adding() {
                 self.view.stop_adding();
             } else if studio.dragging().is_some() || studio.grabbed().is_some() {
                 // The viewport lets go of what it was dragging.
@@ -808,7 +869,7 @@ impl StudioApp {
             && let Some(studio) = &mut self.studio
             && let Some(path) = pick_save_as(&studio.title())
         {
-            let _ = studio.save_as(&path);
+            note_of(&mut self.note, studio.save_as(&path), studio, now);
             self.recent.opened(&path);
         }
         if to_start {
@@ -885,6 +946,9 @@ impl StudioApp {
             Showing::Keys => "The keys",
             Showing::About => "About Duck Mold Studio",
         };
+        // Never taller than the window: the keys scroll.
+        let room = (ui.ctx().content_rect().height() - 120.0).max(160.0);
+        let duck = self.gallery.example(ui.ctx(), "duck");
         egui::Window::new(title)
             .collapsible(false)
             .resizable(false)
@@ -892,15 +956,22 @@ impl StudioApp {
             .open(&mut open)
             .show(ui.ctx(), |ui| match showing {
                 Showing::Keys => {
-                    egui::Grid::new("duck_mold_keys")
-                        .num_columns(2)
-                        .spacing([16.0, 4.0])
+                    egui::ScrollArea::vertical()
+                        .max_height(room)
+                        .scroll_bar_visibility(
+                            egui::scroll_area::ScrollBarVisibility::AlwaysVisible,
+                        )
                         .show(ui, |ui| {
-                            for (key, does) in actions::KEYS {
-                                ui.label(RichText::new(key).strong());
-                                ui.label(does);
-                                ui.end_row();
-                            }
+                            egui::Grid::new("duck_mold_keys")
+                                .num_columns(2)
+                                .spacing([16.0, 4.0])
+                                .show(ui, |ui| {
+                                    for (key, does) in actions::KEYS {
+                                        ui.label(RichText::new(key).strong());
+                                        ui.label(does);
+                                        ui.end_row();
+                                    }
+                                });
                         });
                     ui.add_space(4.0);
                     ui.label(
@@ -908,18 +979,41 @@ impl StudioApp {
                     );
                 }
                 Showing::About => {
-                    ui.label(
-                        RichText::new(format!(
-                            "Duck Mold Studio {}",
-                            env!("CARGO_PKG_VERSION")
-                        ))
-                        .strong(),
-                    );
+                    ui.set_max_width(420.0);
+                    ui.horizontal(|ui| {
+                        if let Some(duck) = duck {
+                            ui.add(
+                                egui::Image::new(duck)
+                                    .fit_to_exact_size(egui::vec2(64.0, 64.0))
+                                    .corner_radius(8.0),
+                            );
+                        }
+                        ui.vertical(|ui| {
+                            ui.label(RichText::new("Duck Mold Studio").size(22.0).strong());
+                            ui.horizontal(|ui| {
+                                ui.label(format!("Version {}", env!("CARGO_PKG_VERSION")));
+                                if ui
+                                    .small_button("Copy version")
+                                    .on_hover_text("Copy it, to put in a message about a problem")
+                                    .clicked()
+                                {
+                                    ui.ctx().copy_text(format!(
+                                        "Duck Mold Studio {}",
+                                        env!("CARGO_PKG_VERSION")
+                                    ));
+                                }
+                            });
+                        });
+                    });
+                    ui.add_space(6.0);
                     ui.label("Make 3D models for Duck Forge games from parts that join at sockets.");
                     ui.add_space(4.0);
                     ui.label(
                         "A model is a recipe: a text file. The Studio changes that file every time you change something, so there is nothing to save, and an AI agent can read and change it too.",
                     );
+                    ui.add_space(6.0);
+                    ui.hyperlink_to("How to use it (the guide)", GUIDE);
+                    ui.hyperlink_to("Duck Mold on GitHub", WEBSITE);
                 }
             });
         if !open || ui.input(|input| input.key_pressed(egui::Key::Escape)) {
@@ -934,10 +1028,11 @@ impl StudioApp {
         let mut open = false;
         let mut new = false;
         let mut again: Option<PathBuf> = None;
+        let mut forget: Option<PathBuf> = None;
         let mut example: Option<&'static str> = None;
         let recent: Vec<PathBuf> = self
             .recent
-            .files()
+            .all_files()
             .into_iter()
             .map(Path::to_path_buf)
             .collect();
@@ -1029,21 +1124,56 @@ impl StudioApp {
                                         let name = file.file_name().map_or_else(String::new, |name| {
                                             name.to_string_lossy().into_owned()
                                         });
-                                        let picture =
-                                            self.gallery.recent(ui.ctx(), file).cloned();
-                                        let tip = match &picture {
-                                            Some(_) => file.display().to_string(),
-                                            None => format!(
-                                                "{}\nIt has a mistake in it: open it to see what",
-                                                file.display()
-                                            ),
-                                        };
-                                        if tile(ui, picture.as_ref(), &name, 96.0)
-                                            .on_hover_text(tip)
-                                            .clicked()
-                                        {
-                                            again = Some(file.clone());
-                                        }
+                                        ui.vertical(|ui| {
+                                            ui.set_width(108.0);
+                                            if !file.is_file() {
+                                                // Deleted or moved since: said, and
+                                                // it can be taken off the list.
+                                                ui.add_enabled_ui(false, |ui| {
+                                                    tile(ui, None, &name, 96.0)
+                                                })
+                                                .response
+                                                .on_disabled_hover_text(format!(
+                                                    "{}\nisn't there any more",
+                                                    file.display()
+                                                ));
+                                                ui.horizontal(|ui| {
+                                                    ui.label(
+                                                        RichText::new("not found").weak(),
+                                                    );
+                                                    if ui
+                                                        .small_button("Forget")
+                                                        .on_hover_text("Take it off this list")
+                                                        .clicked()
+                                                    {
+                                                        forget = Some(file.clone());
+                                                    }
+                                                });
+                                                return;
+                                            }
+                                            let picture =
+                                                self.gallery.recent(ui.ctx(), file).cloned();
+                                            if tile(ui, picture.as_ref(), &name, 96.0)
+                                                .on_hover_text(file.display().to_string())
+                                                .clicked()
+                                            {
+                                                again = Some(file.clone());
+                                            }
+                                            // A model that doesn't build says why.
+                                            if let Some(mistake) =
+                                                self.gallery.recent_mistake(file)
+                                            {
+                                                ui.add(
+                                                    egui::Label::new(
+                                                        RichText::new(mistake)
+                                                            .color(theme::BAD)
+                                                            .small(),
+                                                    )
+                                                    .truncate(),
+                                                )
+                                                .on_hover_text(mistake);
+                                            }
+                                        });
                                     }
                                 });
                             }
@@ -1100,6 +1230,9 @@ impl StudioApp {
         }
         if let Some(file) = again {
             self.open(file, false);
+        }
+        if let Some(file) = forget {
+            self.recent.forget(&file);
         }
         if let Some(name) = example {
             self.open_example(name);
@@ -1335,11 +1468,23 @@ fn outliner(
     studio: &mut Studio,
     shown_selected: &mut Option<String>,
     thumbs: &mut library::Thumbs,
+    filter: &mut String,
 ) -> Option<Action> {
     ui.add_space(4.0);
     ui.label(RichText::new("Parts").strong());
     if let Some(headline) = studio.headline() {
         ui.label(RichText::new(headline).weak().small());
+    }
+    // A long list can be filtered by name.
+    let all = studio.outline();
+    if all.len() > FILTER_FROM {
+        ui.add(
+            egui::TextEdit::singleline(filter)
+                .hint_text("Find a part")
+                .desired_width(f32::INFINITY),
+        );
+    } else {
+        filter.clear();
     }
     ui.separator();
     let selected = studio.selected().map(str::to_owned);
@@ -1351,15 +1496,22 @@ fn outliner(
     let mut asked = None;
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])
+        .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
         .show(ui, |ui| {
-            let rows = studio.outline();
+            let wanted = filter.trim().to_lowercase();
+            let rows: Vec<_> = all
+                .into_iter()
+                .filter(|row| wanted.is_empty() || row.path.to_lowercase().contains(&wanted))
+                .collect();
             // In Pose mode, the parts the pose turns are marked.
             let posed = if studio.mode() == Mode::Pose {
                 studio.posed_parts()
             } else {
                 Vec::new()
             };
-            if rows.is_empty() {
+            if rows.is_empty() && !wanted.is_empty() {
+                ui.label(RichText::new(format!("No part is called \"{}\".", filter.trim())).weak());
+            } else if rows.is_empty() {
                 ui.label(RichText::new("No parts to show.").weak());
             }
             for row in rows {
@@ -1445,6 +1597,132 @@ fn outliner(
 }
 
 /// What is wrong with the file, or that nothing is.
+/// Where the guide for people is.
+pub const GUIDE: &str = "https://github.com/mrguymrguy647-del/Duck-Mold#readme";
+
+/// Where Duck Mold is made.
+pub const WEBSITE: &str = "https://github.com/mrguymrguy647-del/Duck-Mold";
+
+/// How many parts a model has before its list gets a box to find one.
+pub const FILTER_FROM: usize = 12;
+
+/// How tall the status bar is, in points.
+pub const STATUS_HEIGHT: f32 = 26.0;
+
+/// How long a note over the picture stays, in seconds.
+pub const NOTE_SECONDS: f64 = 4.0;
+
+/// A note over the picture: what was written, and where.
+pub struct Note {
+    text: String,
+    file: Option<PathBuf>,
+    /// When it was shown, in the window's seconds.
+    since: f64,
+}
+
+/// A note for a file written, or for why it wasn't.
+fn note_of(note: &mut Option<Note>, done: Result<String, String>, studio: &Studio, now: f64) {
+    *note = Some(match done {
+        Ok(said) => Note {
+            text: said,
+            file: studio.last_written().map(Path::to_path_buf),
+            since: now,
+        },
+        Err(why) => Note {
+            text: why,
+            file: None,
+            since: now,
+        },
+    });
+}
+
+/// Draws the note in the top right of the picture. True if it was
+/// closed.
+fn show_note(ctx: &egui::Context, note: &Note, picture: Rect) -> bool {
+    let mut closed = false;
+    egui::Area::new(egui::Id::unique("duck_mold_note"))
+        .order(egui::Order::Foreground)
+        .anchor(
+            egui::Align2::RIGHT_TOP,
+            // Under the view's Play list, which sits in the corner.
+            egui::vec2(
+                picture.right() - ctx.content_rect().right() - 12.0,
+                picture.top() + 44.0,
+            ),
+        )
+        .show(ctx, |ui| {
+            egui::Frame::popup(ui.style()).show(ui, |ui| {
+                ui.set_max_width(360.0);
+                ui.horizontal(|ui| {
+                    ui.label(&note.text);
+                    if let Some(file) = &note.file
+                        && ui
+                            .button("Show in folder")
+                            .on_hover_text(file.display().to_string())
+                            .clicked()
+                    {
+                        crate::system::show_in_folder(file);
+                        closed = true;
+                    }
+                });
+            });
+        });
+    closed
+}
+
+/// The words on the problems button: none, warnings, or mistakes.
+pub fn problems_words(studio: &Studio) -> (Color32, String) {
+    let problems = studio.problems();
+    let mistakes = problems.iter().filter(|problem| problem.is_error).count();
+    let warnings = problems.len() - mistakes;
+    let count = |count: usize, word: &str| {
+        if count == 1 {
+            format!("1 {word}")
+        } else {
+            format!("{count} {word}s")
+        }
+    };
+    match (mistakes, warnings) {
+        (0, 0) => (theme::GOOD, "No problems".to_owned()),
+        (0, warnings) => (theme::LOOK, count(warnings, "warning")),
+        (mistakes, 0) => (theme::BAD, count(mistakes, "mistake")),
+        (mistakes, warnings) => (
+            theme::BAD,
+            format!(
+                "{}, {}",
+                count(mistakes, "mistake"),
+                count(warnings, "warning")
+            ),
+        ),
+    }
+}
+
+/// The line at the bottom: the problems, as a button that opens their
+/// list, and what the Studio did last.
+fn status_bar(ui: &mut egui::Ui, studio: &Studio, open: &mut bool) {
+    ui.horizontal_centered(|ui| {
+        let (colour, words) = problems_words(studio);
+        let button = ui
+            .add(
+                egui::Button::new(RichText::new(&words).color(colour))
+                    .selected(*open)
+                    .frame_when_inactive(false),
+            )
+            .on_hover_text(if *open {
+                "Close the list of problems (Escape)"
+            } else {
+                "Open the list of problems"
+            });
+        if button.clicked() {
+            *open = !*open;
+        }
+        ui.separator();
+        ui.add(egui::Label::new(RichText::new(studio.status()).weak()).truncate());
+    });
+}
+
+/// The list of problems, opened above the status bar. A click on one
+/// about a part selects that part.
 fn problems(ui: &mut egui::Ui, studio: &mut Studio) {
     let problems = studio.problems().to_vec();
     ui.add_space(4.0);
@@ -1452,16 +1730,14 @@ fn problems(ui: &mut egui::Ui, studio: &mut Studio) {
         ui.label(RichText::new("Problems").strong());
         if problems.is_empty() {
             ui.colored_label(theme::GOOD, "None");
+        } else if studio.has_mistakes() && studio.model().is_none() {
+            ui.colored_label(theme::BAD, "This file can't be built yet:");
         } else if studio.has_mistakes() {
             ui.colored_label(
                 theme::BAD,
                 "The file has mistakes. The picture is of the last version that worked.",
             );
         }
-        // What was last done, at the right.
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.label(RichText::new(studio.status()).weak());
-        });
     });
     egui::ScrollArea::vertical()
         .auto_shrink([false, false])

@@ -31,6 +31,9 @@ pub fn apply_brand(ctx: &egui::Context) {
         ctx.style_mut_of(theme, |style| {
             style.visuals.selection.bg_fill = NIGHT_INDIGO;
             style.visuals.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+            // Scroll bars take their own room, so they never cover a
+            // button at the end of a line, and show there is more.
+            style.spacing.scroll = egui::style::ScrollStyle::solid();
         });
     }
 }

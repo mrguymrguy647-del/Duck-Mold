@@ -1101,6 +1101,11 @@ That is safe:
   and the other can be deleted.
 - A write that fails says why: `the disk is full`, `permission denied`,
   `another program has the file open and locked`. Nothing was changed.
+- A slip in the TOML itself is said in plain words, with its line. For
+  example: *line 4: text values go in quotes*, *the table [palette] is
+  written twice*, *this line has no =*. Anything else starts with "this
+  line isn't written the way TOML needs:" and then the TOML library's own
+  words.
 
 ## 12. Mistakes to avoid
 

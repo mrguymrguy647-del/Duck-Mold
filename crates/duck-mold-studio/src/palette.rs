@@ -62,88 +62,86 @@ pub fn panel(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     let in_hand = (studio.tool == Tool::Paint)
         .then(|| studio.paint_colour())
         .flatten();
-    egui::ScrollArea::vertical()
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            if palette.is_empty() {
-                ui.label(RichText::new("No colours yet.").weak());
-            }
-            for (name, rgb) in &palette {
-                ui.horizontal(|ui| {
-                    // The colour itself: a click opens the picker, and
-                    // letting go changes it everywhere it is used.
-                    let mut picked = match &draft.recolor {
-                        Some((changing, to)) if changing == name => *to,
-                        _ => *rgb,
-                    };
-                    ui.add_enabled_ui(edits, |ui| {
-                        let square = ui
-                            .color_edit_button_srgb(&mut picked)
-                            .on_hover_text(format!(
-                                "Change the colour \"{name}\" itself, everywhere it is used"
-                            ));
-                        if square.changed() {
-                            draft.recolor = Some((name.clone(), picked));
-                        }
-                    });
-                    if let Some((changing, to)) = &draft.recolor
-                        && changing == name
-                        && !ui.input(|input| input.pointer.any_down())
-                    {
-                        if to != rgb {
-                            done = Some(studio.change_colour(name, *to));
-                        }
-                        draft.recolor = None;
-                    }
-                    // Its name: a click picks it to paint with.
-                    let chosen = in_hand.as_deref() == Some(name.as_str());
-                    let label = ui
-                        .add_enabled(edits, egui::Button::selectable(chosen, name))
+    {
+        if palette.is_empty() {
+            ui.label(RichText::new("No colours yet.").weak());
+        }
+        for (name, rgb) in &palette {
+            ui.horizontal(|ui| {
+                // The colour itself: a click opens the picker, and
+                // letting go changes it everywhere it is used.
+                let mut picked = match &draft.recolor {
+                    Some((changing, to)) if changing == name => *to,
+                    _ => *rgb,
+                };
+                ui.add_enabled_ui(edits, |ui| {
+                    let square = ui
+                        .color_edit_button_srgb(&mut picked)
                         .on_hover_text(format!(
-                            "Paint with \"{name}\" (#{:02X}{:02X}{:02X})",
-                            rgb[0], rgb[1], rgb[2]
+                            "Change the colour \"{name}\" itself, everywhere it is used"
                         ));
-                    if label.clicked() {
-                        if chosen {
-                            // Again puts the brush down.
-                            studio.pick_colour(None);
-                            studio.tool = Tool::Move;
-                        } else {
-                            studio.pick_colour(Some(name));
-                        }
-                    }
-                    if edits {
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            let remove = egui::Button::new(RichText::new("remove").small().weak())
-                                .frame(false);
-                            if ui
-                                .add(remove)
-                                .on_hover_text(format!("Take \"{name}\" out of the palette"))
-                                .clicked()
-                            {
-                                if studio.colour_in_use(name) {
-                                    // Ask what to paint with instead.
-                                    let other = palette
-                                        .iter()
-                                        .map(|(other, _)| other)
-                                        .find(|other| *other != name)
-                                        .cloned()
-                                        .unwrap_or_default();
-                                    draft.removing = Some((name.clone(), other));
-                                } else {
-                                    done = Some(studio.remove_colour(name, None));
-                                }
-                            }
-                        });
+                    if square.changed() {
+                        draft.recolor = Some((name.clone(), picked));
                     }
                 });
-            }
+                if let Some((changing, to)) = &draft.recolor
+                    && changing == name
+                    && !ui.input(|input| input.pointer.any_down())
+                {
+                    if to != rgb {
+                        done = Some(studio.change_colour(name, *to));
+                    }
+                    draft.recolor = None;
+                }
+                // Its name: a click picks it to paint with.
+                let chosen = in_hand.as_deref() == Some(name.as_str());
+                let label = ui
+                    .add_enabled(edits, egui::Button::selectable(chosen, name))
+                    .on_hover_text(format!(
+                        "Paint with \"{name}\" (#{:02X}{:02X}{:02X})",
+                        rgb[0], rgb[1], rgb[2]
+                    ));
+                if label.clicked() {
+                    if chosen {
+                        // Again puts the brush down.
+                        studio.pick_colour(None);
+                        studio.tool = Tool::Move;
+                    } else {
+                        studio.pick_colour(Some(name));
+                    }
+                }
+                if edits {
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let remove =
+                            egui::Button::new(RichText::new("remove").small().weak()).frame(false);
+                        if ui
+                            .add(remove)
+                            .on_hover_text(format!("Take \"{name}\" out of the palette"))
+                            .clicked()
+                        {
+                            if studio.colour_in_use(name) {
+                                // Ask what to paint with instead.
+                                let other = palette
+                                    .iter()
+                                    .map(|(other, _)| other)
+                                    .find(|other| *other != name)
+                                    .cloned()
+                                    .unwrap_or_default();
+                                draft.removing = Some((name.clone(), other));
+                            } else {
+                                done = Some(studio.remove_colour(name, None));
+                            }
+                        }
+                    });
+                }
+            });
+        }
 
-            if let Some(why) = &draft.failed {
-                ui.add_space(4.0);
-                ui.colored_label(theme::BAD, why);
-            }
-        });
+        if let Some(why) = &draft.failed {
+            ui.add_space(4.0);
+            ui.colored_label(theme::BAD, why);
+        }
+    }
 
     // ---- a colour in use, to be removed: asked in a window of its own
     if let Some((name, other)) = &mut draft.removing {

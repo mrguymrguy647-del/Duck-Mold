@@ -4937,6 +4937,23 @@ From the audit's known-limits table, the rows marked **now** are fixed.
   "Only head" is today's "Keep them": the four are unjoined, where they
   stand.
 
+- **As built (step 2).**
+  - The snap stays at the bottom right of the picture, where it already
+    was, shown only while there are handles to drag; the status bar
+    carries the problems and the last message.
+  - Pose mode keeps the animation when one was chosen in Part mode. Until
+    one is, the view's Play list says "choose one" rather than showing
+    the first name, so it never seems chosen when it isn't (Play with none
+    chosen plays the first). Choosing one for the person on entering Pose
+    mode was tried and dropped: a drag would then change that animation's
+    first key, not a pose.
+  - Scroll bars take their own room instead of floating over the content,
+    so they never cover the buttons at the end of a line.
+  - The Model section has no colour count, since the palette is right
+    under it.
+  - The status words are plain ("No problems", "1 mistake"); the ✓ and ⚠
+    marks wait for step 3's drawn icons.
+
 #### A finished look (U1 to U9, M1 to M7)
 
 The main window, after (at 1280 x 720):

@@ -406,6 +406,19 @@ pub struct Also {
     pub pose: Option<String>,
 }
 
+/// A file's size in words: `512 bytes`, `85 KB`, `1.4 MB`.
+pub fn size_in_words(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    let size = bytes as f64;
+    if bytes < 1024 {
+        format!("{bytes} bytes")
+    } else if size < KB * KB {
+        format!("{:.0} KB", (size / KB).max(1.0))
+    } else {
+        format!("{:.1} MB", size / KB / KB)
+    }
+}
+
 /// What `duck-mold export` did: the report on the model, and the file it
 /// wrote.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -810,4 +823,16 @@ fn new_recipe(path: &Path, text: &str) -> Result<(), Failure> {
         )));
     }
     write_file(path, text.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sizes_are_said_in_words() {
+        assert_eq!(size_in_words(512), "512 bytes");
+        assert_eq!(size_in_words(87_152), "85 KB");
+        assert_eq!(size_in_words(1_500_000), "1.4 MB");
+    }
 }

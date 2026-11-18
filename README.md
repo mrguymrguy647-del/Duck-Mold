@@ -125,7 +125,10 @@ copy goes in the folder `Duck Mold` in your Documents (as `robot.toml`,
 or `robot_2.toml` if that is taken), so you can change it as you like
 and the example stays as it is. The examples are inside the program, so
 they are there wherever it was started from. File > Open an example and
-File > Opened lately offer the same lists once a model is open.
+File > Opened lately offer the same lists once a model is open. A model
+opened lately that has a mistake says what it is under its picture; one
+that has been deleted or moved since says "not found", with **Forget** to
+take it off the list.
 
 ![The start page: models opened lately and the fifteen examples, each with its picture](docs/studio-start.png)
 
@@ -447,7 +450,9 @@ these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
   file.
 
 **The menus.** File (New model, Open, Open an example, Opened lately,
-Export, Render picture, Back to the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
+Export, Render picture, Back to the start page; a `.glb` or other mesh
+file, which is only looked at, has no Export or Render picture, and no
+Edit menu), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
 Unjoin, Remove, Tidy sockets, Select all), View (the four views, Frame, Grid,
 Wireframe, Shadow, Hit shapes, Hide, Show everything hidden) and Help (Show the tips again, The
 keys, About). Every line shows its key.
@@ -532,7 +537,39 @@ shows the recipe file, and every change you make is written to it at
 once, so there is nothing to save. When you (or an agent) save the
 recipe in another program, the Studio builds it again. If the recipe has
 a mistake, the Studio says so and keeps showing the last version that
-built.
+built (a recipe that has never built says "This file can't be built
+yet:"). Common slips in the TOML itself, such as a missing `=`, a missing
+quote or a table written twice, are said in plain words.
+
+**Where things are.**
+
+- **The status bar** along the bottom says how the model is ("No
+  problems", "2 warnings", "1 mistake") and what the Studio did last.
+  Click the problems to open their list above it; a click on a problem
+  about a part selects that part, and Escape closes the list. A new
+  mistake opens it by itself.
+- **The right column** scrolls as one, so nothing in it is ever cut off:
+  the selected part's properties, its sockets, limits and hit shape, its
+  buttons, then the palette. With nothing selected it shows **the model**
+  itself: its name, size, parts and triangles, poses and animations, and
+  its hit shapes.
+- **The parts list** gets a **Find a part** box once a model has more
+  than 12 parts.
+- **Export and Render picture** say what they wrote, and how big it is,
+  in a note over the picture for a few seconds, with **Show in folder**.
+- **Face, Edge, Corner and Pose** are greyed when they can't be used now,
+  and their tip says why ("Only a box can be shaped in this version:
+  \"body\" is a sphere").
+- **Remove** of a part that others hang from asks what to do: **Remove
+  all**, **Remove only** the part (the others are made free, right where
+  they stand), or **Cancel**.
+- **Rename** (F2) says under the name: Enter renames it, Escape keeps the
+  name.
+- **Help > About** has the version (with **Copy version**, for a message
+  about a problem) and links to this guide and to GitHub. The window's
+  title has the version too.
+- A window that **only looks** shows the selected part's facts as plain
+  words, not greyed fields.
 
 ![The Studio showing the robot, with its left eye selected and its properties](docs/studio.png)
 

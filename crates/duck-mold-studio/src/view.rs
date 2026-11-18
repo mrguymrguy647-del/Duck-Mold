@@ -501,10 +501,28 @@ fn mode_row(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
         );
         ui.painter_at(within)
             .rect_filled(place, 4.0, Color32::from_black_alpha(150));
+        // Why it can't be chosen now, if it can't: said on the button,
+        // where the person looks.
+        let why_not = if studio.mode() == mode {
+            None
+        } else {
+            match mode {
+                Mode::Part => None,
+                Mode::Face | Mode::Edge | Mode::Corner => studio.why_not_shaped(),
+                Mode::Pose => studio.why_not_posed(),
+            }
+        };
         // On one line, however narrow the button.
         let button = egui::Button::selectable(studio.mode() == mode, name)
             .wrap_mode(egui::TextWrapMode::Extend);
-        if ui.put(place, button).on_hover_text(tip).clicked() && studio.mode() != mode {
+        let clicked = ui
+            .put(place, |ui: &mut egui::Ui| {
+                ui.add_enabled(why_not.is_none(), button)
+                    .on_hover_text(tip)
+                    .on_disabled_hover_text(why_not.as_deref().unwrap_or(tip))
+            })
+            .clicked();
+        if clicked && studio.mode() != mode {
             // Why not, if it can't, is in the status line.
             let _ = match mode {
                 Mode::Part => {
