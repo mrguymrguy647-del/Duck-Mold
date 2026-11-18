@@ -348,6 +348,10 @@ pub struct PartDef {
     pub color: Option<Named>,
     /// Colours for single faces.
     pub colors: Vec<FaceColor>,
+    /// The image for the whole part.
+    pub image: Option<ImageName>,
+    /// Images for single faces.
+    pub images: Vec<FaceImageName>,
     /// Where it goes.
     pub placement: Placement,
     /// How much bigger or smaller, along x, y and z.
@@ -757,6 +761,38 @@ pub struct FaceColor {
     pub loc: Loc,
 }
 
+/// An image a part names: `image = "textures/planks.png"`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ImageName {
+    /// The path as written, or `none`.
+    pub text: String,
+    /// Where it was written.
+    pub loc: Loc,
+    /// Which of the pictures that were read it is ([`crate::load::Loaded::pictures`]),
+    /// once the recipe's files are read. `None` for `"none"`, and for a
+    /// file that couldn't be used (which is reported).
+    pub picture: Option<usize>,
+}
+
+impl ImageName {
+    /// Whether it says `"none"`: no image here.
+    pub fn is_none(&self) -> bool {
+        self.text == NO_IMAGE
+    }
+}
+
+/// What `image` and `images` say to have no image: `"none"`.
+pub const NO_IMAGE: &str = "none";
+
+/// One entry of `images`: a face name and its image.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceImageName {
+    /// The face's name.
+    pub face: String,
+    /// The image.
+    pub image: ImageName,
+}
+
 /// Where a part goes.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Placement {
@@ -943,7 +979,7 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-pub(crate) const PART_FIELDS: [&str; 30] = [
+pub(crate) const PART_FIELDS: [&str; 32] = [
     "name",
     "shape",
     "use",
@@ -962,6 +998,8 @@ pub(crate) const PART_FIELDS: [&str; 30] = [
     "color",
     "changes",
     "colors",
+    "image",
+    "images",
     "attach",
     "to",
     "twist",
@@ -1177,6 +1215,40 @@ impl Decoder<'_> {
                 .got(entry.key.as_str())
                 .one_of(&entry.key, known.iter().copied());
             self.issues.push(issue);
+        }
+    }
+
+    /// An image's path as a recipe writes it: `"none"`, or a PNG file
+    /// beside the recipe. A path from the top of the disk is refused, so
+    /// that a recipe can be moved with its folder.
+    fn image_name(&mut self, text: String, loc: Loc) -> Option<ImageName> {
+        let problem = if text == NO_IMAGE {
+            None
+        } else if text.starts_with('/')
+            || text.starts_with('\\')
+            || text.as_bytes().get(1) == Some(&b':')
+        {
+            Some(format!(
+                "\"{text}\" starts from the top of the disk: an image's path starts from the recipe's own folder, like \"textures/face.png\", so the recipe can be moved with its folder"
+            ))
+        } else if !text.to_lowercase().ends_with(".png") {
+            Some(format!(
+                "\"{text}\" isn't a PNG file: an image is a file whose name ends in .png (or \"none\" for no image)"
+            ))
+        } else {
+            None
+        };
+        match problem {
+            Some(message) => {
+                self.issues
+                    .push(loc.error(Code::Unsupported, message).got(text.as_str()));
+                None
+            }
+            None => Some(ImageName {
+                text,
+                loc,
+                picture: None,
+            }),
         }
     }
 
@@ -1925,6 +1997,8 @@ impl Decoder<'_> {
             source: Source::Broken,
             color: None,
             colors: Vec::new(),
+            image: None,
+            images: Vec::new(),
             placement: Placement::none(),
             scale: [1.0; 3],
             mirror: None,
@@ -2075,6 +2149,36 @@ impl Decoder<'_> {
                             color,
                             loc: self.loc(&face_path, face.node.pos),
                         });
+                    }
+                }
+            }
+        }
+
+        // ---- images
+        if let Some(entry) = fields.take("image") {
+            let image_path = fields.sub("image");
+            if let Some(text) = self.text(&entry.node, &image_path, "textures/planks.png") {
+                let loc = self.loc(&image_path, entry.node.pos);
+                part.image = self.image_name(text, loc);
+            }
+        }
+        if let Some(entry) = fields.take("images") {
+            let images_path = fields.sub("images");
+            if let Some(table) = self.table(
+                &entry.node,
+                &images_path,
+                "a table of face names and images, like { front = \"textures/face.png\" }",
+            ) {
+                for face in table.entries {
+                    let face_path = join(&images_path, &face.key);
+                    if let Some(text) = self.text(&face.node, &face_path, "textures/face.png") {
+                        let loc = self.loc(&face_path, face.node.pos);
+                        if let Some(image) = self.image_name(text, loc) {
+                            part.images.push(FaceImageName {
+                                face: face.key.clone(),
+                                image,
+                            });
+                        }
                     }
                 }
             }

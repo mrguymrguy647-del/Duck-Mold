@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "lod", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "image", "images", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "lod", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -1528,7 +1528,7 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 29, "the guide's tables list 29 fields");
+    assert_eq!(checked, 31, "the guide's tables list 31 fields");
 }
 
 #[test]

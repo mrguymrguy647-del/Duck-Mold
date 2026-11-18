@@ -952,6 +952,7 @@ dependencies = [
 name = "duck-mold-core"
 version = "0.7.0"
 dependencies = [
+ "png",
  "serde",
  "serde_json",
  "toml",

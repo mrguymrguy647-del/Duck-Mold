@@ -99,6 +99,9 @@ pub struct Inspection {
     /// copies a game draws when the model is far off.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub far_versions: Vec<FarSummary>,
+    /// The model's images: only for a model that has any.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub images: Option<ImagesReport>,
     /// The names of the model's poses, in the recipe's order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub poses: Vec<String>,
@@ -173,6 +176,184 @@ pub fn socket_report(model: &Model) -> Vec<SocketReport> {
             facing: socket.facing.to_array(),
         })
         .collect()
+}
+
+/// The images on a model.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ImagesReport {
+    /// How big they are together in the `.glb`, across and down, in
+    /// pixels: all of them go on one sheet there.
+    pub sheet: [u32; 2],
+    /// Each image file, in the order the recipe first names them.
+    pub files: Vec<ImageReport>,
+}
+
+/// One image file on a model.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ImageReport {
+    /// The file.
+    pub file: String,
+    /// How many pixels wide.
+    pub width: u32,
+    /// How many pixels high.
+    pub height: u32,
+    /// True if no pixel of it is see-through: the colour under it never
+    /// shows.
+    pub solid: bool,
+    /// Where it is: each part and face name that shows it.
+    pub on: Vec<ImageOn>,
+}
+
+/// One place an image is: a face name of a part.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ImageOn {
+    /// The part, by path.
+    pub part: String,
+    /// The face's name: `front`, `side`... Empty for a face without a
+    /// name.
+    pub face: String,
+    /// How big the whole image is on the model there, across and down,
+    /// in metres.
+    pub metres: [f64; 2],
+    /// How many of its pixels there are to a metre there (the mean of
+    /// across and down).
+    pub pixels_per_metre: f64,
+}
+
+/// How many times finer one image's pixels may be than another's on
+/// the same model before `inspect` warns ("mixed pixel sizes").
+pub const MIXED_PIXELS: f64 = 2.0;
+
+/// The model's images, where each one is, and how big its pixels are
+/// there. `None` for a model without images.
+pub fn images_report(model: &Model) -> Option<ImagesReport> {
+    if model.pictures.is_empty() {
+        return None;
+    }
+    let (width, height) = crate::picture::ImageSheet::size(model).ok().flatten()?;
+    // For each image, part and face name: the triangles' area on the
+    // model, and that area times how far the image reaches across and
+    // down there.
+    type Sums = (f64, f64, f64);
+    let mut on: Vec<std::collections::BTreeMap<(String, String), Sums>> =
+        vec![std::collections::BTreeMap::new(); model.pictures.len()];
+    // Kept in the order the parts and faces come in the model.
+    let mut order: Vec<Vec<(String, String)>> = vec![Vec::new(); model.pictures.len()];
+    for part in model.leaves() {
+        for number in part.faces.clone() {
+            let face = &model.faces[number];
+            let Some(image) = &face.image else { continue };
+            let key = (
+                part.path.clone(),
+                part.face_name(number).unwrap_or("").to_owned(),
+            );
+            for step in 1..face.corners.len().saturating_sub(1) {
+                let corners = [face.corners[0], face.corners[step], face.corners[step + 1]];
+                let at = [image.at[0], image.at[step], image.at[step + 1]];
+                let Some((area, across, down)) = image_reach(corners, at) else {
+                    continue;
+                };
+                if !order[image.picture].contains(&key) {
+                    order[image.picture].push(key.clone());
+                }
+                let sums = on[image.picture]
+                    .entry(key.clone())
+                    .or_insert((0.0, 0.0, 0.0));
+                sums.0 += area;
+                sums.1 += area * across;
+                sums.2 += area * down;
+            }
+        }
+    }
+    let files = model
+        .pictures
+        .iter()
+        .enumerate()
+        .map(|(number, picture)| ImageReport {
+            file: picture.file.clone(),
+            width: picture.width,
+            height: picture.height,
+            solid: picture.is_solid(),
+            on: order[number]
+                .iter()
+                .map(|key| {
+                    let (area, across, down) = on[number][key];
+                    let (across, down) = (across / area, down / area);
+                    let per_metre = ((f64::from(picture.width) / across)
+                        * (f64::from(picture.height) / down))
+                        .sqrt();
+                    ImageOn {
+                        part: key.0.clone(),
+                        face: key.1.clone(),
+                        metres: [tidy_to(across, 1e4), tidy_to(down, 1e4)],
+                        pixels_per_metre: tidy_to(per_metre, 10.0),
+                    }
+                })
+                .collect(),
+        })
+        .collect();
+    Some(ImagesReport {
+        sheet: [width, height],
+        files,
+    })
+}
+
+/// Rounds to one part in `parts`, and never gives `-0`.
+fn tidy_to(value: f64, parts: f64) -> f64 {
+    (value * parts).round() / parts + 0.0
+}
+
+/// For one triangle with an image: its area on the model, and how many
+/// metres the whole image would reach there, across and down. `None`
+/// for a triangle with no area, on the model or on the image.
+fn image_reach(corners: [Vec3; 3], at: [[f64; 2]; 3]) -> Option<(f64, f64, f64)> {
+    let (a, b) = (corners[1] - corners[0], corners[2] - corners[0]);
+    let area = a.cross(b).length() / 2.0;
+    let (ua, va) = (at[1][0] - at[0][0], at[1][1] - at[0][1]);
+    let (ub, vb) = (at[2][0] - at[0][0], at[2][1] - at[0][1]);
+    let across_down = ua * vb - ub * va;
+    if area <= 1e-12 || across_down.abs() <= 1e-12 {
+        return None;
+    }
+    // How far the model goes for one whole image across, and for one
+    // whole image down.
+    let across = (a * vb - b * va) * (1.0 / across_down);
+    let down = (b * ua - a * ub) * (1.0 / across_down);
+    Some((area, across.length(), down.length()))
+}
+
+/// A warning when the model's images have very different pixel sizes on
+/// it: the finest more than [`MIXED_PIXELS`] times the coarsest.
+fn mixed_pixels(images: &ImagesReport, source: &str) -> Option<Issue> {
+    let all = || {
+        images.files.iter().flat_map(|file| {
+            file.on
+                .iter()
+                .map(move |on| (file.file.as_str(), on.part.as_str(), on.pixels_per_metre))
+        })
+    };
+    let finest = all().max_by(|a, b| a.2.total_cmp(&b.2))?;
+    let coarsest = all().min_by(|a, b| a.2.total_cmp(&b.2))?;
+    if finest.2 <= coarsest.2 * MIXED_PIXELS + 1e-6 {
+        return None;
+    }
+    let whole = |per_metre: f64| format!("{}", per_metre.round());
+    Some(
+        Issue::warning(
+            Code::MixedPixels,
+            "",
+            format!(
+                "mixed pixel sizes: \"{}\" on {} has {} pixels a metre and \"{}\" on {} has {}. Pixels look best all one size: make one image smaller or the other bigger",
+                finest.0,
+                finest.1,
+                whole(finest.2),
+                coarsest.0,
+                coarsest.1,
+                whole(coarsest.2),
+            ),
+        )
+        .in_file(source),
+    )
 }
 
 /// One far-away version of a model, in short.
@@ -500,6 +681,9 @@ pub struct FaceReport {
     pub size: Option<[f64; 2]>,
     /// The faces next to it: the ones it shares an edge with.
     pub next_to: Vec<String>,
+    /// The image on it, if it has one: the file.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
 }
 
 /// A name that stands for several faces.
@@ -513,20 +697,20 @@ pub struct NameReport {
 
 /// The faces of every shaped part of a model, by name.
 pub fn face_report(model: &Model) -> Vec<ShapedReport> {
-    fn gather(parts: &[Part], into: &mut Vec<ShapedReport>) {
+    fn gather(model: &Model, parts: &[Part], into: &mut Vec<ShapedReport>) {
         for part in parts {
             if let Some(shaped) = &part.shaped {
-                into.push(shaped_report(part, shaped));
+                into.push(shaped_report(model, part, shaped));
             }
-            gather(&part.parts, into);
+            gather(model, &part.parts, into);
         }
     }
     let mut reports = Vec::new();
-    gather(&model.parts, &mut reports);
+    gather(model, &model.parts, &mut reports);
     reports
 }
 
-fn shaped_report(part: &Part, shaped: &Shaped) -> ShapedReport {
+fn shaped_report(model: &Model, part: &Part, shaped: &Shaped) -> ShapedReport {
     let own = shaped.own_names();
     let faces = own
         .iter()
@@ -559,6 +743,11 @@ fn shaped_report(part: &Part, shaped: &Shaped) -> ShapedReport {
                     _ => None,
                 },
                 next_to,
+                image: part
+                    .faces_named(name)
+                    .into_iter()
+                    .find_map(|face| model.faces[face].image.as_ref())
+                    .map(|image| model.pictures[image.picture].file.clone()),
             }
         })
         .collect();
@@ -692,6 +881,14 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
         }
     }
 
+    // ---- images
+    let images = images_report(model);
+    if let Some(images) = &images
+        && let Some(warning) = mixed_pixels(images, source)
+    {
+        warnings.push(warning);
+    }
+
     // ---- the ground
     let lowest_y = tidy(bounds.min.y);
     let ground = Ground {
@@ -801,6 +998,7 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
             .collect(),
         colliders: Vec::new(),
         far_versions: far_summary(model),
+        images,
         poses: model.poses.iter().map(|pose| pose.name.clone()).collect(),
         animations: model
             .animations
@@ -1016,6 +1214,74 @@ impl Inspection {
                 format!("{named}:  {}  (triangles each)", used.join(", "))
             },
         );
+        if let Some(images) = &self.images {
+            let places: usize = images.files.iter().map(|file| file.on.len()).sum();
+            let mut words = format!(
+                "{} on {}; {} x {} pixels together in the .glb",
+                count(images.files.len(), "file"),
+                count(places, "face"),
+                images.sheet[0],
+                images.sheet[1],
+            );
+            // One line for each image and part, in columns.
+            let mut rows: Vec<[String; 4]> = Vec::new();
+            for file in &images.files {
+                let mut parts: Vec<&str> = Vec::new();
+                for on in &file.on {
+                    if !parts.contains(&on.part.as_str()) {
+                        parts.push(&on.part);
+                    }
+                }
+                for part in parts {
+                    let here: Vec<&ImageOn> = file.on.iter().filter(|on| on.part == part).collect();
+                    let faces: Vec<&str> = here
+                        .iter()
+                        .map(|on| on.face.as_str())
+                        .filter(|face| !face.is_empty())
+                        .collect();
+                    let faces = match faces.len() {
+                        0 => String::new(),
+                        1..=4 => format!(": {}", faces.join(", ")),
+                        many => format!(": {many} faces"),
+                    };
+                    let low = here
+                        .iter()
+                        .map(|on| on.pixels_per_metre)
+                        .fold(f64::INFINITY, f64::min);
+                    let high = here
+                        .iter()
+                        .map(|on| on.pixels_per_metre)
+                        .fold(f64::NEG_INFINITY, f64::max);
+                    let density = if high.round() > low.round() {
+                        format!("{} to {} pixels a metre", low.round(), high.round())
+                    } else {
+                        format!("{} pixels a metre", low.round())
+                    };
+                    rows.push([
+                        file.file.clone(),
+                        format!("{} x {}", file.width, file.height),
+                        format!("{part}{faces}"),
+                        density,
+                    ]);
+                }
+            }
+            let widths: Vec<usize> = (0..3)
+                .map(|column| rows.iter().map(|row| row[column].len()).max().unwrap_or(0))
+                .collect();
+            for row in rows {
+                words.push_str(&format!(
+                    "\n    {:<a$}   {:<b$}   {:<c$}   {}",
+                    row[0],
+                    row[1],
+                    row[2],
+                    row[3],
+                    a = widths[0],
+                    b = widths[1],
+                    c = widths[2],
+                ));
+            }
+            line("images", words);
+        }
         if !self.materials.is_empty() {
             let materials: Vec<String> = self
                 .materials
@@ -1357,10 +1623,14 @@ impl Inspection {
             let size_width = sizes.iter().map(String::len).max().unwrap_or(0);
             for (face, size) in shaped.faces.iter().zip(&sizes) {
                 out.push_str(&format!(
-                    "    {:<width$}   faces {:<5}   {size:<size_width$}   next to: {}\n",
+                    "    {:<width$}   faces {:<5}   {size:<size_width$}   next to: {}{}\n",
                     face.name,
                     face.facing,
-                    face.next_to.join(", ")
+                    face.next_to.join(", "),
+                    match &face.image {
+                        Some(image) => format!("   image: {image}"),
+                        None => String::new(),
+                    }
                 ));
             }
             for name in &shaped.names {

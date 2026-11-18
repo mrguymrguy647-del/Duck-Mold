@@ -185,6 +185,62 @@ pub fn sin_cos_degrees(degrees: f64) -> (f64, f64) {
     }
 }
 
+/// How far round a point is, as a share of a full turn: the angle of
+/// `(across, along)` measured from the `along` direction towards
+/// `across`, from -0.5 (not included) to 0.5. Straight along is 0, a
+/// quarter turn towards `across` is 0.25, straight back is 0.5. A point
+/// at zero gives 0.
+///
+/// It is what `atan2(across, along) / (2 pi)` is, worked out with plain
+/// arithmetic and square roots only, so that every computer gets the
+/// same answer to the last digit (the system's own `atan2` can differ
+/// between computers). Images wrapped round a shape are placed by it.
+pub fn turn_of(across: f64, along: f64) -> f64 {
+    let (a, b) = (across.abs(), along.abs());
+    if a == 0.0 && b == 0.0 {
+        return 0.0;
+    }
+    // Within an eighth of a turn, where the ratio is at most 1.
+    let eighth = if a <= b {
+        small_turn(a / b)
+    } else {
+        0.25 - small_turn(b / a)
+    };
+    // Then the quarter it is in.
+    let quarter = if along >= 0.0 { eighth } else { 0.5 - eighth };
+    if across < 0.0 {
+        -quarter + 0.0
+    } else {
+        quarter
+    }
+}
+
+/// The angle whose tangent is `t` (0 to 1), as a share of a full turn.
+fn small_turn(t: f64) -> f64 {
+    if t == 0.0 {
+        return 0.0;
+    }
+    if t == 1.0 {
+        return 0.125;
+    }
+    // Halve the angle three times: the tangent of half an angle is
+    // `t / (1 + sqrt(1 + t * t))`. Then the angle is small enough for
+    // a short series.
+    let mut t = t;
+    for _ in 0..3 {
+        t /= 1.0 + (1.0 + t * t).sqrt();
+    }
+    // atan(t) = t - t^3/3 + t^5/5 - ..., inside out. With t under 0.1,
+    // eleven terms are more than a decimal number holds.
+    let t2 = t * t;
+    let mut sum = 0.0;
+    for odd in [21.0, 19.0, 17.0, 15.0, 13.0, 11.0, 9.0, 7.0, 5.0, 3.0, 1.0] {
+        sum = 1.0 / odd - t2 * sum;
+    }
+    let radians = 8.0 * t * sum;
+    radians / (2.0 * std::f64::consts::PI)
+}
+
 /// The sine of an angle from 0 to a little over 45 degrees, in radians:
 /// the series `x - x^3/3! + x^5/5! - ...`, to the 17th power, which is
 /// more than a decimal number can hold at this size.
@@ -605,6 +661,24 @@ mod tests {
 
     fn close(a: Vec3, b: Vec3) -> bool {
         (a - b).length() < 1e-12
+    }
+
+    #[test]
+    fn how_far_round_matches_the_systems_own_and_is_exact_at_the_quarters() {
+        assert_eq!(turn_of(0.0, 1.0), 0.0);
+        assert_eq!(turn_of(1.0, 0.0), 0.25);
+        assert_eq!(turn_of(0.0, -1.0), 0.5);
+        assert_eq!(turn_of(-1.0, 0.0), -0.25);
+        assert_eq!(turn_of(1.0, 1.0), 0.125);
+        assert_eq!(turn_of(0.0, 0.0), 0.0);
+        for step in 0..720 {
+            let (sin, cos) = sin_cos_degrees(step as f64 * 0.5 + 0.123);
+            for length in [0.001, 1.0, 250.0] {
+                let ours = turn_of(sin * length, cos * length);
+                let theirs = (sin * length).atan2(cos * length) / (2.0 * std::f64::consts::PI);
+                assert!((ours - theirs).abs() < 1e-14, "{step}: {ours} {theirs}");
+            }
+        }
     }
 
     #[test]

@@ -96,6 +96,8 @@ Each entry of `parts`, and each entry of `define`, is a part.
 | `name` | text | none | Letters, digits, `_`, `-`. Names in one list must differ. An unnamed part is called by its place in the list, counting from 0 as error messages do: `#2` is `parts[2]`. Only a named part can be attached to. |
 | `color` | text | none | A palette name: the colour of the whole part. |
 | `colors` | table | none | Colours for single faces, by face name: `{ top = "grass" }`. |
+| `image` | text | none | A PNG file: the image on the whole part. The path starts from the recipe's folder. See "Images" below. |
+| `images` | table | none | Images for single faces, by face name: `{ front = "textures/face.png" }`. |
 | `attach` | text | none | The part's own socket to join. Needs `to`. |
 | `to` | text | none | `"part.socket"`: the socket of another part **in the same list** to join it to. Needs `attach`. |
 | `twist` | number | `0` | With `attach` only: degrees to turn the part around its join. -36000 to 36000. |
@@ -307,6 +309,73 @@ everything inside it that has none of its own.
   warning.
 - A `color` that changes nothing (every face inside already has one) is
   a warning.
+
+### Images
+
+```toml
+[[parts]]
+name = "head"
+shape = "box"
+color = "steel"
+images = { front = "textures/robot_face.png" }   # one face
+
+[[parts]]
+name = "crate"
+shape = "box"
+color = "wood"
+image = "textures/planks.png"                    # every face
+images = { top = "textures/lid.png" }            # ...but the top has its own
+```
+
+- An image is a **PNG file**, 1 x 1 to 1024 x 1024 pixels. Its path
+  starts from the recipe's folder and is written with `/`. A path from
+  the top of the disk (`C:\...`, `/home/...`) is an error.
+- `image` and `images` work as `color` and `colors` do, and the nearest
+  setting wins: a face name in `images` beats `image`; a part's `image`
+  is the image of everything inside it that has none of its own; a
+  definition's beats that of the part that uses it. `images` on an
+  assembly is an error.
+- `"none"` means no image: `images = { top = "none" }`.
+- **The image lies over the colour.** Where the image is solid you see
+  the image as it was painted; where it is see-through you see the
+  face's colour; a half see-through pixel is a mix.
+- **How it lies on flat faces:** fitted to the rectangle round the faces
+  it was given to, as you see them looking straight at them from
+  outside. Faces that face the same way share one copy; faces that face
+  different ways get a copy each. On a box's four sides it is upright;
+  on the top it is as seen from above with the front edge at the bottom
+  of the image; on the bottom, as seen from below with the front edge at
+  the top. It stretches to fit, and doesn't repeat.
+- **Round faces are wrapped:**
+
+  | Shape | Face | How the image lies |
+  |---|---|---|
+  | `cylinder`, `capsule`, `cone`, `tube` | `side` (a tube's `inside` too) | Once round, like the label on a tin: the middle of the image at the front, its two ends meeting at the back. |
+  | | `top`, `bottom` | Seen from above or below, as a box's: a round face shows the circle in the middle of the image. |
+  | `sphere` | `side` | Like a map of the world: the middle of the image at the front, its top edge at the top. |
+  | `torus` | `side` | Once round the ring and once round its tube. |
+  | `wedge`, `pyramid`, `prism` | slopes | Laid flat on the slope, the image's bottom edge along the slope's lower edge. |
+  | `stairs` | `front`, `top` | All the risers together, seen from the front; all the treads together, seen from above. |
+  | `arch` | `inside` | Along the inside of the doorway, from the foot on the model's right, over the top, to the other foot. |
+  | a box or cylinder with `bevel` | `bevel` | Never: the cut edges keep their colour. Naming them in `images` is an error. |
+
+- **A shaped box** (`changes`): an image given to a face name is on the
+  faces that name stands for. A pulled face keeps its image; an inset
+  leaves the image in place round the new face, like a picture frame;
+  after a cut it is on the piece that kept the name. The part's own
+  `image` is fitted to each whole side of the part, so it carries on
+  across every cut, inset and pull.
+- A mirrored part shows the mirror image.
+- A recipe used as a part brings its images; their paths start from that
+  recipe's folder.
+- A file that isn't there (`file_not_found`), or that isn't a PNG, is
+  damaged or is too big (`bad_image`), is an error that names the file
+  and the fix. All of a model's images together must fit in 4096 x 4096
+  pixels.
+- `inspect` lists the images, where each is and how many of its pixels
+  there are to a metre there, and warns (`mixed_pixels`) when one
+  image's pixels are more than twice as fine as another's.
+- A recipe without `image` or `images` builds exactly as it always has.
 
 ## Sockets
 

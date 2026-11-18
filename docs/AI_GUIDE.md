@@ -200,6 +200,8 @@ Its other fields:
 | `name` | Letters, digits, `_`, `-`. Needed if another part attaches to it. |
 | `color` | A palette name: the colour of the whole part. |
 | `colors` | Colours for single faces: `{ top = "grass", sides = "dirt" }`. |
+| `image` | A PNG file beside the recipe: the image on the whole part. `"none"` for none. |
+| `images` | Images for single faces: `{ front = "textures/face.png" }`. |
 | `changes` | A box only: changes made to its shape once it is built, in order. See "Shaping a box" below. |
 | `attach`, `to` | Join my socket `attach` to `to = "part.socket"`, a socket of another part in the same list. Always both. |
 | `twist` | Attached part only: one number, degrees to twist it around the join. |
@@ -309,6 +311,34 @@ is an error that tells you to add it to the palette. `colors` beats
 none of its own, so the nearest setting wins. A face with no colour at
 all is built plain grey, with a warning. An assembly has no faces of its
 own: `colors` on it is an error; colour the parts inside.
+
+**Images.** `image = "textures/planks.png"` puts a PNG on every face of
+a part; `images = { front = "textures/face.png" }` on one face. They
+follow the colour rules (`images` beats `image`; the nearest setting
+wins; `"none"` takes one away; `images` on an assembly is an error).
+
+- The path starts from the recipe's folder. PNG only, at most 1024 x
+  1024 pixels.
+- **The image lies over the colour**: paint only the mouth and leave the
+  rest of the PNG see-through, and the face's palette colour shows
+  there.
+- It is fitted to the face as you see it straight on from outside,
+  upright on the sides (top: from above, front edge at the bottom of the
+  image). It stretches to fit and doesn't repeat, so give it the face's
+  proportions: `inspect --json` lists, under `images`, each image, the
+  faces it is on, the size it has there in `metres` and its
+  `pixels_per_metre`.
+- Round faces are wrapped: a cylinder's `side` once round like a label
+  (the middle of the image at the front), a sphere like a map of the
+  world.
+- On a shaped box, an image belongs to the face name it was given to: a
+  pull carries it out, an inset leaves it round the new face, a cut
+  leaves it on the piece that kept the name. Shape first, then give
+  images. The part's own `image` carries on across every change.
+- Keep pixels one size: `inspect` warns (`mixed_pixels`) when one image
+  has more than twice as many pixels to the metre as another.
+- A missing file is `file_not_found`; a file that isn't a PNG, is
+  damaged or too big is `bad_image`. Nothing is built.
 
 ## 6. Sockets
 
@@ -1198,7 +1228,8 @@ That is safe:
 
 ## 13. What it can't do yet
 
-Plan around these; don't look for them: no textures or UVs, no smooth
+Plan around these; don't look for them: no images that repeat across a
+face, no painting on the model itself (an image is a flat PNG), no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
 bones (`bones` is a reserved name; parts turn on their joins instead of

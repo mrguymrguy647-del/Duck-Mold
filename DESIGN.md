@@ -5744,6 +5744,23 @@ The same in JSON:
   same `.glb`, the same report, the same picture, byte for byte. The
   recipe's `version` stays 0.
 
+*As built (step 1):*
+
+- **A definition's image beats the image of the part that uses it**, not
+  the other way round as written above. That is how `color` works (a
+  defined arm fixes its red hand), and "the nearest setting wins" is one
+  rule for both.
+- A path from the top of the disk, and a name that doesn't end in `.png`,
+  are refused when the recipe is read (`unsupported`); a file that isn't
+  there is `file_not_found`; one that isn't a PNG, is damaged or too big
+  is `bad_image`.
+- In a far-away version, a face name the simpler shape doesn't have
+  (stairs drawn as one slope have no `front`) is passed over for images
+  and, now, for colours too. Before, such a `colors` entry made the far
+  version fail to build, and it was silently left out. A far version's
+  parts now also go by the simpler shape's face names.
+- An image on a part from a mesh file waits for step 5.
+
 ### 2. How an image is laid on
 
 One rule, for flat faces:
@@ -5880,6 +5897,16 @@ error: robot.toml:12: the images of this model need 5200 x 4096 pixels together,
 - **An image that was deleted** is the first mistake above. The Studio's
   problem line offers *Make a new one*, *Choose another* and *Take the
   image off*.
+- **Mixed pixel sizes are a warning.** In pixel art, big pixels beside
+  small ones look wrong. `inspect` works out how many pixels each image
+  has to the metre on the model, and warns when the finest is more than
+  about twice the coarsest, naming the two:
+
+  ```text
+  warning: robot.toml: mixed pixel sizes: "textures/robot_label.png" on panel has 213 pixels a metre and "textures/robot_face.png" on head has 76. Pixels look best all one size: make one image smaller or the other bigger
+  ```
+
+  (Added on approval.)
 
 ### 5. What `inspect` and `render` say
 
@@ -5949,8 +5976,11 @@ Commands that also write a picture file (as `save-part` writes a recipe):
 **A sensible size.** A new image has the proportions of what it covers,
 so pixels are square on the model:
 
-- 64 pixels to the metre;
-- but the longer side is at least 32 pixels and at most 256;
+- **as many pixels to the metre as the model's images already have**
+  (the middle one, when they differ), so a new image matches the old
+  ones; 64 pixels to the metre for a model's first image;
+- for a first image, the longer side is at least 32 pixels; always at
+  most 256;
 - a wrap round a cylinder is as wide as the way round it.
 
 The robot's head front (42 x 32 cm) gets 32 x 24. A one-metre crate face

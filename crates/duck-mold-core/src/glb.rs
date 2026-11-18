@@ -1432,12 +1432,14 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
                 faces.push(Face {
                     corners: vec![corner(lump, a), corner(lump, b), corner(lump, c)],
                     color: color_of(lump, a),
+                    image: None,
                 });
                 fan = 1;
             } else {
                 faces.push(Face {
                     corners: (base..base + fan + 2).map(|at| corner(lump, at)).collect(),
                     color: color_of(lump, base),
+                    image: None,
                 });
             }
             face_of_triangle.extend(std::iter::repeat_n(faces.len() - 1, fan));
@@ -1523,6 +1525,7 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
     Ok(Model {
         name: extras["name"].as_str().unwrap_or("model").to_owned(),
         palette,
+        pictures: Vec::new(),
         faces,
         parts,
         sockets,

@@ -206,6 +206,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         .map(|(corners, &material)| Face {
             corners: corners.map(|corner| Vec3::from(corner).tidied()).to_vec(),
             color: color_of_material[material],
+            image: None,
         })
         .collect();
     let part = Part {
@@ -244,6 +245,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
     Model {
         name,
         palette,
+        pictures: Vec::new(),
         faces,
         parts: vec![part],
         sockets: Vec::new(),

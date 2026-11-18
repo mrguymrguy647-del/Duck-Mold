@@ -104,6 +104,11 @@ pub enum Code {
     /// A looping animation with the same event on its first and last
     /// key: it would be heard twice where the loop joins.
     EventTwice,
+    /// An image that can't be used: not a PNG, damaged, or too big.
+    BadImage,
+    /// The model's images have very different pixel sizes on it: big
+    /// pixels beside small ones.
+    MixedPixels,
 }
 
 impl Code {
@@ -144,6 +149,8 @@ impl Code {
             Code::HitShape => "hit_shape",
             Code::UnknownEvent => "unknown_event",
             Code::EventTwice => "event_twice",
+            Code::BadImage => "bad_image",
+            Code::MixedPixels => "mixed_pixels",
         }
     }
 }
