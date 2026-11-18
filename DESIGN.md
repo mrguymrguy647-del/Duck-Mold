@@ -5071,6 +5071,21 @@ The main window, after (at 1280 x 720):
 Every changed screen is pictured, at 1280 x 720 and 2560 x 1440, in the
 screen tests.
 
+- **As built (step 3).**
+  - The views under the gizmo are icon-and-word buttons ("Front",
+    "Side"...), not icons alone: at that size the four cube icons were too
+    alike to tell apart.
+  - "Render picture" is a picture icon beside Export .glb, not a menu
+    under it, so it is one click.
+  - The note over the picture sits at its top middle: the corners now
+    hold the toolbar and the gizmo.
+  - With nothing selected, Pose mode draws no ghosts at all.
+  - The parts library takes a third of the left column (150 to 320
+    points), so the parts list keeps room at 720 high.
+  - The picture tests draw the start page, a selected part and Pose mode
+    at 1280 x 720, at 2560 x 1440, and at 2560 x 1440 with the interface
+    at 150%, and every icon on a sheet.
+
 #### Speed (S1 to S4, and item 5)
 
 The targets are measured with the speed test's 50-part, 21,660-triangle

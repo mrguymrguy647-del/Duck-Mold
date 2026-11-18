@@ -2989,7 +2989,11 @@ fn the_hits_switch_and_the_panels_hit_shape() {
         .get_by_role_and_label(Role::ComboBox, "Hit shape")
         .click();
     screen.run_steps(2);
-    screen.query_all_by_label("box").last().unwrap().click();
+    screen
+        .query_all_by_label("its own: box")
+        .last()
+        .unwrap()
+        .click();
     screen.run_steps(3);
     assert!(text().contains("collider = \"box\""), "{}", text());
     screen.get_by_label_contains("\"head\" has a box for its hit shape");
@@ -3015,7 +3019,7 @@ fn the_hits_switch_and_the_panels_hit_shape() {
         .click();
     screen.run_steps(2);
     screen
-        .query_all_by_label("fitted: none")
+        .query_all_by_label("the model's: each part")
         .last()
         .unwrap()
         .click();
@@ -3463,4 +3467,63 @@ fn with_nothing_selected_the_panel_shows_the_model() {
     screen.get_by_label("0.90 x 1.83 x 0.39 m");
     screen.get_by_label("23 parts, 384 triangles");
     screen.get_by_label("idle, walk, wave, jump");
+}
+
+// ---- the look --------------------------------------------------------------------
+
+#[test]
+fn the_interface_size_is_chosen_in_view_and_remembered() {
+    use duck_mold_studio::recent::Recent;
+    let list = folder("screens_interface_size").join("recent.txt");
+    let mut screen = harness(
+        StudioApp::with_file(examples().join("robot.toml"), false)
+            .remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    screen.run_steps(2);
+    assert_eq!(screen.ctx.zoom_factor(), 1.0);
+    screen.get_by_label("View").click();
+    screen.run_steps(3);
+    screen.get_by_label("Interface size").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("125%")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(screen.ctx.zoom_factor(), 1.25);
+    // The next start remembers it.
+    assert_eq!(Recent::kept_in(list.clone()).interface_size(), Some(125));
+    let mut again = harness(
+        StudioApp::new().remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    again.run_steps(2);
+    assert_eq!(again.ctx.zoom_factor(), 1.25);
+    // "Like Windows" goes back to the system's size.
+    Recent::kept_in(list.clone()).keep_interface_size(None);
+    assert_eq!(Recent::kept_in(list).interface_size(), None);
+}
+
+#[test]
+fn a_click_on_the_gizmo_looks_along_that_axis() {
+    use duck_mold_view::studio::viewport::{Orbit, Viewpoint};
+    let mut screen = harness(
+        StudioApp::with_file(examples().join("robot.toml"), false),
+        false,
+    );
+    screen.run_steps(2);
+    screen.get_by_label("Look along y").click();
+    screen.run_steps(2);
+    let mut top = screen.state().studio().unwrap().orbit;
+    top.look_from(Viewpoint::Top);
+    let now: Orbit = screen.state().studio().unwrap().orbit;
+    assert_eq!((now.round, now.above), (top.round, top.above));
+    screen.get_by_label("Look along x").click();
+    screen.run_steps(2);
+    let now = screen.state().studio().unwrap().orbit;
+    let mut side = now;
+    side.look_from(Viewpoint::Side);
+    assert_eq!((now.round, now.above), (side.round, side.above));
 }

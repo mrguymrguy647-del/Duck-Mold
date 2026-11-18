@@ -316,7 +316,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
                 pos2(x + 2.0, rect.bottom() - 15.0),
                 egui::Align2::LEFT_BOTTOM,
                 format!("{at}"),
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(theme::SMALLEST_TEXT),
                 quiet,
             );
         }
@@ -349,7 +349,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
             middle + vec2(0.0, -size - 2.0),
             egui::Align2::CENTER_BOTTOM,
             &key.pose,
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(theme::SMALLEST_TEXT),
             color,
         );
         // Its events: a small flag under it, and their names.
@@ -366,7 +366,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
                 pole + vec2(9.0, 0.0),
                 egui::Align2::LEFT_TOP,
                 key.events.join(", "),
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(theme::SMALLEST_TEXT),
                 flag,
             );
         }

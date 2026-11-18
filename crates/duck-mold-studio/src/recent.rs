@@ -160,6 +160,32 @@ impl Recent {
         self.tips_file().is_none_or(|file| file.exists())
     }
 
+    /// The interface size chosen, in percent, if one was: `None` is the
+    /// size the system asks for.
+    pub fn interface_size(&self) -> Option<u32> {
+        let file = self.kept_in.as_ref()?.with_file_name("interface-size.txt");
+        std::fs::read_to_string(file).ok()?.trim().parse().ok()
+    }
+
+    /// Remembers the interface size chosen.
+    pub fn keep_interface_size(&self, size: Option<u32>) {
+        let Some(kept_in) = &self.kept_in else {
+            return;
+        };
+        let file = kept_in.with_file_name("interface-size.txt");
+        match size {
+            Some(size) => {
+                if let Some(folder) = file.parent() {
+                    let _ = std::fs::create_dir_all(folder);
+                }
+                let _ = std::fs::write(file, format!("{size}\n"));
+            }
+            None => {
+                let _ = std::fs::remove_file(file);
+            }
+        }
+    }
+
     /// Notes that the tips have been shown, so they aren't again.
     pub fn saw_tips(&self) {
         if let Some(file) = self.tips_file() {

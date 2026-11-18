@@ -737,6 +737,136 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "hits-own"));
     }
 
+    // Every icon, at three sizes, on the dark look and on the light.
+    {
+        use duck_mold_studio::icons::{self, Icon};
+        let mut sheet = Harness::builder()
+            .with_size(egui::vec2(560.0, 280.0))
+            .with_pixels_per_point(1.0)
+            .wgpu()
+            .build_ui(|ui| {
+                for (side, theme) in [
+                    (16.0, egui::Theme::Dark),
+                    (24.0, egui::Theme::Dark),
+                    (40.0, egui::Theme::Light),
+                ] {
+                    let back = if theme == egui::Theme::Dark {
+                        egui::Color32::from_gray(30)
+                    } else {
+                        egui::Color32::from_gray(235)
+                    };
+                    let ink = if theme == egui::Theme::Dark {
+                        egui::Color32::from_gray(225)
+                    } else {
+                        egui::Color32::from_gray(30)
+                    };
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(
+                            ui.available_width(),
+                            (side + 4.0) * (Icon::ALL.len() as f32 * (side + 4.0) / 540.0).ceil(),
+                        ),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().rect_filled(rect, 0.0, back);
+                    let across = ((rect.width() - 8.0) / (side + 4.0)).floor() as usize;
+                    for (at, icon) in Icon::ALL.into_iter().enumerate() {
+                        let place = egui::Rect::from_min_size(
+                            rect.min
+                                + egui::vec2(
+                                    4.0 + (at % across) as f32 * (side + 4.0),
+                                    2.0 + (at / across) as f32 * (side + 4.0),
+                                ),
+                            egui::Vec2::splat(side),
+                        );
+                        icons::paint(ui.painter(), place, icon, ink);
+                    }
+                }
+            });
+        sheet.run();
+        let stored = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/screens");
+        wrong.extend(
+            sheet
+                .try_snapshot_options(
+                    "icons",
+                    &SnapshotOptions::new()
+                        .threshold(2.0)
+                        .max_failed_pixels(200)
+                        .output_path(stored),
+                )
+                .err()
+                .map(|error| format!("icons: {error}")),
+        );
+    }
+
+    // The main screens at the audit's two sizes, 1280 x 720 and 2560 x
+    // 1440, and the big one again with the interface at 150%.
+    for (width, height, percent) in [
+        (1280.0, 720.0, None),
+        (2560.0, 1440.0, None),
+        (2560.0, 1440.0, Some(150)),
+    ] {
+        use duck_mold_studio::recent::Recent;
+        let tag = match percent {
+            Some(percent) => format!("{width}x{height}-{percent}"),
+            None => format!("{width}x{height}"),
+        };
+        let sized = |app: StudioApp| {
+            // The window's size is in points: at 150%, a 2560-pixel
+            // screen is 2560 / 1.5 points wide.
+            let scale = percent.map_or(1.0, |percent| percent as f32 / 100.0);
+            let mut screen = Harness::builder()
+                .with_size(egui::vec2(width / scale, height / scale))
+                .with_pixels_per_point(1.0)
+                .with_render_cursor(false)
+                .with_context_setup(|ctx| {
+                    ctx.set_theme(egui::ThemePreference::Dark);
+                    duck_mold_studio::theme::apply_brand(ctx);
+                })
+                .wgpu()
+                .build_eframe(|_| app);
+            screen.run_steps(3);
+            screen
+        };
+        // Where the interface size is kept, for this run only.
+        let settings = folder(&format!("pictures_sizes_{tag}"));
+        let recent = settings.join("recent.txt");
+        Recent::kept_in(recent.clone()).keep_interface_size(percent);
+        let remembering = || Recent::kept_in(recent.clone());
+        let mut screen = sized(
+            StudioApp::new()
+                .remembering(remembering())
+                .keeping_models_in("Documents/Duck Mold"),
+        );
+        wrong.extend(check(&mut screen, &format!("size-{tag}-start")));
+        let mut screen = sized(
+            StudioApp::with_file(examples().join("robot.toml"), false).remembering(remembering()),
+        );
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, &format!("size-{tag}-selected")));
+        let mut screen = sized(
+            StudioApp::with_file(examples().join("robot.toml"), false).remembering(remembering()),
+        );
+        screen.key_press(egui::Key::O);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .choose_animation(Some("walk"));
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("left_leg"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, &format!("size-{tag}-pose")));
+    }
+
     // Removing a part that others hang from: three clear choices.
     {
         let mut screen = robot();

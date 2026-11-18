@@ -30,9 +30,10 @@ pub const KEY_STEP: f64 = 0.05;
 /// How near two times must be to be the same key's, in seconds.
 const SAME_TIME: f64 = 0.0005;
 
-/// The ghost of the key before, and of the key after.
-const GHOST_BEFORE: [u8; 3] = [0x6F, 0x9F, 0xD8];
-const GHOST_AFTER: [u8; 3] = [0xD8, 0x9F, 0x6F];
+/// The ghost of the key before, and of the key after: faint, so the pose
+/// itself stays the clearest thing in the picture.
+const GHOST_BEFORE: [u8; 3] = [0x4E, 0x6C, 0x94];
+const GHOST_AFTER: [u8; 3] = [0x94, 0x6C, 0x4E];
 
 /// One key of the animation chosen, as the timeline shows it.
 #[derive(Debug, Clone, PartialEq)]
@@ -308,8 +309,10 @@ impl Studio {
         (before, after)
     }
 
-    /// The ghosts, as faint outlines of the parts that move: the pose of
-    /// the key before in blue, of the key after in orange.
+    /// The ghosts, as faint outlines of the selected parts (and what
+    /// hangs from them) where the animation moves them: the pose of the
+    /// key before in blue, of the key after in orange. With nothing
+    /// selected, there are none: a whole robot's ghosts hide its pose.
     pub(super) fn ghost_marks(&self) -> Vec<Mark> {
         if self.mode != Mode::Pose || !self.ghosts || self.playing {
             return Vec::new();
@@ -322,6 +325,10 @@ impl Studio {
             .into_iter()
             .map(str::to_owned)
             .collect();
+        let chosen: Vec<String> = self.selection().into_iter().map(str::to_owned).collect();
+        if chosen.is_empty() {
+            return Vec::new();
+        }
         let offset = self.offset();
         let (before, after) = self.ghost_keys();
         let mut marks = Vec::new();
@@ -336,7 +343,11 @@ impl Studio {
                     .iter()
                     .any(|path| leaf.path == *path || leaf.path.starts_with(&format!("{path}/")))
                     || self.hangs_from_moving(&leaf.path, &moving);
-                if !moves {
+                let picked = chosen
+                    .iter()
+                    .any(|path| leaf.path == *path || leaf.path.starts_with(&format!("{path}/")))
+                    || self.hangs_from_moving(&leaf.path, &chosen);
+                if !moves || !picked {
                     continue;
                 }
                 for face in &ghost.faces[leaf.faces.clone()] {

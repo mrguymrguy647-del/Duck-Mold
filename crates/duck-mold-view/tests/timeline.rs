@@ -323,8 +323,15 @@ fn the_ghosts_are_the_keys_before_and_after() {
     let (before, after) = studio.ghost_keys();
     assert!(before.is_none());
     assert_eq!(after.unwrap().number, 2);
-    // Drawn, or not.
+    // Drawn for the selected parts only: with nothing selected, none.
     studio.set_time(0.5);
+    studio.select(None);
+    let nothing = studio.picture(VIEW.0, VIEW.1);
+    studio.set_ghosts(false);
+    assert_eq!(studio.picture(VIEW.0, VIEW.1).pixels, nothing.pixels);
+    studio.set_ghosts(true);
+    // The waving arm.
+    assert!(studio.select(Some("left_arm")));
     let with = studio.picture(VIEW.0, VIEW.1);
     studio.set_ghosts(false);
     let without = studio.picture(VIEW.0, VIEW.1);

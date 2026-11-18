@@ -69,6 +69,9 @@ pub enum Action {
     RenderPicture,
     /// Close the file and go back to the start page.
     StartPage,
+    /// Make everything bigger or smaller: a percentage, or `None` for the
+    /// size the system asks for.
+    InterfaceSize(Option<u32>),
     /// Write the recipe the Studio last saw back where it was, after it
     /// was deleted or moved.
     SaveAgain,
@@ -167,9 +170,18 @@ pub const KEYS: [(&str, &str); 28] = [
     ("Right-click a part", "Its menu"),
 ];
 
+/// The interface sizes View > Interface size offers, beside "Like
+/// Windows": the size the system asks for.
+pub const INTERFACE_SIZES: [u32; 5] = [90, 100, 125, 150, 200];
+
 /// The File, Edit, View and Help menus of the top bar. Every line shows
 /// its key, so the menus teach the keys. Gives what was chosen.
-pub fn menus(ui: &mut egui::Ui, studio: &Studio, recent: &[std::path::PathBuf]) -> Option<Action> {
+pub fn menus(
+    ui: &mut egui::Ui,
+    studio: &Studio,
+    recent: &[std::path::PathBuf],
+    interface: Option<u32>,
+) -> Option<Action> {
     let mut chosen = None;
     let edits = !studio.look_only();
     // A mesh file (a .glb, .gltf or .obj) is only looked at: it can't be
@@ -288,6 +300,32 @@ pub fn menus(ui: &mut egui::Ui, studio: &Studio, recent: &[std::path::PathBuf]) 
             "Shift+H",
             Action::ShowAll,
         );
+        ui.separator();
+        ui.menu_button("Interface size", |ui| {
+            let mark = |on: bool, words: &str| {
+                if on {
+                    format!("{words}  (now)")
+                } else {
+                    words.to_owned()
+                }
+            };
+            pick(
+                ui,
+                true,
+                &mark(interface.is_none(), "Like Windows"),
+                "",
+                Action::InterfaceSize(None),
+            );
+            for percent in INTERFACE_SIZES {
+                pick(
+                    ui,
+                    true,
+                    &mark(interface == Some(percent), &format!("{percent}%")),
+                    "",
+                    Action::InterfaceSize(Some(percent)),
+                );
+            }
+        });
     });
     ui.menu_button("Help", |ui| {
         pick(ui, true, "Show the tips again", "", Action::ShowTips);

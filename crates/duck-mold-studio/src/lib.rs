@@ -13,6 +13,7 @@ pub mod app;
 pub mod crash;
 pub mod gallery;
 pub mod hits;
+pub mod icons;
 pub mod library;
 pub mod palette;
 pub mod posing;

@@ -994,30 +994,35 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                                 ..Sizes::default()
                             }));
                         }
-                        let cuts = ui
-                            .add_enabled(
-                                draft.bevel > 0.0,
-                                DragValue::new(&mut draft.bevel_steps)
-                                    .range(1..=4)
-                                    .custom_formatter(|steps, _| {
-                                        if steps == 1.0 {
-                                            "1 cut".to_owned()
-                                        } else {
-                                            format!("{steps} cuts")
-                                        }
-                                    })
-                                    .custom_parser(|typed| {
-                                        typed.split_whitespace().next()?.parse().ok()
-                                    }),
-                            )
-                            .on_hover_text("How many flat cuts go round each edge");
-                        if settled(&cuts) && Some(draft.bevel_steps) != facts.sizes.bevel_steps {
-                            edits.push(sized(Sizes {
-                                bevel_steps: Some(draft.bevel_steps),
-                                ..Sizes::default()
-                            }));
-                        }
                     });
+                    ui.end_row();
+                    // How many flat cuts go round each edge, on a row of
+                    // its own.
+                    let steps_label = ui.label("Bevel steps");
+                    let cuts = ui
+                        .add_enabled(
+                            draft.bevel > 0.0,
+                            DragValue::new(&mut draft.bevel_steps)
+                                .range(1..=4)
+                                .custom_formatter(|steps, _| {
+                                    if steps == 1.0 {
+                                        "1 cut".to_owned()
+                                    } else {
+                                        format!("{steps} cuts")
+                                    }
+                                })
+                                .custom_parser(|typed| {
+                                    typed.split_whitespace().next()?.parse().ok()
+                                }),
+                        )
+                        .labelled_by(steps_label.id)
+                    .on_hover_text("How many flat cuts go round each edge (1 to 4)");
+                    if settled(&cuts) && Some(draft.bevel_steps) != facts.sizes.bevel_steps {
+                        edits.push(sized(Sizes {
+                            bevel_steps: Some(draft.bevel_steps),
+                            ..Sizes::default()
+                        }));
+                    }
                     ui.end_row();
                 }
                 if facts.sizes.taper.is_some() {

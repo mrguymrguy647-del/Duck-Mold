@@ -130,7 +130,7 @@ opened lately that has a mistake says what it is under its picture; one
 that has been deleted or moved since says "not found", with **Forget** to
 take it off the list.
 
-![The start page: models opened lately and the fifteen examples, each with its picture](docs/studio-start.png)
+![The start page: models opened lately (one with a mistake, one gone) and the examples, each with its picture and what it shows](docs/studio-start.png)
 
 The first model you open to work on gets **five small tips**, one at a
 time, each pointing at what it is about: the picture, a part, the
@@ -155,8 +155,8 @@ change would reach:
 > Made from the definition "eye". Changing its shape, size or colour
 > also changes: right_eye.
 
-**Moving, turning and sizing a part.** Four tools stand down the left
-edge of the picture, each with a key. They put handles on the selected
+**Moving, turning and sizing a part.** The tools stand on the toolbar
+down the left of the picture, each with its icon, its name and its key. They put handles on the selected
 part:
 
 | Tool | Key | Handles | Dragging one |
@@ -396,8 +396,9 @@ Hide.
 
 **Hiding.** Hide stops drawing a part so you can get at what is behind
 it. Nothing else changes: the recipe doesn't know, and a hidden part
-is exported like any other. The top bar says how many are hidden;
-click that, or the "show" at the end of the part's line in the list,
+is exported like any other. The bottom right of the picture says how
+many are hidden; click that, or the shut eye at the end of the part's
+line in the list (the eye shows on the line under the mouse),
 to bring them back. The Studio remembers which parts were hidden in
 each of the models opened lately (in its settings, beside that list),
 and hides them again when the file is next opened.
@@ -429,12 +430,17 @@ are cleared away in the same step that leaves them with nothing on
 them; Edit > Tidy sockets does that for any that are left. In the file
 these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
 
-**Views and look.** In the top bar:
+**Views and look.** In the picture's top right corner:
 
-- **Front**, **Side**, **Top** and **3/4** turn the camera to look from
-  that side (keys 1, 2, 3 and 4), with what is selected, or the whole
-  model, in view. **Frame** (F) brings it back into view without
-  turning.
+- **The axis gizmo** shows which way x (red), y (green) and z (blue) run,
+  turning with the view. Click an axis to look along it.
+- **Front**, **Side**, **Top** and **3/4**, under it, turn the camera to
+  look from that side (keys 1, 2, 3 and 4), with what is selected, or
+  the whole model, in view. **Frame** (F) brings it back into view
+  without turning.
+
+The four switches sit along the picture's bottom right:
+
 - **Grid** is the ground: fine lines every 10 cm near the model,
   heavier ones every metre, a red line along x and a blue one along z
   through the recipe's zero.
@@ -454,8 +460,19 @@ Export, Render picture, Back to the start page; a `.glb` or other mesh
 file, which is only looked at, has no Export or Render picture, and no
 Edit menu), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
 Unjoin, Remove, Tidy sockets, Select all), View (the four views, Frame, Grid,
-Wireframe, Shadow, Hit shapes, Hide, Show everything hidden) and Help (Show the tips again, The
-keys, About). Every line shows its key.
+Wireframe, Shadow, Hit shapes, Hide, Show everything hidden, Interface
+size) and Help (Show the tips again, The keys, About). Every line shows
+its key.
+
+**The top bar** has the menus, then Undo and Redo as arrows, **Add**,
+and at the right **Export .glb** (the one yellow button), Render picture
+and the version.
+
+**Interface size.** View > Interface size makes everything bigger or
+smaller: "Like Windows" (the size your system asks for, the first time),
+90%, 100%, 125%, 150% or 200%. It is remembered. On a 2560 x 1440 screen
+at 100%, 150% looks as a 1280 x 720 one does. Text is never smaller
+than 12 points at 100%.
 
 **The keys.** (Help > The keys shows this list in the Studio.)
 
@@ -529,7 +546,7 @@ so Undo carries on after the Studio is closed and opened again.
   note (`crash-<date>.txt`, in the Studio's settings folder:
   `%APPDATA%\Duck Mold` on Windows, `~/.config/duck-mold` on Linux).
 
-**Export** and **Render picture**, in the top bar, write the `.glb` and
+**Export .glb** and **Render picture**, at the right of the top bar, write the `.glb` and
 the four-view picture next to the recipe: no terminal needed.
 
 **The file is the model.** The Studio keeps no model of its own: it
@@ -571,7 +588,7 @@ quote or a table written twice, are said in plain words.
 - A window that **only looks** shows the selected part's facts as plain
   words, not greyed fields.
 
-![The Studio showing the robot, with its left eye selected and its properties](docs/studio.png)
+![The Studio showing the robot, with its left arm selected: the parts on the left, the tools and the view buttons over the picture, its properties and the palette on the right](docs/studio.png)
 
 `duck-mold preview examples/robot.toml` opens the same window to look
 only: nothing can be changed there.
@@ -731,10 +748,10 @@ examples have them.
 
 ![The robot with its hit shapes outlined](tests/golden/robot.colliders.png)
 
-**In the Studio**, the Hits switch in the top bar draws them. The
+**In the Studio**, the Hits switch at the picture's bottom right draws them. The
 properties panel's **Hit shape** list sets the selected part's: what
-the model's line gives it (`fitted: box`), a box, a sphere or a
-capsule fitted to it, or none. A shape it says for itself shows its
+the model's line gives it ("the model's: each part"), a box, a sphere
+or a capsule of its own fitted to it ("its own: box"), or "none". A shape it says for itself shows its
 middle and size (or radius and length) to type, and **Fit again**
 forgets typed numbers. With nothing selected, the panel's **Hit
 shapes** list is the model's line: none, each part, or one capsule,

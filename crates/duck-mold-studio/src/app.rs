@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 
 use duck_mold_core::tools;
 use duck_mold_view::studio::handles::Tool;
-use duck_mold_view::studio::viewport::Viewpoint;
 use duck_mold_view::studio::{FaceTool, Mode, Studio};
-use eframe::egui::{self, Color32, Rect, RichText, Sense};
+use eframe::egui::{self, Color32, Rect, RichText, Sense, pos2};
 
 use crate::actions::{self, Action};
+use crate::icons::{self, Icon};
 use crate::recent::Recent;
 use crate::{gallery, library, palette, properties, theme, tour, view};
 
@@ -33,6 +33,9 @@ pub struct StudioApp {
     note: Option<Note>,
     /// What the parts list is filtered by: only parts whose path has it.
     parts_filter: String,
+    /// The interface size chosen, in percent: `None` is the size the
+    /// system asks for.
+    interface: Option<u32>,
     view: view::View,
     /// The window's title as it was last set.
     titled: String,
@@ -106,6 +109,7 @@ impl StudioApp {
             had_mistakes: false,
             note: None,
             parts_filter: String::new(),
+            interface: None,
             view: view::View::default(),
             titled: String::new(),
             shown_selected: None,
@@ -129,6 +133,7 @@ impl StudioApp {
     pub fn remembering(mut self, recent: Recent) -> StudioApp {
         self.recent = recent;
         self.crashed = self.recent.folder().and_then(crate::crash::take_unseen);
+        self.interface = self.recent.interface_size();
         if let Some(studio) = &mut self.studio {
             self.recent.opened(studio.path());
             studio.hide_again(self.recent.hidden_in(studio.path()));
@@ -274,6 +279,11 @@ impl StudioApp {
 
     /// Draws the whole screen into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // Everything bigger or smaller, as chosen.
+        let zoom = self.interface.map_or(1.0, |percent| percent as f32 / 100.0);
+        if (ui.ctx().zoom_factor() - zoom).abs() > 0.001 {
+            ui.ctx().set_zoom_factor(zoom);
+        }
         // For a note, if the Studio crashes.
         match &self.studio {
             Some(studio) => crate::crash::remember(Some(studio.path()), studio.status()),
@@ -309,9 +319,16 @@ impl StudioApp {
         // What a menu or a key asked for, carried out at the end.
         let mut asked: Option<Action> = None;
         egui::Panel::top("duck_mold_bar").show(ui, |ui| {
-            ui.add_space(2.0);
+            ui.add_space(3.0);
             // One row on a wide window; it wraps to two on a narrow one.
             ui.horizontal_wrapped(|ui| {
+                if let Some(duck) = self.gallery.example(ui.ctx(), "duck") {
+                    ui.add(
+                        egui::Image::new(duck)
+                            .fit_to_exact_size(egui::vec2(22.0, 22.0))
+                            .corner_radius(4.0),
+                    );
+                }
                 ui.label(RichText::new(studio.title()).strong());
                 if studio.look_only() {
                     ui.label(RichText::new("looking only").weak())
@@ -324,17 +341,20 @@ impl StudioApp {
                     .into_iter()
                     .map(Path::to_path_buf)
                     .collect();
-                if let Some(action) = actions::menus(ui, studio, &recent) {
+                if let Some(action) = actions::menus(ui, studio, &recent, self.interface) {
                     asked = Some(action);
                 }
-                ui.separator();
                 if !studio.look_only() {
+                    ui.separator();
                     // What each would do is in its tip, and in the
                     // status line once it is done.
                     let back = studio.can_undo().map(str::to_owned);
                     let stops = studio.undo_stops();
                     let undo = ui
-                        .add_enabled(back.is_some(), egui::Button::new("Undo"))
+                        .add_enabled_ui(back.is_some(), |ui| {
+                            icons::button(ui, Icon::Undo, "Undo", false)
+                        })
+                        .inner
                         .on_hover_text(match &back {
                             Some(title) => format!("Undo: {title} (Ctrl+Z)"),
                             None => "Nothing to undo".to_owned(),
@@ -348,7 +368,10 @@ impl StudioApp {
                     }
                     let again = studio.can_redo().map(str::to_owned);
                     let redo = ui
-                        .add_enabled(again.is_some(), egui::Button::new("Redo"))
+                        .add_enabled_ui(again.is_some(), |ui| {
+                            icons::button(ui, Icon::Redo, "Redo", false)
+                        })
+                        .inner
                         .on_hover_text(match &again {
                             Some(title) => format!("Redo: {title} (Ctrl+Y)"),
                             None => "Nothing to redo".to_owned(),
@@ -360,84 +383,45 @@ impl StudioApp {
                     // A new part that is joined to nothing: it stands on
                     // the ground where the view looks, ready to be moved.
                     let thumbs = &mut self.thumbs;
-                    let add = ui
-                        .menu_button("Add", |ui| {
-                            ui.label(RichText::new("A new part, on the ground").weak().small());
-                            if let Some(made) = view::choices(ui, studio, thumbs) {
-                                asked = Some(Action::AddFree(made));
-                                ui.close();
-                            }
-                        })
-                        .response;
+                    let add = icons::labelled(ui, Icon::Add, "Add", false);
+                    egui::Popup::menu(&add).show(|ui| {
+                        ui.label(RichText::new("A new part, on the ground").weak());
+                        if let Some(made) = view::choices(ui, studio, thumbs) {
+                            asked = Some(Action::AddFree(made));
+                            ui.close();
+                        }
+                    });
                     self.add_button = Some(add.rect);
                     add.on_hover_text(
                         "Add a part that stands on the ground, joined to nothing (Shift+A). To add one joined to another part, click a dot on that part.",
                     );
-                    ui.separator();
                 }
-                // The four sides to look from.
-                for (from, key) in Viewpoint::ALL.into_iter().zip(["1", "2", "3", "4"]) {
-                    let tip = match from {
-                        Viewpoint::Front => "Look at the front",
-                        Viewpoint::Side => "Look at the right side",
-                        Viewpoint::Top => "Look down from the top",
-                        Viewpoint::ThreeQuarter => "Look from the front right, a little above",
-                    };
-                    if ui
-                        .button(from.name())
-                        .on_hover_text(format!("{tip} ({key})"))
-                        .clicked()
-                    {
-                        asked = Some(Action::LookFrom(from));
+                // At the right: the version, and what to do with the model.
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    ui.label(RichText::new(env!("CARGO_PKG_VERSION")).weak())
+                        .on_hover_text("The version of Duck Mold Studio");
+                    // A mesh file is only looked at: nothing to export.
+                    if studio.is_recipe() {
+                        ui.separator();
+                        if icons::button(ui, Icon::Picture, "Render picture", false)
+                            .on_hover_text("Render picture: write a picture of the model (four views) next to the recipe")
+                            .clicked()
+                        {
+                            asked = Some(Action::RenderPicture);
+                        }
+                        let export = ui
+                            .add(theme::primary_button("Export .glb"))
+                            .on_hover_text("Write the model as a .glb file next to the recipe, for a game (Ctrl+E)");
+                        export.widget_info(|| {
+                            egui::WidgetInfo::labeled(egui::Role::Button, true, "Export")
+                        });
+                        if export.clicked() {
+                            asked = Some(Action::Export);
+                        }
                     }
-                }
-                if ui
-                    .button("Frame")
-                    .on_hover_text("Bring what is selected, or the whole model, into view (F)")
-                    .clicked()
-                {
-                    asked = Some(Action::Frame);
-                }
-                ui.separator();
-                ui.toggle_value(&mut studio.grid, "Grid")
-                    .on_hover_text("The grid on the ground: one square is one metre");
-                ui.toggle_value(&mut studio.wire, "Wire")
-                    .on_hover_text("Wireframe: only the outline of each face, to see through the model (Z)");
-                ui.toggle_value(&mut studio.shadow, "Shadow")
-                    .on_hover_text("Darken the ground under the model, darkest where something stands on it");
-                ui.toggle_value(&mut studio.hits, "Hits").on_hover_text(
-                    "Hit shapes: the box, ball or capsule round each part that a game tests what was hit with",
-                );
-                if studio.hidden_count() > 0
-                    && ui
-                        .button(format!("{} hidden", studio.hidden_count()))
-                        .on_hover_text(
-                            "Parts that aren't drawn. They are still in the model. Click to show them all (Shift+H)",
-                        )
-                        .clicked()
-                {
-                    asked = Some(Action::ShowAll);
-                }
-                // A mesh file is only looked at: nothing to export.
-                if studio.is_recipe() {
-                    ui.separator();
-                    if ui
-                        .button("Export")
-                        .on_hover_text("Write the model as a .glb file next to the recipe (Ctrl+E)")
-                        .clicked()
-                    {
-                        asked = Some(Action::Export);
-                    }
-                    if ui
-                        .button("Render picture")
-                        .on_hover_text("Write a picture of the model (four views) next to the recipe")
-                        .clicked()
-                    {
-                        asked = Some(Action::RenderPicture);
-                    }
-                }
+                });
             });
-            ui.add_space(2.0);
+            ui.add_space(3.0);
         });
 
         // One line at the bottom: the problems, and what was done last.
@@ -476,9 +460,10 @@ impl StudioApp {
                 if !studio.look_only() {
                     // As tall as it needs for its pictures and the
                     // animations list; it can be dragged taller.
+                    let third = (ui.available_height() / 3.0).clamp(150.0, 320.0);
                     egui::Panel::bottom("duck_mold_library")
                         .resizable(true)
-                        .default_size(250.0)
+                        .default_size(third)
                         .min_size(120.0)
                         .show(ui, |ui| library::panel(ui, studio, &mut self.thumbs));
                 }
@@ -676,6 +661,7 @@ impl StudioApp {
                         | Action::Export
                         | Action::RenderPicture
                         | Action::StartPage
+                        | Action::InterfaceSize(_)
                         | Action::ShowKeys
                         | Action::ShowTips
                         | Action::About
@@ -704,6 +690,10 @@ impl StudioApp {
                     note_of(&mut self.note, studio.render_picture(), studio, now);
                 }
                 Action::StartPage => to_start = true,
+                Action::InterfaceSize(size) => {
+                    self.interface = size;
+                    self.recent.keep_interface_size(size);
+                }
                 Action::SaveAgain => {
                     note_of(&mut self.note, studio.save_again(), studio, now);
                 }
@@ -1040,8 +1030,9 @@ impl StudioApp {
             egui::ScrollArea::vertical()
                 .auto_shrink([false, false])
                 .show(ui, |ui| {
-                    // One column, not wider than is comfortable to read.
-                    let wide = ui.available_width().min(860.0);
+                    // Up to 1400 points wide: on a big screen the examples
+                    // spread out, and "How it works" sits beside them.
+                    let wide = ui.available_width().min(START_PAGE_WIDTH);
                     let margin = ((ui.available_width() - wide) / 2.0).max(12.0);
                     ui.horizontal(|ui| {
                         ui.add_space(margin);
@@ -1193,28 +1184,64 @@ impl StudioApp {
                                 .small(),
                             );
                             ui.add_space(4.0);
-                            ui.horizontal_wrapped(|ui| {
-                                for known in tools::EXAMPLES {
-                                    let picture = self.gallery.example(ui.ctx(), known.name).cloned();
-                                    if tile(ui, picture.as_ref(), known.name, 120.0)
-                                        .on_hover_text(known.about)
-                                        .clicked()
-                                    {
-                                        example = Some(known.name);
+                            let beside = wide >= HOW_BESIDE_FROM;
+                            let examples_width = if beside {
+                                wide - 24.0 - HOW_WIDTH - 24.0
+                            } else {
+                                wide - 24.0
+                            };
+                            // As many across as fit, from three to six.
+                            let gap = 8.0;
+                            let across = (((examples_width + gap) / (CARD_SMALLEST + gap)).floor()
+                                as usize)
+                                .clamp(3, 6);
+                            let card = (examples_width - gap * (across - 1) as f32) / across as f32;
+                            let side = (card - 12.0).clamp(96.0, 220.0);
+                            let how = |ui: &mut egui::Ui| {
+                                ui.label(RichText::new("How it works").strong());
+                                ui.add_space(2.0);
+                                for line in [
+                                    "1. A model is made of parts: boxes, balls, tubes, arches...",
+                                    "2. Parts stand free, or join at dots, so they stay together.",
+                                    "3. Everything you do is written to a recipe file as you go. Export turns it into the model file for your game.",
+                                ] {
+                                    ui.label(line);
+                                }
+                            };
+                            ui.horizontal_top(|ui| {
+                                ui.vertical(|ui| {
+                                    ui.set_width(examples_width);
+                                    for row in tools::EXAMPLES.chunks(across) {
+                                        ui.horizontal_top(|ui| {
+                                            ui.spacing_mut().item_spacing.x = gap;
+                                            for known in row {
+                                                let picture = self
+                                                    .gallery
+                                                    .example(ui.ctx(), known.name)
+                                                    .cloned();
+                                                if example_card(ui, picture.as_ref(), known.name, known.about, side)
+                                                    .on_hover_text(known.about)
+                                                    .clicked()
+                                                {
+                                                    example = Some(known.name);
+                                                }
+                                            }
+                                        });
+                                        ui.add_space(gap);
                                     }
+                                });
+                                if beside {
+                                    ui.add_space(24.0);
+                                    ui.vertical(|ui| {
+                                        ui.set_width(HOW_WIDTH);
+                                        how(ui);
+                                    });
                                 }
                             });
-
-                            // ---- how it works
-                            ui.add_space(20.0);
-                            ui.label(RichText::new("How it works").strong());
-                            ui.add_space(2.0);
-                            for line in [
-                                "1. A model is made of parts: boxes, balls, tubes, arches...",
-                                "2. Parts stand free, or join at dots, so they stay together.",
-                                "3. Everything you do is written to a recipe file as you go. Export turns it into the model file for your game.",
-                            ] {
-                                ui.label(line);
+                            if !beside {
+                                // ---- how it works, under them
+                                ui.add_space(12.0);
+                                how(ui);
                             }
                             ui.add_space(24.0);
                         });
@@ -1244,6 +1271,71 @@ impl StudioApp {
             self.start_new(&path);
         }
     }
+}
+
+/// How wide the start page may be, in points.
+pub const START_PAGE_WIDTH: f32 = 1400.0;
+/// From how wide "How it works" sits beside the examples, not under them.
+pub const HOW_BESIDE_FROM: f32 = 1100.0;
+/// How wide "How it works" is beside the examples.
+pub const HOW_WIDTH: f32 = 280.0;
+/// How narrow an example's card may be before fewer fit across.
+pub const CARD_SMALLEST: f32 = 150.0;
+
+/// An example on the start page: its picture, its name, and what it
+/// shows in a line or two under it. The whole card is one button.
+fn example_card(
+    ui: &mut egui::Ui,
+    picture: Option<&egui::TextureHandle>,
+    name: &str,
+    about: &str,
+    side: f32,
+) -> egui::Response {
+    // What it shows: two lines at most, with "..." if it goes on.
+    let mut job = egui::text::LayoutJob::simple(
+        about.to_owned(),
+        egui::FontId::proportional(theme::SMALLEST_TEXT),
+        ui.visuals().weak_text_color(),
+        side,
+    );
+    job.wrap.max_rows = 2;
+    let about_text = ui.painter().layout_job(job);
+    let about_height = about_text.size().y;
+    let size = egui::vec2(side + 12.0, side + 30.0 + about_height + 6.0);
+    let (rect, response) = ui.allocate_exact_size(size, Sense::click());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, name));
+    if ui.is_rect_visible(rect) {
+        let visuals = ui.style().interact(&response);
+        let painter = ui.painter();
+        painter.rect_filled(rect, 6.0, visuals.weak_bg_fill);
+        if response.hovered() || response.has_focus() {
+            painter.rect_stroke(
+                rect,
+                6.0,
+                egui::Stroke::new(1.5, theme::DUCK_YELLOW),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let frame = Rect::from_min_size(rect.min + egui::vec2(6.0, 6.0), egui::vec2(side, side));
+        if let Some(picture) = picture {
+            egui::Image::new(picture)
+                .corner_radius(4.0)
+                .paint_at(ui, frame);
+        }
+        painter.text(
+            pos2(frame.left(), frame.bottom() + 4.0),
+            egui::Align2::LEFT_TOP,
+            name,
+            egui::FontId::proportional(14.0),
+            visuals.text_color(),
+        );
+        painter.galley(
+            pos2(frame.left(), frame.bottom() + 24.0),
+            about_text,
+            ui.visuals().weak_text_color(),
+        );
+    }
+    response
 }
 
 /// A tile of the start page: a picture with a name under it, to click.
@@ -1368,7 +1460,10 @@ fn crashed_notice(ui: &mut egui::Ui, crash: &crate::crash::Crash) -> Option<Cras
         .corner_radius(6)
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
-            ui.label(RichText::new("Duck Mold Studio closed unexpectedly last time.").strong());
+            ui.horizontal(|ui| {
+                icons::icon(ui, Icon::Warning, theme::LOOK);
+                ui.label(RichText::new("Duck Mold Studio closed unexpectedly last time.").strong());
+            });
             if let Some(file) = &crash.file {
                 let name = file
                     .file_name()
@@ -1417,7 +1512,10 @@ fn missing_bar(ui: &mut egui::Ui, why: &str, look_only: bool) -> Option<Action> 
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(format!("{why}.")).strong());
+            ui.horizontal(|ui| {
+                icons::icon(ui, Icon::Warning, theme::LOOK);
+                ui.label(RichText::new(format!("{why}.")).strong());
+            });
             ui.horizontal(|ui| {
                 if !look_only {
                     if ui
@@ -1520,16 +1618,16 @@ fn outliner(
                     ui.add_space(row.depth as f32 * 14.0);
                     // The eye first, at the right; the name and what the
                     // part is take the room that is left.
+                    // The eye shows on the line the mouse is on, and stays
+                    // shut on a hidden part.
+                    let line_hovered = ui.rect_contains_pointer(ui.max_rect());
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let (mark, tip) = if row.hidden {
-                            ("show", "Hidden: click to show it again")
+                        let (mark, icon, tip) = if row.hidden {
+                            ("show", Icon::EyeShut, "Hidden: click to show it again")
                         } else {
-                            ("hide", "Click to hide it. It stays in the model")
+                            ("hide", Icon::Eye, "Click to hide it. It stays in the model")
                         };
-                        let button =
-                            egui::Button::new(RichText::new(mark).small().weak()).frame(row.hidden);
-                        if ui
-                            .add(button)
+                        if icons::quiet_button(ui, icon, mark, row.hidden || line_hovered)
                             .on_hover_text(format!("{tip} ({})", row.path))
                             .clicked()
                         {
@@ -1642,14 +1740,10 @@ fn show_note(ctx: &egui::Context, note: &Note, picture: Rect) -> bool {
     let mut closed = false;
     egui::Area::new(egui::Id::unique("duck_mold_note"))
         .order(egui::Order::Foreground)
-        .anchor(
-            egui::Align2::RIGHT_TOP,
-            // Under the view's Play list, which sits in the corner.
-            egui::vec2(
-                picture.right() - ctx.content_rect().right() - 12.0,
-                picture.top() + 44.0,
-            ),
-        )
+        // At the top of the picture, in the middle: the corners have the
+        // tools and the gizmo.
+        .pivot(egui::Align2::CENTER_TOP)
+        .fixed_pos(egui::pos2(picture.center().x, picture.top() + 10.0))
         .show(ctx, |ui| {
             egui::Frame::popup(ui.style()).show(ui, |ui| {
                 ui.set_max_width(360.0);
@@ -1702,6 +1796,14 @@ pub fn problems_words(studio: &Studio) -> (Color32, String) {
 fn status_bar(ui: &mut egui::Ui, studio: &Studio, open: &mut bool) {
     ui.horizontal_centered(|ui| {
         let (colour, words) = problems_words(studio);
+        let mark = if studio.has_mistakes() {
+            Icon::Mistake
+        } else if studio.problems().is_empty() {
+            Icon::Check
+        } else {
+            Icon::Warning
+        };
+        icons::icon(ui, mark, colour);
         let button = ui
             .add(
                 egui::Button::new(RichText::new(&words).color(colour))

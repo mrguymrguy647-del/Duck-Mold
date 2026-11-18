@@ -68,6 +68,8 @@ pub fn panel(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
         }
         for (name, rgb) in &palette {
             ui.horizontal(|ui| {
+                // The × shows on the line the mouse is on.
+                let line_hovered = ui.rect_contains_pointer(ui.max_rect());
                 // The colour itself: a click opens the picker, and
                 // letting go changes it everywhere it is used.
                 let mut picked = match &draft.recolor {
@@ -112,12 +114,14 @@ pub fn panel(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 }
                 if edits {
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        let remove =
-                            egui::Button::new(RichText::new("remove").small().weak()).frame(false);
-                        if ui
-                            .add(remove)
-                            .on_hover_text(format!("Take \"{name}\" out of the palette"))
-                            .clicked()
+                        if crate::icons::quiet_button(
+                            ui,
+                            crate::icons::Icon::Cross,
+                            "remove",
+                            line_hovered,
+                        )
+                        .on_hover_text(format!("Take \"{name}\" out of the palette"))
+                        .clicked()
                         {
                             if studio.colour_in_use(name) {
                                 // Ask what to paint with instead.
