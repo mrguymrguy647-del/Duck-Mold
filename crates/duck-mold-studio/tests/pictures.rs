@@ -443,7 +443,9 @@ fn the_screens_look_as_they_did() {
         )
         .unwrap();
         let mut screen = harness(
-            StudioApp::new().remembering(Recent::kept_in(settings.join("recent.txt"))),
+            StudioApp::new()
+                .remembering(Recent::kept_in(settings.join("recent.txt")))
+                .keeping_models_in("Documents/Duck Mold"),
             true,
         );
         screen.run_steps(3);

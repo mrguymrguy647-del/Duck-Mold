@@ -36,7 +36,8 @@ fn a_crash_writes_a_note_that_the_next_start_finds_once() {
         env!("CARGO_PKG_VERSION")
     )));
     assert!(note.contains("Message:  something went wrong"), "{note}");
-    assert!(note.contains("tests/crash.rs:"), "{note}");
+    // The place in the code, with / or \ as the system writes paths.
+    assert!(note.contains("crash.rs:"), "{note}");
     assert!(
         note.contains(&format!("Open:     {}", recipe.display())),
         "{note}"
