@@ -1180,6 +1180,13 @@ give animations, poses and parts are the names game code uses: keep
 them plain (`idle`, `walk`, `wave`, `jump`, `open`). `examples/robot.toml`
 has limits, six poses and three animations to copy from.
 
+**Images in a game.** `duck-mold export` puts every image the model
+uses inside the `.glb`, on one sheet, and the game's code doesn't
+change: `Mesh::load_glb` and `AnimatedModel` draw them, with sharp
+pixels. A model with images needs a Duck Forge that reads them (reader
+version 9): an older one refuses the file with "update Duck Forge". A
+model without images exports exactly as it always did.
+
 ### Working beside the Studio
 
 A person may have the recipe open in Duck Mold Studio while you edit it.

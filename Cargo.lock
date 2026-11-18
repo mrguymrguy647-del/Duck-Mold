@@ -986,7 +986,7 @@ dependencies = [
 [[package]]
 name = "duckforge"
 version = "0.1.0"
-source = "git+https://github.com/mrguymrguy647-del/Duck-Forge?rev=3a21f0a377f9b572fa73b60527873b3bb956c212#3a21f0a377f9b572fa73b60527873b3bb956c212"
+source = "git+https://github.com/mrguymrguy647-del/Duck-Forge?rev=57013dada0dfbb5167f1b009ebb8229cd65a5dbc#57013dada0dfbb5167f1b009ebb8229cd65a5dbc"
 dependencies = [
  "ab_glyph",
  "gif",

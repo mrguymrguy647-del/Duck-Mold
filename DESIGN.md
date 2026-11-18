@@ -6206,6 +6206,27 @@ all versions share the one sheet. Stairs that become a wedge in Far 2
 lose the images of their `front` and `top`, which the wedge doesn't
 have, and show the part's `image` or colour.
 
+*As built (step 2):*
+
+- **One primitive for each part, as before**, with `TEXCOORD_0` on every
+  corner. A face without an image points all its corners at one plain
+  white place on the sheet, `extras.duck_mold.images.plain_at`, so other
+  glTF programs show its colour; the reader turns a triangle whose
+  three corners are exactly there back into "no image".
+- The reader's `GlbPicture` also has the sheet's `width` and `height`
+  (from the file's description, without reading the PNG). A far-away
+  version's `picture` is empty: it shows the model's own.
+- `GlbModel::picture_sprite()` in Duck Forge is the picture as a
+  `Sprite`; `GlbModel::load` reads the picture once to check it.
+- A face's colour isn't in the file once it has an image (the sheet
+  holds image and colour together), so `inspect` on a `.glb` counts such
+  a face under "no colour". `extras.duck_mold.images.files` says which
+  colour each image was laid over.
+- The Khronos validator reports no errors, warnings, infos or hints on a
+  file with images.
+- Duck Mold points at the Duck Forge pull request's commit until it is
+  merged, as in 7a.
+
 ### 11. Duck Mold inside Duck Forge's Studio
 
 **How it looks.** The middle of Duck Forge's Studio gets tabs. The first
