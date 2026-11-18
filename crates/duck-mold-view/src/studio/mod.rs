@@ -140,6 +140,15 @@ pub struct Studio {
     /// undone and can be made again.
     undo: Vec<history::Step>,
     redo: Vec<history::Step>,
+    /// Where the undo history is kept on disk, if it is.
+    history_file: Option<PathBuf>,
+    /// True when the file isn't there any more (deleted or moved): the
+    /// model stays, and nothing is changed until it is saved again.
+    gone: bool,
+    /// Text another program has just saved, that doesn't build: shown
+    /// once it has stayed the same for one more check. A program that
+    /// writes a file in pieces isn't shown as a mistake for a moment.
+    settling: Option<String>,
     library: library::Library,
     /// The animation library's files, as last read.
     shelf: shelf::Shelf,
@@ -212,6 +221,9 @@ impl Studio {
             dragging: None,
             undo: Vec::new(),
             redo: Vec::new(),
+            history_file: None,
+            gone: false,
+            settling: None,
             library: library::Library::default(),
             shelf: shelf::Shelf::default(),
             paint: None,
@@ -335,9 +347,20 @@ impl Studio {
     /// Reads the file and builds it again. If it has mistakes, they
     /// become the problems and the last good model stays.
     pub fn reload(&mut self) {
-        self.builds += 1;
-        self.text = std::fs::read_to_string(&self.path).unwrap_or_default();
+        let text = std::fs::read_to_string(&self.path).unwrap_or_default();
         let (built, files) = tools::build_watching(&self.path);
+        self.take_build(text, built, files);
+    }
+
+    /// Shows what was built from `text`.
+    fn take_build(
+        &mut self,
+        text: String,
+        built: Result<tools::Built, Failure>,
+        files: Vec<PathBuf>,
+    ) {
+        self.builds += 1;
+        self.text = text;
         self.watched = files
             .into_iter()
             .map(|path| Watched {
@@ -438,12 +461,91 @@ impl Studio {
     /// built again.
     pub fn check_files(&mut self) -> bool {
         if !self.files_changed() {
+            self.settling = None;
             return false;
         }
+        if !self.path.is_file() {
+            // Deleted or moved: the model stays, and the window offers
+            // to save it again.
+            if self.gone {
+                return false;
+            }
+            self.gone = true;
+            if let Some(why) = self.missing() {
+                self.say(why);
+            }
+            return true;
+        }
+        let text = std::fs::read_to_string(&self.path).unwrap_or_default();
+        let (built, files) = tools::build_watching(&self.path);
+        if built.is_err() && text != self.text && self.settling.as_ref() != Some(&text) {
+            // It may be half written: looked at again next check.
+            self.settling = Some(text);
+            return false;
+        }
+        self.settling = None;
+        self.gone = false;
         let before = std::mem::take(&mut self.text);
-        self.reload();
+        self.take_build(text, built, files);
         self.changed_outside(before);
         true
+    }
+
+    /// Why nothing can be changed: the file isn't there any more.
+    pub fn missing(&self) -> Option<String> {
+        self.gone
+            .then(|| format!("{} isn't there any more (deleted or moved)", self.title()))
+    }
+
+    /// Writes the recipe the Studio last saw back where it was, after it
+    /// was deleted or moved.
+    pub fn save_again(&mut self) -> Result<String, String> {
+        let path = self.path.clone();
+        self.save_as(&path)
+    }
+
+    /// Writes the recipe the Studio last saw to `path`, and goes on
+    /// working there. The undo history comes along.
+    pub fn save_as(&mut self, path: &Path) -> Result<String, String> {
+        if self.look_only {
+            let why = "This window is only for looking: nothing was changed".to_owned();
+            self.say(why.clone());
+            return Err(why);
+        }
+        if let Err(failure) = edit::swap_in(path, None, &self.text) {
+            let why = capital(&first_error(&failure));
+            self.say(why.clone());
+            return Err(why);
+        }
+        if path != self.path {
+            let folder = self
+                .history_file
+                .take()
+                .and_then(|file| file.parent().map(Path::to_path_buf));
+            self.path = path.to_path_buf();
+            self.shown_as = display_path(path);
+            if let Some(folder) = folder {
+                self.history_file = Some(history::history_file(&folder, path));
+            }
+        }
+        self.gone = false;
+        self.reload();
+        let said = format!("Saved {}", self.title());
+        self.say(said.clone());
+        Ok(said)
+    }
+
+    /// Waits a moment, at most a second, for a file another program is
+    /// saving to settle. False if it hasn't.
+    fn settle(&mut self) -> bool {
+        for _ in 0..10 {
+            self.check_files();
+            if self.settling.is_none() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        false
     }
 
     /// The part with this path.
@@ -627,8 +729,17 @@ impl Studio {
         }
         // What the file holds now is what is edited, not what was read a
         // moment ago: if another program has just saved it, that is seen
-        // first.
-        self.check_files();
+        // first, once it has finished saving.
+        if !self.settle() {
+            let why = format!("Waiting for {} to finish saving...", self.title());
+            self.say(why.clone());
+            return Err(why);
+        }
+        if let Some(why) = self.missing() {
+            let why = format!("Not changed: {why}");
+            self.say(why.clone());
+            return Err(why);
+        }
         let before = self.text.clone();
         let parts_before: Vec<String> = self.outline().into_iter().map(|row| row.path).collect();
         // A socket the Studio made, left with nothing on it by these

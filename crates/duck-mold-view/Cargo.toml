@@ -11,9 +11,9 @@ duck-mold-core = { workspace = true }
 duckforge = { workspace = true }
 png = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 
 [dev-dependencies]
-serde_json = { workspace = true }
 
 [lints]
 workspace = true

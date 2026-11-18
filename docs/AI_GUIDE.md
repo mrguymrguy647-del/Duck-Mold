@@ -1084,6 +1084,24 @@ give animations, poses and parts are the names game code uses: keep
 them plain (`idle`, `walk`, `wave`, `jump`, `open`). `examples/robot.toml`
 has limits, six poses and three animations to copy from.
 
+### Working beside the Studio
+
+A person may have the recipe open in Duck Mold Studio while you edit it.
+That is safe:
+
+- The Studio sees your save within half a second and shows it. A save
+  that doesn't build is shown once it has stayed the same for half a
+  second, so write the whole file at once (or use `duck-mold edit`).
+- Your change is a wall for the Studio's Undo: the person can't undo it
+  by accident. To take it back, edit the recipe again.
+- Every file Duck Mold writes (`edit`, `export`, `render`) is written
+  beside the real one (`<name>.duck-mold-saving`) and swapped in, so the
+  Studio or a game never reads half of it. If you see a
+  `.duck-mold-saving` file, a write was cut off: the real file is whole,
+  and the other can be deleted.
+- A write that fails says why: `the disk is full`, `permission denied`,
+  `another program has the file open and locked`. Nothing was changed.
+
 ## 12. Mistakes to avoid
 
 - **Typing positions when a socket would do.** A part placed with

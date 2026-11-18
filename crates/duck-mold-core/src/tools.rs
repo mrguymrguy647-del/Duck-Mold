@@ -453,19 +453,23 @@ pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Fai
 
 /// Writes a file the program was asked to write, or says in one sentence
 /// why it can't.
+///
+/// It is written beside itself and swapped in (see [`crate::save`]), so a
+/// game reloading a `.glb` never reads half of one.
 pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
-    std::fs::write(path, bytes).map_err(|error| {
-        let reason = match error.kind() {
-            std::io::ErrorKind::NotFound => "that folder doesn't exist",
-            std::io::ErrorKind::PermissionDenied => "permission denied",
-            _ => "it can't be written there",
-        };
-        Failure::Usage(Box::new(Issue::error(
-            Code::Io,
-            "",
-            format!("can't write \"{}\": {reason}", display_path(path)),
-        )))
-    })
+    crate::save::write_safely(path, bytes, None)
+        .map(|_| ())
+        .map_err(|error| {
+            Failure::Usage(Box::new(Issue::error(
+                Code::Io,
+                "",
+                format!(
+                    "can't write \"{}\": {}",
+                    display_path(path),
+                    crate::save::why_not_written(&error)
+                ),
+            )))
+        })
 }
 
 /// The recipe a new model starts as: one box, standing on the ground,

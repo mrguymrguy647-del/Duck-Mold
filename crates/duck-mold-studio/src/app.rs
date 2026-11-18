@@ -22,6 +22,8 @@ pub struct StudioApp {
     studio: Option<Studio>,
     /// What the start page says went wrong, if something did.
     notice: Option<String>,
+    /// A crash last time, for the start page to tell about.
+    crashed: Option<crate::crash::Crash>,
     view: view::View,
     /// The window's title as it was last set.
     titled: String,
@@ -90,6 +92,7 @@ impl StudioApp {
         StudioApp {
             studio: None,
             notice: None,
+            crashed: None,
             view: view::View::default(),
             titled: String::new(),
             shown_selected: None,
@@ -112,11 +115,21 @@ impl StudioApp {
     /// the start page.
     pub fn remembering(mut self, recent: Recent) -> StudioApp {
         self.recent = recent;
+        self.crashed = self.recent.folder().and_then(crate::crash::take_unseen);
         if let Some(studio) = &mut self.studio {
             self.recent.opened(studio.path());
             studio.hide_again(self.recent.hidden_in(studio.path()));
         }
+        self.keep_history();
         self
+    }
+
+    /// Keeps the open recipe's undo history on disk, in the folder the
+    /// recent list is kept in.
+    fn keep_history(&mut self) {
+        if let (Some(studio), Some(folder)) = (&mut self.studio, self.recent.folder()) {
+            studio.keep_history_in(folder.join("undo"));
+        }
     }
 
     /// With a file open: a recipe to edit, or (with `look_only`, or for a
@@ -134,6 +147,7 @@ impl StudioApp {
             let mut studio = Studio::open(path, look_only);
             studio.hide_again(self.recent.hidden_in(studio.path()));
             self.studio = Some(studio);
+            self.keep_history();
             self.notice = None;
             // The first model a person opens to work on gets the tips.
             self.tour = (!look_only && !self.recent.tips_seen()).then_some(0);
@@ -238,6 +252,11 @@ impl StudioApp {
 
     /// Draws the whole screen into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
+        // For a note, if the Studio crashes.
+        match &self.studio {
+            Some(studio) => crate::crash::remember(Some(studio.path()), studio.status()),
+            None => crate::crash::remember(None, ""),
+        }
         let Some(studio) = &mut self.studio else {
             self.start_page(ui);
             return;
@@ -291,10 +310,15 @@ impl StudioApp {
                     // What each would do is in its tip, and in the
                     // status line once it is done.
                     let back = studio.can_undo().map(str::to_owned);
+                    let stops = studio.undo_stops();
                     let undo = ui
                         .add_enabled(back.is_some(), egui::Button::new("Undo"))
                         .on_hover_text(match &back {
                             Some(title) => format!("Undo: {title} (Ctrl+Z)"),
+                            None => "Nothing to undo".to_owned(),
+                        })
+                        .on_disabled_hover_text(match stops {
+                            Some(why) => format!("{why}."),
                             None => "Nothing to undo".to_owned(),
                         });
                     if undo.clicked() {
@@ -446,6 +470,13 @@ impl StudioApp {
             });
 
         egui::CentralPanel::no_frame().show(ui, |ui| {
+            // A recipe deleted or moved while open: the model stays, and
+            // the bar offers to keep it.
+            if let Some(why) = studio.missing()
+                && let Some(action) = missing_bar(ui, &why, studio.look_only())
+            {
+                asked = Some(action);
+            }
             if let Some(action) = view::show(ui, studio, &mut self.view, &mut self.thumbs) {
                 asked = Some(action);
             }
@@ -563,6 +594,7 @@ impl StudioApp {
         let mut open_another = false;
         let mut new_model = false;
         let mut to_start = false;
+        let mut save_as = false;
         let mut open_file: Option<PathBuf> = None;
         let mut open_example: Option<&'static str> = None;
         if let Some(action) = asked {
@@ -613,6 +645,10 @@ impl StudioApp {
                     let _ = studio.render_picture();
                 }
                 Action::StartPage => to_start = true,
+                Action::SaveAgain => {
+                    let _ = studio.save_again();
+                }
+                Action::SaveAs => save_as = true,
                 Action::OpenFile(file) => open_file = Some(file),
                 Action::OpenExample(name) => open_example = Some(name),
                 Action::ShowTips => self.tour = Some(0),
@@ -767,6 +803,13 @@ impl StudioApp {
         }
         if new_model && let Some(path) = pick_new_file() {
             self.start_new(&path);
+        }
+        if save_as
+            && let Some(studio) = &mut self.studio
+            && let Some(path) = pick_save_as(&studio.title())
+        {
+            let _ = studio.save_as(&path);
+            self.recent.opened(&path);
         }
         if to_start {
             self.studio = None;
@@ -960,6 +1003,20 @@ impl StudioApp {
                             if let Some(notice) = &self.notice {
                                 ui.add_space(10.0);
                                 ui.colored_label(theme::BAD, notice);
+                            }
+                            if let Some(crash) = self.crashed.clone() {
+                                ui.add_space(10.0);
+                                match crashed_notice(ui, &crash) {
+                                    Some(CrashAnswer::Open(file)) => {
+                                        self.crashed = None;
+                                        again = Some(file);
+                                    }
+                                    Some(CrashAnswer::ShowNote) => {
+                                        crate::system::open(&crash.note);
+                                    }
+                                    Some(CrashAnswer::Dismiss) => self.crashed = None,
+                                    None => {}
+                                }
                             }
 
                             // ---- the models opened lately
@@ -1161,6 +1218,102 @@ fn pick_file() -> Option<PathBuf> {
         )
         .add_filter("Recipes", &["toml", "json"])
         .pick_file()
+}
+
+/// What was clicked in the notice of a crash.
+enum CrashAnswer {
+    Open(PathBuf),
+    ShowNote,
+    Dismiss,
+}
+
+/// The start page's word about a crash last time.
+fn crashed_notice(ui: &mut egui::Ui, crash: &crate::crash::Crash) -> Option<CrashAnswer> {
+    let mut answer = None;
+    egui::Frame::new()
+        .fill(theme::WARNING_FILL)
+        .corner_radius(6)
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.label(RichText::new("Duck Mold Studio closed unexpectedly last time.").strong());
+            if let Some(file) = &crash.file {
+                let name = file
+                    .file_name()
+                    .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                ui.label(format!(
+                    "Your model was saved up to its last change: {name}."
+                ));
+            }
+            ui.horizontal(|ui| {
+                if let Some(file) = &crash.file
+                    && ui.button("Open it").clicked()
+                {
+                    answer = Some(CrashAnswer::Open(file.clone()));
+                }
+                if ui
+                    .button("Show the crash note")
+                    .on_hover_text(crash.note.display().to_string())
+                    .clicked()
+                {
+                    answer = Some(CrashAnswer::ShowNote);
+                }
+                if ui.button("Don't show again").clicked() {
+                    answer = Some(CrashAnswer::Dismiss);
+                }
+            });
+        });
+    answer
+}
+
+/// Asks where a recipe that was deleted or moved should be saved.
+fn pick_save_as(name: &str) -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Save the model as")
+        .add_filter("Recipe", &["toml", "json"])
+        .set_file_name(name)
+        .save_file()
+}
+
+/// The bar over the picture when the recipe isn't there any more:
+/// save it again, save it somewhere else, or close it. Gives the one
+/// clicked.
+fn missing_bar(ui: &mut egui::Ui, why: &str, look_only: bool) -> Option<Action> {
+    let mut asked = None;
+    egui::Frame::new()
+        .fill(theme::WARNING_FILL)
+        .inner_margin(egui::Margin::symmetric(12, 8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.label(RichText::new(format!("{why}.")).strong());
+            ui.horizontal(|ui| {
+                if !look_only {
+                    if ui
+                        .button("Save it again")
+                        .on_hover_text(
+                            "Write the model back where it was, as the Studio last saw it.",
+                        )
+                        .clicked()
+                    {
+                        asked = Some(Action::SaveAgain);
+                    }
+                    if ui
+                        .button("Save as...")
+                        .on_hover_text("Write the model somewhere else, and go on working there.")
+                        .clicked()
+                    {
+                        asked = Some(Action::SaveAs);
+                    }
+                }
+                if ui
+                    .button("Close it")
+                    .on_hover_text("Go back to the start page. The model is not saved.")
+                    .clicked()
+                {
+                    asked = Some(Action::StartPage);
+                }
+            });
+        });
+    asked
 }
 
 /// Asks where a new recipe should go.

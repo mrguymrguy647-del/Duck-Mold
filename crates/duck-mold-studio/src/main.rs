@@ -45,11 +45,17 @@ fn main() -> eframe::Result {
         }
     }
 
+    let recent = Recent::of_this_person();
+    // A crash leaves a note beside the recent list, told about on the
+    // next start.
+    if let Some(folder) = recent.folder() {
+        duck_mold_studio::crash::install(folder.to_path_buf());
+    }
     let app = match file {
         Some(file) => StudioApp::with_file(file, look_only),
         None => StudioApp::new(),
     }
-    .remembering(Recent::of_this_person());
+    .remembering(recent);
     // The duck in the title bar and the taskbar: a picture of
     // examples/duck.toml.
     let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))

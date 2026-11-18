@@ -408,9 +408,43 @@ fn the_screens_look_as_they_did() {
         screen.run_steps(2);
         let good = std::fs::read_to_string(&recipe).unwrap();
         std::fs::write(&recipe, good.replace("shape = \"box\"", "shape = \"blob\"")).unwrap();
+        // Shown once it has stayed the same for two checks.
+        screen.state_mut().studio_mut().unwrap().check_files();
         assert!(screen.state_mut().studio_mut().unwrap().check_files());
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "mistake"));
+    }
+
+    // A recipe deleted while it is open: the bar over the picture.
+    {
+        let recipe = copy_of("house.toml", "pictures_gone");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        std::fs::remove_file(&recipe).unwrap();
+        assert!(screen.state_mut().studio_mut().unwrap().check_files());
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "missing"));
+    }
+
+    // The start page after a crash.
+    {
+        use duck_mold_studio::recent::Recent;
+        let folder = folder("pictures_crashed");
+        let settings = folder.join("settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        let recipe = folder.join("house.toml");
+        std::fs::copy(examples().join("house.toml"), &recipe).unwrap();
+        std::fs::write(
+            settings.join("crash-2026-11-18-14-02-33.txt"),
+            format!("Open:     {}\n", recipe.display()),
+        )
+        .unwrap();
+        let mut screen = harness(
+            StudioApp::new().remembering(Recent::kept_in(settings.join("recent.txt"))),
+            true,
+        );
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "start-crashed"));
     }
 
     // Shaping: a wall with a framed window, in Face mode with the glass

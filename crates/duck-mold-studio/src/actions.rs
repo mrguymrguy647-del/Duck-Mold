@@ -69,6 +69,12 @@ pub enum Action {
     RenderPicture,
     /// Close the file and go back to the start page.
     StartPage,
+    /// Write the recipe the Studio last saw back where it was, after it
+    /// was deleted or moved.
+    SaveAgain,
+    /// Write the recipe the Studio last saw somewhere else, and work
+    /// there.
+    SaveAs,
     /// Open this file: one opened lately.
     OpenFile(std::path::PathBuf),
     /// Open a copy of this example.

@@ -193,6 +193,9 @@ fn a_mistake_saved_from_outside_shows_in_problems_and_the_model_stays() {
     // Another program saves the recipe with a mistake in it.
     let good = std::fs::read_to_string(&recipe).unwrap();
     std::fs::write(&recipe, good.replace("shape = \"box\"", "shape = \"blob\"")).unwrap();
+    // Shown once it has stayed the same for two checks: it may have been
+    // half saved.
+    assert!(!screen.state_mut().studio_mut().unwrap().check_files());
     assert!(screen.state_mut().studio_mut().unwrap().check_files());
     screen.run_steps(2);
     assert!(screen.query_by_label("None").is_none());
@@ -390,6 +393,28 @@ fn the_panel_shows_the_selected_part_and_changes_the_recipe() {
         "{lines:?}"
     );
     assert!(screen.state().studio().unwrap().problems().is_empty());
+
+    // A name that can't be used: what was typed stays, to be mended.
+    let name = screen.get_by_role_and_label(Role::TextInput, "Name");
+    name.focus();
+    screen.run_steps(2);
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .type_text("body");
+    screen.run_steps(2);
+    screen.key_press(egui::Key::Enter);
+    screen.run_steps(3);
+    assert_eq!(selected(&screen).as_deref(), Some("skull"));
+    assert!(screen.query_all_by_label_contains("Not changed").count() >= 1);
+    assert_eq!(
+        screen
+            .get_by_role_and_label(Role::TextInput, "Name")
+            .value()
+            .as_deref(),
+        Some("body")
+    );
 }
 
 #[test]
@@ -849,19 +874,16 @@ fn undo_and_redo_are_buttons_and_keys() {
     screen.run_steps(3);
     assert_eq!(std::fs::read(&recipe).unwrap(), added);
 
-    // A change from outside is undone the same way.
+    // A change from outside is a wall: Undo stops there, and says why.
     let text = String::from_utf8(added.clone()).unwrap();
-    std::fs::write(
-        &recipe,
-        text.replace("name = \"robot\"", "name = \"robot2\""),
-    )
-    .unwrap();
+    let theirs = text.replace("name = \"robot\"", "name = \"robot2\"");
+    std::fs::write(&recipe, &theirs).unwrap();
     assert!(screen.state_mut().studio_mut().unwrap().check_files());
     screen.run_steps(2);
-    screen.get_by_label("Undo").click();
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
     screen.run_steps(3);
-    assert_eq!(std::fs::read(&recipe).unwrap(), added);
-    screen.get_by_label("Undid: Changed outside the Studio");
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), theirs);
+    screen.get_by_label_contains("changed outside the Studio just now. Undo stops here");
 
     // When only looking there is nothing to undo, and no buttons for it.
     let mut looking = harness(StudioApp::with_file(&recipe, true), false);
@@ -3187,4 +3209,71 @@ fn the_timeline_zooms_and_scrolls() {
     assert_eq!(screen.state().timeline().zoomed(), (1.0, 0.0));
     // Nothing of it is the recipe's.
     assert_eq!(screen.state().studio().unwrap().can_undo(), None);
+}
+
+// ---- never losing work -----------------------------------------------------------
+
+#[test]
+fn a_recipe_that_disappears_gets_a_bar_to_save_it_again() {
+    let recipe = copy_of("robot.toml", "screens_gone");
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    std::fs::remove_file(&recipe).unwrap();
+    assert!(screen.state_mut().studio_mut().unwrap().check_files());
+    screen.run_steps(2);
+    screen.get_by_label("robot.toml isn't there any more (deleted or moved).");
+    // The model is still there to look at.
+    screen.get_by_label("antenna");
+    screen.get_by_label("Save it again").click();
+    screen.run_steps(3);
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), text);
+    assert!(screen.query_by_label("Save it again").is_none());
+
+    // Or closed: back to the start page.
+    std::fs::remove_file(&recipe).unwrap();
+    assert!(screen.state_mut().studio_mut().unwrap().check_files());
+    screen.run_steps(2);
+    screen.get_by_label("Close it").click();
+    screen.run_steps(3);
+    assert!(screen.state().studio().is_none());
+}
+
+#[test]
+fn a_crash_last_time_is_told_on_the_start_page_once() {
+    use duck_mold_studio::recent::Recent;
+    let folder = folder("screens_crashed");
+    let recipe = folder.join("robot.toml");
+    std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+    let settings = folder.join("settings");
+    std::fs::create_dir_all(&settings).unwrap();
+    std::fs::write(
+        settings.join("crash-2026-11-18-14-02-33.txt"),
+        format!(
+            "Duck Mold Studio closed unexpectedly.\n\nOpen:     {}\n",
+            recipe.display()
+        ),
+    )
+    .unwrap();
+    let list = settings.join("recent.txt");
+    let mut screen = harness(
+        StudioApp::new().remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    screen.step();
+    screen.get_by_label("Duck Mold Studio closed unexpectedly last time.");
+    screen.get_by_label("Your model was saved up to its last change: robot.toml.");
+    screen.get_by_label("Show the crash note");
+    screen.get_by_label("Open it").click();
+    screen.run_steps(3);
+    assert_eq!(screen.state().title(), "robot.toml - Duck Mold Studio");
+
+    // The next start says nothing more about it.
+    let mut screen = harness(StudioApp::new().remembering(Recent::kept_in(list)), false);
+    screen.step();
+    assert!(
+        screen
+            .query_by_label("Duck Mold Studio closed unexpectedly last time.")
+            .is_none()
+    );
 }

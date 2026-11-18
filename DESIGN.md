@@ -4879,6 +4879,13 @@ From the audit's known-limits table, the rows marked **now** are fixed.
     robot.toml. [Open it] [Show the crash note]"*.
   - Because every change is already in the recipe, and Undo is now on disk,
     nothing is lost but the drag that was in hand.
+- **As built (step 1).**
+  - The wall's message says how long ago, not the clock time: *"robot.toml
+    was changed outside the Studio 2 minutes ago."* Rust's standard library
+    can't read the local time zone, and a clock time in UTC would mislead.
+  - The crash note's name and time are in UTC, and say so.
+  - The bar and the crash notice use words, not ⚠ and ✕: the built-in font
+    has neither. Step 3's drawn icons replace them.
 
 #### What was broken or misleading (B1 to B10)
 

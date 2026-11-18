@@ -4211,25 +4211,21 @@ fn io_problem(path: &Path, what: &str, error: &std::io::Error) -> Failure {
 /// is the text the file should still hold: if it has changed meanwhile,
 /// nothing is written and `Ok(false)` comes back.
 pub fn swap_in(path: &Path, expected: Option<&str>, text: &str) -> Result<bool, Failure> {
-    let mut name = path
-        .file_name()
-        .map(|name| name.to_os_string())
-        .unwrap_or_default();
-    name.push(".duck-mold-saving");
-    let beside = path.with_file_name(name);
-    std::fs::write(&beside, text).map_err(|error| io_problem(path, "write", &error))?;
-    if let Some(expected) = expected {
-        let now = std::fs::read_to_string(path).unwrap_or_default();
-        if now != expected {
-            let _ = std::fs::remove_file(&beside);
-            return Ok(false);
-        }
-    }
-    std::fs::rename(&beside, path).map_err(|error| {
-        let _ = std::fs::remove_file(&beside);
-        io_problem(path, "write", &error)
-    })?;
-    Ok(true)
+    crate::save::write_safely(path, text.as_bytes(), expected.map(str::as_bytes)).map_err(|error| {
+        Failure::Usage(boxed(problem(
+            Code::Io,
+            format!(
+                "can't write \"{}\": {}. Nothing was changed: the recipe is as it was{}",
+                display_path(path),
+                crate::save::why_not_written(&error),
+                if crate::save::is_disk_full(&error) {
+                    ". Free some space and try again"
+                } else {
+                    ""
+                }
+            ),
+        )))
+    })
 }
 
 /// `duck-mold edit`: makes one edit to a recipe file.

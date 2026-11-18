@@ -40,6 +40,12 @@ fn settings_folder() -> Option<PathBuf> {
 }
 
 impl Recent {
+    /// The folder the list is kept in, where the Studio keeps its other
+    /// files too (the undo history, crash notes).
+    pub fn folder(&self) -> Option<&Path> {
+        self.kept_in.as_deref().and_then(Path::parent)
+    }
+
     /// A list that is kept nowhere.
     pub fn nowhere() -> Recent {
         Recent::default()

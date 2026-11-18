@@ -1328,8 +1328,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
             Ok(_) => draft.failed = None,
             Err(why) => {
                 draft.failed = Some(why);
-                // What was typed goes back to what the file says.
-                draft.of = None;
+                // What was typed stays, to be mended and tried again:
+                // it goes back to what the file says when the file
+                // changes or another part is chosen.
                 break;
             }
         }

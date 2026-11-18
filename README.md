@@ -495,10 +495,34 @@ with `examples/desk.toml`, whose library is `examples/parts`.
 **Undo and redo** (the buttons, or Ctrl+Z and Ctrl+Y) take back and
 repeat every change, one at a time, as far back as 500 steps. Because
 the Studio writes each change to the file at once, undo writes the
-earlier text back to the file. A change another program made while the
-Studio was open (an agent, a text editor) is a step too, called "Changed
-outside the Studio": undo always takes back the latest change to the
-file, whoever made it. The steps are forgotten when the Studio closes.
+earlier text back to the file. The last 100 steps are kept on disk too,
+so Undo carries on after the Studio is closed and opened again.
+
+**Your work is never lost.**
+
+- **Another program's change is a wall for Undo.** When an agent or a
+  text editor saves the recipe while the Studio has it open, Undo stops
+  there and says so ("robot.toml was changed outside the Studio 2
+  minutes ago. Undo stops here, so that change isn't lost"). Undo only
+  takes back what the Studio did. The same goes for a change made while
+  the Studio was closed.
+- **Nothing is ever half written.** Every recipe, `.glb` and picture is
+  written beside the real file, saved to the disk, and swapped in at
+  once. A game reloading the model never reads half of one. If the disk
+  is full, or another program has the file locked, the file is left as
+  it was, and the Studio says why.
+- **A file another program is still saving** isn't shown as a mistake
+  for a moment: a version that doesn't build is shown once it has stayed
+  the same for half a second.
+- **A recipe deleted or moved while open** stays on the screen, with a
+  bar to **Save it again**, **Save as...** somewhere else, or **Close
+  it**.
+- **A value typed in the panel that can't be used** stays in its box,
+  with why, to be mended.
+- **If the Studio ever crashes**, the next start says so, with a button
+  to open the model again (saved up to its last change) and the crash
+  note (`crash-<date>.txt`, in the Studio's settings folder:
+  `%APPDATA%\Duck Mold` on Windows, `~/.config/duck-mold` on Linux).
 
 **Export** and **Render picture**, in the top bar, write the `.glb` and
 the four-view picture next to the recipe: no terminal needed.
