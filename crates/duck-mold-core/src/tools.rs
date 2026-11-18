@@ -328,6 +328,35 @@ pub fn inspect_file_listing(path: &Path, also: &Also) -> Result<Inspection, Fail
     Ok(inspection)
 }
 
+/// Far-away version `number` (1 or 2) of a model, as a game draws it
+/// (the parts it leaves out have no faces), named `robot (Far 2)`. Or a
+/// sentence saying why there is none.
+pub fn far_version(model: &Model, number: usize, source: &str) -> Result<Model, Failure> {
+    if model.far.is_empty() {
+        return Err(Failure::Usage(Box::new(
+            Issue::error(
+                Code::Unsupported,
+                "lods",
+                "this model has no far-away versions: add `lods = \"auto\"` to its recipe (`duck-mold edit <recipe> set-lods auto`)",
+            )
+            .in_file(source),
+        )));
+    }
+    let Some(far) = number.checked_sub(1).and_then(|at| model.far.get(at)) else {
+        return Err(Failure::Usage(Box::new(
+            Issue::error(
+                Code::OutOfRange,
+                "far",
+                format!("there is no Far {number}: --far is 1 or 2"),
+            )
+            .got(number),
+        )));
+    };
+    let mut drawn = far.drawn();
+    drawn.name = format!("{} (Far {number})", model.name);
+    Ok(drawn)
+}
+
 /// The model's pose with this name, or a sentence saying which poses it
 /// has. `rest` is always one of them.
 pub fn pose_named(model: &Model, name: &str, source: &str) -> Result<Pose, Failure> {
@@ -488,11 +517,13 @@ pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
 }
 
 /// The recipe a new model starts as: one box, standing on the ground,
-/// with one colour, and a hit shape fitted to every part it will have.
+/// with one colour, a hit shape fitted to every part it will have, and
+/// two far-away versions.
 pub const STARTER: &str = r##"# A new Duck Mold model. Sizes are in metres.
 version = 0
 name = "model"
 colliders = "parts"   # every part gets a hit shape a game can test
+lods = "auto"         # and two simpler versions, for when it is far off
 
 [palette]
 duck = "#FFCC2E"

@@ -163,6 +163,11 @@ enum Command {
         /// outlines: in every view, and in every frame of a strip.
         #[arg(long)]
         colliders: bool,
+        /// Draw one of the model's far-away versions instead (1 or 2: see
+        /// `lods` in the recipe), the simpler model a game draws when it
+        /// is far off. The picture is named robot.far1.png.
+        #[arg(long, value_name = "1|2", conflicts_with = "animation")]
+        far: Option<usize>,
     },
     /// Open the Studio: the window where a model is built with the mouse.
     ///
@@ -418,9 +423,17 @@ fn main() -> ExitCode {
             json,
             pose,
             colliders,
+            far,
             ..
         } => {
-            match render::render_file(&file, output.as_deref(), size, pose.as_deref(), colliders) {
+            match render::render_file(
+                &file,
+                output.as_deref(),
+                size,
+                pose.as_deref(),
+                far,
+                colliders,
+            ) {
                 Ok(rendered) => {
                     if json {
                         say_json(&rendered);

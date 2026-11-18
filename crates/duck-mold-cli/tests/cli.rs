@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "lod", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -2066,6 +2066,93 @@ fn hit_shapes_are_set_listed_and_drawn() {
     assert!(output.status.success(), "{}", stderr(&output));
     let text = std::fs::read_to_string(folder.join("thing.toml")).unwrap();
     assert!(text.contains("colliders = \"parts\""), "{text}");
+}
+
+#[test]
+fn far_away_versions_are_set_reported_and_drawn() {
+    let folder = folder("cli_far");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    // Without them, render --far says what to add.
+    let output = run(&folder, &["render", "tree.toml", "--far", "1"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("lods = \"auto\""),
+        "{}",
+        stderr(&output)
+    );
+
+    let output = edit(&["set-lods", "auto"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("edited tree.toml: the model now has two far-away versions")
+    );
+    let output = edit(&["set-lod", "leaves", "keep"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(text.contains("\nlods = \"auto\"\n"), "{text}");
+    assert!(text.contains("\nlod = \"keep\"\n"), "{text}");
+    let output = edit(&["set-lods", "12,30"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(text.contains("\nlods = [12, 30]\n"), "{text}");
+    // Mistakes of the command.
+    let output = edit(&["set-lods", "far"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("auto, none, or two distances"));
+    let output = edit(&["set-lod", "leaves", "always"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("keep or auto"));
+
+    // inspect says them, in words and in JSON.
+    let output = run(&folder, &["inspect", "tree.toml"]);
+    assert!(
+        stdout(&output).contains("  far versions 2  (Far 1 at 12 m: "),
+        "{}",
+        stdout(&output)
+    );
+    let output = run(&folder, &["inspect", "tree.toml", "--json"]);
+    let far = &json(&output)["far_versions"];
+    assert_eq!(far[0]["name"], "Far 1");
+    assert_eq!(far[1]["distance"], 30.0);
+    // The trunk is simplified; the leaves, kept, are not.
+    assert!(
+        far[1]["triangles"].as_u64()
+            < json(&run(&folder, &["inspect", "tree.toml", "--json"]))["triangles"].as_u64()
+    );
+
+    // render --far draws one, named after it.
+    let output = run(
+        &folder,
+        &["render", "tree.toml", "--far", "2", "--size", "128"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("tree (Far 2): "),
+        "{}",
+        stdout(&output)
+    );
+    assert!(folder.join("tree.far2.png").exists());
+    let output = run(&folder, &["render", "tree.toml", "--far", "3"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--far is 1 or 2"));
+
+    // Taken away again, the file is as it was.
+    assert!(edit(&["set-lods", "none"]).status.success());
+    assert!(edit(&["set-lod", "leaves", "auto"]).status.success());
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        TREE
+    );
+
+    // A new recipe starts with them.
+    let output = run(&folder, &["new", "thing.toml"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("thing.toml")).unwrap();
+    assert!(text.contains("\nlods = \"auto\""), "{text}");
 }
 
 /// The examples folder.

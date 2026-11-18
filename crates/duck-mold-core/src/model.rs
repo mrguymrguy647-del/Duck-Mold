@@ -74,6 +74,31 @@ pub struct FarVersion {
 }
 
 impl FarVersion {
+    /// The model as a game draws this version: the parts it leaves out
+    /// have no faces.
+    pub fn drawn(&self) -> Model {
+        let mut model = self.model.clone();
+        if self.left_out.is_empty() {
+            return model;
+        }
+        fn keep(parts: &mut [Part], old: &[Face], faces: &mut Vec<Face>, left_out: &[String]) {
+            for part in parts {
+                let start = faces.len();
+                if !part.parts.is_empty() {
+                    keep(&mut part.parts, old, faces, left_out);
+                } else if left_out.contains(&part.path) {
+                    part.bounds = None;
+                } else {
+                    faces.extend_from_slice(&old[part.faces.clone()]);
+                }
+                part.faces = start..faces.len();
+            }
+        }
+        let old = std::mem::take(&mut model.faces);
+        keep(&mut model.parts, &old, &mut model.faces, &self.left_out);
+        model
+    }
+
     /// How many triangles it has, the parts left out not counted.
     pub fn triangles(&self) -> usize {
         self.model

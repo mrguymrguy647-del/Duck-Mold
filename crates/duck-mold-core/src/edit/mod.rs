@@ -19,6 +19,7 @@ pub mod doc;
 mod ground;
 pub use ground::{DIP, body_part, deepest_between_keys};
 mod hits;
+mod lods;
 mod motion;
 mod spot;
 
@@ -36,7 +37,7 @@ use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
 use crate::math::{Bounds, Mat3, Vec3};
 use crate::model::{Model, Part};
-use crate::recipe::{Colliders, Limits, PART_FIELDS, Shape, Side, rgb_of};
+use crate::recipe::{Colliders, Limits, Lods, PART_FIELDS, Shape, Side, rgb_of};
 use crate::source::{Node, Syntax, Value};
 use crate::tools::Failure;
 use doc::{Doc, Step, TreePath, Val, key, with};
@@ -458,6 +459,20 @@ pub enum Edit {
         /// What it becomes.
         to: ColliderTo,
     },
+    /// Sets the recipe's `lods`: the model's far-away versions. `None`
+    /// takes the line away: none.
+    SetLods {
+        /// What it becomes.
+        lods: Option<Lods>,
+    },
+    /// Keeps a part whole in the far-away versions (`lod = "keep"`), or
+    /// lets them simplify it again.
+    SetLod {
+        /// The part.
+        part: String,
+        /// True for `keep`, false for `auto`.
+        keep: bool,
+    },
     /// Says how far a part may turn about its join when the model is
     /// posed: its `limits`.
     SetLimits {
@@ -623,7 +638,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 45] = [
+    pub const COMMANDS: [&'static str; 47] = [
         "add",
         "remove",
         "rename",
@@ -666,6 +681,8 @@ impl Edit {
         "remove-key",
         "set-colliders",
         "set-collider",
+        "set-lods",
+        "set-lod",
         "set-event",
         "remove-event",
         "fit-ground",
@@ -703,6 +720,8 @@ impl Edit {
             Edit::SetLimits { .. } => "set-limits",
             Edit::SetColliders { .. } => "set-colliders",
             Edit::SetCollider { .. } => "set-collider",
+            Edit::SetLods { .. } => "set-lods",
+            Edit::SetLod { .. } => "set-lod",
             Edit::SetPose { .. } => "set-pose",
             Edit::AddPose { .. } => "add-pose",
             Edit::RenamePose { .. } => "rename-pose",
@@ -1335,6 +1354,8 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
         Edit::SetLimits { part, limits } => motion::set_limits(doc, part, *limits),
         Edit::SetColliders { colliders } => hits::set_colliders(doc, *colliders),
         Edit::SetCollider { part, to } => hits::set_collider(doc, part, *to, model),
+        Edit::SetLods { lods } => lods::set_lods(doc, *lods),
+        Edit::SetLod { part, keep } => lods::set_lod(doc, part, *keep),
         Edit::SetPose {
             pose,
             part,
@@ -3623,6 +3644,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::Define { part, .. }
         | Edit::SetLimits { part, .. }
         | Edit::SetCollider { part, .. }
+        | Edit::SetLod { part, .. }
         | Edit::SetPose { part, .. }
         | Edit::Cut { part, .. } => part,
         Edit::SetSocket { socket, .. }
@@ -3647,6 +3669,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::RemoveEvent { .. }
         | Edit::FitGround { .. }
         | Edit::SetColliders { .. }
+        | Edit::SetLods { .. }
         | Edit::TidySockets => "",
     }
 }

@@ -232,6 +232,24 @@ fn far_2_leaves_out_the_small_parts_unless_they_say_keep() {
         model.far[1].triangles(),
         model.far[1].model.triangle_count() - triangles_of(&model.far[1].model, "left_eye")
     );
+    // As a game draws it: the eye has no faces, everything else is as
+    // it was.
+    let drawn = model.far[1].drawn();
+    assert_eq!(drawn.triangle_count(), model.far[1].triangles());
+    assert_eq!(triangles_of(&drawn, "left_eye"), 0);
+    for part in drawn.leaves() {
+        if part.path != "left_eye" {
+            assert_eq!(
+                triangles_of(&drawn, &part.path),
+                triangles_of(&model.far[1].model, &part.path)
+            );
+        }
+    }
+    let arm = drawn.part("arm").unwrap();
+    assert_eq!(
+        arm.faces.len(),
+        drawn.part("arm/upper").unwrap().faces.len() + drawn.part("arm/hand").unwrap().faces.len()
+    );
 }
 
 #[test]

@@ -5,7 +5,7 @@
 use clap::{Args, Subcommand};
 use duck_mold_core::edit::{AnimationFrom, Changes, ColliderTo, Edit, Free, LimitsTo, Made, Sizes};
 use duck_mold_core::recipe::Turns;
-use duck_mold_core::recipe::{Colliders, HitKind};
+use duck_mold_core::recipe::{Colliders, HitKind, Lods};
 
 /// One change to a recipe. (Each variant's name is the command's, so
 /// `set-change` is `SetChange`.)
@@ -356,6 +356,22 @@ pub enum Change {
         /// directions). By default, along the part's longest side.
         #[arg(long)]
         along: Option<String>,
+    },
+    /// Say whether the model has far-away versions (LODs): auto (two,
+    /// at distances worked out from its size), two distances in metres
+    /// (near,far: 12,30), or none (take the line away).
+    SetLods {
+        /// auto, none, or near,far in metres.
+        setting: String,
+    },
+    /// Keep a part whole in the far-away versions (keep: never
+    /// simplified or left out, like a character's eyes), or let them
+    /// simplify it again (auto).
+    SetLod {
+        /// The part, as inspect names it: head, or left_arm/hand.
+        part: String,
+        /// keep or auto.
+        setting: String,
     },
     /// Turn or move a part in a pose. Makes the pose if it isn't there.
     ///
@@ -1158,6 +1174,36 @@ impl Change {
                             "colliders is parts, capsule, box, sphere or none, not \"{word}\""
                         )
                     })?),
+                },
+            },
+            Change::SetLods { setting } => Edit::SetLods {
+                lods: match setting.as_str() {
+                    "none" => None,
+                    "auto" => Some(Lods::Auto),
+                    word => {
+                        let distances: Vec<Option<f64>> = word
+                            .split(',')
+                            .map(|number| number.trim().parse::<f64>().ok())
+                            .collect();
+                        match distances.as_slice() {
+                            [Some(near), Some(far)] => Some(Lods::At([*near, *far])),
+                            _ => {
+                                return Err(format!(
+                                    "lods is auto, none, or two distances in metres, near,far (like 12,30): not \"{word}\""
+                                ));
+                            }
+                        }
+                    }
+                },
+            },
+            Change::SetLod { part, setting } => Edit::SetLod {
+                part: part.clone(),
+                keep: match setting.as_str() {
+                    "keep" => true,
+                    "auto" => false,
+                    word => {
+                        return Err(format!("lod is keep or auto, not \"{word}\""));
+                    }
                 },
             },
             Change::SetCollider {
