@@ -2446,3 +2446,18 @@ fn events_are_set_listed_and_taken_away() {
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("key 2 of \"open\" has no events to take away"));
 }
+
+#[test]
+fn the_release_notes_have_a_section_for_this_version() {
+    // The release takes its text from this section: it is written and
+    // checked with the code.
+    let notes = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../RELEASE_NOTES.md"),
+    )
+    .unwrap();
+    let heading = format!("## {}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        notes.lines().any(|line| line == heading),
+        "RELEASE_NOTES.md has no \"{heading}\" section"
+    );
+}

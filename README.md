@@ -22,8 +22,15 @@ and like them it is made for two kinds of user: people who don't know
 
 ## Start the Studio on Windows, without a terminal
 
-- **From a download:** get `DuckMold-<version>-windows.zip` from the
+- **With the installer:** get `DuckMoldSetup-<version>.exe` from the
   [Releases](https://github.com/mrguymrguy647-del/Duck-Mold/releases)
+  page and run it. It installs for you alone (no administrator), puts
+  Duck Mold Studio in the Start menu, and, if you leave its box ticked,
+  lets the command line and AI agents find `duck-mold`. Windows may say
+  "Windows protected your PC": the program isn't signed with a paid
+  certificate. Click "More info", then "Run anyway". Your models stay in
+  Documents\Duck Mold whatever you install or uninstall.
+- **From the zip:** get `DuckMold-<version>-windows.zip` from the same
   page, unzip it, and double-click `DuckMoldStudio.exe`. `READ ME
   FIRST.txt` in the folder says the rest. `Create desktop shortcut.bat`
   puts the duck on your desktop.
@@ -834,16 +841,19 @@ see the handoff note.
 | [PHASE5A_REPORT.md](PHASE5A_REPORT.md) | The first half of Phase 5: limits, poses and animations in the recipe, the `.glb` as a tree of parts, and Duck Forge playing them. |
 | [PHASE5_REPORT.md](PHASE5_REPORT.md) | All of Phase 5, motion: Pose mode, the timeline, the animation library and its starters, the door, cart and gnome, a strip of every example animation, and what Phase 6 should start with. |
 | [PHASE6_REPORT.md](PHASE6_REPORT.md) | Phase 6, game-ready: hit shapes, events on keys, fitting to the ground, a timeline that zooms, Duck Forge's `robot_click`, and what Phase 7 should start with. |
+| [POLISH_AUDIT.md](POLISH_AUDIT.md) | Every screen looked at before Phase 7a, and what was wrong with it. |
+| [PHASE7A_REPORT.md](PHASE7A_REPORT.md) | Phase 7a, polish: every changed screen before and after, the speed before and after, far-away versions, the command line for agents, and the first real release. |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | What changed in each version, in plain words. |
 
 ## Project layout
 
 ```
 Duck-Mold/
 ├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
-├── .github/workflows/release.yml  makes the Windows download (a zip)
+├── .github/workflows/release.yml  makes the Windows downloads (installer and zip) and tests the installer
 ├── Start Duck Mold Studio.bat double-click: builds the Studio and starts it
 ├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
-├── release/                   what goes in the download beside the programs
+├── release/                   the installer's script, and what goes in the download beside the programs
 ├── Cargo.toml                 the workspace: four crates, built together
 ├── examples/                  eighteen recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff

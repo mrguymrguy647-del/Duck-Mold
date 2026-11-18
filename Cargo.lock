@@ -939,7 +939,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "duck-mold-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "clap",
  "duck-mold-core",
@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "serde",
  "serde_json",
@@ -959,7 +959,7 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-studio"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "dirs",
  "duck-mold-core",
@@ -973,7 +973,7 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-view"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "duck-mold-core",
  "duckforge",
