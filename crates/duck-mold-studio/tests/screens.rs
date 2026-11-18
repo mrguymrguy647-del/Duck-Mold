@@ -730,6 +730,47 @@ fn the_cube_can_be_dragged_by_its_arrows_and_by_itself() {
 }
 
 #[test]
+fn a_drag_does_the_same_when_its_frames_are_drafts() {
+    // On a slow computer the frames of a drag are drawn smaller (drafts).
+    // The handles must still move as far as the mouse does: this drag
+    // once snapped to the wrong angle, or none, on a slow machine.
+    use duck_mold_core::math::{Mat3, vec3};
+    use duck_mold_view::studio::handles::Grip;
+    let (recipe, mut screen) = boxes("screens_handles_drafts");
+    screen.state_mut().draw_drafts_while_dragging();
+    screen.key_press(egui::Key::R);
+    screen.run_steps(2);
+    let (from, middle) = {
+        let studio = screen.state().studio().unwrap();
+        (
+            studio.grip_at(Grip::Ring(1)).unwrap(),
+            studio.part("crate").unwrap().place.shift + studio.offset(),
+        )
+    };
+    let to = middle + Mat3::around_y(48.0) * (from - middle);
+    let (start, end) = (point_on_screen(&screen, from), point_on_screen(&screen, to));
+    drag(&mut screen, start, end);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("rotate = [0, 45, 0]"), "{text}");
+    // And the move arrow, along x.
+    screen.key_press(egui::Key::G);
+    screen.run_steps(2);
+    let from = screen
+        .state()
+        .studio()
+        .unwrap()
+        .grip_at(Grip::Arrow(0))
+        .unwrap();
+    let (start, end) = (
+        point_on_screen(&screen, from),
+        point_on_screen(&screen, from + vec3(-0.5, 0.0, 0.0)),
+    );
+    drag(&mut screen, start, end);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("move = [0, 0.35, 0]"), "{text}");
+}
+
+#[test]
 fn the_tools_are_buttons_and_keys() {
     use duck_mold_core::math::{Mat3, vec3};
     use duck_mold_view::studio::handles::{Grip, Tool};

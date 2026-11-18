@@ -250,6 +250,12 @@ impl StudioApp {
         &self.timeline
     }
 
+    /// Makes every frame of a drag a half-size draft, as a slow computer
+    /// does, for tests: what a drag does must not depend on it.
+    pub fn draw_drafts_while_dragging(&mut self) {
+        self.view.always_draft = true;
+    }
+
     /// Where on the screen the viewport was last drawn, and how many
     /// pixels its picture has. The tests use it to click on a part.
     pub fn viewport(&self) -> Option<(Rect, [usize; 2])> {

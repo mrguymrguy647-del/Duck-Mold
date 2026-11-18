@@ -102,6 +102,9 @@ pub struct View {
     /// How long the last picture took, in milliseconds, as if it had been
     /// full size.
     last_frame_ms: f32,
+    /// Every frame of a drag is a half-size draft, as on a slow
+    /// computer: for tests.
+    pub(crate) always_draft: bool,
 }
 
 /// Above how many milliseconds a frame is too slow while dragging, and
@@ -186,8 +189,9 @@ pub fn show(
     // While the picture is dragged (the view turned or slid, a handle
     // pulled) and the last frame was slow, it is drawn smaller and
     // stretched: a draft. The moment the drag stops it is full size.
-    let draft = if (response.dragged() || view.moving) && view.last_frame_ms > DRAFT_ABOVE_MS {
-        if view.last_frame_ms > DRAFT_ABOVE_MS * 1.8 {
+    let slow = view.always_draft || view.last_frame_ms > DRAFT_ABOVE_MS;
+    let draft = if (response.dragged() || view.moving) && slow {
+        if view.always_draft || view.last_frame_ms > DRAFT_ABOVE_MS * 1.8 {
             0.5
         } else {
             0.75
@@ -204,18 +208,20 @@ pub fn show(
     } else {
         full
     };
-    // A point of the screen in the picture's own pixels, whatever size
-    // the picture is drawn at.
+    // A point of the screen in the picture's pixels at full size,
+    // whatever size a draft is drawn at: the pointer is measured the same
+    // way all through a drag, also when the frames turn into drafts
+    // halfway through it.
     let in_picture = |pointer: egui::Pos2| {
         let across = f64::from((pointer.x - rect.min.x) / rect.width());
         let along = f64::from((pointer.y - rect.min.y) / rect.height());
-        (across * size.0 as f64, along * size.1 as f64)
+        (across * full.0 as f64, along * full.1 as f64)
     };
 
     let pointer = response
         .hover_pos()
         .or_else(|| response.interact_pointer_pos());
-    studio.hover(size, pointer.map(in_picture));
+    studio.hover(full, pointer.map(in_picture));
 
     // A drag that starts on a handle, or on the selected part, moves the
     // part. Any other drag turns or slides the view.
@@ -224,7 +230,7 @@ pub fn show(
         && !shift
         && let Some(pressed) = ui.input(|input| input.pointer.press_origin())
     {
-        view.moving = studio.grab(size, in_picture(pressed)).is_some();
+        view.moving = studio.grab(full, in_picture(pressed)).is_some();
         if view.moving {
             view.adding = None;
         }
@@ -240,7 +246,7 @@ pub fn show(
             view.moving = false;
         } else if let Some(pointer) = pointer {
             // Ctrl held: nothing snaps.
-            studio.drag(size, in_picture(pointer), free);
+            studio.drag(full, in_picture(pointer), free);
         }
     } else {
         let moved = response.drag_delta();
@@ -261,30 +267,30 @@ pub fn show(
         if studio.mode() == Mode::Pose {
             // Pose mode: the part under the pointer, as it stands in the
             // pose, is selected.
-            studio.click(size, in_picture(pointer));
+            studio.click(full, in_picture(pointer));
             view.adding = None;
         } else if studio.is_shaping() && studio.face_tool == FaceTool::Cut {
             // The Cut tool: cut where the ring is. What it did, or why
             // not, is in the status line.
-            let _ = studio.cut_at(size, in_picture(pointer), free);
+            let _ = studio.cut_at(full, in_picture(pointer), free);
             view.adding = None;
         } else if studio.is_shaping() {
             // Face or Edge mode: the face (or edge) under the pointer is
             // selected; with Shift, added or taken out.
-            studio.click_face(size, in_picture(pointer), shift);
+            studio.click_face(full, in_picture(pointer), shift);
             view.adding = None;
         } else if studio.tool == Tool::Paint && !studio.look_only() {
             // The Paint tool: the face under the pointer gets the colour
             // in hand; with Shift, the whole part does. What it did, or
             // why not, is in the status line.
-            let _ = studio.paint_at(size, in_picture(pointer), shift);
+            let _ = studio.paint_at(full, in_picture(pointer), shift);
             view.adding = None;
         } else if shift {
             // Shift+click: the part joins the selection, or leaves it.
-            studio.click_adding(size, in_picture(pointer));
+            studio.click_adding(full, in_picture(pointer));
             view.adding = None;
         } else {
-            view.adding = match studio.point_at(size, in_picture(pointer)) {
+            view.adding = match studio.point_at(full, in_picture(pointer)) {
                 Clicked::Socket { part, socket } => Some(Adding {
                     place: Place::Socket { part, socket },
                     at: pointer,
@@ -301,11 +307,11 @@ pub fn show(
     {
         let at = in_picture(pointer);
         view.menu_spot = None;
-        if let Some(part) = studio.part_under(size, at) {
+        if let Some(part) = studio.part_under(full, at) {
             if !studio.is_selected(&part) {
                 studio.select(Some(&part));
             }
-            view.menu_spot = studio.spot_at(size, at);
+            view.menu_spot = studio.spot_at(full, at);
         }
         view.adding = None;
     }

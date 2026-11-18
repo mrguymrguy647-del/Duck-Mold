@@ -152,6 +152,12 @@ What made the difference: keeping the canvas between frames, working the
 shadow out once per build, working an edit out from the model the Studio
 already has, and drawing smaller "draft" frames while a drag is slow.
 
+**A bug the drafts brought, fixed while finishing:** the pointer was
+measured in the picture's pixels, and a draft's picture is smaller, so on
+a slow computer (CI's Linux machine) a handle dragged partly in draft
+frames moved by the wrong amount. The pointer is now always measured at
+full size; a test drags handles with every frame a draft.
+
 Far versions made a model that has them take half as long again to
 build. Checking an edit now builds the model without them (a drag's
 preview never shows them), which took a drag step's model work from 10.4
@@ -161,7 +167,7 @@ counts.
 
 ## Tests
 
-- **694 tests pass** in Duck Mold on Linux (2 ignored on purpose: the
+- **695 tests pass** in Duck Mold on Linux (2 ignored on purpose: the
   speed test and the audit, run by hand). CI runs them on Windows and
   Linux, with `cargo fmt --check` and `cargo clippy -D warnings`.
 - New this phase: safe writes and the crash note; Undo on disk and its
