@@ -316,7 +316,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
                 pos2(x + 2.0, rect.bottom() - 15.0),
                 egui::Align2::LEFT_BOTTOM,
                 format!("{at}"),
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(theme::SMALLEST_TEXT),
                 quiet,
             );
         }
@@ -349,7 +349,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
             middle + vec2(0.0, -size - 2.0),
             egui::Align2::CENTER_BOTTOM,
             &key.pose,
-            egui::FontId::proportional(11.0),
+            egui::FontId::proportional(theme::SMALLEST_TEXT),
             color,
         );
         // Its events: a small flag under it, and their names.
@@ -366,7 +366,7 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, timeline: &mut Timeline) {
                 pole + vec2(9.0, 0.0),
                 egui::Align2::LEFT_TOP,
                 key.events.join(", "),
-                egui::FontId::proportional(10.0),
+                egui::FontId::proportional(theme::SMALLEST_TEXT),
                 flag,
             );
         }
@@ -612,16 +612,18 @@ pub fn play_button(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
         .rect_filled(place.expand(2.0), 4.0, Color32::from_black_alpha(150));
     ui.scope_builder(egui::UiBuilder::new().max_rect(place), |ui| {
         ui.horizontal(|ui| {
-            let chosen = studio
-                .animation()
-                .map(str::to_owned)
-                .unwrap_or_else(|| names[0].clone());
+            // Until one is chosen the list says so: what it shows is what
+            // Pose mode's timeline shows too.
+            let chosen = studio.animation().map(str::to_owned);
             let list = egui::ComboBox::from_id_salt("duck_mold_view_animation")
                 .width(110.0)
-                .selected_text(&chosen)
+                .selected_text(chosen.clone().unwrap_or_else(|| "choose one".to_owned()))
                 .show_ui(ui, |ui| {
                     for name in &names {
-                        if ui.selectable_label(*name == chosen, name).clicked() {
+                        if ui
+                            .selectable_label(chosen.as_ref() == Some(name), name)
+                            .clicked()
+                        {
                             studio.choose_animation(Some(name));
                         }
                     }
@@ -635,8 +637,9 @@ pub fn play_button(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) {
                 .on_hover_text("Play the animation in the view, or stop it (Space). The model comes back to rest when it stops")
                 .clicked()
             {
+                // With none chosen, the first plays.
                 if studio.animation().is_none() {
-                    studio.choose_animation(Some(&chosen));
+                    studio.choose_animation(Some(&names[0]));
                 }
                 studio.toggle_play();
             }

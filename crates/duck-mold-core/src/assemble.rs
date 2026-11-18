@@ -24,11 +24,12 @@ use std::sync::Arc;
 use crate::issue::{Code, Issue};
 use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
-use crate::model::{Face, Model, Part, PartKind, Socket};
+use crate::model::{Face, FarVersion, Model, Part, PartKind, Socket};
 use crate::motion::{self, Animation, Joint, Key, Pose};
 use crate::recipe::{
     AnimationDef, Axis, ColliderDef, Define, Limits, Loc, PaletteColor, PartDef, Placement,
-    PoseDef, REST, Recipe, Shape, Side, SocketDef, SocketKind, SocketRef, Source, hex, rgb_of,
+    PoseDef, REST, Recipe, Shape, Side, SocketDef, SocketKind, SocketRef, Source, Trim, hex,
+    rgb_of,
 };
 use crate::shapes::{self, Landing, Polygon};
 use crate::shaping::{self, Shaped};
@@ -47,8 +48,209 @@ const MAX_DEPTH: usize = 32;
 /// Builds the model. `None` if the recipe has any error, already found
 /// or found here; the errors are in `issues`.
 pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
+    let mut model = assemble_at(loaded, issues, 0)?;
+    // The far-away versions: the same recipe, simpler.
+    if let Some(lods) = loaded.recipe.lods
+        && let Some(bounds) = model.bounds()
+    {
+        let size = bounds.size();
+        let largest = size.x.max(size.y).max(size.z);
+        let distances = lods.distances(largest);
+        for (at, distance) in distances.into_iter().enumerate() {
+            let detail = at as u8 + 1;
+            let mut quiet = Vec::new();
+            let Some(built) = assemble_at(loaded, &mut quiet, detail) else {
+                continue;
+            };
+            let far = lined_up(&model, &built);
+            // In Far 2, the small parts are left out.
+            let left_out = if detail >= 2 {
+                far.leaves()
+                    .into_iter()
+                    .filter(|part| !part.lod_keep)
+                    .filter(|part| {
+                        part.bounds.is_some_and(|bounds| {
+                            let size = bounds.size();
+                            size.x.max(size.y).max(size.z) < largest * LEAVE_OUT_BELOW
+                        })
+                    })
+                    .map(|part| part.path.clone())
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            model.far.push(FarVersion {
+                distance,
+                model: far,
+                left_out,
+            });
+        }
+    }
+    Some(model)
+}
+
+/// [`assemble`] without the far-away versions: the model itself only.
+/// For checking an edit, and for a drag's preview, which never show them
+/// (building them makes a model with `lods` take half as long again).
+pub fn assemble_near(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
+    assemble_at(loaded, issues, 0)
+}
+
+/// A part smaller than this share of the model's largest side is left
+/// out of Far 2: 4%.
+pub const LEAVE_OUT_BELOW: f64 = 0.04;
+
+/// A shape as a far-away version builds it: fewer segments, fewer cuts
+/// round a bevel. `detail` is 1 for Far 1, 2 for Far 2.
+pub fn simplify(shape: &Shape, trim: &Trim, detail: u8) -> (Shape, Trim) {
+    let fewer = |segments: usize, least: [usize; 2]| {
+        let (divide, least) = if detail >= 2 {
+            (4, least[1])
+        } else {
+            (2, least[0])
+        };
+        (segments / divide).max(least).min(segments)
+    };
+    let shape = match *shape {
+        Shape::Sphere { radius, segments } => Shape::Sphere {
+            radius,
+            segments: fewer(segments, [6, 6]),
+        },
+        Shape::Capsule {
+            radius,
+            height,
+            segments,
+        } => Shape::Capsule {
+            radius,
+            height,
+            segments: fewer(segments, [6, 6]),
+        },
+        Shape::Cylinder {
+            radius,
+            height,
+            segments,
+        } => Shape::Cylinder {
+            radius,
+            height,
+            segments: fewer(segments, [6, 5]),
+        },
+        Shape::Cone {
+            radius,
+            height,
+            segments,
+        } => Shape::Cone {
+            radius,
+            height,
+            segments: fewer(segments, [6, 5]),
+        },
+        Shape::Tube {
+            radius,
+            wall,
+            height,
+            segments,
+        } => Shape::Tube {
+            radius,
+            wall,
+            height,
+            segments: fewer(segments, [6, 6]),
+        },
+        Shape::Torus {
+            radius,
+            tube,
+            segments,
+        } => Shape::Torus {
+            radius,
+            tube,
+            segments: fewer(segments, [6, 6]),
+        },
+        Shape::Arch {
+            size,
+            wall,
+            segments,
+        } => Shape::Arch {
+            size,
+            wall,
+            segments: fewer(segments, [4, 3]),
+        },
+        // Far 2: one sloped block the size of the stairs.
+        Shape::Stairs { size, .. } if detail >= 2 => Shape::Wedge { size },
+        other => other,
+    };
+    let mut trim = *trim;
+    if trim.bevel > 0.0 {
+        if detail >= 2 {
+            trim.bevel = 0.0;
+        }
+        trim.bevel_steps = 1;
+    }
+    (shape, trim)
+}
+
+/// A far-away version as the model has it: the model itself, with each
+/// part's triangles swapped for the simpler ones `built` gives it, put
+/// where the model puts that part. So only triangles change: a part
+/// joined to a simpler shape doesn't move (on a sphere with fewer sides
+/// it would sit a little further in; on a box without its bevel, a
+/// little further out), and every pivot, socket and hit shape is the
+/// model's own.
+fn lined_up(model: &Model, built: &Model) -> Model {
+    fn swap(parts: &mut [Part], built: &Model, old: &[Face], faces: &mut Vec<Face>) {
+        for part in parts {
+            let start = faces.len();
+            if !part.parts.is_empty() {
+                swap(&mut part.parts, built, old, faces);
+            } else {
+                let simpler = built
+                    .leaves()
+                    .into_iter()
+                    .find(|other| other.path == part.path);
+                // From the simpler part's own space to where the model
+                // has the part.
+                let undo = simpler.and_then(|simpler| {
+                    let turn = simpler.place.turn.inverse()?;
+                    Some((simpler, turn))
+                });
+                match undo {
+                    Some((simpler, turn)) => {
+                        for face in &built.faces[simpler.faces.clone()] {
+                            let corners = face
+                                .corners
+                                .iter()
+                                .map(|&corner| {
+                                    part.place.apply(turn * (corner - simpler.place.shift))
+                                })
+                                .collect();
+                            faces.push(Face {
+                                corners,
+                                color: face.color,
+                            });
+                        }
+                    }
+                    // (Never: the same recipe gives the same parts.)
+                    None => faces.extend_from_slice(&old[part.faces.clone()]),
+                }
+            }
+            part.faces = start..faces.len();
+            part.bounds = Bounds::around(
+                faces[part.faces.clone()]
+                    .iter()
+                    .flat_map(|face| face.corners.iter().copied()),
+            );
+        }
+    }
+    let mut far = model.clone();
+    far.far = Vec::new();
+    let old = std::mem::take(&mut far.faces);
+    swap(&mut far.parts, built, &old, &mut far.faces);
+    far
+}
+
+/// [`assemble`] at a level of detail: 0 is the model itself, 1 and 2
+/// its far-away versions.
+fn assemble_at(loaded: &Loaded, issues: &mut Vec<Issue>, detail: u8) -> Option<Model> {
     let recipe = &loaded.recipe;
     let mut assembler = Assembler {
+        detail,
         issues,
         palette: loaded.palette.clone(),
         referenced: vec![false; loaded.palette.len()],
@@ -118,6 +320,8 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
         hit_setting: recipe.colliders,
         colliders: Vec::new(),
         without_collider: Vec::new(),
+        lod_setting: recipe.lods,
+        far: Vec::new(),
     };
     let fitted = crate::hit::fit(&model, recipe.colliders);
     for (path, message) in fitted.warnings {
@@ -346,6 +550,8 @@ struct Node {
     limits: Limits,
     /// Its own hit shape, if it (or its definition) says one.
     collider: ColliderDef,
+    /// `lod = "keep"`, its own or its definition's.
+    lod_keep: bool,
     body: Body,
 }
 
@@ -690,6 +896,9 @@ enum Whole {
 
 struct Assembler<'a> {
     issues: &'a mut Vec<Issue>,
+    /// 0 for the model itself; 1 and 2 for its far-away versions, whose
+    /// shapes are simpler.
+    detail: u8,
     /// The model's palette: the recipe's and its files', and the colours
     /// of imported materials the recipe gives none.
     palette: Vec<PaletteColor>,
@@ -772,7 +981,14 @@ impl Assembler<'_> {
         } else {
             let layer = self.layer(part);
             self.paint.push(layer);
+            // `lod = "keep"`: built in full in every version, with
+            // everything inside it.
+            let detail = self.detail;
+            if part.lod_keep {
+                self.detail = 0;
+            }
             let body = self.source(part, scope);
+            self.detail = detail;
             let layer = self.paint.pop().expect("pushed above");
             if !body.broken {
                 self.check_layer(layer);
@@ -1006,17 +1222,25 @@ impl Assembler<'_> {
                 self.shaped(part, *size)
             }
             Source::Shape(shape) => {
-                let faces = shapes::build_trimmed(shape, &part.trim);
+                // In a far-away version, simpler.
+                let (simpler, trim);
+                let (shape, trim) = if self.detail > 0 {
+                    (simpler, trim) = simplify(shape, &part.trim, self.detail);
+                    (&simpler, &trim)
+                } else {
+                    (shape, &part.trim)
+                };
+                let faces = shapes::build_trimmed(shape, trim);
                 if !self.count(&faces, &part.loc) {
                     return Body::broken();
                 }
-                let words: Vec<String> = shapes::face_words(shape, &part.trim)
+                let words: Vec<String> = shapes::face_words(shape, trim)
                     .into_iter()
                     .map(str::to_owned)
                     .collect();
                 let colors = self.paint_faces(
                     &faces,
-                    &|name| shapes::face_groups(shape, &part.trim, name),
+                    &|name| shapes::face_groups(shape, trim, name),
                     &words,
                     &|_| false,
                 );
@@ -1078,7 +1302,10 @@ impl Assembler<'_> {
             }
             Source::Parts(parts) => Body::assembly(self.list(parts, scope), None),
             Source::Recipe(recipe) => {
+                // A part from a file is the same in every version.
+                let detail = std::mem::take(&mut self.detail);
                 let mut body = self.recipe_body(recipe);
+                self.detail = detail;
                 body.kind.file = Some(recipe.file.clone());
                 body
             }
@@ -1445,6 +1672,14 @@ impl Assembler<'_> {
                         .map_or(ColliderDef::Unset, |define| define.part.collider.clone()),
                     (own, _) => own.clone(),
                 },
+                lod_keep: parts[at].lod_keep
+                    || match &parts[at].source {
+                        Source::Use(named) => scope
+                            .defines
+                            .iter()
+                            .any(|define| define.name == named.text && define.part.lod_keep),
+                        _ => false,
+                    },
                 body,
             })
             .collect()
@@ -1761,6 +1996,7 @@ fn emit(
                 axes: outer.turn,
                 limits: node.limits,
                 collider: node.collider.clone(),
+                lod_keep: node.lod_keep,
                 sockets: node.body.all_sockets(&place),
                 carried,
                 bounds: Bounds::around(

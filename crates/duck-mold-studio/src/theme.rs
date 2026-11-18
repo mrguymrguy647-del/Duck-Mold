@@ -17,9 +17,15 @@ pub const GOOD: Color32 = Color32::from_rgb(0x4C, 0xB8, 0x6A);
 pub const LOOK: Color32 = Color32::from_rgb(0xF0, 0xA0, 0x30);
 /// A mistake.
 pub const BAD: Color32 = Color32::from_rgb(0xE5, 0x4B, 0x5F);
+/// Behind a bar that warns of something to do now: a recipe that isn't
+/// there any more.
+pub const WARNING_FILL: Color32 = Color32::from_rgb(0x5A, 0x3A, 0x10);
 /// An event's flag on the timeline: the hit shapes' cyan, so the two
 /// things for games look alike.
 pub const EVENT_FLAG: Color32 = Color32::from_rgb(0x3C, 0xD8, 0xF0);
+
+/// The smallest text the Studio writes, in points.
+pub const SMALLEST_TEXT: f32 = 12.0;
 
 /// Gives both the dark and the light look the brand's selection colour.
 /// Done once at start: egui keeps a style for each theme.
@@ -28,6 +34,19 @@ pub fn apply_brand(ctx: &egui::Context) {
         ctx.style_mut_of(theme, |style| {
             style.visuals.selection.bg_fill = NIGHT_INDIGO;
             style.visuals.selection.stroke = Stroke::new(1.0, Color32::WHITE);
+            // Scroll bars take their own room, so they never cover a
+            // button at the end of a line, and show there is more.
+            style.spacing.scroll = egui::style::ScrollStyle::solid();
+            // No text smaller than 12 points; faint text light enough to
+            // read.
+            style.text_styles.insert(
+                egui::TextStyle::Small,
+                egui::FontId::proportional(SMALLEST_TEXT),
+            );
+            style.visuals.weak_text_color = Some(match theme {
+                Theme::Dark => Color32::from_gray(160),
+                Theme::Light => Color32::from_gray(95),
+            });
         });
     }
 }

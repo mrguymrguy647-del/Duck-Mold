@@ -227,6 +227,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         axes: crate::math::Mat3::IDENTITY,
         limits: crate::recipe::Limits::Free,
         collider: crate::recipe::ColliderDef::Unset,
+        lod_keep: false,
         carried: Vec::new(),
         sockets: Vec::new(),
         bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
@@ -253,6 +254,8 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         hit_setting: None,
         colliders: Vec::new(),
         without_collider: Vec::new(),
+        lod_setting: None,
+        far: Vec::new(),
     }
 }
 
@@ -324,6 +327,35 @@ pub fn inspect_file_listing(path: &Path, also: &Also) -> Result<Inspection, Fail
         inspection.colliders = crate::inspect::collider_report(&model);
     }
     Ok(inspection)
+}
+
+/// Far-away version `number` (1 or 2) of a model, as a game draws it
+/// (the parts it leaves out have no faces), named `robot (Far 2)`. Or a
+/// sentence saying why there is none.
+pub fn far_version(model: &Model, number: usize, source: &str) -> Result<Model, Failure> {
+    if model.far.is_empty() {
+        return Err(Failure::Usage(Box::new(
+            Issue::error(
+                Code::Unsupported,
+                "lods",
+                "this model has no far-away versions: add `lods = \"auto\"` to its recipe (`duck-mold edit <recipe> set-lods auto`)",
+            )
+            .in_file(source),
+        )));
+    }
+    let Some(far) = number.checked_sub(1).and_then(|at| model.far.get(at)) else {
+        return Err(Failure::Usage(Box::new(
+            Issue::error(
+                Code::OutOfRange,
+                "far",
+                format!("there is no Far {number}: --far is 1 or 2"),
+            )
+            .got(number),
+        )));
+    };
+    let mut drawn = far.drawn();
+    drawn.name = format!("{} (Far {number})", model.name);
+    Ok(drawn)
 }
 
 /// The model's pose with this name, or a sentence saying which poses it
@@ -406,6 +438,19 @@ pub struct Also {
     pub pose: Option<String>,
 }
 
+/// A file's size in words: `512 bytes`, `85 KB`, `1.4 MB`.
+pub fn size_in_words(bytes: usize) -> String {
+    const KB: f64 = 1024.0;
+    let size = bytes as f64;
+    if bytes < 1024 {
+        format!("{bytes} bytes")
+    } else if size < KB * KB {
+        format!("{:.0} KB", (size / KB).max(1.0))
+    } else {
+        format!("{:.1} MB", size / KB / KB)
+    }
+}
+
 /// What `duck-mold export` did: the report on the model, and the file it
 /// wrote.
 #[derive(Debug, Clone, PartialEq, Serialize)]
@@ -453,27 +498,33 @@ pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Fai
 
 /// Writes a file the program was asked to write, or says in one sentence
 /// why it can't.
+///
+/// It is written beside itself and swapped in (see [`crate::save`]), so a
+/// game reloading a `.glb` never reads half of one.
 pub fn write_file(path: &Path, bytes: &[u8]) -> Result<(), Failure> {
-    std::fs::write(path, bytes).map_err(|error| {
-        let reason = match error.kind() {
-            std::io::ErrorKind::NotFound => "that folder doesn't exist",
-            std::io::ErrorKind::PermissionDenied => "permission denied",
-            _ => "it can't be written there",
-        };
-        Failure::Usage(Box::new(Issue::error(
-            Code::Io,
-            "",
-            format!("can't write \"{}\": {reason}", display_path(path)),
-        )))
-    })
+    crate::save::write_safely(path, bytes, None)
+        .map(|_| ())
+        .map_err(|error| {
+            Failure::Usage(Box::new(Issue::error(
+                Code::Io,
+                "",
+                format!(
+                    "can't write \"{}\": {}",
+                    display_path(path),
+                    crate::save::why_not_written(&error)
+                ),
+            )))
+        })
 }
 
 /// The recipe a new model starts as: one box, standing on the ground,
-/// with one colour, and a hit shape fitted to every part it will have.
+/// with one colour, a hit shape fitted to every part it will have, and
+/// two far-away versions.
 pub const STARTER: &str = r##"# A new Duck Mold model. Sizes are in metres.
 version = 0
 name = "model"
 colliders = "parts"   # every part gets a hit shape a game can test
+lods = "auto"         # and two simpler versions, for when it is far off
 
 [palette]
 duck = "#FFCC2E"
@@ -806,4 +857,16 @@ fn new_recipe(path: &Path, text: &str) -> Result<(), Failure> {
         )));
     }
     write_file(path, text.as_bytes())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sizes_are_said_in_words() {
+        assert_eq!(size_in_words(512), "512 bytes");
+        assert_eq!(size_in_words(87_152), "85 KB");
+        assert_eq!(size_in_words(1_500_000), "1.4 MB");
+    }
 }

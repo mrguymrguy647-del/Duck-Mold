@@ -78,6 +78,9 @@ pub enum Code {
     Hidden,
     /// A model that does not rest on the ground.
     OffGround,
+    /// An animation that sinks into the ground between two keys that
+    /// stand on it.
+    DipsBetweenKeys,
     /// A note about a mesh file: something in it was skipped.
     Skipped,
     /// A change to a shape that would squeeze a face flat, turn the
@@ -131,6 +134,7 @@ impl Code {
             Code::Floating => "floating",
             Code::Hidden => "hidden",
             Code::OffGround => "off_ground",
+            Code::DipsBetweenKeys => "dips_between_keys",
             Code::Skipped => "skipped",
             Code::BadShape => "bad_shape",
             Code::LimitBroken => "limit_broken",
@@ -433,7 +437,7 @@ pub fn closest<'a>(written: &str, options: impl IntoIterator<Item = &'a str>) ->
 
 /// How many single-letter changes (add, remove, swap for another) turn
 /// one word into the other.
-fn edit_distance(a: &str, b: &str) -> usize {
+pub(crate) fn edit_distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     // `row[j]` is the distance between the first letters of `a` seen so far

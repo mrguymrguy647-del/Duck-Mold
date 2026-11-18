@@ -1705,7 +1705,7 @@ impl Studio {
         let Some(syntax) = Syntax::from_path(&self.path) else {
             return;
         };
-        match edit::apply_many(&self.text, syntax, &self.path, &self.shown_as, &edits) {
+        match self.try_edits(syntax, &edits) {
             Ok(applied) => self.preview = applied.model,
             Err(failure) => {
                 let why = self.shorten(&first_error(&failure));
@@ -1742,7 +1742,7 @@ impl Studio {
             }];
             // A built-in socket (`top`) can't be moved: then a new one
             // is made.
-            if edit::apply_many(&self.text, syntax, &self.path, &self.shown_as, &moved).is_ok() {
+            if self.try_edits(syntax, &moved).is_ok() {
                 return moved;
             }
         }

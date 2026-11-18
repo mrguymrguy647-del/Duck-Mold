@@ -22,8 +22,15 @@ and like them it is made for two kinds of user: people who don't know
 
 ## Start the Studio on Windows, without a terminal
 
-- **From a download:** get `DuckMold-<version>-windows.zip` from the
+- **With the installer:** get `DuckMoldSetup-<version>.exe` from the
   [Releases](https://github.com/mrguymrguy647-del/Duck-Mold/releases)
+  page and run it. It installs for you alone (no administrator), puts
+  Duck Mold Studio in the Start menu, and, if you leave its box ticked,
+  lets the command line and AI agents find `duck-mold`. Windows may say
+  "Windows protected your PC": the program isn't signed with a paid
+  certificate. Click "More info", then "Run anyway". Your models stay in
+  Documents\Duck Mold whatever you install or uninstall.
+- **From the zip:** get `DuckMold-<version>-windows.zip` from the same
   page, unzip it, and double-click `DuckMoldStudio.exe`. `READ ME
   FIRST.txt` in the folder says the rest. `Create desktop shortcut.bat`
   puts the duck on your desktop.
@@ -125,9 +132,12 @@ copy goes in the folder `Duck Mold` in your Documents (as `robot.toml`,
 or `robot_2.toml` if that is taken), so you can change it as you like
 and the example stays as it is. The examples are inside the program, so
 they are there wherever it was started from. File > Open an example and
-File > Opened lately offer the same lists once a model is open.
+File > Opened lately offer the same lists once a model is open. A model
+opened lately that has a mistake says what it is under its picture; one
+that has been deleted or moved since says "not found", with **Forget** to
+take it off the list.
 
-![The start page: models opened lately and the fifteen examples, each with its picture](docs/studio-start.png)
+![The start page: models opened lately (one with a mistake, one gone) and the examples, each with its picture and what it shows](docs/studio-start.png)
 
 The first model you open to work on gets **five small tips**, one at a
 time, each pointing at what it is about: the picture, a part, the
@@ -152,8 +162,8 @@ change would reach:
 > Made from the definition "eye". Changing its shape, size or colour
 > also changes: right_eye.
 
-**Moving, turning and sizing a part.** Four tools stand down the left
-edge of the picture, each with a key. They put handles on the selected
+**Moving, turning and sizing a part.** The tools stand on the toolbar
+down the left of the picture, each with its icon, its name and its key. They put handles on the selected
 part:
 
 | Tool | Key | Handles | Dragging one |
@@ -298,7 +308,9 @@ each with its pose's name.
 - **Fit to ground** stands every pose the animation uses on the ground:
   in each, the body moves up or down until the lowest point touches
   it, so a walk copied onto shorter legs doesn't sink. A leap is left
-  alone. On the command line: `duck-mold edit gnome.toml fit-ground
+  alone. Where the smooth curve between two keys still sinks more than
+  3 mm, it adds a key there that stands on the ground (`jump_2`...), and
+  says so. On the command line: `duck-mold edit gnome.toml fit-ground
   walk`.
 - Every change is one edit: `move-key`, `set-key`, `remove-key`,
   `add-key`, `set-event`, `remove-event`, `fit-ground`,
@@ -393,8 +405,9 @@ Hide.
 
 **Hiding.** Hide stops drawing a part so you can get at what is behind
 it. Nothing else changes: the recipe doesn't know, and a hidden part
-is exported like any other. The top bar says how many are hidden;
-click that, or the "show" at the end of the part's line in the list,
+is exported like any other. The bottom right of the picture says how
+many are hidden; click that, or the shut eye at the end of the part's
+line in the list (the eye shows on the line under the mouse),
 to bring them back. The Studio remembers which parts were hidden in
 each of the models opened lately (in its settings, beside that list),
 and hides them again when the file is next opened.
@@ -426,12 +439,17 @@ are cleared away in the same step that leaves them with nothing on
 them; Edit > Tidy sockets does that for any that are left. In the file
 these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
 
-**Views and look.** In the top bar:
+**Views and look.** In the picture's top right corner:
 
-- **Front**, **Side**, **Top** and **3/4** turn the camera to look from
-  that side (keys 1, 2, 3 and 4), with what is selected, or the whole
-  model, in view. **Frame** (F) brings it back into view without
-  turning.
+- **The axis gizmo** shows which way x (red), y (green) and z (blue) run,
+  turning with the view. Click an axis to look along it.
+- **Front**, **Side**, **Top** and **3/4**, under it, turn the camera to
+  look from that side (keys 1, 2, 3 and 4), with what is selected, or
+  the whole model, in view. **Frame** (F) brings it back into view
+  without turning.
+
+The four switches sit along the picture's bottom right:
+
 - **Grid** is the ground: fine lines every 10 cm near the model,
   heavier ones every metre, a red line along x and a blue one along z
   through the recipe's zero.
@@ -444,13 +462,29 @@ these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
 - **Hits** outlines every hit shape in cyan over the model (below,
   *Hit shapes, for games*), following the pose and the animation as it
   plays; the selected part's is lighter. It changes nothing in the
-  file.
+  file. With Hits on, **a click picks what a game's click would**: the
+  part whose hit shape is first under the mouse. The status bar says
+  what it hit ("A game's click here hits: head (its ball), 4.7 m away"),
+  or that it hits nothing, and why ("antenna_tip has no hit shape").
 
 **The menus.** File (New model, Open, Open an example, Opened lately,
-Export, Render picture, Back to the start page), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
+Export, Render picture, Back to the start page; a `.glb` or other mesh
+file, which is only looked at, has no Export or Render picture, and no
+Edit menu), Edit (Undo, Redo, Duplicate, Mirror copy, Rename,
 Unjoin, Remove, Tidy sockets, Select all), View (the four views, Frame, Grid,
-Wireframe, Shadow, Hit shapes, Hide, Show everything hidden) and Help (Show the tips again, The
-keys, About). Every line shows its key.
+Wireframe, Shadow, Hit shapes, Hide, Show everything hidden, Interface
+size) and Help (Show the tips again, The keys, About). Every line shows
+its key.
+
+**The top bar** has the menus, then Undo and Redo as arrows, **Add**,
+and at the right **Export .glb** (the one yellow button), Render picture
+and the version.
+
+**Interface size.** View > Interface size makes everything bigger or
+smaller: "Like Windows" (the size your system asks for, the first time),
+90%, 100%, 125%, 150% or 200%. It is remembered. On a 2560 x 1440 screen
+at 100%, 150% looks as a 1280 x 720 one does. Text is never smaller
+than 12 points at 100%.
 
 **The keys.** (Help > The keys shows this list in the Studio.)
 
@@ -495,12 +529,36 @@ with `examples/desk.toml`, whose library is `examples/parts`.
 **Undo and redo** (the buttons, or Ctrl+Z and Ctrl+Y) take back and
 repeat every change, one at a time, as far back as 500 steps. Because
 the Studio writes each change to the file at once, undo writes the
-earlier text back to the file. A change another program made while the
-Studio was open (an agent, a text editor) is a step too, called "Changed
-outside the Studio": undo always takes back the latest change to the
-file, whoever made it. The steps are forgotten when the Studio closes.
+earlier text back to the file. The last 100 steps are kept on disk too,
+so Undo carries on after the Studio is closed and opened again.
 
-**Export** and **Render picture**, in the top bar, write the `.glb` and
+**Your work is never lost.**
+
+- **Another program's change is a wall for Undo.** When an agent or a
+  text editor saves the recipe while the Studio has it open, Undo stops
+  there and says so ("robot.toml was changed outside the Studio 2
+  minutes ago. Undo stops here, so that change isn't lost"). Undo only
+  takes back what the Studio did. The same goes for a change made while
+  the Studio was closed.
+- **Nothing is ever half written.** Every recipe, `.glb` and picture is
+  written beside the real file, saved to the disk, and swapped in at
+  once. A game reloading the model never reads half of one. If the disk
+  is full, or another program has the file locked, the file is left as
+  it was, and the Studio says why.
+- **A file another program is still saving** isn't shown as a mistake
+  for a moment: a version that doesn't build is shown once it has stayed
+  the same for half a second.
+- **A recipe deleted or moved while open** stays on the screen, with a
+  bar to **Save it again**, **Save as...** somewhere else, or **Close
+  it**.
+- **A value typed in the panel that can't be used** stays in its box,
+  with why, to be mended.
+- **If the Studio ever crashes**, the next start says so, with a button
+  to open the model again (saved up to its last change) and the crash
+  note (`crash-<date>.txt`, in the Studio's settings folder:
+  `%APPDATA%\Duck Mold` on Windows, `~/.config/duck-mold` on Linux).
+
+**Export .glb** and **Render picture**, at the right of the top bar, write the `.glb` and
 the four-view picture next to the recipe: no terminal needed.
 
 **The file is the model.** The Studio keeps no model of its own: it
@@ -508,9 +566,41 @@ shows the recipe file, and every change you make is written to it at
 once, so there is nothing to save. When you (or an agent) save the
 recipe in another program, the Studio builds it again. If the recipe has
 a mistake, the Studio says so and keeps showing the last version that
-built.
+built (a recipe that has never built says "This file can't be built
+yet:"). Common slips in the TOML itself, such as a missing `=`, a missing
+quote or a table written twice, are said in plain words.
 
-![The Studio showing the robot, with its left eye selected and its properties](docs/studio.png)
+**Where things are.**
+
+- **The status bar** along the bottom says how the model is ("No
+  problems", "2 warnings", "1 mistake") and what the Studio did last.
+  Click the problems to open their list above it; a click on a problem
+  about a part selects that part, and Escape closes the list. A new
+  mistake opens it by itself.
+- **The right column** scrolls as one, so nothing in it is ever cut off:
+  the selected part's properties, its sockets, limits and hit shape, its
+  buttons, then the palette. With nothing selected it shows **the model**
+  itself: its name, size, parts and triangles, poses and animations, and
+  its hit shapes.
+- **The parts list** gets a **Find a part** box once a model has more
+  than 12 parts.
+- **Export and Render picture** say what they wrote, and how big it is,
+  in a note over the picture for a few seconds, with **Show in folder**.
+- **Face, Edge, Corner and Pose** are greyed when they can't be used now,
+  and their tip says why ("Only a box can be shaped in this version:
+  \"body\" is a sphere").
+- **Remove** of a part that others hang from asks what to do: **Remove
+  all**, **Remove only** the part (the others are made free, right where
+  they stand), or **Cancel**.
+- **Rename** (F2) says under the name: Enter renames it, Escape keeps the
+  name.
+- **Help > About** has the version (with **Copy version**, for a message
+  about a problem) and links to this guide and to GitHub. The window's
+  title has the version too.
+- A window that **only looks** shows the selected part's facts as plain
+  words, not greyed fields.
+
+![The Studio showing the robot, with its left arm selected: the parts on the left, the tools and the view buttons over the picture, its properties and the palette on the right](docs/studio.png)
 
 `duck-mold preview examples/robot.toml` opens the same window to look
 only: nothing can be changed there.
@@ -519,10 +609,10 @@ only: nothing can be changed there.
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. A model with far-away versions gets a `far versions` line. `--ray x,y,z --toward x,y,z` says what a game's click or shot along that ray would hit (with `--pose`, or `--animation` and `--at`, as the model stands then). |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
-| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. |
-| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
+| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. `--far 1` or `--far 2` draws a far-away version, as `<file>.far1.png`. |
+| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`, `set-lods`, `set-lod`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints one line saying what changed (`--report`: the whole `inspect` report). `--batch edits.txt` makes a list of edits, one a line, written once or not at all. `--dry-run` writes nothing. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
@@ -532,7 +622,8 @@ only: nothing can be changed there.
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
 Add `--json` to `inspect`, `export`, `render`, `edit` or `new` to get the
-report as JSON, for an agent or a script.
+report as JSON, on one line, for an agent or a script (`--pretty` spreads
+it over lines for reading).
 
 `render` draws with Duck Forge's own renderer, so the picture shows the
 model the way a Duck Forge game draws it. The same recipe always gives
@@ -561,7 +652,7 @@ robot  (examples/robot.toml)
     ...
   floating     none
   overlapping  none
-  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out, jump_crouch, jump_up
+  poses        step_left, step_right, wave, wave_out, breathe_in, breathe_out, jump_crouch, jump_up, jump_2, jump_3
   animations   idle (2 s, loops), walk (0.8 s, loops), wave (1.5 s), jump (1.3 s)
 ok: no problems found
 ```
@@ -670,16 +761,44 @@ examples have them.
 
 ![The robot with its hit shapes outlined](tests/golden/robot.colliders.png)
 
-**In the Studio**, the Hits switch in the top bar draws them. The
+**In the Studio**, the Hits switch at the picture's bottom right draws them. The
 properties panel's **Hit shape** list sets the selected part's: what
-the model's line gives it (`fitted: box`), a box, a sphere or a
-capsule fitted to it, or none. A shape it says for itself shows its
+the model's line gives it ("the model's: each part"), a box, a sphere
+or a capsule of its own fitted to it ("its own: box"), or "none". A shape it says for itself shows its
 middle and size (or radius and length) to type, and **Fit again**
 forgets typed numbers. With nothing selected, the panel's **Hit
 shapes** list is the model's line: none, each part, or one capsule,
 box or ball round the whole model.
 
 ![The Studio with Hits on and the head's hit shape in the panel](crates/duck-mold-studio/tests/screens/hits.png)
+
+## Far-away versions, for games
+
+A building on the horizon or a crowd of characters is a few pixels
+high: the many sides of its round shapes are wasted there. One line
+gives a model two simpler versions that a game draws when it is far
+off:
+
+```toml
+lods = "auto"     # Far 1 from 8 times the model's largest side, Far 2 from 20 times
+```
+
+Far 1 has half the sides on round shapes and plainer bevels; Far 2 a
+quarter, square edges, and no parts smaller than 4% of the model. Only
+triangles change: every part stays where it is, with its colours,
+joins and hit shapes. `lod = "keep"` on a part keeps it whole (a
+character's eyes). `duck-mold inspect` says each version's triangles,
+`render --far 2` draws one, and in the Studio View > Far version shows
+it. The temple, barn, robot and gnome examples have them (the house
+doesn't: it is all boxes, so there is nothing to simplify), and
+`duck-mold new` starts every recipe with `lods = "auto"`. In Duck Forge,
+`robot.draw_mesh(canvas, &place, &camera)` picks the version by
+distance.
+
+| The robot | Far 1 (from 14.6 m) | Far 2 (from 36.6 m) |
+|---|---|---|
+| ![The robot](tests/golden/robot.png) | ![Far 1](tests/golden/robot.far1.png) | ![Far 2](tests/golden/robot.far2.png) |
+| 384 triangles | 288 | 276 |
 
 ## Using a model in Duck Forge
 
@@ -722,16 +841,19 @@ see the handoff note.
 | [PHASE5A_REPORT.md](PHASE5A_REPORT.md) | The first half of Phase 5: limits, poses and animations in the recipe, the `.glb` as a tree of parts, and Duck Forge playing them. |
 | [PHASE5_REPORT.md](PHASE5_REPORT.md) | All of Phase 5, motion: Pose mode, the timeline, the animation library and its starters, the door, cart and gnome, a strip of every example animation, and what Phase 6 should start with. |
 | [PHASE6_REPORT.md](PHASE6_REPORT.md) | Phase 6, game-ready: hit shapes, events on keys, fitting to the ground, a timeline that zooms, Duck Forge's `robot_click`, and what Phase 7 should start with. |
+| [POLISH_AUDIT.md](POLISH_AUDIT.md) | Every screen looked at before Phase 7a, and what was wrong with it. |
+| [PHASE7A_REPORT.md](PHASE7A_REPORT.md) | Phase 7a, polish: every changed screen before and after, the speed before and after, far-away versions, the command line for agents, and the first real release. |
+| [RELEASE_NOTES.md](RELEASE_NOTES.md) | What changed in each version, in plain words. |
 
 ## Project layout
 
 ```
 Duck-Mold/
 ├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
-├── .github/workflows/release.yml  makes the Windows download (a zip)
+├── .github/workflows/release.yml  makes the Windows downloads (installer and zip) and tests the installer
 ├── Start Duck Mold Studio.bat double-click: builds the Studio and starts it
 ├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
-├── release/                   what goes in the download beside the programs
+├── release/                   the installer's script, and what goes in the download beside the programs
 ├── Cargo.toml                 the workspace: four crates, built together
 ├── examples/                  eighteen recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff

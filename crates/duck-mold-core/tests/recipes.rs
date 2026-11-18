@@ -203,13 +203,11 @@ fn a_misspelt_field_is_an_error_with_the_likely_fix() {
 
 #[test]
 fn reserved_names_say_not_yet() {
-    for (field, purpose) in [("bones", "rigs"), ("lods", "simpler versions")] {
-        let issues = issues_of(&with_part(&format!("shape = \"box\"\n{field} = []")));
-        let issue = only(&issues, Code::Reserved);
-        assert_eq!(issue.path, format!("parts[0].{field}"));
-        assert!(issue.message.contains(purpose), "{}", issue.message);
-        assert!(issue.message.contains("isn't available yet"));
-    }
+    let issues = issues_of(&with_part("shape = \"box\"\nbones = []"));
+    let issue = only(&issues, Code::Reserved);
+    assert_eq!(issue.path, "parts[0].bones");
+    assert!(issue.message.contains("rigs"), "{}", issue.message);
+    assert!(issue.message.contains("isn't available yet"));
     // And at the top of the file.
     let issues = issues_of("version = 0\nbones = 1\n[[parts]]\nshape = \"box\"\n");
     assert_eq!(only(&issues, Code::Reserved).line, Some(2));
@@ -218,6 +216,10 @@ fn reserved_names_say_not_yet() {
     let issues = issues_of(&with_part("shape = \"box\"\ncolliders = \"box\""));
     let issue = only(&issues, Code::UnknownField);
     assert_eq!(issue.suggestion.as_deref(), Some("collider"));
+    // So is `lods` (Phase 7), a slip for `lod` on a part.
+    let issues = issues_of(&with_part("shape = \"box\"\nlods = \"keep\""));
+    let issue = only(&issues, Code::UnknownField);
+    assert_eq!(issue.suggestion.as_deref(), Some("lod"));
 }
 
 #[test]

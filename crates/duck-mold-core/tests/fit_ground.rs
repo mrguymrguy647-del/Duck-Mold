@@ -41,6 +41,16 @@ fn fit(animation: &str) -> Edit {
         animation: animation.into(),
         part: None,
         all: false,
+        keys_only: false,
+    }
+}
+
+fn fit_keys_only(animation: &str) -> Edit {
+    Edit::FitGround {
+        animation: animation.into(),
+        part: None,
+        all: false,
+        keys_only: true,
     }
 }
 
@@ -81,7 +91,7 @@ fn every_key_pose_stands_exactly_on_the_ground_and_only_the_body_moves() {
     let fitted = done(&before, &fit("walk"));
     assert_eq!(
         fitted.summary,
-        "stood the poses of \"walk\" on the ground, moving \"body\" in \"step_left\" (down 0.0017), \"step_right\" (down 0.0017); between keys it sinks at most 0.002 (at 0.1 s)"
+        "stood the poses of \"walk\" on the ground, moving \"body\" in \"step_left\" (down 0.0017), \"step_right\" (down 0.0017); between keys it now sinks at most 0.002 (at 0.1 s)"
     );
     // Only the two body lines changed.
     let changed: Vec<(&str, &str)> = before
@@ -124,6 +134,7 @@ fn a_leap_is_left_alone_unless_all() {
             animation: "jump".into(),
             part: None,
             all: true,
+            keys_only: true,
         },
     );
     assert!(
@@ -210,6 +221,7 @@ fn which_part_moves_and_what_is_refused() {
             animation: "down".into(),
             part: Some("leg".into()),
             all: false,
+            keys_only: true,
         },
     );
     assert_eq!(code, Code::Conflict);
@@ -223,6 +235,7 @@ fn which_part_moves_and_what_is_refused() {
             animation: "down".into(),
             part: Some("bodu".into()),
             all: false,
+            keys_only: true,
         },
     );
     assert_eq!(code, Code::UnknownPart);
@@ -243,6 +256,7 @@ fn which_part_moves_and_what_is_refused() {
             animation: "down".into(),
             part: Some("body".into()),
             all: false,
+            keys_only: true,
         },
     );
     assert!(named.summary.contains("moving \"body\""));
@@ -298,12 +312,14 @@ fn every_example_animation_fitted_stands_each_key_on_the_ground() {
                     key.pose
                 );
             }
+            // Between the keys too: keys are added where it sank more
+            // than 3 mm.
             let low = lowest_playing(&model, &name);
-            assert!(low > -0.02, "{} {name}: sinks {low}", example.name);
+            assert!(low > -0.003, "{} {name}: sinks {low}", example.name);
             // The summary says the worst, when it sinks at all.
             if low < -0.0001 {
                 assert!(
-                    fitted.summary.contains("between keys it sinks at most")
+                    fitted.summary.contains("between keys it now sinks at most")
                         || fitted.lines.is_none(),
                     "{}",
                     fitted.summary
@@ -332,4 +348,118 @@ fn a_starter_copied_onto_the_gnome_and_fitted_stands_on_the_ground() {
     let fitted = done(&added.text, &fit("idle"));
     let model = fitted.model.unwrap();
     assert!(lowest_playing(&model, "idle") > -0.005);
+}
+
+// ---- between the keys (Phase 7a) ---------------------------------------------------
+
+/// The robot's jump as it was before Phase 7a: its crouch stood a little
+/// high, by hand, so the feet didn't dig in between the keys.
+const HAND_TUNED_CROUCH: &str = "body = { move = [0, -0.025, 0] }";
+
+fn robot_hand_tuned() -> String {
+    let robot = std::fs::read_to_string(examples().join("robot.toml")).unwrap();
+    // The robot as kept is fitted already: put its jump back as it was.
+    let start = robot.find("[poses.jump_crouch]").unwrap();
+    let line_end = robot[start..].find('\n').unwrap() + start + 1;
+    let next = robot[line_end..].find('\n').unwrap() + line_end;
+    let mut text = format!(
+        "{}{HAND_TUNED_CROUCH}{}",
+        &robot[..line_end],
+        &robot[next..]
+    );
+    for added in ["jump_2", "jump_3"] {
+        let key = format!(
+            "  {{ at = {}, pose = \"{added}\" }},\n",
+            if added == "jump_2" { "0.13" } else { "1.17" }
+        );
+        text = text.replace(&key, "");
+        // And the pose's table, up to the next one.
+        let start = text.find(&format!("[poses.{added}]\n")).unwrap();
+        let end = text[start + 1..].find("\n[").unwrap() + start + 2;
+        text.replace_range(start..end, "");
+    }
+    text
+}
+
+#[test]
+fn fitting_only_the_keys_leaves_a_dip_that_inspect_warns_about() {
+    use duck_mold_core::inspect::{inspect, inspect_animation};
+    let fitted = done(&robot_hand_tuned(), &fit_keys_only("jump"));
+    assert!(
+        fitted
+            .summary
+            .contains("between keys it now sinks at most 0.0102"),
+        "{}",
+        fitted.summary
+    );
+    let model = fitted.model.unwrap();
+    assert!(lowest_playing(&model, "jump") < -0.009);
+    let rest = inspect(&model, "robot.toml", Vec::new());
+    let report = inspect_animation(
+        &rest,
+        &model,
+        model.animation("jump").unwrap(),
+        "robot.toml",
+    );
+    let dip = report
+        .warnings
+        .iter()
+        .find(|warning| warning.code == Code::DipsBetweenKeys)
+        .expect("a dip between keys is warned about");
+    assert!(
+        dip.message
+            .contains("sinks 0.01 into the ground at 0.133 s")
+            && dip.message.contains("fit-ground jump"),
+        "{}",
+        dip.message
+    );
+}
+
+#[test]
+fn fitting_adds_keys_where_it_dips_between_keys() {
+    use duck_mold_core::inspect::{inspect, inspect_animation};
+    let fitted = done(&robot_hand_tuned(), &fit("jump"));
+    assert!(
+        fitted.summary.contains(
+            "added 2 keys between keys, at 0.13 s and 1.17 s, where it sank 10 mm and 10 mm"
+        ),
+        "{}",
+        fitted.summary
+    );
+    let model = fitted.model.unwrap();
+    // The new poses are named after the animation, and stand on the
+    // ground; the jump sinks at most 3 mm now.
+    for (name, at) in [("jump_2", 0.13), ("jump_3", 1.17)] {
+        assert!(lowest_in(&model, name).abs() < 0.0002, "{name}");
+        let played = model.animation("jump").unwrap();
+        assert!(
+            played
+                .keys
+                .iter()
+                .any(|key| key.pose == name && (key.at - at).abs() < 1e-9)
+        );
+    }
+    assert!(lowest_playing(&model, "jump") > -0.003);
+    let rest = inspect(&model, "robot.toml", Vec::new());
+    let report = inspect_animation(
+        &rest,
+        &model,
+        model.animation("jump").unwrap(),
+        "robot.toml",
+    );
+    assert!(
+        !report
+            .warnings
+            .iter()
+            .any(|warning| warning.code == Code::DipsBetweenKeys)
+    );
+    // Fitted again, nothing more is added: it's done.
+    let again = done(&fitted.text, &fit("jump"));
+    assert!(!again.summary.contains("added"), "{}", again.summary);
+}
+
+#[test]
+fn the_robots_jump_as_kept_is_fitted_between_keys() {
+    let model = tools::build(&examples().join("robot.toml")).unwrap().model;
+    assert!(lowest_playing(&model, "jump") > -0.003);
 }

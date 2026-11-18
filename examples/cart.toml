@@ -132,10 +132,26 @@ wheel_front_right = [-360, 0, 0]
 wheel_back_left = [-360, 0, 0]
 wheel_back_right = [-360, 0, 0]
 
+[poses.roll_2]
+wheel_front_left = [-18, 0, 0]
+wheel_front_right = [-18, 0, 0]
+wheel_back_left = [-18, 0, 0]
+wheel_back_right = [-18, 0, 0]
+bed = { move = [0, 0.002, 0] }
+
+[poses.roll_3]
+bed = { move = [0, 0.002, 0] }
+wheel_front_left = [-342, 0, 0]
+wheel_front_right = [-342, 0, 0]
+wheel_back_left = [-342, 0, 0]
+wheel_back_right = [-342, 0, 0]
+
 [animations.roll]
 loop = true
 smooth = false
 keys = [
   { at = 0, pose = "rest" },
+  { at = 0.05, pose = "roll_2" },
+  { at = 0.95, pose = "roll_3" },
   { at = 1, pose = "roll_round" },
 ]

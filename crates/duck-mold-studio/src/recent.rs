@@ -40,6 +40,12 @@ fn settings_folder() -> Option<PathBuf> {
 }
 
 impl Recent {
+    /// The folder the list is kept in, where the Studio keeps its other
+    /// files too (the undo history, crash notes).
+    pub fn folder(&self) -> Option<&Path> {
+        self.kept_in.as_deref().and_then(Path::parent)
+    }
+
     /// A list that is kept nowhere.
     pub fn nowhere() -> Recent {
         Recent::default()
@@ -95,6 +101,19 @@ impl Recent {
             .collect()
     }
 
+    /// All the files, newest first, whether they are still there or not:
+    /// the start page shows the ones that aren't as "not found".
+    pub fn all_files(&self) -> Vec<&Path> {
+        self.files.iter().map(PathBuf::as_path).collect()
+    }
+
+    /// Takes a file off the list.
+    pub fn forget(&mut self, file: &Path) {
+        let file = whole(file);
+        self.files.retain(|known| *known != file);
+        self.save();
+    }
+
     /// Notes that a file was opened: it goes to the top of the list.
     pub fn opened(&mut self, file: &Path) {
         let file = whole(file);
@@ -139,6 +158,32 @@ impl Recent {
     /// would be no way to stop showing them.
     pub fn tips_seen(&self) -> bool {
         self.tips_file().is_none_or(|file| file.exists())
+    }
+
+    /// The interface size chosen, in percent, if one was: `None` is the
+    /// size the system asks for.
+    pub fn interface_size(&self) -> Option<u32> {
+        let file = self.kept_in.as_ref()?.with_file_name("interface-size.txt");
+        std::fs::read_to_string(file).ok()?.trim().parse().ok()
+    }
+
+    /// Remembers the interface size chosen.
+    pub fn keep_interface_size(&self, size: Option<u32>) {
+        let Some(kept_in) = &self.kept_in else {
+            return;
+        };
+        let file = kept_in.with_file_name("interface-size.txt");
+        match size {
+            Some(size) => {
+                if let Some(folder) = file.parent() {
+                    let _ = std::fs::create_dir_all(folder);
+                }
+                let _ = std::fs::write(file, format!("{size}\n"));
+            }
+            None => {
+                let _ = std::fs::remove_file(file);
+            }
+        }
     }
 
     /// Notes that the tips have been shown, so they aren't again.

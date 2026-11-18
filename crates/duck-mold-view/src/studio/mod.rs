@@ -31,6 +31,7 @@ pub use sockets::Clicked;
 pub use timeline::{KEY_STEP, KeyMark};
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::SystemTime;
 
 use duck_mold_core::edit::{self, Edit, Facts};
@@ -119,6 +120,13 @@ pub struct Studio {
     /// Whether the model's hit shapes are outlined over it (the Hits
     /// switch), as `render --colliders` draws them.
     pub hits: bool,
+    /// Which version of the model the picture shows (View > Far
+    /// version): 0 for the model itself, 1 or 2 for a far-away version.
+    /// Only the picture changes, and only outside Pose mode.
+    pub far: usize,
+    /// That far-away version as a game draws it, kept until the model
+    /// is built again: the build it is of, which version, and it.
+    far_shown: std::cell::RefCell<Option<(usize, usize, Rc<Model>)>>,
     /// The part that is selected, by path. When several are, this is
     /// the one selected last: the one the panel shows.
     pub(crate) selected: Option<String>,
@@ -140,6 +148,20 @@ pub struct Studio {
     /// undone and can be made again.
     undo: Vec<history::Step>,
     redo: Vec<history::Step>,
+    /// Where the undo history is kept on disk, if it is.
+    history_file: Option<PathBuf>,
+    /// What one picture keeps for the next: its canvas, the shadow.
+    kept: std::cell::RefCell<viewport::Kept>,
+    /// The file the Studio wrote last (a `.glb`, a picture, the recipe
+    /// saved again), for the window to offer to show in its folder.
+    written: Option<PathBuf>,
+    /// True when the file isn't there any more (deleted or moved): the
+    /// model stays, and nothing is changed until it is saved again.
+    gone: bool,
+    /// Text another program has just saved, that doesn't build: shown
+    /// once it has stayed the same for one more check. A program that
+    /// writes a file in pieces isn't shown as a mistake for a moment.
+    settling: Option<String>,
     library: library::Library,
     /// The animation library's files, as last read.
     shelf: shelf::Shelf,
@@ -201,6 +223,8 @@ impl Studio {
             wire: false,
             shadow: true,
             hits: false,
+            far: 0,
+            far_shown: std::cell::RefCell::new(None),
             selected: None,
             also: Vec::new(),
             hidden: Vec::new(),
@@ -212,6 +236,11 @@ impl Studio {
             dragging: None,
             undo: Vec::new(),
             redo: Vec::new(),
+            history_file: None,
+            kept: Default::default(),
+            written: None,
+            gone: false,
+            settling: None,
             library: library::Library::default(),
             shelf: shelf::Shelf::default(),
             paint: None,
@@ -249,6 +278,24 @@ impl Studio {
             || self.shown_as.clone(),
             |name| name.to_string_lossy().into_owned(),
         )
+    }
+
+    /// Works `edits` out on the recipe's text, in memory: for a drag's
+    /// preview, or to see whether an edit would work. The model shown is
+    /// handed on when the text has no mistakes, so it isn't built again.
+    pub(crate) fn try_edits(
+        &self,
+        syntax: Syntax,
+        edits: &[Edit],
+    ) -> Result<edit::Applied, Failure> {
+        let built = self.model().filter(|_| !self.has_mistakes());
+        edit::apply_many_built(&self.text, syntax, &self.path, &self.shown_as, edits, built)
+    }
+
+    /// True for a recipe (`.toml`, `.json`); false for a mesh file
+    /// (`.glb`, `.gltf`, `.obj`), which is only looked at.
+    pub fn is_recipe(&self) -> bool {
+        Syntax::from_path(&self.path).is_some()
     }
 
     /// True when nothing can be edited.
@@ -335,9 +382,20 @@ impl Studio {
     /// Reads the file and builds it again. If it has mistakes, they
     /// become the problems and the last good model stays.
     pub fn reload(&mut self) {
-        self.builds += 1;
-        self.text = std::fs::read_to_string(&self.path).unwrap_or_default();
+        let text = std::fs::read_to_string(&self.path).unwrap_or_default();
         let (built, files) = tools::build_watching(&self.path);
+        self.take_build(text, built, files);
+    }
+
+    /// Shows what was built from `text`.
+    fn take_build(
+        &mut self,
+        text: String,
+        built: Result<tools::Built, Failure>,
+        files: Vec<PathBuf>,
+    ) {
+        self.builds += 1;
+        self.text = text;
         self.watched = files
             .into_iter()
             .map(|path| Watched {
@@ -438,12 +496,132 @@ impl Studio {
     /// built again.
     pub fn check_files(&mut self) -> bool {
         if !self.files_changed() {
+            self.settling = None;
             return false;
         }
+        if !self.path.is_file() {
+            // Deleted or moved: the model stays, and the window offers
+            // to save it again.
+            if self.gone {
+                return false;
+            }
+            self.gone = true;
+            if let Some(why) = self.missing() {
+                self.say(why);
+            }
+            return true;
+        }
+        let text = std::fs::read_to_string(&self.path).unwrap_or_default();
+        let (built, files) = tools::build_watching(&self.path);
+        if built.is_err() && text != self.text && self.settling.as_ref() != Some(&text) {
+            // It may be half written: looked at again next check.
+            self.settling = Some(text);
+            return false;
+        }
+        self.settling = None;
+        self.gone = false;
         let before = std::mem::take(&mut self.text);
-        self.reload();
+        self.take_build(text, built, files);
         self.changed_outside(before);
         true
+    }
+
+    /// Why nothing can be changed: the file isn't there any more.
+    pub fn missing(&self) -> Option<String> {
+        self.gone
+            .then(|| format!("{} isn't there any more (deleted or moved)", self.title()))
+    }
+
+    /// Writes the recipe the Studio last saw back where it was, after it
+    /// was deleted or moved.
+    pub fn save_again(&mut self) -> Result<String, String> {
+        let path = self.path.clone();
+        self.save_as(&path)
+    }
+
+    /// Writes the recipe the Studio last saw to `path`, and goes on
+    /// working there. The undo history comes along.
+    pub fn save_as(&mut self, path: &Path) -> Result<String, String> {
+        if self.look_only {
+            let why = "This window is only for looking: nothing was changed".to_owned();
+            self.say(why.clone());
+            return Err(why);
+        }
+        if let Err(failure) = edit::swap_in(path, None, &self.text) {
+            let why = capital(&first_error(&failure));
+            self.say(why.clone());
+            return Err(why);
+        }
+        if path != self.path {
+            let folder = self
+                .history_file
+                .take()
+                .and_then(|file| file.parent().map(Path::to_path_buf));
+            self.path = path.to_path_buf();
+            self.shown_as = display_path(path);
+            if let Some(folder) = folder {
+                self.history_file = Some(history::history_file(&folder, path));
+            }
+        }
+        self.gone = false;
+        self.written = Some(self.path.clone());
+        self.reload();
+        let said = format!("Saved {}", self.title());
+        self.say(said.clone());
+        Ok(said)
+    }
+
+    /// Waits a moment, at most a second, for a file another program is
+    /// saving to settle. False if it hasn't.
+    fn settle(&mut self) -> bool {
+        for _ in 0..10 {
+            self.check_files();
+            if self.settling.is_none() {
+                return true;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        false
+    }
+
+    /// A click with Hits on: the part whose hit shape is first on the ray
+    /// from the eye through the pointer is selected, as a game's click
+    /// would find it, and the status line says what it hit; a click a
+    /// game's would miss selects nothing, and says why.
+    fn click_hit_shape(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<&str> {
+        self.hover(size, Some(at));
+        let (eye, way) = self.pointer_ray(at);
+        let found = self
+            .shown_model()
+            .and_then(|model| crate::ray::first_hit(model, eye - self.offset(), way));
+        self.also.clear();
+        let said = match &found {
+            Some(hit) if !hit.part.is_empty() => {
+                self.selected = Some(hit.part.clone());
+                format!(
+                    "A game's click here hits: {} (its {}), {:.1} m away",
+                    hit.part, hit.shape, hit.distance
+                )
+            }
+            Some(hit) => {
+                self.selected = None;
+                format!(
+                    "A game's click here hits the {} round the whole model, {:.1} m away",
+                    hit.shape, hit.distance
+                )
+            }
+            None => {
+                self.selected = None;
+                match self.part_under(size, at) {
+                    Some(part) => {
+                        format!("A game's click here hits nothing: {part} has no hit shape")
+                    }
+                    None => "A game's click here hits nothing".to_owned(),
+                }
+            }
+        };
+        self.say(said);
+        self.selected.as_deref()
     }
 
     /// The part with this path.
@@ -540,6 +718,11 @@ impl Studio {
     /// the first click on a robot's hand selects its arm, and the second
     /// the hand.
     pub fn click(&mut self, size: (usize, usize), at: (f64, f64)) -> Option<&str> {
+        // With Hits on, what a game's click here would hit: the first
+        // hit shape on the ray, as the model stands.
+        if self.hits {
+            return self.click_hit_shape(size, at);
+        }
         // (Picked from what is shown: in Pose mode, the model in its
         // pose.)
         let hit = self.shown_model().and_then(|model| {
@@ -627,8 +810,17 @@ impl Studio {
         }
         // What the file holds now is what is edited, not what was read a
         // moment ago: if another program has just saved it, that is seen
-        // first.
-        self.check_files();
+        // first, once it has finished saving.
+        if !self.settle() {
+            let why = format!("Waiting for {} to finish saving...", self.title());
+            self.say(why.clone());
+            return Err(why);
+        }
+        if let Some(why) = self.missing() {
+            let why = format!("Not changed: {why}");
+            self.say(why.clone());
+            return Err(why);
+        }
         let before = self.text.clone();
         let parts_before: Vec<String> = self.outline().into_iter().map(|row| row.path).collect();
         // A socket the Studio made, left with nothing on it by these
@@ -636,7 +828,13 @@ impl Studio {
         let mut all = changes.to_vec();
         all.extend(self.sockets_left_unused(changes));
         let changes = all.as_slice();
-        match edit::edit_file_many(&self.path, changes, false) {
+        // The model shown is handed on (when the file has no mistakes),
+        // so it isn't built again; the report is worked out by reload.
+        let built = self
+            .model()
+            .filter(|_| !self.has_mistakes())
+            .map(|model| (self.text.as_str(), model));
+        match edit::edit_file_built(&self.path, changes, false, built, false) {
             Ok(edited) => {
                 // The selection follows the last change that moves it.
                 let mut follow = changes
@@ -758,7 +956,7 @@ impl Studio {
             tried.push(Edit::RemoveSocket {
                 socket: socket.clone(),
             });
-            if edit::apply_many(&self.text, syntax, &self.path, &self.shown_as, &tried).is_ok() {
+            if self.try_edits(syntax, &tried).is_ok() {
                 tidy.push(Edit::RemoveSocket { socket });
             }
         }
@@ -785,6 +983,28 @@ impl Studio {
     pub fn on_screen(&self, point: Vec3) -> Option<(f64, f64)> {
         self.orbit
             .on_screen(point + self.offset(), self.view.0, self.view.1)
+    }
+
+    /// The far-away version the picture shows, if View > Far version
+    /// asks for one and the model has it: not while a handle is held or
+    /// in Pose mode, which show the model itself.
+    pub fn far_drawn(&self) -> Option<Rc<Model>> {
+        if self.far == 0 || self.preview.is_some() || self.posed_model().is_some() {
+            return None;
+        }
+        let model = self.model()?;
+        let version = model.far.get(self.far - 1)?;
+        let mut kept = self.far_shown.borrow_mut();
+        match kept.as_ref() {
+            Some((builds, far, drawn)) if *builds == self.builds && *far == self.far => {
+                Some(drawn.clone())
+            }
+            _ => {
+                let drawn = Rc::new(version.drawn());
+                *kept = Some((self.builds, self.far, drawn.clone()));
+                Some(drawn)
+            }
+        }
     }
 
     /// The model as the viewport shows it: what a drag would build, while
@@ -891,7 +1111,11 @@ impl Studio {
             }
             None => None,
         };
-        let model = self.shown_model();
+        let far = self.far_drawn();
+        let model = match &far {
+            Some(far) => Some(far.as_ref()),
+            None => self.shown_model(),
+        };
         // The selected parts as they are in what is shown.
         // (In Face mode the box isn't lit whole: its faces are.)
         let selected: Vec<&Part> = self
@@ -915,7 +1139,15 @@ impl Studio {
         } else {
             Vec::new()
         };
-        viewport::draw(
+        // The model as built changes only with the file: what is kept
+        // for it (its shadow) stays until then, through a drag too (the
+        // shadow catches up when the part is let go). A pose is worked
+        // out afresh.
+        let model_key = (self.preview.is_some() || self.posed_model().is_none())
+            .then_some(self.builds as u64 * 4 + far.as_ref().map_or(0, |_| self.far as u64));
+        viewport::draw_kept(
+            &mut self.kept.borrow_mut(),
+            model_key,
             &Look {
                 model,
                 orbit: &self.orbit,
@@ -943,8 +1175,9 @@ impl Studio {
         let done = tools::export_file(&self.path, None)
             .map(|exported| {
                 self.shorten(&format!(
-                    "Wrote {} ({} bytes)",
-                    exported.output, exported.bytes
+                    "Wrote {} ({})",
+                    exported.output,
+                    tools::size_in_words(exported.bytes)
                 ))
             })
             .map_err(|failure| self.shorten(&first_error(&failure)));
@@ -952,17 +1185,23 @@ impl Studio {
             Ok(said) => said.clone(),
             Err(why) => format!("Not exported: {why}"),
         });
+        if done.is_ok() {
+            self.written = Some(self.path.with_extension("glb"));
+        }
         done
     }
 
     /// Writes the four-view picture next to the recipe, as `duck-mold
     /// render` does. Says where it went.
     pub fn render_picture(&mut self) -> Result<String, String> {
-        let done = render::render_file(&self.path, None, render::DEFAULT_SIZE, None, false)
+        let done = render::render_file(&self.path, None, render::DEFAULT_SIZE, None, None, false)
             .map(|rendered| {
                 self.shorten(&format!(
-                    "Wrote {} ({} x {} pixels)",
-                    rendered.output, rendered.width, rendered.height
+                    "Wrote {} ({} x {} pixels, {})",
+                    rendered.output,
+                    rendered.width,
+                    rendered.height,
+                    tools::size_in_words(rendered.bytes)
                 ))
             })
             .map_err(|failure| self.shorten(&first_error(&failure)));
@@ -970,7 +1209,16 @@ impl Studio {
             Ok(said) => said.clone(),
             Err(why) => format!("No picture: {why}"),
         });
+        if done.is_ok() {
+            self.written = Some(self.path.with_extension("png"));
+        }
         done
+    }
+
+    /// The file the Studio wrote last: a `.glb` exported, a picture
+    /// rendered, or the recipe saved again.
+    pub fn last_written(&self) -> Option<&Path> {
+        self.written.as_deref()
     }
 }
 

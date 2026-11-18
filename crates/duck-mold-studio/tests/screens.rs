@@ -25,13 +25,22 @@ fn the_start_page_offers_open_and_new() {
     screen.get_by_label("Duck Mold Studio");
     screen.get_by_label("Open a model");
     screen.get_by_label("New model");
-    assert_eq!(screen.state().title(), "Duck Mold Studio");
+    assert_eq!(
+        screen.state().title(),
+        format!("Duck Mold Studio {}", env!("CARGO_PKG_VERSION"))
+    );
 
     // A new model is a recipe with one box, opened at once.
     let recipe = folder("screens_new").join("crate.toml");
     screen.state_mut().start_new(&recipe);
     screen.run_steps(2);
-    assert_eq!(screen.state().title(), "crate.toml - Duck Mold Studio");
+    assert_eq!(
+        screen.state().title(),
+        format!(
+            "crate.toml - Duck Mold Studio {}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
     screen.get_by_label("body");
     let text = std::fs::read_to_string(&recipe).unwrap();
     assert!(text.contains("name = \"crate\""), "{text}");
@@ -61,8 +70,7 @@ fn an_open_recipe_shows_its_parts_and_no_problems() {
     for part in ["body", "head", "antenna", "left_arm", "right_leg"] {
         screen.get_by_label(part);
     }
-    screen.get_by_label("Problems");
-    screen.get_by_label("None");
+    screen.get_by_label("No problems");
     assert!(screen.query_by_label("looking only").is_none());
     for button in [
         "File",
@@ -95,13 +103,16 @@ fn export_and_render_picture_write_next_to_the_recipe() {
     let model = recipe.with_extension("glb");
     assert!(model.is_file(), "Export wrote no .glb");
     assert_eq!(&std::fs::read(&model).unwrap()[..4], b"glTF");
-    screen.get_by_label_contains("robot.glb");
+    assert!(screen.query_all_by_label_contains("robot.glb").count() >= 1);
+    // A note over the picture offers to show where it went.
+    screen.run_steps(1);
+    screen.get_by_label("Show in folder");
 
     screen.get_by_label("Render picture").click();
     screen.run_steps(2);
     let picture = recipe.with_extension("png");
     assert!(picture.is_file(), "Render picture wrote no .png");
-    screen.get_by_label_contains("robot.png");
+    assert!(screen.query_all_by_label_contains("robot.png").count() >= 1);
 
     // Neither touched the recipe.
     assert_eq!(
@@ -188,14 +199,17 @@ fn a_mistake_saved_from_outside_shows_in_problems_and_the_model_stays() {
     let recipe = copy_of("robot.toml", "screens_problems");
     let mut screen = harness(StudioApp::with_file(&recipe, false), false);
     screen.run_steps(2);
-    screen.get_by_label("None");
+    screen.get_by_label("No problems");
 
     // Another program saves the recipe with a mistake in it.
     let good = std::fs::read_to_string(&recipe).unwrap();
     std::fs::write(&recipe, good.replace("shape = \"box\"", "shape = \"blob\"")).unwrap();
+    // Shown once it has stayed the same for two checks: it may have been
+    // half saved.
+    assert!(!screen.state_mut().studio_mut().unwrap().check_files());
     assert!(screen.state_mut().studio_mut().unwrap().check_files());
     screen.run_steps(2);
-    assert!(screen.query_by_label("None").is_none());
+    assert!(screen.query_by_label("No problems").is_none());
     screen.get_by_label("The file has mistakes. The picture is of the last version that worked.");
     assert!(screen.query_all_by_label("mistake").count() >= 1);
     // The parts of the last good version are still listed.
@@ -205,7 +219,7 @@ fn a_mistake_saved_from_outside_shows_in_problems_and_the_model_stays() {
     std::fs::write(&recipe, good).unwrap();
     assert!(screen.state_mut().studio_mut().unwrap().check_files());
     screen.run_steps(2);
-    screen.get_by_label("None");
+    screen.get_by_label("No problems");
 }
 
 #[test]
@@ -300,6 +314,7 @@ fn clicking_a_problem_selects_the_part_it_is_about() {
     .unwrap();
     let mut screen = harness(StudioApp::with_file(&recipe, false), false);
     screen.run_steps(2);
+    open_problems(&mut screen);
     screen.get_by_label_contains("touches nothing").click();
     screen.run_steps(2);
     assert_eq!(selected(&screen).as_deref(), Some("b"));
@@ -363,8 +378,9 @@ fn the_panel_shows_the_selected_part_and_changes_the_recipe() {
         .get_by_role_and_label(Role::ComboBox, "Colour")
         .click();
     screen.run_steps(2);
-    // (The later one: the palette panel lists the colour too.)
-    screen.query_all_by_label("red").last().unwrap().click();
+    // (The first one, in the list: the palette under the panel lists
+    // the colour too.)
+    screen.query_all_by_label("red").next().unwrap().click();
     screen.run_steps(3);
     assert_eq!(new_lines(&recipe), ["color = \"red\""]);
     screen.get_by_label_contains("Set \"head\": colour red");
@@ -390,6 +406,28 @@ fn the_panel_shows_the_selected_part_and_changes_the_recipe() {
         "{lines:?}"
     );
     assert!(screen.state().studio().unwrap().problems().is_empty());
+
+    // A name that can't be used: what was typed stays, to be mended.
+    let name = screen.get_by_role_and_label(Role::TextInput, "Name");
+    name.focus();
+    screen.run_steps(2);
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::A);
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::TextInput, "Name")
+        .type_text("body");
+    screen.run_steps(2);
+    screen.key_press(egui::Key::Enter);
+    screen.run_steps(3);
+    assert_eq!(selected(&screen).as_deref(), Some("skull"));
+    assert!(screen.query_all_by_label_contains("Not changed").count() >= 1);
+    assert_eq!(
+        screen
+            .get_by_role_and_label(Role::TextInput, "Name")
+            .value()
+            .as_deref(),
+        Some("body")
+    );
 }
 
 #[test]
@@ -412,8 +450,9 @@ fn a_part_from_a_definition_says_so_before_any_edit() {
         .get_by_role_and_label(egui::accesskit::Role::ComboBox, "Colour")
         .click();
     screen.run_steps(2);
-    // (The later one: the palette panel lists the colour too.)
-    screen.query_all_by_label("glow").last().unwrap().click();
+    // (The first one, in the list: the palette under the panel lists
+    // the colour too.)
+    screen.query_all_by_label("glow").next().unwrap().click();
     screen.run_steps(3);
     assert_eq!(new_lines(&recipe), ["color = \"glow\""]);
     screen.get_by_label_contains("(also changed: right_arm/hand)");
@@ -447,14 +486,14 @@ fn duplicate_mirror_copy_and_remove_are_buttons() {
     screen.run_steps(2);
     screen.get_by_label("Remove").click_accesskit();
     screen.run_steps(2);
-    screen.get_by_label("4 other parts hang from this one. Remove them too?");
+    screen.get_by_label("4 parts are joined to it: antenna, antenna_tip, left_eye, right_eye.");
     assert!(screen.state().studio().unwrap().part("head").is_some());
-    screen.get_by_label("Keep them").click_accesskit();
+    screen.get_by_label("Cancel").click_accesskit();
     screen.run_steps(2);
     assert!(screen.state().studio().unwrap().part("head").is_some());
     screen.get_by_label("Remove").click_accesskit();
     screen.run_steps(2);
-    screen.get_by_label("Remove them all").click();
+    screen.get_by_label("Remove all 5").click();
     screen.run_steps(3);
     let studio = screen.state().studio().unwrap();
     for gone in ["head", "left_eye", "right_eye", "antenna", "antenna_tip"] {
@@ -494,9 +533,11 @@ fn when_only_looking_the_panel_changes_nothing() {
         .unwrap()
         .select(Some("antenna_tip"));
     screen.run_steps(2);
-    screen.get_by_label("Looking only: nothing can be changed here.");
-    screen.get_by_label("Remove").click();
-    screen.run_steps(3);
+    // The facts as plain words; nothing to type in, nothing to press.
+    screen.get_by_label("Looking only: open the recipe in the Studio to change it.");
+    screen.get_by_label("Joined to");
+    screen.get_by_label("antenna.top");
+    assert!(screen.query_by_label("Remove").is_none());
     assert!(
         screen
             .state()
@@ -689,6 +730,47 @@ fn the_cube_can_be_dragged_by_its_arrows_and_by_itself() {
 }
 
 #[test]
+fn a_drag_does_the_same_when_its_frames_are_drafts() {
+    // On a slow computer the frames of a drag are drawn smaller (drafts).
+    // The handles must still move as far as the mouse does: this drag
+    // once snapped to the wrong angle, or none, on a slow machine.
+    use duck_mold_core::math::{Mat3, vec3};
+    use duck_mold_view::studio::handles::Grip;
+    let (recipe, mut screen) = boxes("screens_handles_drafts");
+    screen.state_mut().draw_drafts_while_dragging();
+    screen.key_press(egui::Key::R);
+    screen.run_steps(2);
+    let (from, middle) = {
+        let studio = screen.state().studio().unwrap();
+        (
+            studio.grip_at(Grip::Ring(1)).unwrap(),
+            studio.part("crate").unwrap().place.shift + studio.offset(),
+        )
+    };
+    let to = middle + Mat3::around_y(48.0) * (from - middle);
+    let (start, end) = (point_on_screen(&screen, from), point_on_screen(&screen, to));
+    drag(&mut screen, start, end);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("rotate = [0, 45, 0]"), "{text}");
+    // And the move arrow, along x.
+    screen.key_press(egui::Key::G);
+    screen.run_steps(2);
+    let from = screen
+        .state()
+        .studio()
+        .unwrap()
+        .grip_at(Grip::Arrow(0))
+        .unwrap();
+    let (start, end) = (
+        point_on_screen(&screen, from),
+        point_on_screen(&screen, from + vec3(-0.5, 0.0, 0.0)),
+    );
+    drag(&mut screen, start, end);
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("move = [0, 0.35, 0]"), "{text}");
+}
+
+#[test]
 fn the_tools_are_buttons_and_keys() {
     use duck_mold_core::math::{Mat3, vec3};
     use duck_mold_view::studio::handles::{Grip, Tool};
@@ -806,8 +888,9 @@ fn undo_and_redo_are_buttons_and_keys() {
         .get_by_role_and_label(Role::ComboBox, "Colour")
         .click();
     screen.run_steps(2);
-    // (The later one: the palette panel lists the colour too.)
-    screen.query_all_by_label("red").last().unwrap().click();
+    // (The first one, in the list: the palette under the panel lists
+    // the colour too.)
+    screen.query_all_by_label("red").next().unwrap().click();
     screen.run_steps(3);
     let coloured = std::fs::read(&recipe).unwrap();
     screen
@@ -849,19 +932,16 @@ fn undo_and_redo_are_buttons_and_keys() {
     screen.run_steps(3);
     assert_eq!(std::fs::read(&recipe).unwrap(), added);
 
-    // A change from outside is undone the same way.
+    // A change from outside is a wall: Undo stops there, and says why.
     let text = String::from_utf8(added.clone()).unwrap();
-    std::fs::write(
-        &recipe,
-        text.replace("name = \"robot\"", "name = \"robot2\""),
-    )
-    .unwrap();
+    let theirs = text.replace("name = \"robot\"", "name = \"robot2\"");
+    std::fs::write(&recipe, &theirs).unwrap();
     assert!(screen.state_mut().studio_mut().unwrap().check_files());
     screen.run_steps(2);
-    screen.get_by_label("Undo").click();
+    screen.key_press_modifiers(egui::Modifiers::COMMAND, egui::Key::Z);
     screen.run_steps(3);
-    assert_eq!(std::fs::read(&recipe).unwrap(), added);
-    screen.get_by_label("Undid: Changed outside the Studio");
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), theirs);
+    screen.get_by_label_contains("changed outside the Studio just now. Undo stops here");
 
     // When only looking there is nothing to undo, and no buttons for it.
     let mut looking = harness(StudioApp::with_file(&recipe, true), false);
@@ -930,6 +1010,7 @@ fn a_library_part_is_chosen_in_the_add_list() {
     let studio = screen.state().studio().unwrap();
     assert!(!studio.has_mistakes(), "{:?}", studio.problems());
     assert!(studio.part("hat/cone").is_some());
+    open_problems(&mut screen);
     screen.get_by_label_contains("is hidden inside \"hat/cone\"");
 
     // When only looking, there is no library to add from.
@@ -981,19 +1062,33 @@ fn recipes_opened_lately_are_on_the_start_page() {
     screen.get_by_label("house.toml");
     screen.get_by_label("robot.toml").click();
     screen.run_steps(3);
-    assert_eq!(screen.state().title(), "robot.toml - Duck Mold Studio");
+    assert_eq!(
+        screen.state().title(),
+        format!(
+            "robot.toml - Duck Mold Studio {}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
     let written = std::fs::read_to_string(&list).unwrap();
     assert!(written.lines().next().unwrap().ends_with("robot.toml"));
 
-    // A recipe that has been deleted since is left out.
+    // A recipe that has been deleted since says so, and can be taken
+    // off the list; one with a mistake says what it is.
     std::fs::remove_file(folder.join("house.toml")).unwrap();
+    std::fs::write(folder.join("robot.toml"), "name\n").unwrap();
     let mut screen = harness(
         StudioApp::new().remembering(Recent::kept_in(list.clone())),
         false,
     );
-    screen.step();
+    screen.run_steps(2);
     screen.get_by_label("robot.toml");
+    screen.get_by_label_contains("line 1: this line has no `=`");
+    screen.get_by_label("house.toml");
+    screen.get_by_label("not found");
+    screen.get_by_label("Forget").click();
+    screen.run_steps(2);
     assert!(screen.query_by_label("house.toml").is_none());
+    assert_eq!(std::fs::read_to_string(&list).unwrap().lines().count(), 1);
 
     // A new model is remembered too; and only the latest eight are kept.
     for number in 0..10 {
@@ -1236,8 +1331,9 @@ fn shift_click_selects_several_and_the_panel_is_for_them_all() {
         .get_by_role_and_label(Role::ComboBox, "Colour")
         .click();
     screen.run_steps(2);
-    // (The later one: the palette panel lists the colour too.)
-    screen.query_all_by_label("stone").last().unwrap().click();
+    // (The first one, in the list: the palette under the panel lists
+    // the colour too.)
+    screen.query_all_by_label("stone").next().unwrap().click();
     screen.run_steps(3);
     assert_eq!(text_of(&recipe).matches("color = \"stone\"").count(), 3);
     screen.get_by_label_contains("Coloured 2 parts stone");
@@ -1308,13 +1404,36 @@ fn the_keys_copy_remove_hide_frame_and_select() {
     screen.key_press(Key::Backspace);
     screen.run_steps(3);
     assert_eq!(text_of(&recipe), YARD);
-    screen.get_by_label("Another part hangs from this one. Remove it too?");
-    screen.get_by_label("Keep them").click();
+    screen.get_by_label("1 part is joined to it: cap.");
+    screen.get_by_label("Cancel").click();
     screen.run_steps(2);
     assert_eq!(text_of(&recipe), YARD);
+    // Only the post: the cap stays where it stands, free.
     screen.key_press(Key::Delete);
     screen.run_steps(3);
-    screen.get_by_label("Remove them all").click();
+    screen
+        .get_by_label("Remove only \"post\" (they stay put)")
+        .click();
+    screen.run_steps(3);
+    let now = text_of(&recipe);
+    assert!(
+        !now.contains("name = \"post\"") && now.contains("name = \"cap\""),
+        "{now}"
+    );
+    let studio = screen.state().studio().unwrap();
+    assert!(studio.part("cap").unwrap().attached_to.is_none());
+    screen.key_press_modifiers(Modifiers::COMMAND, Key::Z);
+    screen.run_steps(3);
+    assert_eq!(text_of(&recipe), YARD);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("post"));
+    screen.run_steps(2);
+    screen.key_press(Key::Delete);
+    screen.run_steps(3);
+    screen.get_by_label("Remove all 2").click();
     screen.run_steps(3);
     let now = text_of(&recipe);
     assert!(!now.contains("post") && !now.contains("cap"), "{now}");
@@ -1503,8 +1622,8 @@ fn a_right_click_opens_the_menu_for_the_part_under_the_pointer() {
         .click();
     screen.run_steps(3);
     // The cap hangs from the post and wasn't selected: asked first.
-    screen.get_by_label("Another part hangs from these. Remove it too?");
-    screen.get_by_label("Remove them all").click();
+    screen.get_by_label("1 part is joined to them: cap.");
+    screen.get_by_label_contains("Remove all").click();
     screen.run_steps(3);
     let now = text_of(&recipe);
     assert!(
@@ -1669,7 +1788,8 @@ fn the_menus_do_what_the_buttons_and_keys_do() {
             .is_none()
     );
     choose(&mut screen, "Help", "About");
-    screen.get_by_label_contains("Duck Mold Studio 0.");
+    screen.get_by_label_contains("Version 0.");
+    screen.get_by_label("Copy version");
     screen.key_press(egui::Key::Escape);
     screen.run_steps(3);
 
@@ -1957,7 +2077,13 @@ fn an_example_on_the_start_page_opens_a_copy_of_your_own() {
     // A click opens a copy, in the folder for the person's own models.
     screen.get_by_label("robot").click();
     screen.run_steps(3);
-    assert_eq!(screen.state().title(), "robot.toml - Duck Mold Studio");
+    assert_eq!(
+        screen.state().title(),
+        format!(
+            "robot.toml - Duck Mold Studio {}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
     let copy = models.join("robot.toml");
     assert_eq!(
         std::fs::read_to_string(&copy)
@@ -1993,7 +2119,13 @@ fn an_example_on_the_start_page_opens_a_copy_of_your_own() {
     screen.run_steps(3);
     screen.get_by_label("robot").click();
     screen.run_steps(3);
-    assert_eq!(screen.state().title(), "robot_2.toml - Duck Mold Studio");
+    assert_eq!(
+        screen.state().title(),
+        format!(
+            "robot_2.toml - Duck Mold Studio {}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
     assert!(
         std::fs::read_to_string(models.join("robot_2.toml"))
             .unwrap()
@@ -2016,7 +2148,10 @@ fn an_example_on_the_start_page_opens_a_copy_of_your_own() {
         .unwrap()
         .click();
     screen.run_steps(3);
-    assert_eq!(screen.state().title(), "desk.toml - Duck Mold Studio");
+    assert_eq!(
+        screen.state().title(),
+        format!("desk.toml - Duck Mold Studio {}", env!("CARGO_PKG_VERSION"))
+    );
     assert!(models.join("parts/lamp.gltf").is_file());
     assert!(models.join("parts/crate.glb").is_file());
     assert!(!screen.state().studio().unwrap().has_mistakes());
@@ -2111,7 +2246,13 @@ fn models_opened_lately_have_pictures_and_are_in_the_file_menu() {
         .unwrap()
         .click();
     screen.run_steps(3);
-    assert_eq!(screen.state().title(), "robot.toml - Duck Mold Studio");
+    assert_eq!(
+        screen.state().title(),
+        format!(
+            "robot.toml - Duck Mold Studio {}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
 
     // On the start page each is a tile; the broken one too, and it
     // still opens, to show what is wrong with it.
@@ -2128,7 +2269,13 @@ fn models_opened_lately_have_pictures_and_are_in_the_file_menu() {
     }
     screen.get_by_label("broken.toml").click();
     screen.run_steps(3);
-    assert_eq!(screen.state().title(), "broken.toml - Duck Mold Studio");
+    assert_eq!(
+        screen.state().title(),
+        format!(
+            "broken.toml - Duck Mold Studio {}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
     assert!(screen.state().studio().unwrap().has_mistakes());
 }
 
@@ -2883,7 +3030,11 @@ fn the_hits_switch_and_the_panels_hit_shape() {
         .get_by_role_and_label(Role::ComboBox, "Hit shape")
         .click();
     screen.run_steps(2);
-    screen.query_all_by_label("box").last().unwrap().click();
+    screen
+        .query_all_by_label("its own: box")
+        .last()
+        .unwrap()
+        .click();
     screen.run_steps(3);
     assert!(text().contains("collider = \"box\""), "{}", text());
     screen.get_by_label_contains("\"head\" has a box for its hit shape");
@@ -2909,7 +3060,7 @@ fn the_hits_switch_and_the_panels_hit_shape() {
         .click();
     screen.run_steps(2);
     screen
-        .query_all_by_label("fitted: none")
+        .query_all_by_label("the model's: each part")
         .last()
         .unwrap()
         .click();
@@ -2946,6 +3097,73 @@ fn with_nothing_selected_the_panel_has_the_models_hit_shapes() {
     let text = std::fs::read_to_string(&recipe).unwrap();
     assert!(text.contains("colliders = \"capsule\""), "{text}");
     screen.get_by_label("One capsule round the whole model, and the parts that say their own.");
+}
+
+// ---- far-away versions ------------------------------------------------------------
+
+#[test]
+fn view_far_version_shows_one_in_the_picture_and_says_its_triangles() {
+    let (recipe, mut screen) = robot_with("screens_far_view", "head");
+    let far = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().far;
+    assert_eq!(far(&screen), 0);
+    screen.get_by_label("View").click();
+    screen.run_steps(3);
+    screen.get_by_label("Far version").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("Far 2 (from 36.6 m)")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(far(&screen), 2);
+    screen.get_by_label("Showing Far 2: 276 triangles");
+    assert!(new_lines(&recipe).is_empty(), "looking changes nothing");
+    assert!(screen.state().studio().unwrap().far_drawn().is_some());
+    screen.get_by_label("View").click();
+    screen.run_steps(3);
+    screen.get_by_label("Far version").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("The model itself")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(far(&screen), 0);
+    assert!(screen.query_by_label_contains("Showing Far").is_none());
+}
+
+#[test]
+fn the_model_section_sets_far_versions_and_a_part_can_be_kept_whole() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_far_model", "head");
+    let text = || std::fs::read_to_string(&recipe).unwrap();
+    // A part: kept whole, one edit.
+    screen.get_by_label("Keep whole when far").click();
+    screen.run_steps(3);
+    assert!(text().contains("lod = \"keep\""), "{}", text());
+    // The model: its line, and none takes them away.
+    screen.state_mut().studio_mut().unwrap().select(None);
+    screen.run_steps(2);
+    screen.get_by_label_contains("Far 1 from 14.6 m: 288 triangles.");
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Far versions")
+        .click();
+    screen.run_steps(2);
+    screen.query_all_by_label("none").last().unwrap().click();
+    screen.run_steps(3);
+    assert!(!text().contains("lods ="), "{}", text());
+    screen.get_by_label("None: a game draws every triangle however far off it is.");
+    // With none, the part's box isn't offered and View > Far version is
+    // greyed.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    screen.run_steps(2);
+    assert!(screen.query_by_label("Keep whole when far").is_none());
 }
 
 #[test]
@@ -3187,4 +3405,233 @@ fn the_timeline_zooms_and_scrolls() {
     assert_eq!(screen.state().timeline().zoomed(), (1.0, 0.0));
     // Nothing of it is the recipe's.
     assert_eq!(screen.state().studio().unwrap().can_undo(), None);
+}
+
+// ---- never losing work -----------------------------------------------------------
+
+#[test]
+fn a_recipe_that_disappears_gets_a_bar_to_save_it_again() {
+    let recipe = copy_of("robot.toml", "screens_gone");
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    std::fs::remove_file(&recipe).unwrap();
+    assert!(screen.state_mut().studio_mut().unwrap().check_files());
+    screen.run_steps(2);
+    screen.get_by_label("robot.toml isn't there any more (deleted or moved).");
+    // The model is still there to look at.
+    screen.get_by_label("antenna");
+    screen.get_by_label("Save it again").click();
+    screen.run_steps(3);
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), text);
+    assert!(screen.query_by_label("Save it again").is_none());
+
+    // Or closed: back to the start page.
+    std::fs::remove_file(&recipe).unwrap();
+    assert!(screen.state_mut().studio_mut().unwrap().check_files());
+    screen.run_steps(2);
+    screen.get_by_label("Close it").click();
+    screen.run_steps(3);
+    assert!(screen.state().studio().is_none());
+}
+
+#[test]
+fn a_crash_last_time_is_told_on_the_start_page_once() {
+    use duck_mold_studio::recent::Recent;
+    let folder = folder("screens_crashed");
+    let recipe = folder.join("robot.toml");
+    std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+    let settings = folder.join("settings");
+    std::fs::create_dir_all(&settings).unwrap();
+    std::fs::write(
+        settings.join("crash-2026-11-18-14-02-33.txt"),
+        format!(
+            "Duck Mold Studio closed unexpectedly.\n\nOpen:     {}\n",
+            recipe.display()
+        ),
+    )
+    .unwrap();
+    let list = settings.join("recent.txt");
+    let mut screen = harness(
+        StudioApp::new().remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    screen.step();
+    screen.get_by_label("Duck Mold Studio closed unexpectedly last time.");
+    screen.get_by_label("Your model was saved up to its last change: robot.toml.");
+    screen.get_by_label("Show the crash note");
+    screen.get_by_label("Open it").click();
+    screen.run_steps(3);
+    assert_eq!(
+        screen.state().title(),
+        format!(
+            "robot.toml - Duck Mold Studio {}",
+            env!("CARGO_PKG_VERSION")
+        )
+    );
+
+    // The next start says nothing more about it.
+    let mut screen = harness(StudioApp::new().remembering(Recent::kept_in(list)), false);
+    screen.step();
+    assert!(
+        screen
+            .query_by_label("Duck Mold Studio closed unexpectedly last time.")
+            .is_none()
+    );
+}
+
+// ---- saying things where the person looks -----------------------------------------
+
+#[test]
+fn modes_that_cant_start_are_greyed_and_say_why() {
+    use egui::accesskit::Role;
+    let recipe = copy_of("snowman.toml", "screens_modes_greyed");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("body"));
+    screen.run_steps(2);
+    for mode in ["Face", "Edge", "Corner"] {
+        let button = screen.get_by_role_and_label(Role::Button, mode);
+        assert!(button.accesskit_node().is_disabled(), "{mode} is greyed");
+    }
+    assert!(
+        !screen
+            .get_by_role_and_label(Role::Button, "Pose")
+            .accesskit_node()
+            .is_disabled()
+    );
+    let studio = screen.state().studio().unwrap();
+    assert_eq!(
+        studio.why_not_shaped().as_deref(),
+        Some("Only a box can be shaped in this version: \"body\" is a sphere")
+    );
+}
+
+#[test]
+fn a_recipe_that_never_built_says_so() {
+    let folder = folder("screens_never_built");
+    let recipe = folder.join("broken.toml");
+    std::fs::write(
+        &recipe,
+        "version = 0\nname = \"x\"\n\n[[parts]]\nshape = \"blob\"\n",
+    )
+    .unwrap();
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(3);
+    // The list of problems opens by itself, and doesn't speak of a
+    // version that worked.
+    screen.get_by_label("This file can't be built yet:");
+    assert!(
+        screen
+            .query_by_label(
+                "The file has mistakes. The picture is of the last version that worked."
+            )
+            .is_none()
+    );
+    screen.get_by_label("1 mistake");
+    // Escape closes the list; the button opens it again.
+    screen.key_press(egui::Key::Escape);
+    screen.run_steps(2);
+    assert!(
+        screen
+            .query_by_label("This file can't be built yet:")
+            .is_none()
+    );
+    open_problems(&mut screen);
+    screen.get_by_label("This file can't be built yet:");
+}
+
+#[test]
+fn a_model_file_is_only_looked_at_with_nothing_to_export() {
+    let folder = folder("screens_glb_only");
+    let recipe = folder.join("crate.toml");
+    std::fs::copy(examples().join("crate.toml"), &recipe).unwrap();
+    duck_mold_core::tools::export_file(&recipe, None).unwrap();
+    let mut screen = harness(StudioApp::with_file(folder.join("crate.glb"), false), false);
+    screen.run_steps(2);
+    screen.get_by_label("looking only");
+    for gone in ["Export", "Render picture", "Edit", "Undo"] {
+        assert!(
+            screen.query_by_label(gone).is_none(),
+            "{gone} isn't offered"
+        );
+    }
+    screen.get_by_label("View");
+    screen.get_by_label("Help");
+}
+
+#[test]
+fn with_nothing_selected_the_panel_shows_the_model() {
+    let mut screen = harness(
+        StudioApp::with_file(examples().join("robot.toml"), true),
+        false,
+    );
+    screen.run_steps(2);
+    screen.get_by_label("Model");
+    screen.get_by_label("0.90 x 1.83 x 0.39 m");
+    screen.get_by_label("23 parts, 384 triangles");
+    screen.get_by_label("idle, walk, wave, jump");
+}
+
+// ---- the look --------------------------------------------------------------------
+
+#[test]
+fn the_interface_size_is_chosen_in_view_and_remembered() {
+    use duck_mold_studio::recent::Recent;
+    let list = folder("screens_interface_size").join("recent.txt");
+    let mut screen = harness(
+        StudioApp::with_file(examples().join("robot.toml"), false)
+            .remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    screen.run_steps(2);
+    assert_eq!(screen.ctx.zoom_factor(), 1.0);
+    screen.get_by_label("View").click();
+    screen.run_steps(3);
+    screen.get_by_label("Interface size").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("125%")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(screen.ctx.zoom_factor(), 1.25);
+    // The next start remembers it.
+    assert_eq!(Recent::kept_in(list.clone()).interface_size(), Some(125));
+    let mut again = harness(
+        StudioApp::new().remembering(Recent::kept_in(list.clone())),
+        false,
+    );
+    again.run_steps(2);
+    assert_eq!(again.ctx.zoom_factor(), 1.25);
+    // "Like Windows" goes back to the system's size.
+    Recent::kept_in(list.clone()).keep_interface_size(None);
+    assert_eq!(Recent::kept_in(list).interface_size(), None);
+}
+
+#[test]
+fn a_click_on_the_gizmo_looks_along_that_axis() {
+    use duck_mold_view::studio::viewport::{Orbit, Viewpoint};
+    let mut screen = harness(
+        StudioApp::with_file(examples().join("robot.toml"), false),
+        false,
+    );
+    screen.run_steps(2);
+    screen.get_by_label("Look along y").click();
+    screen.run_steps(2);
+    let mut top = screen.state().studio().unwrap().orbit;
+    top.look_from(Viewpoint::Top);
+    let now: Orbit = screen.state().studio().unwrap().orbit;
+    assert_eq!((now.round, now.above), (top.round, top.above));
+    screen.get_by_label("Look along x").click();
+    screen.run_steps(2);
+    let now = screen.state().studio().unwrap().orbit;
+    let mut side = now;
+    side.look_from(Viewpoint::Side);
+    assert_eq!((now.round, now.above), (side.round, side.above));
 }

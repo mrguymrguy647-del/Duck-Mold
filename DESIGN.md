@@ -4778,3 +4778,856 @@ Studio. Also:
     together, not a new command.
 
 The version becomes 0.6.0.
+
+## 23. Phase 7a: polish and game use
+
+Phase 7 is the last planned phase. It is split in two:
+
+- **7a** makes the Studio feel finished and adds the game features that are
+  left.
+- **7b** connects Duck Mold to Duck Quill and to Duck Forge's Studio. It gets
+  its own section, written after 7a is merged.
+
+7a starts from `POLISH_AUDIT.md`: what I found when I opened every screen
+at two sizes, timed a big model, tried to lose work, and used the command
+line as an agent. The finding numbers below (L1, B5, U3...) are the audit's.
+
+The rules don't change:
+
+- The recipe is the model.
+- Every Studio action is an edit command an agent can run.
+- An edit changes only what it must in the file.
+- The picture is drawn by Duck Forge's CPU renderer.
+- Duck Forge's reader is the same code in both repositories, with its version
+  raised, the shared test files updated and the handoff note updated.
+
+### What 7a fixes from the audit
+
+Every finding in sections 1 to 6 of the audit is fixed, apart from these
+three, which stay as they are:
+
+- **M6.** Hiding isn't saved with the model, on purpose.
+- **U8, in part.** Ghosts stay, but are drawn only for the selected parts.
+- **C6.** It becomes `--report`; see C1 to C6 below.
+
+From the audit's known-limits table, the rows marked **now** are fixed.
+
+#### Never lose work (L1 to L7, and item 6)
+
+- **An outside change is a wall for Undo (L1).**
+  - When the recipe is changed by another program, the Studio puts a mark
+    in its undo history.
+  - Undo stops at the mark and says so: *"robot.toml was changed outside
+    the Studio at 14:02. Undo stops here, so that change isn't lost."*
+  - Undo never writes over a change it didn't make. Redo is cleared at the
+    mark.
+- **Undo is kept on disk (L7).**
+  - Each recipe's last 100 steps are kept in the Studio's own folder, beside
+    `recent.txt`, in `undo/<name>-<short hash of the path>.json`. They are
+    written after every change.
+  - When a recipe opens and its text is what the history says it was last,
+    Undo carries on from where it was.
+  - If the text is different (changed while the Studio was closed), the old
+    steps are kept behind a mark (above).
+  - At most 5 MB of history is kept for each recipe; the oldest steps go
+    first.
+- **A recipe that disappears (L2).** If the open recipe is deleted or
+  moved, the Studio keeps the model and shows a bar over the picture:
+
+  ```text
+  +-----------------------------------------------------------------+
+  | ! robot.toml isn't there any more (deleted or moved).           |
+  |   [Save it again]  [Save as...]  [Close it]                     |
+  +-----------------------------------------------------------------+
+  ```
+
+  "Save it again" writes the text the Studio last saw back to the same
+  place. Until one of the three is chosen, changes are refused with the
+  same sentence.
+- **A write that fails (L3, L4, item 6: a full disk).**
+  - The new text is written beside the recipe, flushed to the disk, then
+    swapped in.
+  - If any of that fails, the file beside it is removed and the message
+    names the cause: *"The disk is full: nothing was changed, and robot.toml
+    is as it was. Free some space and try again."* The other causes are
+    "permission denied" and "another program has the file locked"
+    (Windows' error 32). A general "couldn't be written" is left for the
+    rest.
+  - The change the person tried is not lost from the screen: the panel
+    keeps the typed value until it is written or the part changes.
+- **Export and pictures are swapped in too (L6).** `.glb` and `.png` files
+  are written the same way as recipes, so a running game never reads half
+  a model.
+- **A file being saved by someone else at that moment (item 6).**
+  - When the recipe changes on disk, the Studio waits until it has stayed
+    the same for two checks in a row (half a second) before building it. A
+    text editor that writes in pieces is never shown as a mistake for one
+    frame.
+  - A change the person makes while the file is settling waits too, with
+    *"Waiting for robot.toml to finish saving..."*.
+  - The Studio's own writes already check that the file still holds what
+    they expect, and work the edit out again on the new text if not. That
+    stays.
+- **A crash (L5).**
+  - A panic writes `crash-<date>.txt` beside `recent.txt`, holding:
+    - the version;
+    - the message and the place in the code;
+    - the open file;
+    - the last 20 status lines.
+  - The next start says, on the start page: *"Duck Mold Studio closed
+    unexpectedly last time. Your model was saved up to its last change:
+    robot.toml. [Open it] [Show the crash note]"*.
+  - Because every change is already in the recipe, and Undo is now on disk,
+    nothing is lost but the drag that was in hand.
+- **As built (step 1).**
+  - The wall's message says how long ago, not the clock time: *"robot.toml
+    was changed outside the Studio 2 minutes ago."* Rust's standard library
+    can't read the local time zone, and a clock time in UTC would mislead.
+  - The crash note's name and time are in UTC, and say so.
+  - The bar and the crash notice use words, not ⚠ and ✕: the built-in font
+    has neither. Step 3's drawn icons replace them.
+
+#### What was broken or misleading (B1 to B10)
+
+- **Panels that hold their contents (B1).**
+  - The right column becomes one scrolling column of sections that fold
+    (Properties, Hit shape, Limits, Sockets, Palette, ...), instead of two
+    boxes split at a fixed height. Nothing is cut off: the column scrolls,
+    and its scroll bar is always shown when there is more.
+  - The parts list gets the same always-shown scroll bar. It also gets a
+    filter box once a model has more than 12 parts.
+  - Socket name fields are as wide as their names, up to the panel's width.
+- **The keys window (B2)** scrolls, and is never taller than the window.
+- **Messages that are right (B3, B4, B7).**
+  - A recipe that has never built says *"This file can't be built yet:"* and
+    its mistakes, not "the last version that worked".
+  - The TOML library's messages are put into plain words for the common
+    cases:
+    - a line with no `=`;
+    - a missing quote;
+    - a table named twice;
+    - an unclosed `[`;
+    - a wrong value.
+
+    Anything else gets *"line 4 isn't written the way TOML needs:"* and the
+    library's own words after it.
+  - On the start page:
+    - a broken recent file shows its first mistake under its name;
+    - a missing one is greyed, with "not found" and a × to take it off the
+      list.
+- **Say no where the person looks (B5).** Face, Edge and Corner are greyed
+  for a part that isn't a box, with a tip saying why ("Only a box can be
+  shaped: this is a sphere"). The same goes for Pose with no joints.
+- **Pose mode keeps the animation (B6)** that Part mode's Play list showed.
+- **The zero point (B8)** becomes a small cross lying on the ground. It is
+  drawn only with the grid, and dimmer than the grid's axes. It no longer
+  looks like a stray ring.
+- **A `.glb` opened to look at (B9)** has no Export, no Render picture and
+  no Edit menu: only View and Help.
+- **Remove asks clearly (B10):**
+
+  ```text
+  +-- Remove "head"? ------------------------------------------+
+  | 4 parts are joined to it: left_eye, right_eye, antenna,    |
+  | antenna_tip.                                               |
+  |  [Remove all 5]  [Remove only "head" (they stay put)]  [Cancel] |
+  +------------------------------------------------------------+
+  ```
+
+  "Only head" is today's "Keep them": the four are unjoined, where they
+  stand.
+
+- **As built (step 2).**
+  - The snap stays at the bottom right of the picture, where it already
+    was, shown only while there are handles to drag; the status bar
+    carries the problems and the last message.
+  - Pose mode keeps the animation when one was chosen in Part mode. Until
+    one is, the view's Play list says "choose one" rather than showing
+    the first name, so it never seems chosen when it isn't (Play with none
+    chosen plays the first). Choosing one for the person on entering Pose
+    mode was tried and dropped: a drag would then change that animation's
+    first key, not a pose.
+  - Scroll bars take their own room instead of floating over the content,
+    so they never cover the buttons at the end of a line.
+  - The Model section has no colour count, since the palette is right
+    under it.
+  - The status words are plain ("No problems", "1 mistake"); the ✓ and ⚠
+    marks wait for step 3's drawn icons.
+
+#### A finished look (U1 to U9, M1 to M7)
+
+The main window, after (at 1280 x 720):
+
+```text
++--------------------------------------------------------------------------------------+
+| [duck] robot.toml  ~/Documents/Duck Mold    File Edit View Help   <- ->   [+ Add]    |
+|                                                         [Export .glb v]   0.7.0      |
++--------------+--------------------------------------------------------+--------------+
+| PARTS     ⌕  | [Part][Face][Edge][Corner][Pose]          idle v  > Play | MODEL        |
+|  body    box | +--+                                          y        |  robot       |
+|  panel   box | |↔ | Move  G                                  |  x     |  0.90 x 1.83 |
+|  head    box | |⟳ | Rotate R                                /         |  384 tris    |
+|> left_arm    | |⤢ | Scale  S        (model)               z  [front]  |  19 parts    |
+|    upper     | |▭ | Size   T                                 [side ]  | HIT SHAPES   |
+|    elbow     | |🖌| Paint  P                                 [top  ]  |  each part v |
+|  ...       ▐ | +--+                                         [3/4  ]  | FAR VERSIONS |
++--------------+                                       ⊞ ⧉ ▦ ◎          |  auto        |
+| LIBRARY  ANIMATIONS                                (grid wire shadow  | PALETTE      |
+|  [crate] [lamp]                                      hits)           |  ■ steel  ...|
++--------------+--------------------------------------------------------+--------------+
+| ✓ No problems      Wrote robot.glb (85 KB)  [Show in folder]     Snap 0.1 m, 15°     |
++--------------------------------------------------------------------------------------+
+```
+
+- **Icons, drawn by the program itself (U1).**
+  - A set of about 30 small icons is drawn with lines and shapes, in the
+    brand's colours. They need no new library and are the same at every
+    size. They are tested with pictures.
+  - The tools become a narrow toolbar down the picture's left edge: an
+    icon, the name, and the key.
+  - The top bar keeps File, Edit, View and Help, then:
+    - Undo and Redo as arrows;
+    - Add;
+    - Export as the one coloured button, with Render picture beside it in a
+      small menu.
+  - The view buttons (Front, Side, Top, 3/4) and the switches (Grid, Wire,
+    Shadow, Hits) move into the picture's top right corner, as icon
+    buttons with tips. Their keys and menu lines stay.
+- **An axis gizmo (U5)** in the top right of the picture: x, y and z, turning
+  with the view. A click on an axis looks along it.
+- **A status bar, not a Problems box (U2, U6).**
+  - The bottom is one line, 26 points high, showing:
+    - "✓ No problems", or "⚠ 2 warnings" / "✗ 1 mistake", which opens the
+      list;
+    - the last message;
+    - the snap.
+  - The problem list opens upwards as a drawer and closes with Escape or a
+    click on the chip. It opens by itself when a new mistake appears.
+  - Results that matter (Export, Render picture, Save it again) also show as
+    a note in the picture's top right for 4 seconds, with **Show in folder**.
+  - Sizes are in KB or MB.
+- **With nothing selected, the right column shows the model (U2):** its name,
+  size, triangle and part counts, hit shapes, far versions (below) and
+  animations, instead of one line over an empty panel.
+- **Readable text (U2, U7, U9).**
+  - No text is smaller than 12 points at 100%. The faint greys are made
+    lighter.
+  - "hide" and "remove" are an eye and a × that appear on the row the mouse
+    is on, or that stay shown when a part is hidden.
+  - The hit-shape words are one set everywhere:
+    - "the model's: each part" or "the model's: none";
+    - "its own: box";
+    - "none".
+  - The bevel's steps are a labelled field.
+  - Defined parts in the Add menu get the icon of their shape.
+- **A start page that fills the screen (U3, U4).** At 2560 x 1440:
+
+  ```text
+  +--------------------------------------------------------------------------------+
+  |  [duck]  Duck Mold Studio                                      version 0.7.0   |
+  |          Build 3D models from parts, for Duck Forge games.                     |
+  |                                                                                |
+  |  [  + New model  ]  [  Open a model...  ]                                       |
+  |                                                                                |
+  |  OPENED LATELY                                                                 |
+  |  [pic] my_robot      [pic] castle        [ ? ] mistake          [ - ] gone      |
+  |        2 hours ago         yesterday           line 3: no "blob"      not found ×|
+  |        Documents/...       Desktop/...                                         |
+  |                                                                                |
+  |  EXAMPLES: open a copy of your own                      HOW IT WORKS           |
+  |  [ robot      ] [ house     ] [ snowman  ] [ desk   ]   1. A model is parts... |
+  |    joins, arms    a door and   balls on     a lamp      2. Parts join at dots  |
+  |    and four       windows      balls        from a file 3. Every change is     |
+  |    animations                                              written to a recipe |
+  |  [ ...                                               ]                         |
+  +--------------------------------------------------------------------------------+
+  ```
+
+  - The page is up to 1400 points wide.
+  - The example cards grow from 3 to 6 across with the window.
+  - Each example has a line saying what it shows. The descriptions are in
+    `tools::EXAMPLES` already.
+  - "How it works" sits beside the examples when there is room.
+  - At 1280 x 720 the page scrolls, and the first row of examples is above
+    the fold.
+- **The interface size (U3).** View > Interface size offers:
+  - "Like Windows", the default;
+  - 90%, 100%, 125%, 150% and 200%.
+
+  The choice is remembered. At 2560 x 1440 with Windows at 100%, 150% looks
+  as the 1280 pictures do.
+- **Ghosts (U8)** are drawn for the selected parts only, and fainter.
+- **Smaller things.**
+  - Rename shows "Enter: rename · Escape: keep the name" under the field
+    (M1).
+  - About has the duck, the version, a link to the guide and to GitHub, and
+    "Copy version" (M2).
+  - Pose mode hides the palette (M3).
+  - Looking-only shows values as text, not greyed fields (M4).
+  - The animation library gets the same height as the parts library and can
+    be dragged taller (M5).
+  - The window title is "robot.toml — Duck Mold Studio 0.7.0" (M7).
+
+Every changed screen is pictured, at 1280 x 720 and 2560 x 1440, in the
+screen tests.
+
+- **As built (step 3).**
+  - The views under the gizmo are icon-and-word buttons ("Front",
+    "Side"...), not icons alone: at that size the four cube icons were too
+    alike to tell apart.
+  - "Render picture" is a picture icon beside Export .glb, not a menu
+    under it, so it is one click.
+  - The note over the picture sits at its top middle: the corners now
+    hold the toolbar and the gizmo.
+  - With nothing selected, Pose mode draws no ghosts at all.
+  - The parts library takes a third of the left column (150 to 320
+    points), so the parts list keeps room at 720 high.
+  - The picture tests draw the start page, a selected part and Pose mode
+    at 1280 x 720, at 2560 x 1440, and at 2560 x 1440 with the interface
+    at 150%, and every icon on a sheet.
+
+#### Speed (S1 to S4, and item 5)
+
+The targets are measured with the speed test's 50-part, 21,660-triangle
+model, in a release build. They hold on this 4-core 2.1 GHz machine, and on
+GitHub's Windows runner, which is the "ordinary Windows laptop": a printed
+measurement in CI, not a pass/fail check.
+
+| What | Before | Target |
+|---|---|---|
+| A frame while turning the view, 1280 x 720 window | 10 to 14 ms | under 10 ms |
+| A frame while turning the view, 2560 x 1440 window | 30 to 37 ms | under 16 ms |
+| One step of a drag | 23 to 24 ms | under 12 ms |
+| One edit from the panel | 57 to 69 ms | under 40 ms |
+
+How, in order, measuring after each:
+
+1. **Work out the shadow and the grid once (S3).** The shadow is worked out
+   when the model is built, not every frame. The grid's lines only change
+   with the view.
+2. **No checks during a drag (S2).** A drag's preview builds the model but
+   doesn't look for floating and overlapping parts. That is most of the
+   cost with 50 parts. The checks run once, when it is let go.
+3. **Draft frames while moving (S1).** If a frame takes over 12 ms while the
+   view turns or a handle is dragged, the next ones are drawn at
+   three-quarters or half size and scaled up. 0.2 s after the movement
+   stops, a full frame is drawn. Still pictures are always full size.
+4. **Duck Forge keeps a mesh's bounding ball (S4)** instead of working it
+   out from every corner each time. This is a small change in Duck Forge,
+   in the LOD pull request (below).
+5. **Only if 1 to 4 fall short:** draw the picture in strips on several
+   cores. That needs Duck Forge's camera to draw an off-centre part of its
+   view, so it is held back unless the numbers need it.
+
+The edit time drops with step 2 too: the panel's edit checks the model
+once, not twice. Before and after go in `PHASE7A_REPORT.md`.
+
+- **As built (step 4).** Measured with the speed test, release build,
+  this 4-core 2.1 GHz machine. Its times wander by about 20% from run to
+  run; these are typical.
+
+  | What | Before | After | Target |
+  |---|---|---|---|
+  | A frame, 1280 x 720 window (780 x 590 picture) | 10 to 14 ms | 7.5 to 9 ms | under 10 ms: met |
+  | A frame, 2560 x 1440 window (1560 x 1180 picture) | 30 to 37 ms | 15 to 17.5 ms | under 16 ms: about met; drafts make it so while turning |
+  | One step of a drag, with its frame | 23 to 24 ms | 15 to 19 ms | under 12 ms: **not met** |
+  | One edit from the panel | 57 to 69 ms | 33 to 35 ms | under 40 ms: met |
+
+  What did it:
+  - **The canvas is kept** from frame to frame. Making a new 1560 x 1180
+    one (15 MB, with its depth) took 8 to 9 ms by itself: more than
+    drawing the model.
+  - **The shadow is worked out once for each build** of the model (1.8
+    ms), kept through a drag (it catches up when the part is let go), and
+    drawn with each grid corner put on the screen once, in 24 shades.
+    Drawing it as long runs of one shade was tried and was slower: long
+    thin triangles have large bounding boxes.
+  - **An edit is worked out from the model the Studio has** instead of
+    building the file again first, for a drag's preview and for an edit
+    from the panel; the panel's edit leaves the report to the reload, so
+    the model is checked once.
+  - **Draft frames**: while the picture is dragged and the last frame
+    took over 12 ms, it is drawn at three-quarters (or half) size and
+    stretched. When the drag stops, the next frame is full size.
+  - A drag step is now the edit and model (6.5 ms) plus the frame (8 to
+    12 ms). Under 12 ms needs the frame drawn on several cores (the
+    design's last resort), or Duck Forge drawing faster; both are left for
+    later. The grid was never the cost (under 1 ms).
+  - The speed test prints its times on CI's Windows machine.
+
+#### The command line, for agents (C1 to C6)
+
+- **Compact JSON (C1).** `--json` prints one line. `--pretty` gives today's
+  layout. The fields don't change.
+- **`edit --json` leads with the edit (C2):**
+
+  ```json
+  {"ok":true,"edit":{"command":"set-color",...},"summary":"changed the colour \"red\"...",
+   "lines":[24,24],"warnings":[],"errors":[]}
+  ```
+
+  `--report` adds the full `inspect` report under `"report"`. Without
+  `--json`, `edit` prints its one line and any problems; `--report` prints
+  the whole report as now (C6).
+- **Suggestions name every part (C3)**, `left_arm/hand` included, and come
+  nearest first.
+- **`edit --help` lists every command (C4)**, grouped: parts, shapes,
+  sockets, colours, poses and animations, games.
+- **Several edits at once (C5).**
+  - `duck-mold edit robot.toml --batch edits.txt` reads one edit per line,
+    each as it would follow `duck-mold edit robot.toml` on the command line
+    (`-` reads them from the input).
+  - They are applied in order to the text, and checked once at the end.
+    They are written once, or not at all if any is refused. The report says
+    which line was refused, and why.
+  - The Studio doesn't need it: each of its actions is one edit already.
+
+#### Small known limits fixed now
+
+From the audit's table:
+
+- **A copy of a joined part** goes on a free socket of the same name on the
+  same parent (`left_arm` → `right_arm` if `body.right_arm` is free), and
+  otherwise beside the original, free.
+- **A part standing on the ground** is never "floating".
+- **The wireframe's back edges** are dimmer.
+- **The examples folder** uses Windows' known-folder lookup for Documents,
+  so a Documents moved to OneDrive works.
+- **`add-socket --facing`.**
+
+*As built (step 9):*
+
+- **One-line JSON**: `--pretty` is a flag of every command. The golden
+  reports are stored with `--pretty`, so they read as before.
+- **`edit --json`** is `{ok, edit: {command, file, written, definition?,
+  also_changes?}, summary, lines, model, warnings, errors}`, plus
+  `report` with `--report`. `model` is `inspect`'s one-line summary.
+- **`--batch`**: each line is made in turn on the text in memory, each
+  seeing the model the lines before it made (not all on the first
+  model); each is checked as it is made, and the file is written once at
+  the end, or not at all. A line that isn't an edit is said before
+  anything is done. `"command"` is `batch`.
+- **Suggestions**: every part's path, nested ones too, sorted by how
+  close the path or its last name is; the nearest is the "Did you mean"
+  when its own name is close.
+- **`add-socket --facing`** is the socket, then `set-socket --facing`,
+  made together: two edits, written once. The Studio's sockets are
+  unchanged.
+- **A copy of a joined part** and **a part on the ground** were already
+  as the audit asked (Phase 3's later work): a copy goes on a free socket
+  facing the same way, else a new socket beside, else free; a left arm
+  goes on `body.right_arm` with `duplicate --mirror`. A free part on the
+  ground has no "floats" warning. Nothing changed for them.
+- **Documents** comes from the `dirs` crate (Windows' known folder; the
+  XDG setting on Linux): the workspace forbids `unsafe`, which calling
+  Windows directly needs.
+- **The wireframe**: faces turned away from the eye are drawn first,
+  halfway to the background.
+
+### 1. Fitting between keys
+
+`fit-ground` stands every key's pose on the ground already. Between two keys,
+where a leg swings fast, the smooth curve can still dip below the ground (the
+robot's jump: 1 cm if its keys were fitted exactly).
+
+**Now `fit-ground` fits the frames between keys too.**
+
+1. Fit every key's pose, as now.
+2. Play the animation frame by frame (30 a second). Find the frame where the
+   model sinks deepest.
+3. If it sinks more than **3 mm**, add a key there:
+   - Its pose is a new one, made from where every part is at that moment,
+     as the timeline already does when a part is turned between keys. It is
+     named `jump_2`, `jump_3`, and so on.
+   - The body is moved up so that the frame touches the ground.
+   - The key is at that frame's time, rounded to 0.01 s, and at least
+     0.05 s from the keys beside it.
+4. Repeat from 2, at most 6 times.
+
+Rules:
+
+- The last key of a loop and its first are left as they are: they are the
+  same moment.
+- A leap (a pose whose body is lifted) is still left alone.
+- `--keys-only` does what `fit-ground` does today.
+- The summary lists the keys it added: *"...; added 2 keys between keys, at
+  0.17 s and 0.83 s, where it sank 9 mm and 4 mm; it now sinks at most
+  2 mm"*.
+- In the Studio, Fit to ground does the same. It is one step to undo.
+
+**`inspect --animation` warns** `dips_between_keys` when:
+
+- a frame sinks more than 3 mm below the ground, while
+- the keys on either side stand on it (within 1 mm).
+
+The message names the time and the fix: `fit-ground jump`. The animations of
+models that never touch the ground, such as a ball in the air, aren't warned
+about.
+
+**The robot's jump is fitted with it.** Its golden files change, and so do
+Duck Forge's copies of the robot (in the LOD pull request).
+
+*As built (step 5):* as above, with three things to know.
+
+- The added pose's numbers are tidied as a recipe writes them (turns to
+  0.1°, moves to 0.01 mm) before the body is lifted, so it stands on the
+  ground to within 0.01 mm.
+- The warning is given only for a model with a body that every other
+  part hangs from, so `fit-ground` can mend it.
+- Besides the robot's jump, the gnome's jump (it sank 4 mm) and the
+  cart's roll (3 mm: a twelve-sided wheel rolling lifts its axle) were
+  fitted, so that no example warns.
+
+### 2. A physics body from the hit shapes
+
+Duck Forge's physics has two shapes:
+
+- `Ball`;
+- `Block`, a box that never turns.
+
+A capsule, or one body made of several shapes, would be new physics, which
+this phase doesn't do. So a character's body is a **block round its hit
+shapes as it stands at rest**.
+
+New in Duck Forge (`duckforge::glb`):
+
+```rust
+let robot = AnimatedModel::load("assets/robot.glb")?;
+let body = world.add(robot.model().physics_body(vec3(0.0, 0.0, 3.0))); // feet at (0, 0, 3)
+// each frame, after world.step(dt):
+let place = Transform::at(robot.model().stands_at(world.get(body)));    // where to draw it
+```
+
+- **`GlbModel::physics_body(feet: Vec3) -> Body<Vec3>`** is a `Body::block`
+  of the box round every hit shape at rest. It stands with the middle of its
+  bottom at `feet`. A model with no hit shapes uses its own box. The block
+  is centred on the hit shapes' middle across x and z, so a character with
+  one arm out isn't off-centre in its box.
+- **`GlbModel::stands_at(&Body) -> Vec3`** gives where to draw the model so
+  it fits that body: the point under the model's zero.
+- The block is the model at rest, not posed. A body that changes size with
+  every step would bounce on the floor.
+- The box round the hit shapes, not round the triangles, is used: a part
+  with `collider = "none"` (an antenna's tip) doesn't make the body taller.
+- It's a starting body. A game can still use `.with_mass`, `.with_friction`
+  and the rest on it.
+
+`robot_click` gets a floor and walls of blocks, and the robot walks into
+them and stops: the body in use.
+
+This is a Duck Forge pull request of its own. It changes no file format, so
+the reader's version doesn't change.
+
+### 3. Picking by hit shape in the Studio
+
+With **Hits** on, a click in the picture picks what a game's click would pick:
+
+- The ray from the eye through the mouse is tested against the hit shapes,
+  as they are in the pose shown. It uses Duck Forge's own `HitVolume::ray`
+  on Duck Mold's shapes, so it is the same code, not a copy.
+- The part whose shape is first on the ray is selected. Its shape lights
+  up, and the status bar says *"A game's click here hits: head (its ball),
+  2.1 m away"*.
+- A click where a game's click would miss (on an eye with
+  `collider = "none"`, or past every shape) selects nothing. The status
+  says *"A game's click here hits nothing: left_eye has no hit shape"*. That
+  is the point: checking the shapes by hand.
+
+With Hits off, a click picks by triangles, as now. The parts list picks the
+same way in both.
+
+This only changes the selection, never the recipe, so there is no edit
+command. Agents have `inspect --colliders`; for "what does this ray hit", a
+new read-only command:
+
+```bash
+duck-mold inspect robot.toml --ray 0,1.4,5 --toward 0,0,-1 [--pose wave | --animation walk --at 0.3]
+```
+
+It prints the part, the point and the distance, or "nothing". It uses the
+same code, and it has its line in the agent guide.
+
+### 4. Far-away versions (LODs)
+
+A model far from the camera is a few dozen pixels high. Its 26-sided spheres
+and its bevels are wasted there. Duck Mold makes **two simpler versions of
+every model by itself**, writes them in the `.glb`, and Duck Forge draws the
+right one for the distance.
+
+**In the recipe:**
+
+```toml
+lods = "auto"          # two far versions, at distances worked out from the model's size
+lods = [12, 30]        # the same, at 12 m and 30 m
+```
+
+- A part can say `lod = "keep"`: it is never simplified or dropped (a
+  character's eyes, say).
+- The line is new. Existing recipes and the examples don't have it, so their
+  files don't change.
+- New models (`duck-mold new`, New model) start with `lods = "auto"`, as
+  they start with `colliders = "parts"`.
+- Five examples get it:
+  - the house, the temple and the barn (big, seen from far);
+  - the robot and the gnome (characters).
+- Edit commands:
+  - `set-lods <auto|none|<near>,<far>>`;
+  - `set-lod <part> <keep|auto>`.
+
+**How each version is made.** "Far 1" is from the first distance and
+"Far 2" from the second.
+
+| Part | Far 1 | Far 2 |
+|---|---|---|
+| sphere, capsule | half the segments (at least 6) | a quarter (at least 6) |
+| cylinder, cone, tube | half the segments (at least 6) | a quarter (at least 5; a tube at least 6) |
+| torus | half the segments both ways (at least 6 and 4) | a quarter (at least 6 and 3) |
+| arch | half its curve's segments (at least 4) | at least 3 |
+| stairs | the same | one sloped block (a wedge) the size of the stairs |
+| bevel | one step | none: square edges |
+| box, wedge, pyramid, prism | the same | the same |
+| a shaped box (pull, inset, cut, moved edges and corners) | the same | the same: its shape is the point |
+| a part from a file | the same | the same |
+| any part smaller than 4% of the model's largest side | the same | **left out**, unless `lod = "keep"` |
+
+Colours, joins, sockets and hit shapes are the same in every version. Only
+triangles change. "auto" puts Far 1 at 8 times the model's largest side and
+Far 2 at 20 times: 15 m and 37 m for the robot.
+
+**In the `.glb`:**
+
+- The far versions use glTF's `MSFT_lod` extension: each part's object lists
+  a far object for each version, holding that part's simpler triangles.
+  Other glTF programs that know the extension use it; those that don't draw
+  the full model, as now.
+- The distances are in Duck Mold's corner, as `"lods": [15.0, 37.0]`.
+- The Khronos validator reports two "info" lines for such a file: it can't
+  check `MSFT_lod`, and the far objects aren't in the scene. There are no
+  errors and no warnings. The report says so, and files without `lods`
+  stay clean.
+- **Reader version 8** reads them.
+
+**In Duck Forge:**
+
+- `AnimatedModel::draw_mesh(canvas, &place, &camera)`, or
+  `mesh_for(&place, &camera)`, picks the version by the camera's distance
+  to the model and poses only that one.
+- `mesh()` is still the full model, so nothing changes for a game that
+  doesn't ask.
+- `Mesh::load_glb` is the full model.
+- Hit tests use the hit shapes, which are the same in every version.
+
+**Where to see them:**
+
+- `inspect` says *"far versions: 2 (Far 1 at 15 m: 212 triangles; Far 2 at
+  37 m: 96)"*.
+- `render --far 1` and `render --far 2` draw them.
+- In the Studio, View > Far version shows Far 1 or Far 2 in the picture,
+  with the triangle count in the status bar. The Model section has the line
+  and its setting.
+
+*As built (step 8):* as above, with these differences.
+
+- **Only triangles change, exactly.** A far version is the model itself
+  with each part's triangles swapped for the simpler ones, placed where
+  the model places that part. Built naively, a part joined to a simpler
+  shape moved: 1 to 3 cm in on a rounder sphere, 6 cm out where the
+  temple's platform lost its bevel. Now every pivot, socket and hit
+  shape is the model's own.
+- **The house has no `lods`.** It is all boxes and shaped boxes, so its
+  far versions came out the same as itself (120 triangles each): four
+  examples have them (temple, barn, robot, gnome), not five.
+- **Nothing is left out** of any example's Far 2: their smallest parts
+  are just over 4% of their size. The 4% rule is tested on a figure in
+  `tests/far.rs`.
+- **Duck Forge poses every version as the model moves**, not only the
+  one drawn: `draw_mesh` takes `&self` so a game calls it from
+  `draw()`, and posing only one would need a lock inside
+  `AnimatedModel`. The far versions have a half and a quarter of the
+  corners. Duck Forge's general glTF reader now draws only the scene,
+  as glTF says, so the far objects don't show there.
+- **`render --far` leaves out "floats" warnings**: simpler shapes can
+  open a gap of millimetres between parts that touch in the model (the
+  gnome's nose on its rounder beard), invisible that far off. The gap
+  is still listed in `--json`'s `floating`.
+- **Checking an edit builds the model without its far versions**
+  (`assemble_near`): with them, an edit to a big model with `lods` took
+  52 ms instead of 34, and a drag step's model work 10.4 ms instead of
+  5.9. A drag's preview never shows them; the Studio's reload after an
+  edit, `edit --report` and every other command build them as before.
+- The Khronos validator: 0 errors, 0 warnings; "info" lines of the two
+  kinds expected (`UNSUPPORTED_EXTENSION`, `UNUSED_OBJECT`), one per far
+  object. Files without `lods` stay byte for byte as before.
+
+### 5. Speed
+
+See "Speed" above, under the audit's fixes.
+
+### 6. Never lose work
+
+See "Never lose work" above.
+
+### 7. A first real release
+
+- **Version 0.7.0**, published as a GitHub Release, not a pre-release, at
+  the end of 7a. 7b ends with 1.0.0.
+- **An installer**, `DuckMoldSetup-0.7.0.exe`, made with Inno Setup as Duck
+  Forge's is (the script is copied and changed):
+  - It installs for the person only, so it doesn't ask for an
+    administrator. The folder is `%LOCALAPPDATA%\Programs\Duck Mold`.
+  - It adds a Start menu entry, Duck Mold Studio, and offers a desktop
+    shortcut.
+  - It installs the examples and the guide.
+  - A ticked box, *"Let the command line and AI agents find duck-mold"*,
+    adds the folder to the person's PATH.
+  - It installs an uninstaller.
+  - It makes no file association: `.toml` is used by many programs.
+  - Installing a new version over an old one keeps the person's models,
+    which live in Documents, never in the program's folder.
+- **The zip** stays, for people who don't want an installer.
+- **Release notes in plain words.** `RELEASE_NOTES.md` has a short section
+  for each version: what's new, what's fixed, and what to know. The release
+  workflow uses that section as the release's text, so the notes are
+  written and checked with the code.
+- **The version shows:**
+  - in the title bar and in About;
+  - on the start page;
+  - in the crash note;
+  - in `duck-mold --version`.
+- **A test in the release workflow:**
+  - It installs the installer silently on GitHub's Windows machine.
+  - It runs the installed `duck-mold.exe --version` and `inspect` on an
+    installed example.
+  - It starts and closes the Studio with `--version`.
+  - It uninstalls, and checks the folder has gone.
+- **Still unsigned.** A code-signing certificate costs money every year.
+  The release notes and "READ ME FIRST" say plainly what Windows will ask,
+  and why.
+
+### Steps
+
+1. **Never lose work.** L1 to L7, settling files, the crash note, undo on
+   disk.
+2. **The layout and the messages.** B1 to B10, the status bar, notes in the
+   picture, the right column, the Model section, M1 to M7.
+3. **The look.** Icons, the toolbar, the top bar, the axis gizmo, the start
+   page, the interface size, ghosts, and the wording (U1, U3 to U5, U7 to
+   U9).
+4. **Speed.** S1 to S4, measured before and after; numbers in CI.
+5. **Fitting between keys.** `fit-ground`, the warning, the robot's jump.
+6. **The physics body.** A Duck Forge pull request; `robot_click` walks
+   into walls.
+7. **Picking by hit shape.** The Studio, and `inspect --ray`.
+8. **Far versions.** The recipe, edits, `.glb`, reader version 8, Duck
+   Forge's drawing (with S4's bounding ball), examples. A Duck Forge pull
+   request.
+9. **The command line for agents.** C1 to C6, and the small known limits.
+10. **The release.** The installer, release notes, version 0.7.0, the
+    install test, published.
+
+Then `PHASE7A_REPORT.md`, with:
+
+- a picture of every changed screen at both sizes, beside the audit's
+  "before";
+- the speed before and after;
+- what works and the known limits.
+
+### Testing
+
+- **Every step has tests.** Edits have golden files. Every changed screen
+  has a picture test at 1280 x 720, and the new screens at 2560 x 1440 too.
+- **Never lose work** is tested by doing each thing:
+  - an outside change, then Undo;
+  - a deleted file;
+  - a full disk, faked by writing to a path that can't be written;
+  - a file that changes in two pieces half a second apart;
+  - a panic in a test build, then a new start;
+  - undo after reopening.
+- **Fitting:**
+  - after `fit-ground`, every example animation sinks at most 3 mm in any
+    frame;
+  - keys are only ever added, never moved;
+  - running it twice changes nothing the second time.
+- **The physics body:** the robot dropped onto a floor stands on it with its
+  feet at y = 0, within a millimetre, and walking into a wall stops at it.
+- **Picking:** a click by hit shape in the Studio and Duck Forge's
+  `hit_ray` name the same part, for rays at every part of every example
+  with hit shapes, in several poses.
+- **Far versions:**
+  - each version keeps every part's colours and joins;
+  - its triangle counts are in golden files;
+  - its picture is in golden files;
+  - Duck Forge picks the right one at each distance and poses it like the
+    full one;
+  - files without `lods` are byte for byte as before.
+- **Speed:** the speed test prints its numbers on Linux and on Windows in
+  CI.
+- **The release:** the installer test above.
+- `cargo fmt`, and `clippy` with `-D warnings`.
+- Windows and Linux green in Duck Mold and Duck Forge.
+- README, AI_GUIDE and the handoff note updated in both repositories.
+
+### What 7a won't do
+
+- Parts that bend, IK, sculpting, booleans.
+- Physics beyond the one body.
+- A capsule shape in Duck Forge's physics.
+- Textures, Duck Quill, Duck Forge's Studio: those are 7b.
+- A signed program.
+- macOS or Linux builds to download. The program builds there, but only the
+  Windows download is made.
+
+### The decisions
+
+1. **The audit's findings are all fixed**, apart from the three named above.
+   *The other way:* fix only the worst half. That would leave the "test
+   build" feeling the audit is about.
+2. **Undo stops at a change made outside the Studio.** *The other way:* try
+   to undo around it by merging. A merge that guesses wrong loses work, the
+   thing this phase is about.
+3. **Undo is kept on disk, 100 steps a file.** *The other way:* a list of
+   earlier versions of each file to go back to. That's more to build and to
+   understand; Undo is what people reach for.
+4. **The right column scrolls as one, in sections that fold.** *The other
+   way:* tabs (Properties / Palette). The palette is needed beside the part
+   while painting, and tabs would hide one or the other.
+5. **Icons are drawn by the program.** *The other way:* an icon font
+   library. That is a dependency that has to follow egui's versions, and
+   its icons wouldn't match the duck's style.
+6. **An interface size setting, following Windows by default.** *The other
+   way:* only follow Windows. That's what 2560 x 1440 at 100% looks like
+   today.
+7. **Speed comes from caching, no checks during a drag, and draft frames,
+   with several cores only if needed.** *The other way:* several cores
+   first. That's a change to Duck Forge's camera, for a gain the first
+   three may already give.
+8. **`fit-ground` adds keys where the curve dips more than 3 mm**, at most
+   6. *The other way:* a key at every frame. That's exact, but it writes 30
+   keys a second into a recipe that a person reads.
+9. **The physics body is a block round the hit shapes at rest.** *The other
+   way:* add a capsule to Duck Forge's physics. That is new physics, which
+   this phase leaves out; a block stands and bumps well enough for a
+   character.
+10. **Picking by hit shape uses Duck Forge's own ray test**, with Hits on.
+    *The other way:* always pick by hit shape. Parts without a hit shape
+    (eyes) couldn't be clicked at all.
+11. **Far versions are opt-in, `lods = "auto"`, with new models getting
+    it.** *The other way:* every model, always. That would change every
+    example's file, and a game that never looks far pays for nothing.
+12. **Far versions use `MSFT_lod`.** *The other way:* only Duck Mold's own
+    corner of the file. Other programs couldn't use them. Either way the
+    validator gives two "info" lines.
+13. **Two far versions, made by fewer segments, no bevels and leaving out
+    small parts.** *The other way:* a general mesh simplifier. That would
+    be a big piece of geometry code for shapes Duck Mold made itself and
+    can simply make again with fewer sides.
+14. **`--json` becomes one line, and `edit --json` leads with the edit.**
+    *The other way:* keep them and add new flags. That would keep the costly
+    form as the default for agents, the main users of `--json`.
+15. **`--batch` applies a list of edits all or nothing.** *The other way:*
+    leave it to agents to run twenty commands, and to undo the first ten
+    when the eleventh fails.
+16. **0.7.0 is published at the end of 7a, with an installer, and 1.0.0 at
+    the end of 7b.** *The other way:* call 7a's release 1.0.0. But 7b is
+    still to change the file format (textures), and 1.0 should be the
+    version that doesn't need to.

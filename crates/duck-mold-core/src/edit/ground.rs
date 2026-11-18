@@ -9,7 +9,7 @@
 
 use std::path::Path;
 
-use super::motion::{joint_at, require_animation, set_pose};
+use super::motion::{add_key, add_pose, joint_at, require_animation, set_pose};
 use super::{Outcome, Stop, problem, tidy_number};
 use crate::issue::Code;
 use crate::model::{Model, Part};
@@ -23,6 +23,12 @@ use super::doc::Doc;
 const ON_GROUND: f64 = 0.00005;
 /// A body moved up more than this in a pose is lifted on purpose: a leap.
 const LIFTED: f64 = 0.0005;
+/// Sinking deeper than this between keys gets a key of its own: 3 mm.
+pub const DIP: f64 = 0.003;
+/// How many keys fitting between keys adds, at most.
+const MOST_KEYS_ADDED: usize = 6;
+/// How near a key added between keys may be to the keys beside it.
+const KEY_GAP: f64 = 0.05;
 
 /// Every part of the model, however deep.
 fn every_part(model: &Model) -> Vec<&Part> {
@@ -106,6 +112,13 @@ fn body_of<'a>(model: &'a Model, named: Option<&str>) -> Result<&'a Part, Stop> 
     }
 }
 
+/// The part every other part hangs from, found by itself, if there is
+/// one: what `fit-ground` would move. `None` for a model with no such
+/// part (free wheels on a cart).
+pub fn body_part(model: &Model) -> Option<String> {
+    body_of(model, None).ok().map(|part| part.path.clone())
+}
+
 /// The lowest point of the part and everything that hangs from it.
 fn lowest(model: &Model, body: &str) -> Option<f64> {
     every_part(model)
@@ -122,6 +135,7 @@ pub(super) fn fit_ground(
     animation: &str,
     named: Option<&str>,
     all: bool,
+    keys_only: bool,
     model: Option<&Model>,
     path: &Path,
 ) -> Result<Outcome, Stop> {
@@ -255,11 +269,38 @@ pub(super) fn fit_ground(
             }
         ));
     }
-    // Between the keys, as it plays now.
+    // Between the keys: where the smooth curve between two keys still
+    // sinks into the ground, a key is added there, standing on it.
     let display = path
         .file_name()
         .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-    if !fitted.is_empty()
+    let added = if keys_only {
+        Vec::new()
+    } else {
+        fit_between_keys(doc, animation, &body.path, path, &display)?
+    };
+    if !added.is_empty() {
+        let (times, depths): (Vec<String>, Vec<String>) = added
+            .iter()
+            .map(|(at, sank)| {
+                (
+                    format!("{} s", tidy_number(*at, 2)),
+                    format!("{} mm", tidy_number(sank * 1000.0, 0)),
+                )
+            })
+            .unzip();
+        summary.push_str(&format!(
+            "; added {} between keys, at {}, where it sank {}",
+            if added.len() == 1 {
+                "a key".to_owned()
+            } else {
+                format!("{} keys", added.len())
+            },
+            and_list(&times),
+            and_list(&depths)
+        ));
+    }
+    if (!fitted.is_empty() || !added.is_empty())
         && let (Some(new_model), _) = super::build(&doc.text, doc.syntax, path, &display)
         && let Some(played) = new_model.animation(animation)
     {
@@ -276,7 +317,7 @@ pub(super) fn fit_ground(
         match worst {
             Some((low, at)) if low < -ON_GROUND => {
                 summary.push_str(&format!(
-                    "; between keys it sinks at most {} (at {} s)",
+                    "; between keys it now sinks at most {} (at {} s)",
                     tidy_number(-low, 4),
                     tidy_number(at, 3)
                 ));
@@ -288,4 +329,135 @@ pub(super) fn fit_ground(
         summary,
         touched: None,
     })
+}
+
+/// "a", "a and b", "a, b and c".
+fn and_list(items: &[String]) -> String {
+    match items {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
+}
+
+/// The frame between two keys where the model sinks deepest into the
+/// ground, as `(how low, when)`. Only frames between the first key and
+/// the last are looked at: the last key of a loop and its first are the
+/// same moment.
+pub fn deepest_between_keys(model: &Model, animation: &str, body: &str) -> Option<(f64, f64)> {
+    let played = model.animation(animation)?;
+    let (first, last) = (played.keys.first()?.at, played.keys.last()?.at);
+    let moving = Motion::of(model, played);
+    let mut worst: Option<(f64, f64)> = None;
+    for at in frame_times(played.length()) {
+        if at <= first || at >= last {
+            continue;
+        }
+        let frame = posed(model, &moving.joints_at(at));
+        if let Some(low) = lowest(&frame, body)
+            && worst.is_none_or(|(known, _)| low < known)
+        {
+            worst = Some((low, at));
+        }
+    }
+    worst
+}
+
+/// Adds keys where the animation sinks more than [`DIP`] between keys,
+/// the deepest first, at most [`MOST_KEYS_ADDED`]: each a new pose, made
+/// from where every part is at that moment, with the body moved up to
+/// stand on the ground. Gives when each was added and how deep it sank.
+fn fit_between_keys(
+    doc: &mut Doc,
+    animation: &str,
+    body: &str,
+    path: &Path,
+    display: &str,
+) -> Result<Vec<(f64, f64)>, Stop> {
+    let tidy =
+        |numbers: [f64; 3], step: f64| numbers.map(|number| (number / step).round() * step + 0.0);
+    let mut added = Vec::new();
+    for _ in 0..MOST_KEYS_ADDED {
+        let (Some(model), _) = super::build(&doc.text, doc.syntax, path, display) else {
+            break;
+        };
+        let Some(played) = model.animation(animation) else {
+            break;
+        };
+        let Some((low, at)) = deepest_between_keys(&model, animation, body) else {
+            break;
+        };
+        if low >= -DIP {
+            break;
+        }
+        // When: to a hundredth of a second, and not too near the keys
+        // beside it.
+        let before = played
+            .keys
+            .iter()
+            .map(|key| key.at)
+            .filter(|time| *time <= at)
+            .fold(f64::NEG_INFINITY, f64::max);
+        let after = played
+            .keys
+            .iter()
+            .map(|key| key.at)
+            .filter(|time| *time > at)
+            .fold(f64::INFINITY, f64::min);
+        if after - before < KEY_GAP * 2.0 {
+            break;
+        }
+        let (earliest, latest) = (
+            ((before + KEY_GAP) * 100.0).ceil() / 100.0,
+            ((after - KEY_GAP) * 100.0).floor() / 100.0,
+        );
+        if earliest > latest {
+            break;
+        }
+        let when = ((at * 100.0).round() / 100.0).clamp(earliest, latest);
+        // The pose: every part where it is then, its numbers tidied as a
+        // recipe writes them; then the body lifted to stand on the ground.
+        let mut joints = Motion::of(&model, played).joints_at(when);
+        for joint in &mut joints {
+            joint.turn = tidy(joint.turn, 0.1);
+            joint.move_by = tidy(joint.move_by, 0.00001);
+        }
+        let lifted = lowest(&posed(&model, &joints), body).unwrap_or(0.0);
+        let taken: Vec<String> = model.poses.iter().map(|pose| pose.name.clone()).collect();
+        let name = super::unused_name(&format!("{animation}_2"), &taken);
+        add_pose(doc, &name, None)?;
+        let mut body_done = false;
+        for joint in &joints {
+            let mut move_by = joint.move_by;
+            if joint.part == body {
+                move_by[1] -= lifted;
+                body_done = true;
+            }
+            let (turn, move_by) = (joint.turn, tidy(move_by, 0.00001));
+            if turn == [0.0; 3] && move_by == [0.0; 3] {
+                continue;
+            }
+            set_pose(
+                doc,
+                &name,
+                &joint.part,
+                (turn != [0.0; 3]).then_some(turn),
+                (move_by != [0.0; 3]).then_some(move_by),
+                false,
+            )?;
+        }
+        if !body_done && lifted.abs() >= ON_GROUND {
+            set_pose(
+                doc,
+                &name,
+                body,
+                None,
+                Some(tidy([0.0, -lifted, 0.0], 0.00001)),
+                false,
+            )?;
+        }
+        add_key(doc, animation, &name, when)?;
+        added.push((when, -low));
+    }
+    Ok(added)
 }

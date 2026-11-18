@@ -10,13 +10,17 @@
 
 pub mod actions;
 pub mod app;
+pub mod crash;
+pub mod far;
 pub mod gallery;
 pub mod hits;
+pub mod icons;
 pub mod library;
 pub mod palette;
 pub mod posing;
 pub mod properties;
 pub mod recent;
+pub mod system;
 pub mod theme;
 pub mod timeline;
 pub mod tour;

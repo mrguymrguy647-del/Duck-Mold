@@ -254,6 +254,18 @@
       "hidden": false
     }
   ],
+  "far_versions": [
+    {
+      "name": "Far 1",
+      "distance": 39.4,
+      "triangles": 128
+    },
+    {
+      "name": "Far 2",
+      "distance": 98.6,
+      "triangles": 104
+    }
+  ],
   "warnings": [],
   "errors": []
 }

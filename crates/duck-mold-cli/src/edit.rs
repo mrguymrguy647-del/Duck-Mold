@@ -2,10 +2,117 @@
 //! [`Edit`], which the library carries out. The Studio builds the same
 //! `Edit` values from clicks, so whatever it can do, this can.
 
-use clap::{Args, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use duck_mold_core::edit::{AnimationFrom, Changes, ColliderTo, Edit, Free, LimitsTo, Made, Sizes};
 use duck_mold_core::recipe::Turns;
-use duck_mold_core::recipe::{Colliders, HitKind};
+use duck_mold_core::recipe::{Colliders, HitKind, Lods};
+
+/// Every edit, grouped, for `duck-mold edit --help`. A test checks that
+/// it names each one.
+pub const GROUPS: &str = "\
+Edits, by what they change:
+  parts       add, remove, rename, join, unjoin, set, duplicate, define
+  shapes      pull, inset, set-change, remove-change, move-face, turn-face,
+              scale-face, move-edge, move-corner, cut
+  sockets     add-socket, set-socket, rename-socket, remove-socket, tidy-sockets
+  colours     add-color, set-color, remove-color
+  moving      set-limits, set-pose, add-pose, rename-pose, remove-pose,
+              mirror-pose, add-animation, set-animation, rename-animation,
+              remove-animation, add-key, move-key, set-key, remove-key
+  games       set-colliders, set-collider, set-event, remove-event,
+              fit-ground, set-lods, set-lod
+
+`duck-mold edit <recipe> <edit> --help` explains one. Many at once:
+`duck-mold edit <recipe> --batch edits.txt`, one edit a line.";
+
+/// Reads a `--batch` file (`-` for standard input): one edit a line, as
+/// it would follow `duck-mold edit <recipe>`, each with its label
+/// (`edits.txt line 3`). Blank lines and lines starting with `#` are
+/// skipped. A line that can't be read is a sentence naming it.
+pub fn read_batch(from: &str) -> Result<Vec<(String, Edit)>, String> {
+    let text = if from == "-" {
+        std::io::read_to_string(std::io::stdin())
+            .map_err(|error| format!("can't read the edits from standard input: {error}"))?
+    } else {
+        std::fs::read_to_string(from)
+            .map_err(|error| format!("can't read the edits from \"{from}\": {error}"))?
+    };
+    let mut edits = Vec::new();
+    for (at, line) in text.lines().enumerate() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        let label = if from == "-" {
+            format!("line {}", at + 1)
+        } else {
+            format!("{from} line {}", at + 1)
+        };
+        let words = words(line).map_err(|why| format!("{label}: {why}"))?;
+        let parsed = Line::try_parse_from(std::iter::once("edit".to_owned()).chain(words))
+            .map_err(|error| {
+                let said = error.to_string();
+                let first = said
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .trim_start_matches("error: ");
+                format!("{label}: {first}")
+            })?;
+        for edit in parsed
+            .change
+            .to_edits()
+            .map_err(|why| format!("{label}: {why}"))?
+        {
+            edits.push((label.clone(), edit));
+        }
+    }
+    Ok(edits)
+}
+
+/// One line of a batch, read as clap reads the command line.
+#[derive(Parser)]
+#[command(name = "edit", no_binary_name = false, disable_help_subcommand = true)]
+struct Line {
+    #[command(subcommand)]
+    change: Change,
+}
+
+/// A line cut into words as a shell would: on spaces, with "..." and
+/// '...' keeping spaces inside a word.
+fn words(line: &str) -> Result<Vec<String>, String> {
+    let mut words = Vec::new();
+    let mut word = String::new();
+    let mut started = false;
+    let mut quote: Option<char> = None;
+    for c in line.chars() {
+        match (quote, c) {
+            (Some(open), c) if c == open => quote = None,
+            (Some(_), c) => word.push(c),
+            (None, '"' | '\'') => {
+                quote = Some(c);
+                started = true;
+            }
+            (None, c) if c.is_whitespace() => {
+                if started {
+                    words.push(std::mem::take(&mut word));
+                    started = false;
+                }
+            }
+            (None, c) => {
+                word.push(c);
+                started = true;
+            }
+        }
+    }
+    if let Some(open) = quote {
+        return Err(format!("a {open} isn't closed"));
+    }
+    if started {
+        words.push(word);
+    }
+    Ok(words)
+}
 
 /// One change to a recipe. (Each variant's name is the command's, so
 /// `set-change` is `SetChange`.)
@@ -206,6 +313,10 @@ pub enum Change {
         /// the side faces stays 0.
         #[arg(long, value_name = "X,Y,Z", allow_hyphen_values = true)]
         shift: Option<String>,
+        /// Which way it faces, if not straight out of its side: up, down,
+        /// left, right, front or back (as set-socket --facing).
+        #[arg(long, value_name = "WAY")]
+        facing: Option<String>,
     },
     /// Move or turn a socket that add-socket (or the recipe) put on a
     /// side of a part. Whatever is joined to it moves with it.
@@ -356,6 +467,22 @@ pub enum Change {
         /// directions). By default, along the part's longest side.
         #[arg(long)]
         along: Option<String>,
+    },
+    /// Say whether the model has far-away versions (LODs): auto (two,
+    /// at distances worked out from its size), two distances in metres
+    /// (near,far: 12,30), or none (take the line away).
+    SetLods {
+        /// auto, none, or near,far in metres.
+        setting: String,
+    },
+    /// Keep a part whole in the far-away versions (keep: never
+    /// simplified or left out, like a character's eyes), or let them
+    /// simplify it again (auto).
+    SetLod {
+        /// The part, as inspect names it: head, or left_arm/hand.
+        part: String,
+        /// keep or auto.
+        setting: String,
     },
     /// Turn or move a part in a pose. Makes the pose if it isn't there.
     ///
@@ -522,7 +649,9 @@ pub enum Change {
     /// the body (the part every other part hangs from) is moved up or
     /// down so the model's lowest point is on the ground. Only that one
     /// number of each pose changes. A pose that lifts the body (a leap)
-    /// is left alone unless --all.
+    /// is left alone unless --all. Then, where the model still sinks more
+    /// than 3 mm between two keys, a key is added there with a new pose
+    /// that stands on the ground (at most 6), unless --keys-only.
     FitGround {
         /// The animation.
         animation: String,
@@ -533,6 +662,9 @@ pub enum Change {
         /// Fit the poses that lift the body too.
         #[arg(long)]
         all: bool,
+        /// Only fit the keys' poses: add no keys between them.
+        #[arg(long)]
+        keys_only: bool,
     },
     /// Take an event off a key; without a name, every event on it.
     RemoveEvent {
@@ -765,6 +897,34 @@ impl SizeOptions {
 impl Change {
     /// The edit these words ask for, or a sentence saying what is wrong
     /// with them.
+    /// Every edit this command makes, in order: one for most, two for
+    /// `add-socket --facing`. They are made together and written once.
+    pub fn to_edits(&self) -> Result<Vec<Edit>, String> {
+        let edit = self.to_edit()?;
+        Ok(match self {
+            // add-socket --facing: the socket, then which way it faces,
+            // made together.
+            Change::AddSocket {
+                part,
+                name,
+                facing: Some(facing),
+                ..
+            } => vec![
+                edit,
+                Edit::SetSocket {
+                    socket: format!("{part}.{name}"),
+                    on: None,
+                    shift: None,
+                    at: None,
+                    facing: Some(facing.clone()),
+                },
+            ],
+            _ => vec![edit],
+        })
+    }
+
+    /// The edit this command makes ([`Change::to_edits`] gives every
+    /// edit, for a command that makes more than one).
     pub fn to_edit(&self) -> Result<Edit, String> {
         Ok(match self {
             Change::Add {
@@ -927,6 +1087,7 @@ impl Change {
                 name,
                 on,
                 shift,
+                ..
             } => Edit::AddSocket {
                 part: part.clone(),
                 name: name.clone(),
@@ -1104,10 +1265,12 @@ impl Change {
                 animation,
                 part,
                 all,
+                keys_only,
             } => Edit::FitGround {
                 animation: animation.clone(),
                 part: part.clone(),
                 all: *all,
+                keys_only: *keys_only,
             },
             Change::RemoveEvent {
                 animation,
@@ -1151,6 +1314,36 @@ impl Change {
                             "colliders is parts, capsule, box, sphere or none, not \"{word}\""
                         )
                     })?),
+                },
+            },
+            Change::SetLods { setting } => Edit::SetLods {
+                lods: match setting.as_str() {
+                    "none" => None,
+                    "auto" => Some(Lods::Auto),
+                    word => {
+                        let distances: Vec<Option<f64>> = word
+                            .split(',')
+                            .map(|number| number.trim().parse::<f64>().ok())
+                            .collect();
+                        match distances.as_slice() {
+                            [Some(near), Some(far)] => Some(Lods::At([*near, *far])),
+                            _ => {
+                                return Err(format!(
+                                    "lods is auto, none, or two distances in metres, near,far (like 12,30): not \"{word}\""
+                                ));
+                            }
+                        }
+                    }
+                },
+            },
+            Change::SetLod { part, setting } => Edit::SetLod {
+                part: part.clone(),
+                keep: match setting.as_str() {
+                    "keep" => true,
+                    "auto" => false,
+                    word => {
+                        return Err(format!("lod is keep or auto, not \"{word}\""));
+                    }
                 },
             },
             Change::SetCollider {

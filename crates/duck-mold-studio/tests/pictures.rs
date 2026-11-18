@@ -123,11 +123,14 @@ fn the_screens_look_as_they_did() {
             "version = 0\n[[parts]]\nshape = \"blob\"\n",
         )
         .unwrap();
+        std::fs::write(folder.join("gone.toml"), "").unwrap();
         let list = folder.join("recent.txt");
         let mut recent = Recent::kept_in(list.clone());
-        for name in ["mistake", "my_robot", "castle"] {
+        for name in ["gone", "mistake", "my_robot", "castle"] {
             recent.opened(&folder.join(format!("{name}.toml")));
         }
+        // One opened lately and deleted since.
+        std::fs::remove_file(folder.join("gone.toml")).unwrap();
         let mut screen = harness(
             StudioApp::new()
                 .remembering(Recent::kept_in(list))
@@ -408,9 +411,45 @@ fn the_screens_look_as_they_did() {
         screen.run_steps(2);
         let good = std::fs::read_to_string(&recipe).unwrap();
         std::fs::write(&recipe, good.replace("shape = \"box\"", "shape = \"blob\"")).unwrap();
+        // Shown once it has stayed the same for two checks.
+        screen.state_mut().studio_mut().unwrap().check_files();
         assert!(screen.state_mut().studio_mut().unwrap().check_files());
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "mistake"));
+    }
+
+    // A recipe deleted while it is open: the bar over the picture.
+    {
+        let recipe = copy_of("house.toml", "pictures_gone");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        std::fs::remove_file(&recipe).unwrap();
+        assert!(screen.state_mut().studio_mut().unwrap().check_files());
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "missing"));
+    }
+
+    // The start page after a crash.
+    {
+        use duck_mold_studio::recent::Recent;
+        let folder = folder("pictures_crashed");
+        let settings = folder.join("settings");
+        std::fs::create_dir_all(&settings).unwrap();
+        let recipe = folder.join("house.toml");
+        std::fs::copy(examples().join("house.toml"), &recipe).unwrap();
+        std::fs::write(
+            settings.join("crash-2026-11-18-14-02-33.txt"),
+            format!("Open:     {}\n", recipe.display()),
+        )
+        .unwrap();
+        let mut screen = harness(
+            StudioApp::new()
+                .remembering(Recent::kept_in(settings.join("recent.txt")))
+                .keeping_models_in("Documents/Duck Mold"),
+            true,
+        );
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "start-crashed"));
     }
 
     // Shaping: a wall with a framed window, in Face mode with the glass
@@ -696,6 +735,227 @@ fn the_screens_look_as_they_did() {
         screen.run_steps(3);
         scroll_panel(&mut screen);
         wrong.extend(check(&mut screen, "hits-own"));
+    }
+
+    // A far-away version: View > Far version > Far 2, nothing selected,
+    // with the model's line and the count in the status bar.
+    {
+        let mut screen = robot();
+        screen.state_mut().studio_mut().unwrap().far = 2;
+        screen.state_mut().studio_mut().unwrap().select(None);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "far"));
+    }
+
+    // Every icon, at three sizes, on the dark look and on the light.
+    {
+        use duck_mold_studio::icons::{self, Icon};
+        let mut sheet = Harness::builder()
+            .with_size(egui::vec2(560.0, 280.0))
+            .with_pixels_per_point(1.0)
+            .wgpu()
+            .build_ui(|ui| {
+                for (side, theme) in [
+                    (16.0, egui::Theme::Dark),
+                    (24.0, egui::Theme::Dark),
+                    (40.0, egui::Theme::Light),
+                ] {
+                    let back = if theme == egui::Theme::Dark {
+                        egui::Color32::from_gray(30)
+                    } else {
+                        egui::Color32::from_gray(235)
+                    };
+                    let ink = if theme == egui::Theme::Dark {
+                        egui::Color32::from_gray(225)
+                    } else {
+                        egui::Color32::from_gray(30)
+                    };
+                    let (rect, _) = ui.allocate_exact_size(
+                        egui::vec2(
+                            ui.available_width(),
+                            (side + 4.0) * (Icon::ALL.len() as f32 * (side + 4.0) / 540.0).ceil(),
+                        ),
+                        egui::Sense::hover(),
+                    );
+                    ui.painter().rect_filled(rect, 0.0, back);
+                    let across = ((rect.width() - 8.0) / (side + 4.0)).floor() as usize;
+                    for (at, icon) in Icon::ALL.into_iter().enumerate() {
+                        let place = egui::Rect::from_min_size(
+                            rect.min
+                                + egui::vec2(
+                                    4.0 + (at % across) as f32 * (side + 4.0),
+                                    2.0 + (at / across) as f32 * (side + 4.0),
+                                ),
+                            egui::Vec2::splat(side),
+                        );
+                        icons::paint(ui.painter(), place, icon, ink);
+                    }
+                }
+            });
+        sheet.run();
+        let stored = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/screens");
+        wrong.extend(
+            sheet
+                .try_snapshot_options(
+                    "icons",
+                    &SnapshotOptions::new()
+                        .threshold(2.0)
+                        .max_failed_pixels(200)
+                        .output_path(stored),
+                )
+                .err()
+                .map(|error| format!("icons: {error}")),
+        );
+    }
+
+    // The main screens at the audit's two sizes, 1280 x 720 and 2560 x
+    // 1440, and the big one again with the interface at 150%.
+    for (width, height, percent) in [
+        (1280.0, 720.0, None),
+        (2560.0, 1440.0, None),
+        (2560.0, 1440.0, Some(150)),
+    ] {
+        use duck_mold_studio::recent::Recent;
+        let tag = match percent {
+            Some(percent) => format!("{width}x{height}-{percent}"),
+            None => format!("{width}x{height}"),
+        };
+        let sized = |app: StudioApp| {
+            // The window's size is in points: at 150%, a 2560-pixel
+            // screen is 2560 / 1.5 points wide.
+            let scale = percent.map_or(1.0, |percent| percent as f32 / 100.0);
+            let mut screen = Harness::builder()
+                .with_size(egui::vec2(width / scale, height / scale))
+                .with_pixels_per_point(1.0)
+                .with_render_cursor(false)
+                .with_context_setup(|ctx| {
+                    ctx.set_theme(egui::ThemePreference::Dark);
+                    duck_mold_studio::theme::apply_brand(ctx);
+                })
+                .wgpu()
+                .build_eframe(|_| app);
+            screen.run_steps(3);
+            screen
+        };
+        // Where the interface size is kept, for this run only.
+        let settings = folder(&format!("pictures_sizes_{tag}"));
+        let recent = settings.join("recent.txt");
+        Recent::kept_in(recent.clone()).keep_interface_size(percent);
+        let remembering = || Recent::kept_in(recent.clone());
+        let mut screen = sized(
+            StudioApp::new()
+                .remembering(remembering())
+                .keeping_models_in("Documents/Duck Mold"),
+        );
+        wrong.extend(check(&mut screen, &format!("size-{tag}-start")));
+        let mut screen = sized(
+            StudioApp::with_file(examples().join("robot.toml"), false).remembering(remembering()),
+        );
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, &format!("size-{tag}-selected")));
+        let mut screen = sized(
+            StudioApp::with_file(examples().join("robot.toml"), false).remembering(remembering()),
+        );
+        screen.key_press(egui::Key::O);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .choose_animation(Some("walk"));
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("left_leg"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, &format!("size-{tag}-pose")));
+    }
+
+    // Removing a part that others hang from: three clear choices.
+    {
+        let mut screen = robot();
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("head"));
+        screen.run_steps(2);
+        screen.key_press(egui::Key::Delete);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "remove-asks"));
+    }
+
+    // A recipe that has never built.
+    {
+        let recipe = folder("pictures_never_built").join("broken.toml");
+        std::fs::write(
+            &recipe,
+            "version = 0\nname = \"x\"\n\n[[parts]]\nshape = \"blob\"\n",
+        )
+        .unwrap();
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "never-built"));
+    }
+
+    // A .glb opened only to look at, with a part selected: plain facts.
+    {
+        let folder = folder("pictures_glb");
+        let recipe = folder.join("robot.toml");
+        std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+        duck_mold_core::tools::export_file(&recipe, None).unwrap();
+        let mut screen = harness(StudioApp::with_file(folder.join("robot.glb"), false), true);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "glb-opened"));
+        let mut screen = harness(StudioApp::with_file(&recipe, true), true);
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("left_arm"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "look-only"));
+    }
+
+    // Help: the keys (they scroll) and About.
+    {
+        let mut screen = robot();
+        screen.get_by_label("Help").click();
+        screen.run_steps(3);
+        screen
+            .query_all_by_label_contains("The keys")
+            .last()
+            .unwrap()
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "keys"));
+        let mut screen = robot();
+        screen.get_by_label("Help").click();
+        screen.run_steps(3);
+        screen
+            .query_all_by_label_contains("About Duck Mold Studio")
+            .last()
+            .unwrap()
+            .click();
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "about"));
+    }
+
+    // Export: the note over the picture.
+    {
+        let recipe = copy_of("robot.toml", "pictures_export_note");
+        let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+        screen.run_steps(2);
+        screen.get_by_label("Export").click();
+        screen.run_steps(4);
+        wrong.extend(check(&mut screen, "export-note"));
     }
 
     assert!(

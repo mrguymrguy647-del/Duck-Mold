@@ -2774,16 +2774,23 @@ fn edit_file_writes_the_recipe_and_reports_like_inspect() {
     let edited = edit_file(&recipe, &add_hat(), false).unwrap();
     assert!(edited.edit.written);
     assert_eq!(std::fs::read_to_string(&recipe).unwrap(), edited.after);
-    let report = edited.to_json();
+    // As --json prints it: the edit first, the report only if asked.
+    let text = serde_json::to_string(&edited.to_json(false)).unwrap();
+    assert!(
+        text.starts_with(r#"{"ok":true,"edit":{"command":"add","#),
+        "{text}"
+    );
+    let report: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(report["ok"], true);
     assert_eq!(report["edit"]["command"], "add");
+    assert_eq!(report["edit"]["written"], true);
+    assert_eq!(report["summary"], "added \"hat\" (cone) on pole.top");
+    assert_eq!(report["lines"], serde_json::json!([57, 65]));
+    assert!(report["model"].as_str().unwrap().starts_with("lamp: "));
+    assert!(report["report"].is_null());
+    let full = serde_json::to_value(edited.to_json(true)).unwrap();
     assert_eq!(
-        report["edit"]["summary"],
-        "added \"hat\" (cone) on pole.top"
-    );
-    assert_eq!(report["edit"]["lines"], serde_json::json!([57, 65]));
-    assert_eq!(
-        report["triangles"],
+        full["report"]["triangles"],
         edited.inspection.as_ref().unwrap().triangles
     );
     // Nothing else is left in the folder.
@@ -3025,6 +3032,11 @@ fn every_kind_of_edit_has_a_name() {
             part: String::new(),
             to: duck_mold_core::edit::ColliderTo::None,
         },
+        Edit::SetLods { lods: None },
+        Edit::SetLod {
+            part: String::new(),
+            keep: true,
+        },
         Edit::SetEvent {
             animation: String::new(),
             key: 1,
@@ -3039,6 +3051,7 @@ fn every_kind_of_edit_has_a_name() {
             animation: String::new(),
             part: None,
             all: false,
+            keys_only: true,
         },
     ];
     let names: Vec<&str> = all.iter().map(Edit::command).collect();

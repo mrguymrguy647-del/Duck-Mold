@@ -417,6 +417,7 @@ pub fn render_file(
     output: Option<&Path>,
     size: usize,
     pose: Option<&str>,
+    far: Option<usize>,
     colliders: bool,
 ) -> Result<Rendered, Failure> {
     if !(SMALLEST_SIZE..=LARGEST_SIZE).contains(&size) {
@@ -435,8 +436,21 @@ pub fn render_file(
             .suggest(format!("--size {DEFAULT_SIZE}")),
         )));
     }
-    let built = tools::build(path)?;
+    let mut built = tools::build(path)?;
+    // A far-away version: the picture and the report are of it.
+    if let Some(far) = far {
+        built.model = tools::far_version(&built.model, far, &built.source)?;
+    }
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
+    // A far-away version's simpler shapes can leave a gap of millimetres
+    // between parts that touch in the model (a nose on a rounder beard):
+    // invisible that far off, and no mistake of the recipe's. It is still
+    // listed in `floating`.
+    if far.is_some() {
+        inspection
+            .warnings
+            .retain(|warning| warning.code != Code::Floating);
+    }
     // In a pose, the picture and the report are of the model as the pose
     // puts it.
     let model = match pose {
@@ -451,11 +465,20 @@ pub fn render_file(
     inspection.materials = built.materials;
     let sheet = render_sheet_with(&model, &inspection.headline(), size, colliders);
     let png = sheet.to_png();
-    let output = match (output, pose) {
-        (Some(output), _) => output.to_path_buf(),
-        (None, None) => path.with_extension("png"),
-        // `robot.wave.png`, beside `robot.png`.
-        (None, Some(pose)) => path.with_extension(format!("{pose}.png")),
+    let output = match output {
+        Some(output) => output.to_path_buf(),
+        // `robot.png`; `robot.wave.png` beside it for a pose,
+        // `robot.far2.png` for a far version, `robot.far2.wave.png`.
+        None => {
+            let mut ending = String::new();
+            if let Some(far) = far {
+                ending.push_str(&format!("far{far}."));
+            }
+            if let Some(pose) = pose {
+                ending.push_str(&format!("{pose}."));
+            }
+            path.with_extension(format!("{ending}png"))
+        }
     };
     tools::write_file(&output, &png)?;
     Ok(Rendered {

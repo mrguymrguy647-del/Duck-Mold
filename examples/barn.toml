@@ -10,6 +10,9 @@
 version = 0
 name = "barn"
 description = "A red barn with a silo."
+# Two simpler versions for a game to draw when it is far off: rounder
+# shapes with fewer sides, no bevels, the smallest parts left out.
+lods = "auto"
 
 [palette]
 red   = "#B23A2E"

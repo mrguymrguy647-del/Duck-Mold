@@ -59,9 +59,10 @@ too.
 
 Exit codes: **0** it worked (warnings included), **1** the recipe has
 errors, **2** the command was wrong or a file couldn't be read or written.
-With `--json`, standard output is exactly one JSON document, also when it
-failed. Without it, the report is on standard output and the problems are
-on standard error.
+With `--json`, standard output is exactly one JSON document **on one
+line**, also when it failed (`--pretty` spreads it over lines, indented,
+with the same fields). Without it, the report is on standard output and
+the problems are on standard error.
 
 The same recipe always gives exactly the same bytes, so a change you see
 is a change you made.
@@ -497,7 +498,7 @@ As JSON (`"ok": false`, with `errors` and `warnings`), each is:
 | `duplicate_name` | Two parts, or two sockets, with one name. |
 | `conflict` | Two fields that can't go together (`attach` with `move`; two sources of shape). The message says which to remove. |
 | `cycle` | A part that uses itself, or parts attached in a ring. The message shows the chain. |
-| `reserved` | `bones`, `colliders` and `lods` are kept for a later phase. Remove them. |
+| `reserved` | `bones` is kept for a later phase. Remove it. |
 | `unsupported` | Not available: see-through colours, compressed glTF. |
 | `file_not_found` | A file the recipe names can't be read. Paths start from the recipe's folder. |
 | `bad_mesh` | A mistake inside a mesh file (an `.obj`'s with its line). |
@@ -520,6 +521,7 @@ Warnings (the model is still built; exit code 0):
 | `unknown_animation` | A command names an animation the recipe doesn't have. |
 | `hidden` | A part is entirely inside another. |
 | `off_ground` | The model's lowest point isn't at y = 0. |
+| `dips_between_keys` | `inspect --animation`: the animation sinks more than 3 mm into the ground between two keys that stand on it. `fit-ground <animation>` adds a key there. |
 | `skipped` | Something in a mesh file was passed over. |
 
 ## 9. How to build common things
@@ -590,9 +592,11 @@ whole model.
 You can always change the recipe's text yourself. `duck-mold edit` makes
 the common changes for you, safely: it changes only the characters it
 has to (comments, order and layout stay), builds the result before it
-writes, and prints the same report as `inspect`, so one command is the
-edit and the check. These are the edits a person makes with the mouse in
-Duck Mold Studio, one for one.
+writes, and prints one line saying what changed, with any problems
+(`--report` adds `inspect`'s whole report), so one command is the edit
+and the check. These are the edits a person makes with the mouse in Duck
+Mold Studio, one for one. `duck-mold edit --help` lists them all,
+grouped by what they change.
 
 ```bash
 duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
@@ -613,7 +617,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
 | `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
 | `duck-mold edit <recipe> remove-color <name>` | Takes a colour out of the palette. Refused if anything is painted with it, naming what; `--replace-with <other colour>` paints those with the other colour first. |
-| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
+| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. `--facing up` (or `down`, `left`, `right`, `front`, `back`) turns it as it is made, as `set-socket --facing` does. |
 | `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared on a side or at a point: `--shift x,y,z` and `--on <side>` for one on a side; `--at x,y,z` for an exact point in the part's own space (it also turns one on a side into one at a point, and `--on` does the opposite). Whatever is joined to it moves with it. |
 | `duck-mold edit <recipe> set-socket <part.socket> --facing <way>` | Turns a socket on a side or at a point: `up`, `down`, `left`, `right`, `front`, `back` writes `facing`; `out` takes it away, so the socket faces as it does when nothing says (straight out of its side; up, for one at a point). Whatever is joined to it turns to match: a door's hinge at a point, `--facing right`, stands the door out to the right. |
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
@@ -621,6 +625,8 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
 | `duck-mold edit <recipe> set-colliders <parts\|capsule\|box\|sphere\|none>` | The model's hit shapes (section 11, "Hit shapes"): `parts` fits one to every part; `capsule`, `box` or `sphere` puts one round the whole model; `none` takes the line away. |
 | `duck-mold edit <recipe> set-collider <part> <box\|sphere\|capsule\|none\|fitted>` | A part's own hit shape: a shape fitted to it, `none` (no hit shape), or `fitted` (take its own away: it follows `colliders`). `--size x,y,z`, `--radius r`, `--length l` (end to end), `--center x,y,z` and `--along x\|y\|z` give it numbers of its own; any not given keep the fitted shape's. |
+| `duck-mold edit <recipe> set-lods <auto\|none\|near,far>` | The model's far-away versions (section 11, "Far-away versions"): `auto` puts two at 8 and 20 times the model's largest side; `12,30` puts them at 12 m and 30 m; `none` takes the line away. |
+| `duck-mold edit <recipe> set-lod <part> <keep\|auto>` | `keep`: the part is never simplified or left out of the far-away versions (a character's eyes). `auto` takes that away again. On an assembly, it keeps everything inside it. |
 | `duck-mold edit <recipe> set-limits <part> --x <low,high> --y ... --z ...` | Says how far a part may turn when the model is posed (section 11). Each of `--x`, `--y`, `--z` takes two angles (`-30,40`), `free` (any amount) or `none` (not that way); directions not given stay as they are. `--fixed`: it never turns or moves. `--none`: no limits again. |
 | `duck-mold edit <recipe> set-pose <pose> <part> --turn x,y,z` | Turns a part in a pose, in degrees about its pivot (section 11); `--move x,y,z` slides it, in metres. Makes the pose if it isn't there. `--rest` puts the part back at rest in that pose. |
 | `duck-mold edit <recipe> add-pose <name>` | A new pose with every part at rest; `--from <pose>` makes it a copy of another. |
@@ -634,7 +640,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> remove-key <animation> <number>` | Removes a key. If it is the first, the keys after it move earlier so the animation still starts at 0. |
 | `duck-mold edit <recipe> set-event <animation> <number> <name>` | Puts an event on a key: a name a game hears each time the animation passes that key (`footstep`). A key keeps the events it had; one already there is refused. |
 | `duck-mold edit <recipe> remove-event <animation> <number> [<name>]` | Takes an event off a key; without a name, every event on it. |
-| `duck-mold edit <recipe> fit-ground <animation>` | Stands each pose the animation's keys use on the ground: the body (the part every other part hangs from) moves up or down in it until the lowest point touches. Only that number changes. A pose that lifts the body (a leap) is left alone; `--all` fits it too; `--part <part>` says which part to move when more than one has others hanging from it. The summary names other animations that use the same poses, and how far it still sinks between keys. |
+| `duck-mold edit <recipe> fit-ground <animation>` | Stands each pose the animation's keys use on the ground: the body (the part every other part hangs from) moves up or down in it until the lowest point touches. Only that number changes. A pose that lifts the body (a leap) is left alone; `--all` fits it too; `--part <part>` says which part to move when more than one has others hanging from it. Then, where the smooth curve between two keys still sinks more than 3 mm into the ground, it adds a key there (at most 6): a new pose named after the animation (`jump_2`, `jump_3`...), made from where every part is at that moment with the body lifted onto the ground, at least 0.05 s from the keys beside it. `--keys-only` adds none. The summary names other animations that use the same poses, the keys it added, and how far it still sinks between keys. |
 | `duck-mold edit <recipe> set-animation <animation> --loop true\|false --smooth true\|false --length <seconds>` | Any of the three. `--length` scales every key's time: the whole animation gets faster or slower. |
 | `duck-mold edit <recipe> rename-animation <animation> <new name>` | Renames an animation where it stands. |
 | `duck-mold edit <recipe> remove-animation <animation>` | Removes an animation. Its poses stay. |
@@ -653,10 +659,24 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 - **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,
   or `#2` for a part with no name. `--to` takes the same
   (`left_arm/hand.bottom`).
-- **`--json`** prints `inspect`'s report for the recipe after the edit,
-  plus `"edit"`: `{ "command": "add", "summary": "added \"hat\" (cone)
-  on head.top", "file": "robot.toml", "written": true, "lines": [198,
-  206] }` (`lines`: the first and last line that changed).
+- **`--json`** prints one line, the edit first:
+  `{"ok":true,"edit":{"command":"add","file":"robot.toml","written":true},
+  "summary":"added \"hat\" (cone) on head.top","lines":[198,206],
+  "model":"robot: 0.90 x 1.95 x 0.39 m, ...","warnings":[],"errors":[]}`
+  (`lines`: the first and last line that changed; `model`: `inspect`'s
+  summary line). `--report` adds `inspect`'s whole report under
+  `"report"`.
+- **Many edits at once: `--batch edits.txt`** (or `--batch -` to read
+  them from standard input): one edit a line, each written as it would
+  follow `duck-mold edit <recipe>`, with `"..."` round a value that has
+  spaces; blank lines and `#` lines are skipped. They are made in turn
+  (each sees what the ones before it did) and the recipe is written
+  once, or not at all if any is refused: the refusal starts with its
+  line (`edits.txt line 3: there is no part "hnd"...`). `"command"` is
+  `batch` and `summary` lists every edit. One run instead of twenty.
+- **An unknown part** gets every part it could be, nested ones
+  (`left_arm/hand`) too, nearest first, and the nearest as the likely
+  fix.
 - **`--dry-run`** does everything but write: read the report, then
   decide.
 - **An edit that would leave the recipe with more mistakes than it had
@@ -1016,8 +1036,10 @@ duck-mold edit duck.toml add-animation hello --from robot.toml --take wave
   key's pose on the ground (shorter legs sink into it, longer ones
   float). Turn the feet flat first if the legs tip them (as below):
   fitting a toe that digs in lifts the whole body. It leaves a leap
-  alone. Between keys a fast turn can still dip a little: the summary
-  says how much; keep it under half a centimetre.
+  alone. Between keys, where a fast turn still dips more than 3 mm, it
+  adds a key that stands on the ground; the summary says where, and how
+  far it still sinks. `inspect --animation` warns `dips_between_keys`
+  when it sinks between two keys that stand on the ground.
 - **Turns are about each part's own axes**, so check the result: render
   a strip. A starter only knows the six names: feet that stick out of a
   leg can dig in as it swings (the robot's own walk turns its feet back;
@@ -1039,7 +1061,17 @@ duck-mold edit robot.toml set-collider head sphere   # a ball round the head ins
 duck-mold edit robot.toml set-collider left_eye none # no hit shape: too small to aim at
 duck-mold inspect robot.toml --colliders             # every shape and its numbers
 duck-mold render robot.toml --colliders              # outlined in cyan over the model
+duck-mold inspect robot.toml --ray 0,1.4,5 --toward 0,0,-1   # what a click there hits
 ```
+
+- `inspect --ray x,y,z --toward x,y,z` is what a game's click or shot
+  would hit: the first hit shape on that ray, with Duck Forge's own test.
+  It prints the part, its shape, how far away and where (`hits head (its
+  ball), 4.696 m away, at (0, 1.4, 0.304)`), or `hits nothing`. Points are
+  in metres in the model, as a game has them. `--pose <name>`, or
+  `--animation <name> --at <seconds>`, tests the model as it stands then.
+  `--json` gives `{ok, source, from, toward, stands, hit: {part, shape,
+  point, distance} or null, hit_shapes}`.
 
 - `colliders = "parts"` at the top gives every part the shape that
   suits it: a sphere for a sphere; a capsule for a cylinder, capsule or
@@ -1063,6 +1095,37 @@ duck-mold render robot.toml --colliders              # outlined in cyan over the
 - Give tiny parts (eyes, a buckle) `none`: a hit on them is rarely
   wanted, and the part behind is named instead.
 
+### Far-away versions
+
+A model a game shows far off (a building, a crowd of characters) should
+carry simpler versions of itself. One line at the top does it:
+
+```toml
+lods = "auto"     # Far 1 from 8 times the largest side, Far 2 from 20 times
+lods = [12, 30]   # or at these distances, in metres
+```
+
+```sh
+duck-mold edit robot.toml set-lods auto        # the same, as an edit
+duck-mold edit robot.toml set-lod left_eye keep # never simplified or left out
+duck-mold inspect robot.toml                   # "far versions 2  (Far 1 at 14.6 m: 288 triangles; ...)"
+duck-mold render robot.toml --far 2            # robot.far2.png: what a game draws far off
+```
+
+- Far 1 halves the segments of round shapes and gives bevels one step;
+  Far 2 quarters them, takes bevels away, makes stairs one sloped block,
+  and leaves out parts smaller than 4% of the model's largest side.
+- Only triangles change: every part stays where it is, with its
+  colours, joins, sockets and hit shapes.
+- Check `inspect`'s triangle counts: a model of boxes has nothing to
+  simplify, and then `lods` only makes the file bigger. Take it away
+  (`set-lods none`).
+- `lod = "keep"` on small parts that must still show far off (eyes, a
+  badge). On an assembly it keeps everything inside.
+- `duck-mold new` starts a recipe with `lods = "auto"`.
+- `--json` has `far_versions`: each one's `name`, `distance`,
+  `triangles` and the `left_out` parts.
+
 ### In a game
 
 `duck-mold export` writes the animations and the poses into the `.glb`
@@ -1074,8 +1137,11 @@ let mut robot = AnimatedModel::load("assets/robot.glb")?; // duckforge::glb::Ani
 robot.play("idle");                                       // by the animation's name
 if walking { robot.play("walk") } else { robot.play("idle") } // every frame is fine
 robot.update(ctx.dt());
-canvas.draw_mesh(robot.mesh(), &Transform::at(position), &camera);
+robot.draw_mesh(canvas, &Transform::at(position), &camera); // the version that suits the distance
 ```
+
+(`canvas.draw_mesh(robot.mesh(), ...)` still works: it always draws the
+model itself.)
 
 `play_once`, `play_looping`, `stop`, `resume`, `rest`, `set_speed`,
 `set_pose("wave")`, `turn("head", vec3(0.0, 30.0, 0.0))` and
@@ -1083,6 +1149,29 @@ canvas.draw_mesh(robot.mesh(), &Transform::at(position), &camera);
 give animations, poses and parts are the names game code uses: keep
 them plain (`idle`, `walk`, `wave`, `jump`, `open`). `examples/robot.toml`
 has limits, six poses and three animations to copy from.
+
+### Working beside the Studio
+
+A person may have the recipe open in Duck Mold Studio while you edit it.
+That is safe:
+
+- The Studio sees your save within half a second and shows it. A save
+  that doesn't build is shown once it has stayed the same for half a
+  second, so write the whole file at once (or use `duck-mold edit`).
+- Your change is a wall for the Studio's Undo: the person can't undo it
+  by accident. To take it back, edit the recipe again.
+- Every file Duck Mold writes (`edit`, `export`, `render`) is written
+  beside the real one (`<name>.duck-mold-saving`) and swapped in, so the
+  Studio or a game never reads half of it. If you see a
+  `.duck-mold-saving` file, a write was cut off: the real file is whole,
+  and the other can be deleted.
+- A write that fails says why: `the disk is full`, `permission denied`,
+  `another program has the file open and locked`. Nothing was changed.
+- A slip in the TOML itself is said in plain words, with its line. For
+  example: *line 4: text values go in quotes*, *the table [palette] is
+  written twice*, *this line has no =*. Anything else starts with "this
+  line isn't written the way TOML needs:" and then the TOML library's own
+  words.
 
 ## 12. Mistakes to avoid
 
@@ -1112,8 +1201,8 @@ has limits, six poses and three animations to copy from.
 Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
-bones, colliders or LODs (`bones`, `colliders` and `lods` are reserved
-names; parts turn on their joins instead of bending on bones). There is
+bones (`bones` is a reserved name; parts turn on their joins instead of
+bending on bones). There is
 a window, Duck Mold Studio, but it is for people: everything it does,
 you do with `edit`.
 

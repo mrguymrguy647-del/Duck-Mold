@@ -190,12 +190,16 @@ impl<'a> Lines<'a> {
 
 fn parse_toml(text: &str) -> Result<Node, SyntaxError> {
     let lines = Lines::new(text);
-    let table = toml::de::DeTable::parse(text).map_err(|error| SyntaxError {
-        message: sentence(error.message()),
-        pos: error
+    let table = toml::de::DeTable::parse(text).map_err(|error| {
+        let pos = error
             .span()
             .map(|span| lines.pos(span.start))
-            .unwrap_or_default(),
+            .unwrap_or_default();
+        let line = text.lines().nth(pos.line.saturating_sub(1)).unwrap_or("");
+        SyntaxError {
+            message: plain_toml(&sentence(error.message()), line),
+            pos,
+        }
     })?;
     Ok(Node {
         value: toml_table(table.get_ref(), &lines),
@@ -255,6 +259,53 @@ fn toml_node(value: &toml::Spanned<toml::de::DeValue<'_>>, lines: &Lines<'_>) ->
 /// line with the file and line number in front.
 fn sentence(message: &str) -> String {
     message.lines().next().unwrap_or("").trim().to_owned()
+}
+
+/// The TOML library's message about a slip, in plain words, for the
+/// common ones; the library's own words after a plain start for the rest.
+/// `line` is the line of the recipe it is about.
+fn plain_toml(message: &str, line: &str) -> String {
+    let line = line.trim();
+    let quoted = |line: &str| match line.split_once('=') {
+        Some((name, value)) => format!("{} = \"{}\"", name.trim(), value.trim()),
+        None => "name = \"robot\"".to_owned(),
+    };
+    if message.starts_with("key with no value") {
+        return format!(
+            "this line has no `=`: each line is a name, `=` and a value, as in `{}`",
+            if line.is_empty() || line.contains('=') {
+                "name = \"robot\"".to_owned()
+            } else {
+                format!("{line} = ...")
+            }
+        );
+    }
+    if message.starts_with("invalid basic string") || message.starts_with("invalid literal string")
+    {
+        return "a text value is missing its closing quote: it must end with `\"` on the same line"
+            .to_owned();
+    }
+    if message.starts_with("string values must be quoted") {
+        return format!("text values go in quotes: write `{}`", quoted(line));
+    }
+    if message.starts_with("duplicate key") || message.starts_with("duplicate table") {
+        return if line.starts_with('[') && !line.starts_with("[[") {
+            format!("the table `{line}` is written twice: put everything in it under one `{line}`")
+        } else {
+            let name = line.split('=').next().unwrap_or(line).trim();
+            format!("`{name}` is given twice here: keep one of them")
+        };
+    }
+    if message.starts_with("unclosed table") {
+        return format!(
+            "the table name has no `]` to close it: write `{}]`",
+            line.trim_end_matches(']')
+        );
+    }
+    if message.starts_with("unclosed array") {
+        return "the list has no `]` to close it: a list is written `[1, 2, 3]`".to_owned();
+    }
+    format!("this line isn't written the way TOML needs: {message}")
 }
 
 // ---- JSON -------------------------------------------------------------------
@@ -595,6 +646,41 @@ fn is_json_number(written: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn toml_slips_are_said_in_plain_words() {
+        let said = |text: &str| parse_toml(text).unwrap_err().message;
+        assert_eq!(
+            said("name\n"),
+            "this line has no `=`: each line is a name, `=` and a value, as in `name = ...`"
+        );
+        assert_eq!(
+            said("name = \"x\n"),
+            "a text value is missing its closing quote: it must end with `\"` on the same line"
+        );
+        assert_eq!(
+            said("name = robot\n"),
+            "text values go in quotes: write `name = \"robot\"`"
+        );
+        assert_eq!(
+            said("[palette]\nred = \"#ff0000\"\n[palette]\n"),
+            "the table `[palette]` is written twice: put everything in it under one `[palette]`"
+        );
+        assert_eq!(
+            said("name = \"x\"\nname = \"y\"\n"),
+            "`name` is given twice here: keep one of them"
+        );
+        assert_eq!(
+            said("[palette\n"),
+            "the table name has no `]` to close it: write `[palette]`"
+        );
+        assert_eq!(
+            said("size = [1, 2\n"),
+            "the list has no `]` to close it: a list is written `[1, 2, 3]`"
+        );
+        assert!(said("a = [1,,2]\n").starts_with("this line isn't written the way TOML needs: "));
+    }
+
     use super::*;
 
     fn table(node: &Node) -> &[Entry] {

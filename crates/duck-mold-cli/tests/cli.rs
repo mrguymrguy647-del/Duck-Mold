@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "lod", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -387,6 +387,7 @@ fn edit_changes_the_recipe_and_prints_the_report() {
             "leaf",
             "--twist",
             "-30",
+            "--report",
         ],
     );
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
@@ -405,7 +406,7 @@ fn edit_changes_the_recipe_and_prints_the_report() {
         )
     );
 
-    // As JSON: inspect's report, with what the edit did.
+    // As JSON: the edit first, and with --report inspect's report.
     let output = run(
         &folder,
         &[
@@ -419,16 +420,19 @@ fn edit_changes_the_recipe_and_prints_the_report() {
             "--shift",
             "-0.5,0.2,0",
             "--json",
+            "--report",
         ],
     );
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(stdout(&output).starts_with(r#"{"ok":true,"edit":{"command":"add-socket""#));
+    assert_eq!(stdout(&output).lines().count(), 1, "one line");
     let report = json(&output);
     assert_eq!(report["ok"], true);
-    assert_eq!(report["triangles"], 162);
+    assert_eq!(report["report"]["triangles"], 162);
     assert_eq!(report["edit"]["command"], "add-socket");
     assert_eq!(report["edit"]["written"], true);
     assert_eq!(
-        report["edit"]["summary"],
+        report["summary"],
         "added the socket \"knot\" on the front of \"trunk\""
     );
 
@@ -512,10 +516,7 @@ fn add_without_a_socket_stands_the_part_on_the_ground() {
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let report = json(&output);
     assert_eq!(report["edit"]["command"], "add");
-    assert_eq!(
-        report["edit"]["summary"],
-        "added \"cloud\" (sphere), standing free"
-    );
+    assert_eq!(report["summary"], "added \"cloud\" (sphere), standing free");
     assert!(
         std::fs::read_to_string(folder.join("tree.toml"))
             .unwrap()
@@ -754,10 +755,10 @@ fn a_colour_is_removed_and_a_faces_colour_taken_away_from_the_command_line() {
     let report = json(&output);
     assert_eq!(report["edit"]["command"], "remove-color");
     assert_eq!(
-        report["edit"]["summary"],
+        report["summary"],
         "removed the colour \"bark\", and painted 1 thing with \"leaf\" instead"
     );
-    assert_eq!(report["palette"].as_array().unwrap().len(), 1);
+    assert!(report["report"].is_null(), "the report only with --report");
     let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
     assert!(!text.contains("bark"), "{text}");
 
@@ -835,7 +836,7 @@ fn sockets_are_renamed_removed_and_tidied_from_the_command_line() {
     let report = json(&output);
     assert_eq!(report["edit"]["command"], "tidy-sockets");
     assert_eq!(
-        report["edit"]["summary"],
+        report["summary"],
         "removed 1 socket nothing uses: trunk.spot_2"
     );
     assert!(!text().contains("spot_2"), "{}", text());
@@ -923,7 +924,217 @@ fn every_edit_has_a_command_and_is_in_the_guide() {
                 || guide.contains(&format!("`duck-mold edit <recipe> {command}`")),
             "the guide doesn't describe `duck-mold edit <recipe> {command}`"
         );
+        // And the help's grouped list names it.
+        let groups = &help[help
+            .find("Edits, by what they change:")
+            .expect("the groups")..];
+        assert!(
+            groups.split([',', ' ', '\n']).any(|word| word == command),
+            "the grouped list in `edit --help` doesn't name {command}"
+        );
     }
+}
+
+#[test]
+fn add_socket_can_say_which_way_it_faces() {
+    let folder = folder("cli_add_socket_facing");
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add-socket",
+            "trunk",
+            "hook",
+            "--on",
+            "front",
+            "--facing",
+            "up",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(
+        text.contains("hook = { on = \"front\", facing = \"up\" }"),
+        "{text}"
+    );
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "add-socket",
+            "trunk",
+            "nook",
+            "--on",
+            "front",
+            "--facing",
+            "sideways",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    // Refused, so not even the socket is added.
+    assert!(
+        !std::fs::read_to_string(folder.join("tree.toml"))
+            .unwrap()
+            .contains("nook")
+    );
+}
+
+#[test]
+fn json_is_one_line_unless_pretty() {
+    let folder = folder("cli_json_lines");
+    let output = run(&folder, &["inspect", "tree.toml", "--json"]);
+    assert_eq!(stdout(&output).lines().count(), 1);
+    let one = json(&output);
+    let output = run(&folder, &["inspect", "tree.toml", "--json", "--pretty"]);
+    assert!(stdout(&output).lines().count() > 50);
+    assert_eq!(json(&output), one, "the same fields either way");
+    // A failure too.
+    let output = run(&folder, &["inspect", "bad.toml", "--json"]);
+    assert_eq!(stdout(&output).lines().count(), 1);
+    // Text edits print one line, and problems on standard error.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "add-color", "sky", "#88CCFF"],
+    );
+    assert_eq!(
+        stdout(&output),
+        "edited tree.toml: added the colour \"sky\" (#88CCFF)\n"
+    );
+    assert!(stderr(&output).contains("the colour \"sky\" is never used"));
+}
+
+#[test]
+fn an_unknown_part_lists_every_part_nearest_first() {
+    let folder = folder("cli_nearest");
+    std::fs::copy(examples().join("robot.toml"), folder.join("robot.toml")).unwrap();
+    let output = run(
+        &folder,
+        &["edit", "robot.toml", "rename", "hnd", "paw", "--json"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let error = &json(&output)["errors"][0];
+    assert_eq!(error["suggestion"], "left_arm/hand");
+    let options: Vec<&str> = error["allowed"]["options"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|option| option.as_str().unwrap())
+        .collect();
+    assert_eq!(options[..2], ["left_arm/hand", "right_arm/hand"]);
+    assert!(options.contains(&"left_leg/foot") && options.contains(&"body"));
+    assert_eq!(options.len(), 23, "every part, nested ones too");
+    // Inside a part, its own parts.
+    let output = run(
+        &folder,
+        &["edit", "robot.toml", "rename", "left_arm/hnd", "paw"],
+    );
+    assert!(
+        stderr(&output).contains("Did you mean \"left_arm/hand\"?"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn a_batch_of_edits_is_written_once_or_not_at_all() {
+    let folder = folder("cli_batch");
+    let read = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    std::fs::write(
+        folder.join("edits.txt"),
+        "# a star on top, then its colour\n\nadd-color gold \"#FFD700\"\nadd star --shape sphere --radius 0.1 --to leaves.top --color gold\nset-lods auto\n",
+    )
+    .unwrap();
+    // A dry run writes nothing.
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "--batch", "edits.txt", "--dry-run"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(read(), TREE);
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "--batch", "edits.txt", "--json"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let report = json(&output);
+    assert_eq!(report["edit"]["command"], "batch");
+    assert!(
+        report["summary"]
+            .as_str()
+            .unwrap()
+            .starts_with("3 edits: added the colour \"gold\"")
+    );
+    // Each edit saw the ones before it: the star is gold.
+    assert!(read().contains("name = \"star\""));
+    assert!(read().contains("color = \"gold\""));
+
+    // One refused: nothing at all is written, and the refusal names its
+    // line.
+    let before = read();
+    std::fs::write(
+        folder.join("more.txt"),
+        "add-color teal \"#008080\"\nrename nosuch x\n",
+    )
+    .unwrap();
+    let output = run(&folder, &["edit", "tree.toml", "--batch", "more.txt"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("more.txt line 2: there is no part \"nosuch\""),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(read(), before);
+    // A line that isn't an edit is said before anything is done.
+    std::fs::write(
+        folder.join("bad.txt"),
+        "add-color teal \"#008080\"\nfly away\n",
+    )
+    .unwrap();
+    let output = run(&folder, &["edit", "tree.toml", "--batch", "bad.txt"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("bad.txt line 2: "),
+        "{}",
+        stderr(&output)
+    );
+    assert_eq!(read(), before);
+    // From standard input.
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_duck-mold"))
+        .args(["edit", "tree.toml", "--batch", "-"])
+        .current_dir(&folder)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    use std::io::Write as _;
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(b"add-color teal \"#008080\"\n")
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(read().contains("teal = \"#008080\""));
+    // Both an edit and --batch, or neither, is a mistake of the command.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "--batch",
+            "edits.txt",
+            "add-color",
+            "x",
+            "#000000",
+        ],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    let output = run(&folder, &["edit", "tree.toml"]);
+    assert_eq!(output.status.code(), Some(2));
 }
 
 #[test]
@@ -1403,7 +1614,15 @@ fn limits_are_set_and_the_joins_listed_from_the_command_line() {
     let text = || std::fs::read_to_string(folder.join("tree.toml")).unwrap();
 
     // The leaves sway a little on the trunk, and turn right round.
-    let output = edit(&["set-limits", "leaves", "--x", "-10,10", "--y", "free"]);
+    let output = edit(&[
+        "set-limits",
+        "leaves",
+        "--x",
+        "-10,10",
+        "--y",
+        "free",
+        "--report",
+    ]);
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     assert!(
         stdout(&output)
@@ -1465,7 +1684,14 @@ fn limits_are_set_and_the_joins_listed_from_the_command_line() {
     assert!(report.get("joins").is_none());
 
     // One direction locked again, then fixed, then free.
-    let output = edit(&["set-limits", "leaves", "--y", "none", "--dry-run"]);
+    let output = edit(&[
+        "set-limits",
+        "leaves",
+        "--y",
+        "none",
+        "--dry-run",
+        "--report",
+    ]);
     assert!(
         stdout(&output).contains("x -10..10\n"),
         "{}",
@@ -2068,6 +2294,95 @@ fn hit_shapes_are_set_listed_and_drawn() {
     assert!(text.contains("colliders = \"parts\""), "{text}");
 }
 
+#[test]
+fn far_away_versions_are_set_reported_and_drawn() {
+    let folder = folder("cli_far");
+    let edit = |words: &[&str]| {
+        let mut arguments = vec!["edit", "tree.toml"];
+        arguments.extend_from_slice(words);
+        run(&folder, &arguments)
+    };
+    // Without them, render --far says what to add.
+    let output = run(&folder, &["render", "tree.toml", "--far", "1"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("lods = \"auto\""),
+        "{}",
+        stderr(&output)
+    );
+
+    let output = edit(&["set-lods", "auto"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("edited tree.toml: the model now has two far-away versions")
+    );
+    let output = edit(&["set-lod", "leaves", "keep"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(text.contains("\nlods = \"auto\"\n"), "{text}");
+    assert!(text.contains("\nlod = \"keep\"\n"), "{text}");
+    let output = edit(&["set-lods", "12,30", "--json", "--report"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    // Checking an edit skips the far versions; the report has them.
+    assert_eq!(json(&output)["report"]["far_versions"][0]["distance"], 12.0);
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(text.contains("\nlods = [12, 30]\n"), "{text}");
+    // Mistakes of the command.
+    let output = edit(&["set-lods", "far"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("auto, none, or two distances"));
+    let output = edit(&["set-lod", "leaves", "always"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("keep or auto"));
+
+    // inspect says them, in words and in JSON.
+    let output = run(&folder, &["inspect", "tree.toml"]);
+    assert!(
+        stdout(&output).contains("  far versions 2  (Far 1 at 12 m: "),
+        "{}",
+        stdout(&output)
+    );
+    let output = run(&folder, &["inspect", "tree.toml", "--json"]);
+    let far = &json(&output)["far_versions"];
+    assert_eq!(far[0]["name"], "Far 1");
+    assert_eq!(far[1]["distance"], 30.0);
+    // The trunk is simplified; the leaves, kept, are not.
+    assert!(
+        far[1]["triangles"].as_u64()
+            < json(&run(&folder, &["inspect", "tree.toml", "--json"]))["triangles"].as_u64()
+    );
+
+    // render --far draws one, named after it.
+    let output = run(
+        &folder,
+        &["render", "tree.toml", "--far", "2", "--size", "128"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("tree (Far 2): "),
+        "{}",
+        stdout(&output)
+    );
+    assert!(folder.join("tree.far2.png").exists());
+    let output = run(&folder, &["render", "tree.toml", "--far", "3"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--far is 1 or 2"));
+
+    // Taken away again, the file is as it was.
+    assert!(edit(&["set-lods", "none"]).status.success());
+    assert!(edit(&["set-lod", "leaves", "auto"]).status.success());
+    assert_eq!(
+        std::fs::read_to_string(folder.join("tree.toml")).unwrap(),
+        TREE
+    );
+
+    // A new recipe starts with them.
+    let output = run(&folder, &["new", "thing.toml"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("thing.toml")).unwrap();
+    assert!(text.contains("\nlods = \"auto\""), "{text}");
+}
+
 /// The examples folder.
 fn examples() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples")
@@ -2132,4 +2447,19 @@ fn events_are_set_listed_and_taken_away() {
     let output = edit(&["remove-event", "open", "2"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("key 2 of \"open\" has no events to take away"));
+}
+
+#[test]
+fn the_release_notes_have_a_section_for_this_version() {
+    // The release takes its text from this section: it is written and
+    // checked with the code.
+    let notes = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../RELEASE_NOTES.md"),
+    )
+    .unwrap();
+    let heading = format!("## {}", env!("CARGO_PKG_VERSION"));
+    assert!(
+        notes.lines().any(|line| line == heading),
+        "RELEASE_NOTES.md has no \"{heading}\" section"
+    );
 }

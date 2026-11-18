@@ -1,4 +1,7 @@
-# Makes the Windows download: DuckMold-<version>-windows.zip.
+# Makes the Windows downloads: the installer, DuckMoldSetup-<version>.exe,
+# and DuckMold-<version>-windows.zip. Tests the installer as a person
+# would use it (install, run, install over it, uninstall), and publishes
+# both with the version's section of RELEASE_NOTES.md as the text.
 #
 # Three ways to make a release, none needing a terminal:
 # - Actions tab -> Release -> "Run workflow" (the "Make a release" button):
@@ -22,9 +25,9 @@ on:
     tags: ["v*"]
     branches: ["**"]
     # Branch pushes only run when the release itself changed (tags always run).
-    paths: [".github/workflows/release.yml", "release/**"]
+    paths: [".github/workflows/release.yml", "release/**", "RELEASE_NOTES.md"]
   pull_request:
-    paths: [".github/workflows/release.yml", "release/**"]
+    paths: [".github/workflows/release.yml", "release/**", "RELEASE_NOTES.md"]
 
 env:
   RUST_VERSION: "1.97.0"
@@ -62,6 +65,22 @@ jobs:
           else
             echo "tag=v$version" >> "$GITHUB_OUTPUT"
           fi
+          echo "VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Read this version's release notes
+        shell: bash
+        run: |
+          # The text between "## <version>" and the next "## " heading.
+          awk -v want="## $VERSION" '
+            $0 == want { found = 1; next }
+            found && /^## / { exit }
+            found { print }
+          ' RELEASE_NOTES.md > notes.md
+          if [[ ! -s notes.md ]]; then
+            echo "RELEASE_NOTES.md has no section \"## $VERSION\": write one first."
+            exit 1
+          fi
+          cat notes.md
 
       - name: Build
         run: cargo build --release --workspace
@@ -113,6 +132,94 @@ jobs:
           name: ${{ env.ZIP }}
           path: ${{ env.ZIP }}
 
+      - name: Build the installer
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress
+          }
+          & $iscc "/DVersion=$env:VERSION" "/DSource=$pwd\dist\Duck Mold" "/O$pwd\dist" release\DuckMold.iss
+          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $setup = "dist/DuckMoldSetup-$env:VERSION.exe"
+          Get-Item $setup | Format-List Name, Length
+          "SETUP=$setup" | Out-File -Append -Encoding utf8 $env:GITHUB_ENV
+
+      - name: Keep the installer on this run's page
+        uses: actions/upload-artifact@v5
+        with:
+          name: DuckMoldSetup-${{ env.VERSION }}
+          path: ${{ env.SETUP }}
+
+      - name: Install it, as a person would (no administrator rights)
+        shell: pwsh
+        run: |
+          $setup = Start-Process $env:SETUP -Wait -PassThru `
+            -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=$pwd\install.log"
+          if ($setup.ExitCode -ne 0) { Get-Content install.log; throw "the installer said $($setup.ExitCode)" }
+          $app = "$env:LOCALAPPDATA\Programs\Duck Mold"
+          foreach ($file in 'DuckMoldStudio.exe', 'duck-mold.exe', 'READ ME FIRST.txt', 'examples\robot.toml',
+                            'examples\parts\lamp.gltf', 'docs\AI_GUIDE.md', 'docs\recipe-format.md', 'unins000.exe') {
+            if (-not (Test-Path "$app\$file")) { throw "not installed: $file" }
+          }
+          if (Test-Path "$app\Create desktop shortcut.bat") { throw "the zip's shortcut maker isn't needed here" }
+          # The Start menu entry points at the Studio.
+          $shell = New-Object -ComObject WScript.Shell
+          $link = Join-Path ([Environment]::GetFolderPath('Programs')) 'Duck Mold Studio.lnk'
+          if (-not (Test-Path $link)) { throw "no Start menu entry" }
+          $target = $shell.CreateShortcut($link).TargetPath
+          if ($target -ne "$app\DuckMoldStudio.exe") { throw "the Start menu entry points at $target" }
+          # Windows Settings > Apps lists it, for this person only.
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F2C1D84-3B7E-4E8A-9C51-2D7A0B9E4F63}_is1'
+          $entry = Get-ItemProperty $key
+          if ($entry.DisplayVersion -ne $env:VERSION) { throw "listed as version $($entry.DisplayVersion)" }
+          # The folder is on the person's own PATH, once.
+          $path = (Get-ItemProperty 'HKCU:\Environment').Path
+          $count = @($path -split ';' | Where-Object { $_ -eq $app }).Count
+          if ($count -ne 1) { throw "the folder is on the PATH $count times: $path" }
+          # No file association.
+          if (Test-Path 'HKCU:\Software\Classes\.toml') { throw ".toml was given to Duck Mold" }
+          # The installed programs work.
+          $ver = & "$app\duck-mold.exe" --version | Out-String
+          if ($ver.Trim() -ne "duck-mold $env:VERSION") { throw "the installed duck-mold says $ver" }
+          & "$app\duck-mold.exe" inspect "$app\examples\robot.toml"
+          if ($LASTEXITCODE -ne 0) { throw "inspect failed on the installed robot" }
+          $studio = & "$app\DuckMoldStudio.exe" --version | Out-String
+          if ($studio.Trim() -ne "DuckMoldStudio $env:VERSION") { throw "the installed Studio says $studio" }
+          "Installed $env:VERSION in $app"
+
+      - name: Installing over it keeps my models
+        shell: pwsh
+        run: |
+          $models = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Duck Mold'
+          New-Item -ItemType Directory -Force $models | Out-Null
+          Copy-Item "$env:LOCALAPPDATA\Programs\Duck Mold\examples\crate.toml" "$models\mine.toml"
+          $setup = Start-Process $env:SETUP -Wait -PassThru -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'
+          if ($setup.ExitCode -ne 0) { throw "installing again said $($setup.ExitCode)" }
+          if (-not (Test-Path "$models\mine.toml")) { throw "my model is gone" }
+          $app = "$env:LOCALAPPDATA\Programs\Duck Mold"
+          $path = (Get-ItemProperty 'HKCU:\Environment').Path
+          $count = @($path -split ';' | Where-Object { $_ -eq $app }).Count
+          if ($count -ne 1) { throw "after installing again, the folder is on the PATH $count times" }
+          "Kept: $models\mine.toml"
+
+      - name: Uninstall it, and my models stay
+        shell: pwsh
+        run: |
+          $app = "$env:LOCALAPPDATA\Programs\Duck Mold"
+          $models = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Duck Mold'
+          Start-Process "$app\unins000.exe" -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait
+          # The uninstaller carries on from a copy of itself: wait for it.
+          $key = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F2C1D84-3B7E-4E8A-9C51-2D7A0B9E4F63}_is1'
+          for ($i = 0; $i -lt 120 -and ((Test-Path $key) -or (Test-Path $app)); $i++) { Start-Sleep 1 }
+          if (Test-Path $key) { throw "still listed in Settings > Apps" }
+          if (Test-Path $app) { Get-ChildItem -Recurse $app; throw "the folder is still there" }
+          if (Test-Path (Join-Path ([Environment]::GetFolderPath('Programs')) 'Duck Mold Studio.lnk')) { throw "the Start menu entry is left" }
+          $path = (Get-ItemProperty 'HKCU:\Environment').Path
+          if (($path -split ';') -contains $app) { throw "the folder is still on the PATH: $path" }
+          if (-not (Test-Path "$models\mine.toml")) { throw "uninstalling took my model" }
+          "Uninstalled. Still there: $models\mine.toml"
+
       - name: Publish the release
         if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
         shell: bash
@@ -121,14 +228,15 @@ jobs:
           TAG: ${{ steps.version.outputs.tag }}
         run: |
           if gh release view "$TAG" > /dev/null 2>&1; then
-            # Made on the website (or made before): add the zip, replacing
-            # an older one of the same name, instead of failing.
-            echo "The release $TAG is already there: adding the zip to it."
-            gh release upload "$TAG" "$ZIP" --clobber
+            # Made on the website (or made before): add the files, replacing
+            # older ones of the same name, and the notes, instead of failing.
+            echo "The release $TAG is already there: adding the files to it."
+            gh release upload "$TAG" "$SETUP" "$ZIP" --clobber
+            gh release edit "$TAG" --notes-file notes.md
           else
             # --target makes the tag on this run's commit if it doesn't exist.
-            gh release create "$TAG" "$ZIP" --target "$GITHUB_SHA" \
+            gh release create "$TAG" "$SETUP" "$ZIP" --target "$GITHUB_SHA" \
               --title "Duck Mold ${{ steps.version.outputs.version }}" \
-              --notes "Download $ZIP below, unzip it, and double-click DuckMoldStudio.exe. READ ME FIRST.txt inside says the rest."
+              --notes-file notes.md
           fi
           echo "Published: https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG"

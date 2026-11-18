@@ -26,6 +26,7 @@ pub mod mesh;
 pub mod model;
 pub mod motion;
 pub mod recipe;
+pub mod save;
 pub mod shapes;
 pub mod shaping;
 pub mod source;

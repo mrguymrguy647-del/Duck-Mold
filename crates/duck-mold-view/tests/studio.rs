@@ -202,6 +202,10 @@ fn a_save_with_mistakes_shows_them_and_keeps_the_last_good_model() {
     let good = studio.picture(200, 150);
 
     save(&recipe, &CRATE.replace("\"box\"\ncolor", "\"boxx\"\ncolor"));
+    // A save that doesn't build may be one that is half done: it is
+    // shown once it has stayed the same for one more check.
+    assert!(!studio.tick(0.5));
+    assert!(!studio.has_mistakes());
     assert!(studio.tick(0.5));
     assert!(studio.has_mistakes());
     let problems = studio.problems();
@@ -275,14 +279,22 @@ fn export_and_render_write_next_to_the_recipe_and_say_so() {
     // The file is named from the recipe's folder, as the recipe names
     // files: not by the whole way to it.
     assert!(
-        said.starts_with("Wrote table.glb (") && said.ends_with(" bytes)"),
+        said.starts_with("Wrote table.glb (") && said.ends_with(" KB)"),
         "{said}"
     );
     assert_eq!(studio.status(), said);
     assert_eq!(&std::fs::read(&glb).unwrap()[..4], b"glTF");
+    assert_eq!(studio.last_written(), Some(glb.as_path()));
 
     let said = studio.render_picture().unwrap();
-    assert_eq!(said, "Wrote table.png (513 x 536 pixels)");
+    assert!(
+        said.starts_with("Wrote table.png (513 x 536 pixels, ") && said.ends_with(" KB)"),
+        "{said}"
+    );
+    assert_eq!(
+        studio.last_written(),
+        Some(recipe.with_extension("png").as_path())
+    );
     assert_eq!(
         &std::fs::read(recipe.with_extension("png")).unwrap()[..4],
         b"\x89PNG"
@@ -1147,7 +1159,7 @@ fn edits_made_together_are_one_step() {
 }
 
 #[test]
-fn a_change_from_outside_is_a_step_to_undo_too() {
+fn undo_stops_at_a_change_from_outside() {
     let recipe = copy_of("robot", "studio_undo_outside");
     let original = std::fs::read_to_string(&recipe).unwrap();
     let mut studio = Studio::open(&recipe, false);
@@ -1158,44 +1170,139 @@ fn a_change_from_outside_is_a_step_to_undo_too() {
     let theirs = ours.replace("name = \"robot\"", "name = \"robot2\"");
     save(&recipe, &theirs);
     assert!(studio.check_files());
-    assert_eq!(studio.can_undo(), Some("Changed outside the Studio"));
-
-    // Undo takes back the latest change to the file, whoever made it.
-    assert_eq!(studio.undo().unwrap(), "Undid: Changed outside the Studio");
-    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), ours);
-    assert_eq!(studio.undo().unwrap(), "Undid: Set \"head\": colour red");
-    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), original);
-    // And both can be made again.
-    studio.redo().unwrap();
-    studio.redo().unwrap();
+    // Undo stops there, and says why: it never writes over a change it
+    // didn't make.
+    assert_eq!(studio.can_undo(), None);
+    assert_eq!(
+        studio.undo_stops().as_deref(),
+        Some(
+            "robot.toml was changed outside the Studio just now. Undo stops here, so that change isn't lost"
+        )
+    );
+    assert_eq!(
+        studio.undo().unwrap_err(),
+        "robot.toml was changed outside the Studio just now. Undo stops here, so that change isn't lost"
+    );
     assert_eq!(std::fs::read_to_string(&recipe).unwrap(), theirs);
+    assert_eq!(studio.can_redo(), None);
+
+    // Changes made after it can be undone, back to it.
+    studio.apply(&colour("body", "red")).unwrap();
+    assert_eq!(studio.undo().unwrap(), "Undid: Set \"body\": colour red");
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), theirs);
+    assert!(studio.undo().is_err());
 
     // Saved from outside and undone before the Studio has looked: the
-    // outside change is seen first, and is what is taken back. Nothing
-    // is written over unseen.
-    let later = theirs.replace("name = \"robot2\"", "name = \"robot3\"");
+    // outside change is seen first, and nothing is written over.
+    studio.redo().unwrap();
+    let later = std::fs::read_to_string(&recipe)
+        .unwrap()
+        .replace("name = \"robot2\"", "name = \"robot3\"");
     save(&recipe, &later);
-    assert_eq!(studio.undo().unwrap(), "Undid: Changed outside the Studio");
-    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), theirs);
-    assert_eq!(studio.can_redo(), Some("Changed outside the Studio"));
+    assert!(studio.undo().is_err());
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), later);
+    assert_ne!(later, original);
 }
 
 #[test]
-fn undo_goes_back_through_a_version_with_mistakes() {
+fn a_change_from_outside_with_mistakes_is_not_undone() {
     let recipe = copy_of("robot", "studio_undo_mistake");
     let good = std::fs::read_to_string(&recipe).unwrap();
     let mut studio = Studio::open(&recipe, false);
-    save(
-        &recipe,
-        &good.replace("shape = \"box\"", "shape = \"blob\""),
-    );
+    let bad = good.replace("shape = \"box\"", "shape = \"blob\"");
+    save(&recipe, &bad);
+    // Shown once it has stayed the same for two checks.
+    assert!(!studio.check_files());
     assert!(studio.check_files());
     assert!(studio.has_mistakes());
-    studio.undo().unwrap();
+    assert!(studio.undo().is_err());
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), bad);
+    // Mended outside, it builds again at once.
+    save(&recipe, &good);
+    assert!(studio.check_files());
     assert!(!studio.has_mistakes());
-    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), good);
+}
+
+#[test]
+fn undo_is_kept_on_disk_from_one_opening_to_the_next() {
+    let recipe = copy_of("robot", "studio_undo_kept");
+    let kept = folder("studio_undo_kept_history");
+    let original = std::fs::read_to_string(&recipe).unwrap();
+    {
+        let mut studio = Studio::open(&recipe, false);
+        studio.keep_history_in(&kept);
+        studio.apply(&colour("head", "red")).unwrap();
+        studio.apply(&colour("body", "red")).unwrap();
+        studio.undo().unwrap();
+    }
+    // Opened again: undo and redo carry on where they were.
+    let mut studio = Studio::open(&recipe, false);
+    studio.keep_history_in(&kept);
+    assert_eq!(studio.can_undo(), Some("Set \"head\": colour red"));
+    assert_eq!(studio.can_redo(), Some("Set \"body\": colour red"));
+    studio.undo().unwrap();
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), original);
     studio.redo().unwrap();
-    assert!(studio.has_mistakes());
+    drop(studio);
+
+    // Changed while the Studio was closed: that change is a wall.
+    let theirs = std::fs::read_to_string(&recipe)
+        .unwrap()
+        .replace("name = \"robot\"", "name = \"robot2\"");
+    save(&recipe, &theirs);
+    let mut studio = Studio::open(&recipe, false);
+    studio.keep_history_in(&kept);
+    assert_eq!(studio.can_undo(), None);
+    assert_eq!(
+        studio.undo_stops().as_deref(),
+        Some(
+            "robot.toml was changed while the Studio was closed. Undo stops here, so that change isn't lost"
+        )
+    );
+    assert_eq!(studio.can_redo(), None);
+    assert_eq!(std::fs::read_dir(&kept).unwrap().count(), 1);
+}
+
+#[test]
+fn a_recipe_that_disappears_can_be_saved_again() {
+    let recipe = copy_of("robot", "studio_gone");
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    std::fs::remove_file(&recipe).unwrap();
+    assert!(studio.check_files());
+    assert_eq!(
+        studio.missing().as_deref(),
+        Some("robot.toml isn't there any more (deleted or moved)")
+    );
+    // The model stays; nothing can be changed or undone.
+    assert!(studio.part("head").is_some());
+    assert_eq!(
+        studio.apply(&colour("head", "red")).unwrap_err(),
+        "Not changed: robot.toml isn't there any more (deleted or moved)"
+    );
+    assert!(!recipe.exists());
+
+    // Saved again where it was.
+    assert_eq!(studio.save_again().unwrap(), "Saved robot.toml");
+    assert_eq!(studio.missing(), None);
+    assert_eq!(std::fs::read_to_string(&recipe).unwrap(), text);
+    studio.apply(&colour("head", "red")).unwrap();
+
+    // Or somewhere else, where the Studio carries on.
+    std::fs::remove_file(&recipe).unwrap();
+    assert!(studio.check_files());
+    let elsewhere = recipe.with_file_name("robot_saved.toml");
+    assert_eq!(
+        studio.save_as(&elsewhere).unwrap(),
+        "Saved robot_saved.toml"
+    );
+    assert_eq!(studio.path(), elsewhere.as_path());
+    studio.apply(&colour("body", "red")).unwrap();
+    assert!(std::fs::read_to_string(&elsewhere).unwrap().contains("red"));
+    // Undo goes back through the steps made before it moved.
+    studio.undo().unwrap();
+    assert_eq!(studio.undo().unwrap(), "Undid: Set \"head\": colour red");
+    assert_eq!(std::fs::read_to_string(&elsewhere).unwrap(), text);
 }
 
 #[test]
@@ -3977,4 +4084,93 @@ fn a_key_can_have_its_pose_to_itself_in_one_step() {
             .unwrap()
             .contains("{ at = 0.2, pose = \"walk_2\" }")
     );
+}
+
+// ---- picking by hit shape (Phase 7a) ----------------------------------------------
+
+#[test]
+fn with_hits_on_a_click_picks_what_a_games_click_would() {
+    let recipe = copy_of("robot", "studio_pick_hits");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hits = true;
+    // The head: its ball.
+    let head = studio.part("head").unwrap().bounds.unwrap().center();
+    assert_eq!(studio.click(VIEW, seen(&studio, head)), Some("head"));
+    assert!(
+        studio
+            .status()
+            .starts_with("A game's click here hits: head (its ball), "),
+        "{}",
+        studio.status()
+    );
+    // An eye has no hit shape: a game's click there goes on to the
+    // head's ball behind it, so the head is what it hits.
+    let eye = studio.part("left_eye").unwrap().bounds.unwrap();
+    let front = eye.center() + vec3(0.0, 0.0, eye.half().z);
+    assert_eq!(studio.click(VIEW, seen(&studio, front)), Some("head"));
+    // Off the model: nothing, and nothing selected.
+    assert_eq!(studio.click(VIEW, (2.0, 2.0)), None);
+    assert_eq!(studio.status(), "A game's click here hits nothing");
+    // With Hits off, the triangles pick: the eye itself.
+    studio.hits = false;
+    assert_eq!(studio.click(VIEW, seen(&studio, front)), Some("left_eye"));
+}
+
+#[test]
+fn a_part_with_no_hit_shape_on_its_own_says_so() {
+    // The antenna's tip has no hit shape, and nothing is behind it.
+    let recipe = copy_of("robot", "studio_pick_hits_tip");
+    let mut studio = Studio::open(&recipe, false);
+    studio.hits = true;
+    let tip = studio.part("antenna_tip").unwrap().bounds.unwrap().center();
+    assert_eq!(studio.click(VIEW, seen(&studio, tip)), None);
+    assert_eq!(
+        studio.status(),
+        "A game's click here hits nothing: antenna_tip has no hit shape"
+    );
+}
+
+#[test]
+fn inspect_ray_names_the_first_hit_shape() {
+    use duck_mold_view::ray::{parse_point, ray_file};
+    let recipe = copy_of("robot", "studio_inspect_ray");
+    let report = ray_file(
+        &recipe,
+        vec3(0.0, 1.4, 5.0),
+        vec3(0.0, 0.0, -1.0),
+        None,
+        None,
+    )
+    .unwrap();
+    let hit = report.hit.clone().unwrap();
+    assert_eq!((hit.part.as_str(), hit.shape), ("head", "ball"));
+    assert!((hit.distance - 4.6956).abs() < 0.001, "{}", hit.distance);
+    assert!(
+        report
+            .to_text()
+            .contains("hits         head (its ball), 4.696 m away")
+    );
+    // Past the side of the model: nothing.
+    let report = ray_file(
+        &recipe,
+        vec3(3.0, 1.4, 5.0),
+        vec3(0.0, 0.0, -1.0),
+        None,
+        None,
+    )
+    .unwrap();
+    assert_eq!(report.hit, None);
+    assert!(report.to_text().contains("hits         nothing\n"));
+    // In a pose, the model stands as the pose puts it.
+    let pose = ray_file(
+        &recipe,
+        vec3(0.0, 1.4, 5.0),
+        vec3(0.0, 0.0, -1.0),
+        Some("wave"),
+        None,
+    )
+    .unwrap();
+    assert_eq!(pose.stands, "in the pose \"wave\"");
+    assert_eq!(parse_point("1, 2,3"), Some(vec3(1.0, 2.0, 3.0)));
+    assert_eq!(parse_point("1,2"), None);
 }

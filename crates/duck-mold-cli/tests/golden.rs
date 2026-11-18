@@ -65,10 +65,13 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 /// Runs `duck-mold` from the top of the repository, so that the paths in
-/// its output are the ones a person would type.
+/// its output are the ones a person would type. Its JSON is spread over
+/// lines (`--pretty`), so that a changed golden file shows what changed.
 fn duck_mold(arguments: &[&str]) -> Vec<u8> {
+    let pretty = arguments.contains(&"--json").then_some("--pretty");
     let output = Command::new(env!("CARGO_BIN_EXE_duck-mold"))
         .args(arguments)
+        .args(pretty)
         .current_dir(root())
         .output()
         .expect("the program runs");
@@ -169,6 +172,32 @@ fn every_example_with_hit_shapes_renders_them_to_its_golden_picture() {
             "--json",
         ]);
         check(&format!("{name}.colliders.json"), &listed);
+    }
+}
+
+/// The examples with far-away versions (`lods = "auto"`): each version
+/// is drawn to a golden picture (`render --far`).
+const WITH_FAR_VERSIONS: [&str; 4] = ["temple", "barn", "robot", "gnome"];
+
+#[test]
+fn every_far_version_renders_to_its_golden_picture() {
+    let scratch = scratch("golden_far");
+    for name in WITH_FAR_VERSIONS {
+        for far in ["1", "2"] {
+            let output = scratch.join(format!("{name}.far{far}.png"));
+            duck_mold(&[
+                "render",
+                &format!("examples/{name}.toml"),
+                "--far",
+                far,
+                "-o",
+                output.to_str().unwrap(),
+            ]);
+            check(
+                &format!("{name}.far{far}.png"),
+                &std::fs::read(output).unwrap(),
+            );
+        }
     }
 }
 

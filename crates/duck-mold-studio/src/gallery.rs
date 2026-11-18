@@ -105,6 +105,8 @@ pub struct Gallery {
     examples: HashMap<&'static str, TextureHandle>,
     /// A model opened lately that can't be built has no picture.
     recent: HashMap<PathBuf, Option<TextureHandle>>,
+    /// The first mistake of each model opened lately that doesn't build.
+    mistakes: HashMap<PathBuf, String>,
 }
 
 impl Gallery {
@@ -122,7 +124,18 @@ impl Gallery {
     /// asked for. `None` if the file doesn't build any more.
     pub fn recent(&mut self, ctx: &egui::Context, file: &Path) -> Option<&TextureHandle> {
         if !self.recent.contains_key(file) {
-            let texture = tools::build(file).ok().map(|built| {
+            let built = tools::build(file);
+            if let Err(failure) = &built {
+                let report = failure.report();
+                if let Some(first) = report.errors.first() {
+                    let said = match first.line {
+                        Some(line) => format!("line {line}: {}", first.message),
+                        None => first.message.clone(),
+                    };
+                    self.mistakes.insert(file.to_path_buf(), said);
+                }
+            }
+            let texture = built.ok().map(|built| {
                 let size = PICTURE_SIZE / 2;
                 let pixels = render_small(&built.model, size);
                 let image = ColorImage::new(
@@ -149,5 +162,12 @@ impl Gallery {
     /// again the next time the start page is shown.
     pub fn forget_recent(&mut self) {
         self.recent.clear();
+        self.mistakes.clear();
+    }
+
+    /// The first mistake in a model opened lately, if it doesn't build
+    /// (known once [`Gallery::recent`] has looked at it).
+    pub fn recent_mistake(&self, file: &Path) -> Option<&str> {
+        self.mistakes.get(file).map(String::as_str)
     }
 }

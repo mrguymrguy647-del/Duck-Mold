@@ -118,6 +118,22 @@ FOR GAMES: WHAT WAS HIT, AND FOOTSTEPS  (new in 0.6)
     duck-mold edit examples\gnome.toml fit-ground walk
 
 
+NEW IN 0.7
+  - Nothing is lost: every change is written safely, Undo carries on
+    after you close the Studio, and a recipe deleted while open can be
+    saved again.
+  - A tidier Studio: one toolbar, a status bar at the bottom, an axis
+    gizmo, and View > Interface size to make everything bigger.
+  - Far-away versions: View > Far version shows the simpler model a game
+    draws when it is far off. The Model section on the right sets them.
+  - With Hits on, a click picks what a game's click would.
+
+  On the command line:
+
+    duck-mold render examples\robot.toml --far 2
+    duck-mold edit examples\robot.toml --batch my-edits.txt
+
+
 YOUR MODELS ARE TEXT FILES
   A model is a recipe: a .toml file that lists its parts and where they
   join. The Studio changes that file every time you change something,
@@ -137,7 +153,10 @@ WHAT'S IN THIS FOLDER
 
 
 A NEW VERSION
-  Download the new zip, unzip it, and replace this folder with it. Keep
-  your own models somewhere else (your Documents folder, say), never in
+  The easiest way: DuckMoldSetup-<version>.exe from the Releases page
+  installs Duck Mold for you (no administrator needed), in the Start
+  menu, and installing a newer one replaces it. Or download the new zip,
+  unzip it, and replace this folder with it. Keep your own models
+  somewhere else (the Studio puts them in Documents\Duck Mold), never in
   this folder, so they are safe. Run "Create desktop shortcut.bat" again
   if you moved the folder.

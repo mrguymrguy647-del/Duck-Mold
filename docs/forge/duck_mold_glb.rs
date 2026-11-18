@@ -27,9 +27,11 @@
 
 use std::collections::HashMap;
 
-// ==== Duck Mold's .glb reader, version 7 ====================================
+// ==== Duck Mold's .glb reader, version 8 ====================================
 //
-// Version 6: the model's hit shapes (colliders), in `colliders`: a box, a
+// Version 8: a model's far-away versions (glTF's `MSFT_lod`), in `far`:
+// the same model with fewer triangles, for drawing it far off. Version 7:
+// the events on an animation's keys. Version 6: the model's hit shapes (colliders), in `colliders`: a box, a
 // ball or a capsule for each part that has one, at rest, each carried by
 // its part's join ([`GlbHitShape::moved`]). Version 5: the model's animations and named poses, in `animations` and
 // `poses`, and what it takes to play them: where an animation has every
@@ -94,6 +96,25 @@ pub struct GlbModel {
     /// rest. Empty for a model with none, and for files from before
     /// version 6.
     pub colliders: Vec<GlbCollider>,
+    /// The model's far-away versions, nearest first: the same model,
+    /// with the same parts, joins, sockets, animations and hit shapes,
+    /// and fewer triangles. A game draws one when the model is further
+    /// away than its `distance`. Empty for a model with none, and for
+    /// files from before version 8.
+    pub far: Vec<GlbFar>,
+}
+
+/// One far-away version of a model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct GlbFar {
+    /// From how far away it is drawn, about in metres: from the camera
+    /// to the model's zero point.
+    pub distance: f32,
+    /// The model as this version has it. Only its `vertices`,
+    /// `triangles`, the triangle ranges of its `parts` and `assemblies`,
+    /// and the vertex ranges of its `joins` differ from the full model;
+    /// its own `far` is empty. A small part can have no triangles in it.
+    pub model: GlbModel,
 }
 
 /// One hit shape of the model.
@@ -1143,7 +1164,7 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
         });
     }
 
-    Ok(GlbModel {
+    let mut model = GlbModel {
         name: extras["name"].as_str().unwrap_or("model").to_owned(),
         vertices,
         triangles,
@@ -1155,7 +1176,110 @@ pub fn read_duck_mold_glb(bytes: &[u8]) -> Result<GlbModel, String> {
         animations,
         poses,
         colliders,
-    })
+        far: Vec::new(),
+    };
+
+    // ---- The far-away versions: the distances in `lods`, and for each
+    // part with triangles, in its object's `MSFT_lod`, one object for
+    // each version, outside the tree, with that part's simpler triangles
+    // measured from the same pivot (or none, for a part left out).
+    let distances = extras["lods"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+    if !distances.is_empty() {
+        if !tree {
+            return Err("far-away versions are only read from a file laid out as a tree".into());
+        }
+        let mut node_of_join = vec![0usize; model.joins.len()];
+        for (node, join) in join_of_node.iter().enumerate() {
+            if let Some(join) = join {
+                node_of_join[*join] = node;
+            }
+        }
+        let mut nearer = 0.0f32;
+        let mut far = Vec::new();
+        for (version, distance) in distances.iter().enumerate() {
+            let distance = distance
+                .as_f64()
+                .map(|distance| distance as f32)
+                .filter(|distance| distance.is_finite() && *distance > nearer)
+                .ok_or(
+                    "the far-away versions' distances aren't numbers, each further than the last",
+                )?;
+            nearer = distance;
+            let mut vertices: Vec<[f32; 3]> = Vec::new();
+            let mut triangles: Vec<GlbTriangle> = Vec::new();
+            // For each object: its first corner and how many it has.
+            let mut corners: Vec<(usize, usize)> = vec![(0, 0); pivots.len()];
+            let mut parts = model.parts.clone();
+            for (entry, part) in extras["parts"]
+                .as_array()
+                .map(Vec::as_slice)
+                .unwrap_or_default()
+                .iter()
+                .zip(parts.iter_mut())
+            {
+                // Checked above, with the full model.
+                let node = entry["node"].as_u64().unwrap_or_default() as usize;
+                let first_vertex = vertices.len();
+                let before = triangles.len();
+                if gltf["nodes"][node]["mesh"].is_u64() {
+                    let instead = gltf["nodes"][node]["extensions"]["MSFT_lod"]["ids"][version]
+                        .as_u64()
+                        .and_then(|id| usize::try_from(id).ok())
+                        .filter(|id| *id < pivots.len() && !walk.contains(id))
+                        .ok_or_else(|| {
+                            format!(
+                                "the part \"{}\" has no object for far-away version {}",
+                                part.name,
+                                version + 1
+                            )
+                        })?;
+                    if let Some(mesh) = gltf["nodes"][instead]["mesh"].as_u64() {
+                        add_lump(
+                            &gltf,
+                            bin,
+                            &gltf["meshes"][mesh as usize]["primitives"][0],
+                            pivots[node],
+                            &mut vertices,
+                            &mut triangles,
+                        )?;
+                    }
+                }
+                corners[node] = (first_vertex, vertices.len() - first_vertex);
+                part.first_triangle = before;
+                part.triangles = triangles.len() - before;
+            }
+            let mut assemblies = model.assemblies.clone();
+            for assembly in &mut assemblies {
+                let inside = format!("{}/", assembly.name);
+                let mine: Vec<&GlbPart> = parts
+                    .iter()
+                    .filter(|part| part.name.starts_with(&inside))
+                    .collect();
+                assembly.first_triangle = mine.first().map_or(0, |part| part.first_triangle);
+                assembly.triangles = mine.iter().map(|part| part.triangles).sum();
+            }
+            let mut joins = model.joins.clone();
+            for (join, node) in joins.iter_mut().zip(&node_of_join) {
+                (join.first_vertex, join.vertices) = corners[*node];
+            }
+            far.push(GlbFar {
+                distance,
+                model: GlbModel {
+                    vertices,
+                    triangles,
+                    parts,
+                    assemblies,
+                    joins,
+                    ..model.clone()
+                },
+            });
+        }
+        model.far = far;
+    }
+    Ok(model)
 }
 
 /// Reads one lump of triangles (the whole model's in a file from before
@@ -1339,4 +1463,4 @@ fn srgb(linear: f32) -> u8 {
     (curved * 255.0).round().clamp(0.0, 255.0) as u8
 }
 
-// ==== end of Duck Mold's .glb reader, version 7 =============================
+// ==== end of Duck Mold's .glb reader, version 8 =============================

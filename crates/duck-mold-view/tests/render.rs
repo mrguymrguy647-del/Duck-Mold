@@ -214,6 +214,8 @@ fn a_model_with_no_faces_gives_empty_views() {
         hit_setting: None,
         colliders: Vec::new(),
         without_collider: Vec::new(),
+        lod_setting: None,
+        far: Vec::new(),
     };
     let sheet = render_sheet(&model, "nothing", 128);
     for name in ["front", "right", "back", "three_quarter"] {

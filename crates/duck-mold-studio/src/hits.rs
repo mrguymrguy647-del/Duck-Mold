@@ -144,17 +144,12 @@ pub fn part_section(
         draft.of = Some(key);
     }
 
-    let follow_words = match (model.hit_setting, built) {
-        (Some(Colliders::Parts), Some(collider)) => {
-            format!("fitted: {}", collider.shape.kind().name())
-        }
-        (Some(Colliders::Parts), None) => "fitted: none".to_owned(),
-        (Some(Colliders::Whole(_)), _) => "the model's".to_owned(),
-        (None, _) => "none (the model's)".to_owned(),
-    };
+    // One set of words, the same as the model's line uses: what the
+    // model gives it, a shape of its own, or none.
+    let follow_words = format!("the model's: {}", word_for(model.hit_setting));
     let word = |choice: Choice| match choice {
         Choice::Follow => follow_words.clone(),
-        Choice::Shape(kind) => kind.name().to_owned(),
+        Choice::Shape(kind) => format!("its own: {}", kind.name()),
         Choice::None => "none".to_owned(),
     };
 

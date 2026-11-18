@@ -53,3 +53,10 @@ jobs:
         run: cargo test --workspace
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
+      # How fast the Studio is with a big model (50 parts, about 20,000
+      # triangles), on GitHub's Windows machine, which stands for an
+      # ordinary laptop. The times are printed for reading, not checked:
+      # machines differ too much for a pass or a fail.
+      - name: Speed (printed, not checked)
+        if: runner.os == 'Windows'
+        run: cargo test --release -p duck-mold-view --test speed -- --ignored --nocapture

@@ -34,7 +34,8 @@ Rules that hold everywhere:
 | `poses` | table of poses | none | The model's poses, by name. See "Poses" below. |
 | `animations` | table of animations | none | The model's animations, by name. See "Animations" below. |
 | `colliders` | text | none: no hit shapes | `"parts"`: a hit shape fitted to every part, moving with it; `"capsule"`, `"box"` or `"sphere"`: one round the whole model. See "Hit shapes" below. |
-| `bones`, `lods` | | | Reserved for later phases. Using one is an error that says so. |
+| `lods` | text, or two numbers | none: no far-away versions | `"auto"`: two simpler versions for a game to draw far off, at 8 and 20 times the model's largest side; `[12, 30]`: at those distances, in metres; `"none"`: none. See "Far-away versions" below. |
+| `bones` | | | Reserved for a later phase. Using it is an error that says so. |
 
 ### `palette`
 
@@ -106,7 +107,8 @@ Each entry of `parts`, and each entry of `define`, is a part.
 | `collider` | text, or a table | follows `colliders` | The part's own hit shape: `"box"`, `"sphere"`, `"capsule"` (fitted to it), `"none"`, or a table with its numbers. See "Hit shapes" below. A part under `define` can have one too. |
 | `sockets` | table of sockets | none | The part's own named sockets. |
 | `note` | anything | none | For people. Ignored. |
-| `bones`, `lods` | | | Reserved. |
+| `lod` | text | `"auto"` | `"keep"`: the part is never simplified or left out of the far-away versions (a character's eyes). On an assembly, or on a part under `define`, it keeps everything inside. |
+| `bones` | | | Reserved. |
 
 A part under `define` has no place of its own, so it can't have `name`,
 `attach`, `to`, `twist`, `rotate`, `move`, `scale`, `mirror` or
@@ -548,6 +550,42 @@ collider = { shape = "sphere", radius = 0.12 }   # numbers of its own
 have none; `inspect --colliders` lists each with its numbers; `render
 --colliders` outlines them. `duck-mold edit` has `set-colliders` and
 `set-collider`.
+
+## Far-away versions
+
+A model far from the camera is a few pixels high, and its round shapes'
+many sides are wasted there. With `lods` at the top, Duck Mold builds two
+simpler versions of it by itself, and writes them in the `.glb`; Duck
+Forge draws the one that suits the distance.
+
+```toml
+lods = "auto"     # Far 1 at 8 times the largest side, Far 2 at 20 times
+lods = [12, 30]   # Far 1 from 12 m, Far 2 from 30 m
+```
+
+| Part | Far 1 | Far 2 |
+|---|---|---|
+| sphere, capsule, torus, tube | half the segments (at least 6) | a quarter (at least 6) |
+| cylinder, cone | half the segments (at least 6) | a quarter (at least 5) |
+| arch | half its curve's segments (at least 4) | a quarter (at least 3) |
+| stairs | the same | one sloped block (a wedge) the size of the stairs |
+| bevel | one step | none: square edges |
+| box, wedge, pyramid, prism, a shaped box, a part from a file | the same | the same |
+| any part smaller than 4% of the model's largest side | the same | left out |
+
+- **Only triangles change.** Every part stays where the model has it, so
+  nothing moves when a bevel or a sphere's sides go; colours, joins,
+  sockets and hit shapes are the model's own in every version.
+- **`lod = "keep"`** on a part keeps it whole in both (a character's
+  eyes, small but important).
+- A model made only of boxes has nothing to simplify: its far versions
+  would be the model itself, so give it no `lods`.
+- `duck-mold new` writes `lods = "auto"` in a new recipe.
+
+`duck-mold inspect` has a `far versions` line (the distances and each
+version's triangles); `render --far 1` and `render --far 2` draw them;
+the Studio shows one with View > Far version. `duck-mold edit` has
+`set-lods` and `set-lod`.
 
 ## Files as parts
 
