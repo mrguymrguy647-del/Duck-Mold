@@ -3664,10 +3664,13 @@ pub struct Applied {
     pub issues: Vec<Issue>,
 }
 
+/// Builds a recipe's text to check an edit: the model itself, without
+/// its far-away versions, which an edit never changes the rules of and a
+/// check doesn't need ([`edit_file_with`] builds them for its report).
 fn build(text: &str, syntax: Syntax, path: &Path, display: &str) -> (Option<Model>, Vec<Issue>) {
     let mut issues = Vec::new();
     let loaded = load_text_at(text, syntax, path, display, &mut issues);
-    let model = assemble(&loaded, &mut issues);
+    let model = crate::assemble::assemble_near(&loaded, &mut issues);
     (model, issues)
 }
 
@@ -4585,9 +4588,18 @@ fn edit_file_with(
         };
         let report = Report::from_issues(applied.issues);
         let inspection = if wanted_report {
-            applied
+            // The report says the far-away versions too: built here, once.
+            let full = applied
                 .model
                 .as_ref()
+                .filter(|model| model.lod_setting.is_some())
+                .and_then(|_| {
+                    let mut quiet = Vec::new();
+                    let loaded = load_text_at(&applied.text, syntax, path, &display, &mut quiet);
+                    assemble(&loaded, &mut quiet)
+                });
+            full.as_ref()
+                .or(applied.model.as_ref())
                 .map(|model| inspect(model, &display, report.warnings.clone()))
         } else {
             None

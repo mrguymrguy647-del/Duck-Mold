@@ -2321,8 +2321,10 @@ fn far_away_versions_are_set_reported_and_drawn() {
     let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
     assert!(text.contains("\nlods = \"auto\"\n"), "{text}");
     assert!(text.contains("\nlod = \"keep\"\n"), "{text}");
-    let output = edit(&["set-lods", "12,30"]);
+    let output = edit(&["set-lods", "12,30", "--json", "--report"]);
     assert!(output.status.success(), "{}", stderr(&output));
+    // Checking an edit skips the far versions; the report has them.
+    assert_eq!(json(&output)["report"]["far_versions"][0]["distance"], 12.0);
     let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
     assert!(text.contains("\nlods = [12, 30]\n"), "{text}");
     // Mistakes of the command.

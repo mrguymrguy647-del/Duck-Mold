@@ -89,6 +89,13 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
     Some(model)
 }
 
+/// [`assemble`] without the far-away versions: the model itself only.
+/// For checking an edit, and for a drag's preview, which never show them
+/// (building them makes a model with `lods` take half as long again).
+pub fn assemble_near(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
+    assemble_at(loaded, issues, 0)
+}
+
 /// A part smaller than this share of the model's largest side is left
 /// out of Far 2: 4%.
 pub const LEAVE_OUT_BELOW: f64 = 0.04;

@@ -5450,6 +5450,11 @@ Far 2 at 20 times: 15 m and 37 m for the robot.
   open a gap of millimetres between parts that touch in the model (the
   gnome's nose on its rounder beard), invisible that far off. The gap
   is still listed in `--json`'s `floating`.
+- **Checking an edit builds the model without its far versions**
+  (`assemble_near`): with them, an edit to a big model with `lods` took
+  52 ms instead of 34, and a drag step's model work 10.4 ms instead of
+  5.9. A drag's preview never shows them; the Studio's reload after an
+  edit, `edit --report` and every other command build them as before.
 - The Khronos validator: 0 errors, 0 warnings; "info" lines of the two
   kinds expected (`UNSUPPORTED_EXTENSION`, `UNUSED_OBJECT`), one per far
   object. Files without `lods` stay byte for byte as before.
