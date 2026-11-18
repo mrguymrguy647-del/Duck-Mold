@@ -227,6 +227,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         axes: crate::math::Mat3::IDENTITY,
         limits: crate::recipe::Limits::Free,
         collider: crate::recipe::ColliderDef::Unset,
+        lod_keep: false,
         carried: Vec::new(),
         sockets: Vec::new(),
         bounds: Bounds::around(faces.iter().flat_map(|face| face.corners.iter().copied())),
@@ -253,6 +254,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         hit_setting: None,
         colliders: Vec::new(),
         without_collider: Vec::new(),
+        far: Vec::new(),
     }
 }
 

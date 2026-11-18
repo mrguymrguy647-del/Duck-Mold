@@ -82,6 +82,34 @@ pub struct Recipe {
     /// What hit shapes the model has (`colliders`). `None`: none, but a
     /// part can still say its own.
     pub colliders: Option<Colliders>,
+    /// Far-away versions (`lods`): simpler triangles for a model seen
+    /// from far. `None`: none.
+    pub lods: Option<Lods>,
+}
+
+/// When a model's far-away versions are used: `lods = "auto"`, or
+/// `lods = [near, far]` in metres.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum Lods {
+    /// At 8 and 20 times the model's largest side.
+    Auto,
+    /// At these distances, in metres: Far 1, then Far 2.
+    At([f64; 2]),
+}
+
+impl Lods {
+    /// How many times the model's largest side "auto" puts Far 1 and
+    /// Far 2 at.
+    pub const AUTO_TIMES: [f64; 2] = [8.0, 20.0];
+
+    /// The two distances, in metres, for a model whose largest side is
+    /// `largest`.
+    pub fn distances(self, largest: f64) -> [f64; 2] {
+        match self {
+            Lods::Auto => Self::AUTO_TIMES.map(|times| ((times * largest) * 10.0).round() / 10.0),
+            Lods::At(at) => at,
+        }
+    }
 }
 
 /// One of the three simple shapes a game tests hits against.
@@ -337,6 +365,9 @@ pub struct PartDef {
     pub limits: Limits,
     /// Its own hit shape, if it says one.
     pub collider: ColliderDef,
+    /// `lod = "keep"`: never simplified or left out of the far-away
+    /// versions (a character's eyes).
+    pub lod_keep: bool,
 }
 
 /// How far a part may turn about its join when the model is posed: its
@@ -912,7 +943,7 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-pub(crate) const PART_FIELDS: [&str; 29] = [
+pub(crate) const PART_FIELDS: [&str; 30] = [
     "name",
     "shape",
     "use",
@@ -940,6 +971,7 @@ pub(crate) const PART_FIELDS: [&str; 29] = [
     "mirror",
     "limits",
     "collider",
+    "lod",
     "sockets",
     "note",
 ];
@@ -962,13 +994,14 @@ fn a_shape(name: &str) -> String {
 }
 
 /// The fields at the top of a recipe.
-pub(crate) const TOP_FIELDS: [&str; 12] = [
+pub(crate) const TOP_FIELDS: [&str; 13] = [
     "version",
     "name",
     "description",
     "note",
     "palette",
     "colliders",
+    "lods",
     "define",
     "parts",
     "sockets",
@@ -978,10 +1011,7 @@ pub(crate) const TOP_FIELDS: [&str; 12] = [
 ];
 
 /// Names kept for later phases, and what each is for.
-const RESERVED: [(&str, &str); 2] = [
-    ("bones", "rigs"),
-    ("lods", "simpler versions of a model for far away"),
-];
+const RESERVED: [(&str, &str); 1] = [("bones", "rigs")];
 
 /// The fields of a hit shape written as a table.
 const COLLIDER_FIELDS: [&str; 6] = ["shape", "center", "size", "radius", "length", "along"];
@@ -1280,6 +1310,7 @@ impl Decoder<'_> {
             poses: Vec::new(),
             animations: Vec::new(),
             colliders: None,
+            lods: None,
         };
         let Some(mut fields) = self.table(root, "", "a recipe: a table of fields") else {
             return recipe;
@@ -1424,6 +1455,10 @@ impl Decoder<'_> {
             }
         }
 
+        if let Some(entry) = fields.take("lods") {
+            recipe.lods = self.lods(&entry.node);
+        }
+
         if let Some(entry) = fields.take("poses") {
             recipe.poses = self.poses(&entry.node, "poses");
         }
@@ -1433,6 +1468,44 @@ impl Decoder<'_> {
 
         self.finish(fields, &TOP_FIELDS);
         recipe
+    }
+
+    /// Reads `lods`: "auto", "none", or two distances in metres, the
+    /// nearer first.
+    fn lods(&mut self, node: &Node) -> Option<Lods> {
+        let wrong = |reader: &mut Self, said: String| {
+            let issue = Issue::error(
+                Code::TypeMismatch,
+                "lods",
+                format!(
+                    "\"lods\" is \"auto\" (far versions at distances worked out from the model's size), \"none\", or two distances in metres, nearer first, like [12, 30]. Not {said}"
+                ),
+            )
+            .in_file(reader.file)
+            .at(node.pos)
+            .suggest("lods = \"auto\"");
+            reader.issues.push(issue);
+            None
+        };
+        match &node.value {
+            Value::Str(word) if word == "auto" => Some(Lods::Auto),
+            Value::Str(word) if word == "none" => None,
+            Value::Str(word) => wrong(self, format!("\"{word}\"")),
+            Value::Array(items) if items.len() == 2 => {
+                let near = self.number(&items[0], "lods[0]", "12")?;
+                let far = self.number(&items[1], "lods[1]", "30")?;
+                if near > 0.0 && far > near && far.is_finite() {
+                    Some(Lods::At([near, far]))
+                } else {
+                    wrong(
+                        self,
+                        format!("[{near}, {far}]: both above 0, the second further"),
+                    )
+                }
+            }
+            Value::Array(items) => wrong(self, format!("a list of {}", items.len())),
+            _ => wrong(self, "that".to_owned()),
+        }
     }
 
     /// Reads `poses`: a table of poses by name, each a table of parts
@@ -1860,6 +1933,7 @@ impl Decoder<'_> {
             changes: Vec::new(),
             limits: Limits::Free,
             collider: ColliderDef::Unset,
+            lod_keep: false,
         };
         let Some(mut fields) = self.table(node, path, "a part: a table of fields") else {
             return part;
@@ -2055,6 +2129,29 @@ impl Decoder<'_> {
             && let Some(collider) = self.collider(&entry.node, &fields.sub("collider"))
         {
             part.collider = collider;
+        }
+
+        if let Some(entry) = fields.take("lod")
+            && let Some(word) = self.text(&entry.node, &fields.sub("lod"), "keep")
+        {
+            match word.as_str() {
+                "keep" => part.lod_keep = true,
+                "auto" => part.lod_keep = false,
+                _ => {
+                    let issue = Issue::error(
+                        Code::TypeMismatch,
+                        fields.sub("lod"),
+                        format!(
+                            "\"lod\" is \"keep\" (never simplified or left out of the far versions) or \"auto\". Not \"{word}\""
+                        ),
+                    )
+                    .in_file(self.file)
+                    .at(entry.node.pos)
+                    .got(word.as_str())
+                    .one_of(&word, ["keep", "auto"]);
+                    self.issues.push(issue);
+                }
+            }
         }
 
         if let Some(entry) = fields.take("sockets") {

@@ -95,6 +95,10 @@ pub struct Inspection {
     /// ([`collider_report`]).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub colliders: Vec<ColliderReport>,
+    /// The model's far-away versions (`lods` in the recipe): simpler
+    /// copies a game draws when the model is far off.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub far_versions: Vec<FarSummary>,
     /// The names of the model's poses, in the recipe's order.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub poses: Vec<String>,
@@ -169,6 +173,20 @@ pub fn socket_report(model: &Model) -> Vec<SocketReport> {
             facing: socket.facing.to_array(),
         })
         .collect()
+}
+
+/// One far-away version of a model, in short.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct FarSummary {
+    /// "Far 1" or "Far 2".
+    pub name: String,
+    /// From how far away a game draws it, in metres.
+    pub distance: f64,
+    /// How many triangles it has.
+    pub triangles: usize,
+    /// The small parts it leaves out, by path.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub left_out: Vec<String>,
 }
 
 /// One of a model's animations, in a line of the plain report.
@@ -782,6 +800,7 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
             .map(|(path, _)| path.clone())
             .collect(),
         colliders: Vec::new(),
+        far_versions: far_summary(model),
         poses: model.poses.iter().map(|pose| pose.name.clone()).collect(),
         animations: model
             .animations
@@ -876,6 +895,45 @@ fn seconds(at: f64) -> String {
 /// the model is at rest.
 const NOT_AT_REST: &str = "   (not so at rest)";
 
+/// The far-away versions of a model, in short.
+pub fn far_summary(model: &Model) -> Vec<FarSummary> {
+    model
+        .far
+        .iter()
+        .enumerate()
+        .map(|(at, far)| FarSummary {
+            name: format!("Far {}", at + 1),
+            distance: tidy(far.distance),
+            triangles: far.triangles(),
+            left_out: far.left_out.clone(),
+        })
+        .collect()
+}
+
+/// `2  (Far 1 at 14.6 m: 288 triangles; Far 2 at 36.6 m: 120 triangles,
+/// leaving out 3 small parts)`.
+pub fn far_words(far: &[FarSummary]) -> String {
+    let each: Vec<String> = far
+        .iter()
+        .map(|version| {
+            let mut words = format!(
+                "{} at {} m: {}",
+                version.name,
+                tidy(version.distance),
+                count(version.triangles, "triangle")
+            );
+            if !version.left_out.is_empty() {
+                words.push_str(&format!(
+                    ", leaving out {}",
+                    count(version.left_out.len(), "small part")
+                ));
+            }
+            words
+        })
+        .collect();
+    format!("{}  ({})", far.len(), each.join("; "))
+}
+
 /// The start of the summary: `robot: 0.9 x 1.53 x 0.36 m, 384 triangles`.
 fn headline(name: &str, size: [f64; 3], triangles: usize) -> String {
     let [x, y, z] = size.map(length);
@@ -936,6 +994,9 @@ impl Inspection {
             format!("{}  ({} corners)", self.triangles, self.vertices),
         );
         line("ground", ground_words(&self.ground));
+        if !self.far_versions.is_empty() {
+            line("far versions", far_words(&self.far_versions));
+        }
 
         let mut used: Vec<String> = self
             .palette

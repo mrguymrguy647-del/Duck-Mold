@@ -55,6 +55,35 @@ pub struct Model {
     /// the model has hit shapes (`colliders` is set): each part's path,
     /// and true if the part says so itself (`collider = "none"`).
     pub without_collider: Vec<(String, bool)>,
+    /// Its far-away versions (`lods`), nearest first: simpler triangles
+    /// for the same parts, joins, sockets and hit shapes. Empty for a
+    /// model without them.
+    pub far: Vec<FarVersion>,
+}
+
+/// One far-away version of a model.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FarVersion {
+    /// From how far away it is used, in metres.
+    pub distance: f64,
+    /// The model as this version builds it: the same parts, with fewer
+    /// triangles.
+    pub model: Model,
+    /// The parts left out of it (small ones, in Far 2), by path.
+    pub left_out: Vec<String>,
+}
+
+impl FarVersion {
+    /// How many triangles it has, the parts left out not counted.
+    pub fn triangles(&self) -> usize {
+        self.model
+            .leaves()
+            .into_iter()
+            .filter(|part| !self.left_out.contains(&part.path))
+            .flat_map(|part| self.model.faces[part.faces.clone()].iter())
+            .map(|face| face.corners.len().saturating_sub(2))
+            .sum()
+    }
 }
 
 /// One hit shape of the model: a simple shape that stands in for a
@@ -193,6 +222,8 @@ pub struct Part {
     /// Its own hit shape, as the recipe says it (or its definition
     /// does).
     pub collider: ColliderDef,
+    /// `lod = "keep"`: never simplified or left out of a far version.
+    pub lod_keep: bool,
     /// The parts inside it, if it is an assembly.
     pub parts: Vec<Part>,
     /// The names a recipe's `colors` can give this part's own faces: a

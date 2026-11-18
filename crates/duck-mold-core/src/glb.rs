@@ -110,6 +110,9 @@ struct Gltf {
     buffers: Vec<Buffer>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     animations: Vec<Animation>,
+    /// `["MSFT_lod"]` for a model with far-away versions.
+    #[serde(rename = "extensionsUsed", skip_serializing_if = "Vec::is_empty")]
+    extensions_used: Vec<&'static str>,
     extras: Extras,
 }
 
@@ -167,6 +170,24 @@ struct Node {
     translation: Option<[f64; 3]>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     children: Vec<u32>,
+    /// A part's far-away versions: `MSFT_lod`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    extensions: Option<NodeExtensions>,
+}
+
+/// What glTF's extensions add to an object.
+#[derive(Serialize)]
+struct NodeExtensions {
+    #[serde(rename = "MSFT_lod")]
+    lod: Lod,
+}
+
+/// glTF's `MSFT_lod`: the objects to draw instead of this one, further
+/// and further away. Each holds only the part's own triangles, measured
+/// from the same pivot; what hangs from the part stays as it is.
+#[derive(Serialize)]
+struct Lod {
+    ids: Vec<u32>,
 }
 
 #[derive(Serialize)]
@@ -287,6 +308,11 @@ struct DuckMold {
     /// it: when that part turns, its shape turns with it.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     colliders: Vec<ColliderEntry>,
+    /// From how far away each far-away version is drawn, in metres:
+    /// Far 1, then Far 2. Their triangles are in the objects each part's
+    /// `MSFT_lod` names.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    lods: Vec<f64>,
 }
 
 /// One hit shape: its part, the object that carries it (0 is the model
@@ -511,6 +537,117 @@ fn assembly_entries(
     entries
 }
 
+/// The numbers of a `.glb`, as they are gathered: every part's
+/// corners one after the other, and the meshes that point into them.
+#[derive(Default)]
+struct Lists {
+    positions: Vec<[f32; 3]>,
+    normals: Vec<[f32; 3]>,
+    colors: Vec<[f32; 3]>,
+    indices: Vec<u32>,
+    accessors: Vec<Accessor>,
+    meshes: Vec<Mesh>,
+}
+
+impl Lists {
+    /// Adds a part's triangles, measured from `pivot`, and a mesh named
+    /// `name` for them. Gives where its triangles start, how many there
+    /// are, and the mesh (none for a part with no triangles).
+    fn add(
+        &mut self,
+        model: &Model,
+        leaf: &Part,
+        pivot: Vec3,
+        name: &str,
+    ) -> (usize, usize, Option<u32>) {
+        let first_triangle = self.indices.len() / 3;
+        let first_corner = self.positions.len();
+        for face in &model.faces[leaf.faces.clone()] {
+            // A face squashed to nothing has no direction and is left out.
+            let Some(normal) = face.normal() else {
+                continue;
+            };
+            let rgb = match face.color {
+                Some(color) => model.palette[color].rgb,
+                None => UNPAINTED,
+            };
+            let linear = rgb.map(|channel| SRGB_TO_LINEAR[channel as usize]);
+            let base = (self.positions.len() - first_corner) as u32;
+            for corner in &face.corners {
+                // glTF's right is -x.
+                let own = [
+                    from_pivot(corner.x, pivot.x),
+                    from_pivot(corner.y, pivot.y),
+                    from_pivot(corner.z, pivot.z),
+                ];
+                self.positions
+                    .push([-own[0] + 0.0, own[1] + 0.0, own[2] + 0.0]);
+                self.normals.push([
+                    tidy(-normal.x) as f32,
+                    tidy(normal.y) as f32,
+                    tidy(normal.z) as f32,
+                ]);
+                self.colors.push(linear);
+            }
+            // The face as a fan of triangles, each listed the other way
+            // round because x was negated.
+            for at in 1..face.corners.len() as u32 - 1 {
+                self.indices.extend([base, base + at + 1, base + at]);
+            }
+        }
+        let triangles = self.indices.len() / 3 - first_triangle;
+        if triangles == 0 {
+            return (first_triangle, 0, None);
+        }
+        // glTF wants the smallest and biggest position written down.
+        let own = &self.positions[first_corner..];
+        let mut min = [f32::INFINITY; 3];
+        let mut max = [f32::NEG_INFINITY; 3];
+        for position in own {
+            for axis in 0..3 {
+                min[axis] = min[axis].min(position[axis]);
+                max[axis] = max[axis].max(position[axis]);
+            }
+        }
+        let first = self.accessors.len() as u32;
+        for (view, min, max) in [(0, Some(min), Some(max)), (1, None, None), (2, None, None)] {
+            self.accessors.push(Accessor {
+                buffer_view: view,
+                offset: first_corner * 12,
+                component_type: FLOAT,
+                count: own.len(),
+                kind: "VEC3",
+                min: min.map(Vec::from),
+                max: max.map(Vec::from),
+            });
+        }
+        self.accessors.push(Accessor {
+            buffer_view: 3,
+            offset: first_triangle * 12,
+            component_type: UNSIGNED_INT,
+            count: triangles * 3,
+            kind: "SCALAR",
+            min: None,
+            max: None,
+        });
+        let mesh = self.meshes.len() as u32;
+        self.meshes.push(Mesh {
+            name: name.to_owned(),
+            primitives: vec![Primitive {
+                attributes: Attributes {
+                    position: first,
+                    normal: first + 1,
+                    color: first + 2,
+                },
+                indices: first + 3,
+                material: 0,
+                mode: TRIANGLES,
+            }],
+        });
+        (first_triangle, triangles, Some(mesh))
+    }
+}
+
 /// Writes the model as the bytes of a `.glb` file.
 ///
 /// The file holds the model as a tree of objects: the model itself, and
@@ -540,6 +677,7 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
         mesh: None,
         translation: None,
         children: Vec::new(),
+        extensions: None,
     }];
     for part in &all {
         let from = pivot_of(part.parent.as_deref());
@@ -548,6 +686,7 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
             mesh: None,
             translation: Some(to_gltf(as_stored(part.pivot) - from)),
             children: Vec::new(),
+            extensions: None,
         });
     }
     for (at, part) in all.iter().enumerate() {
@@ -558,52 +697,13 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
     // The numbers, every part's one after the other: positions (measured
     // from the part's pivot), directions, colours, and the triangles'
     // corners (counted from the part's first corner).
-    let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut normals: Vec<[f32; 3]> = Vec::new();
-    let mut colors: Vec<[f32; 3]> = Vec::new();
-    let mut indices: Vec<u32> = Vec::new();
+    let mut lists = Lists::default();
     let mut parts: Vec<PartEntry> = Vec::new();
-    let mut meshes: Vec<Mesh> = Vec::new();
-    let mut accessors: Vec<Accessor> = Vec::new();
-
     for leaf in model.leaves() {
-        let first_triangle = indices.len() / 3;
-        let first_corner = positions.len();
-        for face in &model.faces[leaf.faces.clone()] {
-            // A face squashed to nothing has no direction and is left out.
-            let Some(normal) = face.normal() else {
-                continue;
-            };
-            let rgb = match face.color {
-                Some(color) => model.palette[color].rgb,
-                None => UNPAINTED,
-            };
-            let linear = rgb.map(|channel| SRGB_TO_LINEAR[channel as usize]);
-            let base = (positions.len() - first_corner) as u32;
-            let pivot = as_stored(leaf.pivot);
-            for corner in &face.corners {
-                // glTF's right is -x.
-                let own = [
-                    from_pivot(corner.x, pivot.x),
-                    from_pivot(corner.y, pivot.y),
-                    from_pivot(corner.z, pivot.z),
-                ];
-                positions.push([-own[0] + 0.0, own[1] + 0.0, own[2] + 0.0]);
-                normals.push([
-                    tidy(-normal.x) as f32,
-                    tidy(normal.y) as f32,
-                    tidy(normal.z) as f32,
-                ]);
-                colors.push(linear);
-            }
-            // The face as a fan of triangles, each listed the other way
-            // round because x was negated.
-            for at in 1..face.corners.len() as u32 - 1 {
-                indices.extend([base, base + at + 1, base + at]);
-            }
-        }
+        let (first_triangle, triangles, mesh) =
+            lists.add(model, leaf, as_stored(leaf.pivot), &leaf.path);
         let node = node_of(&leaf.path);
-        let triangles = indices.len() / 3 - first_triangle;
+        nodes[node].mesh = mesh;
         parts.push(PartEntry {
             name: leaf.path.clone(),
             first_triangle,
@@ -611,55 +711,51 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
             node,
             turns_in: turns_in(leaf),
         });
-        if triangles == 0 {
-            continue;
-        }
-        // glTF wants the smallest and biggest position written down.
-        let own = &positions[first_corner..];
-        let mut min = [f32::INFINITY; 3];
-        let mut max = [f32::NEG_INFINITY; 3];
-        for position in own {
-            for axis in 0..3 {
-                min[axis] = min[axis].min(position[axis]);
-                max[axis] = max[axis].max(position[axis]);
-            }
-        }
-        let first = accessors.len() as u32;
-        for (view, min, max) in [(0, Some(min), Some(max)), (1, None, None), (2, None, None)] {
-            accessors.push(Accessor {
-                buffer_view: view,
-                offset: first_corner * 12,
-                component_type: FLOAT,
-                count: own.len(),
-                kind: "VEC3",
-                min: min.map(Vec::from),
-                max: max.map(Vec::from),
-            });
-        }
-        accessors.push(Accessor {
-            buffer_view: 3,
-            offset: first_triangle * 12,
-            component_type: UNSIGNED_INT,
-            count: triangles * 3,
-            kind: "SCALAR",
-            min: None,
-            max: None,
-        });
-        nodes[node].mesh = Some(meshes.len() as u32);
-        meshes.push(Mesh {
-            name: leaf.path.clone(),
-            primitives: vec![Primitive {
-                attributes: Attributes {
-                    position: first,
-                    normal: first + 1,
-                    color: first + 2,
-                },
-                indices: first + 3,
-                material: 0,
-                mode: TRIANGLES,
-            }],
-        });
     }
+
+    // The far-away versions: for every part with triangles, an object
+    // for each version, outside the scene, with the part's simpler
+    // triangles measured from the same pivot. A part a version leaves
+    // out has an object with no triangles.
+    let lods: Vec<f64> = model.far.iter().map(|far| tidy(far.distance)).collect();
+    if !model.far.is_empty() {
+        for leaf in model.leaves() {
+            let node = node_of(&leaf.path);
+            if nodes[node].mesh.is_none() {
+                continue;
+            }
+            let mut ids = Vec::new();
+            for (at, far) in model.far.iter().enumerate() {
+                let mesh = far
+                    .model
+                    .leaves()
+                    .into_iter()
+                    .find(|part| part.path == leaf.path)
+                    .filter(|_| !far.left_out.contains(&leaf.path))
+                    .and_then(|part| {
+                        let name = format!("{} (far {})", leaf.path, at + 1);
+                        lists.add(&far.model, part, as_stored(leaf.pivot), &name).2
+                    });
+                ids.push(nodes.len() as u32);
+                nodes.push(Node {
+                    name: format!("{} (far {})", leaf.path, at + 1),
+                    mesh,
+                    translation: None,
+                    children: Vec::new(),
+                    extensions: None,
+                });
+            }
+            nodes[node].extensions = Some(NodeExtensions { lod: Lod { ids } });
+        }
+    }
+    let Lists {
+        positions,
+        normals,
+        colors,
+        indices,
+        meshes,
+        mut accessors,
+    } = lists;
 
     // The block of numbers: positions, then directions, then colours,
     // then the triangles' corners.
@@ -727,6 +823,11 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
         buffer_views: views,
         buffers: vec![Buffer { length: bin.len() }],
         animations: moving.animations,
+        extensions_used: if lods.is_empty() {
+            Vec::new()
+        } else {
+            vec!["MSFT_lod"]
+        },
         extras: Extras {
             duck_mold: DuckMold {
                 version: EXTRAS_VERSION,
@@ -760,6 +861,7 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
                     .iter()
                     .map(|collider| collider_entry(collider, &node_of))
                     .collect(),
+                lods,
             },
         },
     };
@@ -1431,6 +1533,7 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         hit_setting: None,
         colliders: Vec::new(),
         without_collider: Vec::new(),
+        far: Vec::new(),
     })
 }
 
@@ -1513,6 +1616,7 @@ fn part_tree(within: &str, entries: &[(String, Range<usize>, bool)], faces: &[Fa
             axes: Mat3::IDENTITY,
             limits: crate::recipe::Limits::Free,
             collider: crate::recipe::ColliderDef::Unset,
+            lod_keep: false,
             carried: Vec::new(),
             sockets: Vec::new(),
             bounds: Bounds::around(
