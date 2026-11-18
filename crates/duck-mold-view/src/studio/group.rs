@@ -408,9 +408,7 @@ impl Studio {
                 .map_or(0.0, |bounds| bounds.size().x);
             let step = self.snap_step();
             let aside = ((wide + step) / step).ceil() * step;
-            if let Ok(tried) =
-                edit::apply_many(&self.text, syntax, &self.path, &self.shown_as, &edits)
-            {
+            if let Ok(tried) = self.try_edits(syntax, &edits) {
                 let mut new = Vec::new();
                 fn paths(parts: &[Part], into: &mut Vec<String>) {
                     for part in parts {

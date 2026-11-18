@@ -137,6 +137,11 @@ fn a_big_model_in_the_studio() {
         let _ = studio.picture(size.0, size.1);
     });
     eprintln!("one step of a drag + frame    {dragged:6.1} ms");
+    let worked_out = time(7, || {
+        x += 4.0;
+        studio.drag(size, (x, at.1), false);
+    });
+    eprintln!("  of which the edit and model {worked_out:6.1} ms");
     let _ = studio.release();
 
     // A click that picks a part.

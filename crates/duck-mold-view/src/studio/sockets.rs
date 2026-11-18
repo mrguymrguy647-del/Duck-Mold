@@ -435,9 +435,8 @@ impl Studio {
         let mut at = snapped(middle.x, middle.z);
         // How much room it takes is known once it is built: try it, and
         // look.
-        let tried = Syntax::from_path(&self.path).and_then(|syntax| {
-            edit::apply_many(&self.text, syntax, &self.path, &self.shown_as, &[add(at)]).ok()
-        });
+        let tried = Syntax::from_path(&self.path)
+            .and_then(|syntax| self.try_edits(syntax, &[add(at)]).ok());
         let room = tried
             .and_then(|tried| tried.model)
             .and_then(|model| part_in(&model.parts, &name).and_then(|part| part.bounds))

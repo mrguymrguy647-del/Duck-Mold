@@ -142,6 +142,8 @@ pub struct Studio {
     redo: Vec<history::Step>,
     /// Where the undo history is kept on disk, if it is.
     history_file: Option<PathBuf>,
+    /// What one picture keeps for the next: its canvas, the shadow.
+    kept: std::cell::RefCell<viewport::Kept>,
     /// The file the Studio wrote last (a `.glb`, a picture, the recipe
     /// saved again), for the window to offer to show in its folder.
     written: Option<PathBuf>,
@@ -225,6 +227,7 @@ impl Studio {
             undo: Vec::new(),
             redo: Vec::new(),
             history_file: None,
+            kept: Default::default(),
             written: None,
             gone: false,
             settling: None,
@@ -265,6 +268,18 @@ impl Studio {
             || self.shown_as.clone(),
             |name| name.to_string_lossy().into_owned(),
         )
+    }
+
+    /// Works `edits` out on the recipe's text, in memory: for a drag's
+    /// preview, or to see whether an edit would work. The model shown is
+    /// handed on when the text has no mistakes, so it isn't built again.
+    pub(crate) fn try_edits(
+        &self,
+        syntax: Syntax,
+        edits: &[Edit],
+    ) -> Result<edit::Applied, Failure> {
+        let built = self.model().filter(|_| !self.has_mistakes());
+        edit::apply_many_built(&self.text, syntax, &self.path, &self.shown_as, edits, built)
     }
 
     /// True for a recipe (`.toml`, `.json`); false for a mesh file
@@ -758,7 +773,13 @@ impl Studio {
         let mut all = changes.to_vec();
         all.extend(self.sockets_left_unused(changes));
         let changes = all.as_slice();
-        match edit::edit_file_many(&self.path, changes, false) {
+        // The model shown is handed on (when the file has no mistakes),
+        // so it isn't built again; the report is worked out by reload.
+        let built = self
+            .model()
+            .filter(|_| !self.has_mistakes())
+            .map(|model| (self.text.as_str(), model));
+        match edit::edit_file_built(&self.path, changes, false, built, false) {
             Ok(edited) => {
                 // The selection follows the last change that moves it.
                 let mut follow = changes
@@ -880,7 +901,7 @@ impl Studio {
             tried.push(Edit::RemoveSocket {
                 socket: socket.clone(),
             });
-            if edit::apply_many(&self.text, syntax, &self.path, &self.shown_as, &tried).is_ok() {
+            if self.try_edits(syntax, &tried).is_ok() {
                 tidy.push(Edit::RemoveSocket { socket });
             }
         }
@@ -1037,7 +1058,15 @@ impl Studio {
         } else {
             Vec::new()
         };
-        viewport::draw(
+        // The model as built changes only with the file: what is kept
+        // for it (its shadow) stays until then, through a drag too (the
+        // shadow catches up when the part is let go). A pose is worked
+        // out afresh.
+        let model_key =
+            (self.preview.is_some() || self.posed_model().is_none()).then_some(self.builds as u64);
+        viewport::draw_kept(
+            &mut self.kept.borrow_mut(),
+            model_key,
             &Look {
                 model,
                 orbit: &self.orbit,

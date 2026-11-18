@@ -99,7 +99,14 @@ pub struct View {
     /// The point of a part's surface the right-click menu was opened
     /// at: where "Add a part here" adds.
     menu_spot: Option<(String, Spot)>,
+    /// How long the last picture took, in milliseconds, as if it had been
+    /// full size.
+    last_frame_ms: f32,
 }
+
+/// Above how many milliseconds a frame is too slow while dragging, and
+/// the next ones are drafts.
+pub const DRAFT_ABOVE_MS: f32 = 12.0;
 
 impl View {
     /// Where on the screen the viewport was last drawn, and how many
@@ -176,7 +183,27 @@ pub fn show(
     if rect.width() < 2.0 || rect.height() < 2.0 {
         return None;
     }
-    let size = picture_size(ui, rect);
+    // While the picture is dragged (the view turned or slid, a handle
+    // pulled) and the last frame was slow, it is drawn smaller and
+    // stretched: a draft. The moment the drag stops it is full size.
+    let draft = if (response.dragged() || view.moving) && view.last_frame_ms > DRAFT_ABOVE_MS {
+        if view.last_frame_ms > DRAFT_ABOVE_MS * 1.8 {
+            0.5
+        } else {
+            0.75
+        }
+    } else {
+        1.0
+    };
+    let full = picture_size(ui, rect);
+    let size = if draft < 1.0 {
+        (
+            ((full.0 as f32 * draft) as usize).max(1),
+            ((full.1 as f32 * draft) as usize).max(1),
+        )
+    } else {
+        full
+    };
     // A point of the screen in the picture's own pixels, whatever size
     // the picture is drawn at.
     let in_picture = |pointer: egui::Pos2| {
@@ -320,7 +347,12 @@ pub fn show(
     };
     // While a handle is held the picture changes with every move.
     if view.drawn.as_ref() != Some(&now) || view.texture.is_none() || view.moving {
+        let started = std::time::Instant::now();
         let picture = studio.picture(size.0, size.1);
+        // A full frame's time decides whether drafts are needed; a
+        // draft's, scaled up, whether they still are.
+        let took = started.elapsed().as_secs_f32() * 1000.0;
+        view.last_frame_ms = took / (draft * draft);
         let image = ColorImage::new(
             now.size,
             picture

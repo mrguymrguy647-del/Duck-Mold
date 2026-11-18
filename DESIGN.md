@@ -5122,6 +5122,39 @@ How, in order, measuring after each:
 The edit time drops with step 2 too: the panel's edit checks the model
 once, not twice. Before and after go in `PHASE7A_REPORT.md`.
 
+- **As built (step 4).** Measured with the speed test, release build,
+  this 4-core 2.1 GHz machine. Its times wander by about 20% from run to
+  run; these are typical.
+
+  | What | Before | After | Target |
+  |---|---|---|---|
+  | A frame, 1280 x 720 window (780 x 590 picture) | 10 to 14 ms | 7.5 to 9 ms | under 10 ms: met |
+  | A frame, 2560 x 1440 window (1560 x 1180 picture) | 30 to 37 ms | 15 to 17.5 ms | under 16 ms: about met; drafts make it so while turning |
+  | One step of a drag, with its frame | 23 to 24 ms | 15 to 19 ms | under 12 ms: **not met** |
+  | One edit from the panel | 57 to 69 ms | 33 to 35 ms | under 40 ms: met |
+
+  What did it:
+  - **The canvas is kept** from frame to frame. Making a new 1560 x 1180
+    one (15 MB, with its depth) took 8 to 9 ms by itself: more than
+    drawing the model.
+  - **The shadow is worked out once for each build** of the model (1.8
+    ms), kept through a drag (it catches up when the part is let go), and
+    drawn with each grid corner put on the screen once, in 24 shades.
+    Drawing it as long runs of one shade was tried and was slower: long
+    thin triangles have large bounding boxes.
+  - **An edit is worked out from the model the Studio has** instead of
+    building the file again first, for a drag's preview and for an edit
+    from the panel; the panel's edit leaves the report to the reload, so
+    the model is checked once.
+  - **Draft frames**: while the picture is dragged and the last frame
+    took over 12 ms, it is drawn at three-quarters (or half) size and
+    stretched. When the drag stops, the next frame is full size.
+  - A drag step is now the edit and model (6.5 ms) plus the frame (8 to
+    12 ms). Under 12 ms needs the frame drawn on several cores (the
+    design's last resort), or Duck Forge drawing faster; both are left for
+    later. The grid was never the cost (under 1 ms).
+  - The speed test prints its times on CI's Windows machine.
+
 #### The command line, for agents (C1 to C6)
 
 - **Compact JSON (C1).** `--json` prints one line. `--pretty` gives today's

@@ -3975,18 +3975,40 @@ pub fn apply_many(
     display: &str,
     edits: &[Edit],
 ) -> Result<Applied, Failure> {
+    apply_many_built(text, syntax, path, display, edits, None)
+}
+
+/// [`apply_many`], given the model `text` builds, when the caller has it
+/// already (the Studio, at every step of a drag): it isn't built again.
+/// A model given means the text has no mistakes.
+pub fn apply_many_built(
+    text: &str,
+    syntax: Syntax,
+    path: &Path,
+    display: &str,
+    edits: &[Edit],
+    built: Option<&Model>,
+) -> Result<Applied, Failure> {
     // The invisible mark some Windows editors put first stays first.
     let (mark, body) = match text.strip_prefix('\u{feff}') {
         Some(body) => ("\u{feff}", body),
         None => ("", text),
     };
-    let (old_model, old_issues) = build(text, syntax, path, display);
+    let built_here;
+    let (old_model, old_issues): (Option<&Model>, Vec<Issue>) = match built {
+        Some(model) => (Some(model), Vec::new()),
+        None => {
+            let (model, issues) = build(text, syntax, path, display);
+            built_here = model;
+            (built_here.as_ref(), issues)
+        }
+    };
     let mut doc = Doc::parse(body, syntax)
         .map_err(|_| Failure::Invalid(Report::from_issues(old_issues.clone())))?;
     let mut said = Vec::new();
     let mut shared = None;
     for edit in edits {
-        let outcome = run(&mut doc, edit, old_model.as_ref(), path)
+        let outcome = run(&mut doc, edit, old_model, path)
             .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
         said.push(outcome.summary);
         // A new part that stands free, with no place given, is stood on
@@ -4000,20 +4022,14 @@ pub fn apply_many(
             && free.move_to.is_none()
         {
             let built = build(&format!("{mark}{}", doc.text), syntax, path, display).0;
-            stand_on_ground(
-                &mut doc,
-                name,
-                free.stand,
-                built.as_ref(),
-                old_model.as_ref(),
-            )
-            .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
+            stand_on_ground(&mut doc, name, free.stand, built.as_ref(), old_model)
+                .map_err(|stop| Failure::Usage(Box::new(stop.0.in_file(display))))?;
         }
         if shared.is_none() {
             shared = outcome
                 .touched
                 .as_ref()
-                .and_then(|found| share(found, old_model.as_ref(), part_of(edit)));
+                .and_then(|found| share(found, old_model, part_of(edit)));
         }
     }
     let new_text = format!("{mark}{}", doc.text);
@@ -4242,6 +4258,20 @@ pub fn edit_file(path: &Path, edit: &Edit, dry_run: bool) -> Result<Edited, Fail
 /// [`edit_file`] for several edits made together: worked out one after
 /// the other, checked once, and written once.
 pub fn edit_file_many(path: &Path, edits: &[Edit], dry_run: bool) -> Result<Edited, Failure> {
+    edit_file_built(path, edits, dry_run, None, true)
+}
+
+/// [`edit_file_many`] for a caller that has the model already: `built`
+/// is a recipe's text and the model it builds, used if the file still
+/// holds that text. With `report` false, the `inspect` report is left
+/// out (the Studio works its own out once the file is read again).
+pub fn edit_file_built(
+    path: &Path,
+    edits: &[Edit],
+    dry_run: bool,
+    built: Option<(&str, &Model)>,
+    wanted_report: bool,
+) -> Result<Edited, Failure> {
     let display = display_path(path);
     let Some(syntax) = Syntax::from_path(path) else {
         return Err(Failure::Usage(boxed(problem(
@@ -4254,7 +4284,8 @@ pub fn edit_file_many(path: &Path, edits: &[Edit], dry_run: bool) -> Result<Edit
         tries += 1;
         let before =
             std::fs::read_to_string(path).map_err(|error| io_problem(path, "read", &error))?;
-        let applied = apply_many(&before, syntax, path, &display, edits)?;
+        let model = built.and_then(|(text, model)| (text == before).then_some(model));
+        let applied = apply_many_built(&before, syntax, path, &display, edits, model)?;
         let changed = applied.text != before;
         let written = if dry_run || !changed {
             false
@@ -4271,10 +4302,14 @@ pub fn edit_file_many(path: &Path, edits: &[Edit], dry_run: bool) -> Result<Edit
             ))));
         };
         let report = Report::from_issues(applied.issues);
-        let inspection = applied
-            .model
-            .as_ref()
-            .map(|model| inspect(model, &display, report.warnings.clone()));
+        let inspection = if wanted_report {
+            applied
+                .model
+                .as_ref()
+                .map(|model| inspect(model, &display, report.warnings.clone()))
+        } else {
+            None
+        };
         let (definition, also_changes) = match applied.shared {
             Some(shared) => (Some(shared.definition), shared.also_changes),
             None => (None, Vec::new()),

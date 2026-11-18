@@ -345,10 +345,43 @@ fn paint([red, green, blue]: [u8; 3]) -> Color {
 }
 
 /// Draws the viewport, `width` x `height` pixels.
+/// What one frame keeps for the next, so that it isn't made again: the
+/// canvas (a new one of 1560 x 1180 pixels takes longer to make than to
+/// draw on), and the shadow worked out for a model.
+#[derive(Default)]
+pub struct Kept {
+    canvas: Option<Canvas>,
+    /// The shadow, and what it was worked out for.
+    shade: Option<(ShadeKey, Option<Shade>)>,
+}
+
+/// What a shadow was worked out for: which build of the model (and the
+/// pose it stands in), and which faces were hidden. `None` from the
+/// Studio means the model changes every frame (a drag, an animation
+/// playing): the shadow is worked out again.
+pub type ShadeKey = (u64, Vec<Range<usize>>);
+
+/// Draws the picture `look` describes, `width` x `height` pixels.
 pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
+    draw_kept(&mut Kept::default(), None, look, width, height)
+}
+
+/// [`draw`], keeping what can be kept for the next frame in `kept`.
+/// `model_key` names the model shown (see [`ShadeKey`]).
+pub fn draw_kept(
+    kept: &mut Kept,
+    model_key: Option<u64>,
+    look: &Look<'_>,
+    width: usize,
+    height: usize,
+) -> Picture {
     let (width, height) = (width.max(1), height.max(1));
-    let mut canvas = Canvas::new(width, height);
+    let mut canvas = match kept.canvas.take() {
+        Some(canvas) if canvas.width() == width && canvas.height() == height => canvas,
+        _ => Canvas::new(width, height),
+    };
     canvas.clear(BACKGROUND);
+    canvas.set_lighting(Lighting::default());
     let orbit = look.orbit;
     let offset = look.offset;
     // Duck Forge's camera stays at zero, looking straight ahead: the
@@ -402,44 +435,21 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
     if look.shadow
         && orbit.above > 1.0
         && let Some(model) = look.model
-        && let Some(shade) = Shade::under(model, look.hidden)
     {
-        let spot = |canvas: &Canvas, x: f64, z: f64| -> Option<Vec2> {
-            let seen = orbit.to_view(vec3(x, shade.ground, z) + offset);
-            if seen.z < NEAR {
-                return None;
-            }
-            camera.project(forge(seen), canvas).map(|(at, _)| at)
+        // Worked out once for each model, not every frame.
+        let key = model_key.map(|key| (key, look.hidden.to_vec()));
+        let fresh = match (&kept.shade, &key) {
+            (Some((was, _)), Some(key)) => was != key,
+            _ => true,
         };
-        let [red, green, blue] = [BACKGROUND.r, BACKGROUND.g, BACKGROUND.b];
-        for row in 0..shade.deep {
-            for column in 0..shade.across {
-                let dark = shade.dark[row * shade.across + column];
-                if dark < 0.02 {
-                    continue;
-                }
-                let (x, z) = (
-                    shade.x + column as f64 * shade.cell,
-                    shade.z + row as f64 * shade.cell,
-                );
-                let corners = [
-                    spot(&canvas, x, z),
-                    spot(&canvas, x + shade.cell, z),
-                    spot(&canvas, x + shade.cell, z + shade.cell),
-                    spot(&canvas, x, z + shade.cell),
-                ];
-                let [Some(a), Some(b), Some(c), Some(d)] = corners else {
-                    continue;
-                };
-                let keep = 1.0 - SHADOW_DEPTH * dark;
-                let color = Color::rgb(
-                    (f32::from(red) * keep) as u8,
-                    (f32::from(green) * keep) as u8,
-                    (f32::from(blue) * keep) as u8,
-                );
-                canvas.fill_triangle(a, b, c, color);
-                canvas.fill_triangle(a, c, d, color);
+        if fresh {
+            let shade = Shade::under(model, look.hidden);
+            kept.shade = key.map(|key| (key, shade.clone()));
+            if let Some(shade) = shade {
+                draw_shade(&mut canvas, &camera, orbit, offset, &shade);
             }
+        } else if let Some((_, Some(shade))) = &kept.shade {
+            draw_shade(&mut canvas, &camera, orbit, offset, shade);
         }
     }
 
@@ -673,10 +683,66 @@ pub fn draw(look: &Look<'_>, width: usize, height: usize) -> Picture {
         }
     }
 
-    Picture {
+    let picture = Picture {
         width,
         height,
         pixels: canvas.pixels().to_vec(),
+    };
+    kept.canvas = Some(canvas);
+    picture
+}
+
+/// How many shades of dark the shadow is drawn in.
+const SHADOW_LEVELS: f32 = 24.0;
+
+/// Draws the shadow on the ground, a pair of triangles for each cell that
+/// isn't open ground. Each corner of its grid is put on the screen once,
+/// not once for each of the four cells round it.
+fn draw_shade(canvas: &mut Canvas, camera: &Camera3D, orbit: &Orbit, offset: Vec3, shade: &Shade) {
+    let across = shade.across + 1;
+    let corners: Vec<Option<Vec2>> = (0..=shade.deep)
+        .flat_map(|row| (0..=shade.across).map(move |column| (row, column)))
+        .map(|(row, column)| {
+            let x = shade.x + column as f64 * shade.cell;
+            let z = shade.z + row as f64 * shade.cell;
+            let seen = orbit.to_view(vec3(x, shade.ground, z) + offset);
+            if seen.z < NEAR {
+                return None;
+            }
+            camera.project(forge(seen), canvas).map(|(at, _)| at)
+        })
+        .collect();
+    let corner = |row: usize, column: usize| corners[row * across + column];
+    let [red, green, blue] = [BACKGROUND.r, BACKGROUND.g, BACKGROUND.b];
+    // One colour for each shade, worked out once.
+    let colours: Vec<Color> = (0..=SHADOW_LEVELS as usize)
+        .map(|level| {
+            let keep = 1.0 - SHADOW_DEPTH * level as f32 / SHADOW_LEVELS;
+            Color::rgb(
+                (f32::from(red) * keep) as u8,
+                (f32::from(green) * keep) as u8,
+                (f32::from(blue) * keep) as u8,
+            )
+        })
+        .collect();
+    for row in 0..shade.deep {
+        for column in 0..shade.across {
+            let dark = shade.dark[row * shade.across + column];
+            if dark < 0.02 {
+                continue;
+            }
+            let (Some(a), Some(b), Some(c), Some(d)) = (
+                corner(row, column),
+                corner(row, column + 1),
+                corner(row + 1, column + 1),
+                corner(row + 1, column),
+            ) else {
+                continue;
+            };
+            let color = colours[(dark * SHADOW_LEVELS).round() as usize];
+            canvas.fill_triangle(a, b, c, color);
+            canvas.fill_triangle(a, c, d, color);
+        }
     }
 }
 
@@ -688,6 +754,7 @@ const SHADOW_CELLS: usize = 96;
 /// The shadow under a model: a grid of square cells on the ground, each
 /// with how dark it is, from 0 (open ground) to 1 (something stands
 /// right on it).
+#[derive(Clone)]
 struct Shade {
     /// The corner of the grid with the least x and z, in the model.
     x: f64,
