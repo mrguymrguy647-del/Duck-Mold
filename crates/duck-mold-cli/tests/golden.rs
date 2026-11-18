@@ -65,10 +65,13 @@ fn scratch(name: &str) -> PathBuf {
 }
 
 /// Runs `duck-mold` from the top of the repository, so that the paths in
-/// its output are the ones a person would type.
+/// its output are the ones a person would type. Its JSON is spread over
+/// lines (`--pretty`), so that a changed golden file shows what changed.
 fn duck_mold(arguments: &[&str]) -> Vec<u8> {
+    let pretty = arguments.contains(&"--json").then_some("--pretty");
     let output = Command::new(env!("CARGO_BIN_EXE_duck-mold"))
         .args(arguments)
+        .args(pretty)
         .current_dir(root())
         .output()
         .expect("the program runs");

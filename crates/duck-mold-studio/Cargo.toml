@@ -16,6 +16,9 @@ duck-mold-core = { workspace = true }
 duck-mold-view = { workspace = true }
 eframe = { workspace = true }
 rfd = { workspace = true }
+# Where Documents is: on Windows, the folder Windows says (moved to
+# OneDrive, say), not always USERPROFILE\Documents.
+dirs = "6.0.0"
 
 # Puts the icon inside DuckMoldStudio.exe on Windows.
 [build-dependencies]

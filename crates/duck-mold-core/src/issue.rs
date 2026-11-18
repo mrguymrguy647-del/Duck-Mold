@@ -437,7 +437,7 @@ pub fn closest<'a>(written: &str, options: impl IntoIterator<Item = &'a str>) ->
 
 /// How many single-letter changes (add, remove, swap for another) turn
 /// one word into the other.
-fn edit_distance(a: &str, b: &str) -> usize {
+pub(crate) fn edit_distance(a: &str, b: &str) -> usize {
     let a: Vec<char> = a.chars().collect();
     let b: Vec<char> = b.chars().collect();
     // `row[j]` is the distance between the first letters of `a` seen so far

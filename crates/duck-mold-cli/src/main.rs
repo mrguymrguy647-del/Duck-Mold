@@ -37,7 +37,14 @@ mod studio;
 struct Cli {
     #[command(subcommand)]
     command: Command,
+    /// With --json: spread the JSON over lines, indented, for people to
+    /// read. Without it, --json prints one line.
+    #[arg(long, global = true)]
+    pretty: bool,
 }
+
+/// Whether `--pretty` was given.
+static PRETTY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 #[derive(Subcommand)]
 enum Command {
@@ -238,24 +245,36 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Make one change to a recipe without typing it: add, remove, rename,
-    /// join, unjoin, set, duplicate, add-color, set-color, remove-color,
-    /// add-socket, set-socket, rename-socket, remove-socket, tidy-sockets.
+    /// Change a recipe without typing it: the same edits the Studio
+    /// makes. `duck-mold edit --help` lists them all, grouped.
     ///
     /// Only what has to change in the file is changed: comments, order
-    /// and layout stay. Prints the same report as inspect, for the recipe
-    /// after the change. A change that would leave the recipe with more
-    /// mistakes than it had is refused, and nothing is written. These are
-    /// the same edits the Studio makes.
+    /// and layout stay. Prints one line saying what changed, and any
+    /// problems (--report: inspect's whole report). A change that would
+    /// leave the recipe with more mistakes than it had is refused, and
+    /// nothing is written.
+    #[command(after_help = edit::GROUPS)]
     Edit {
         /// The recipe (.toml or .json).
         recipe: PathBuf,
         #[command(subcommand)]
-        change: Box<edit::Change>,
-        /// Print the report as JSON, for agents, with what the edit did
-        /// under "edit".
+        change: Option<Box<edit::Change>>,
+        /// Make many edits at once: one a line in this file (`-` reads
+        /// them from standard input), each as it would follow `duck-mold
+        /// edit <recipe>`. Blank lines and lines starting with # are
+        /// skipped. They are made in turn and written once, or not at
+        /// all if any is refused.
+        #[arg(long, value_name = "FILE")]
+        batch: Option<String>,
+        /// Print the result as one line of JSON, for agents: the edit
+        /// first, then what it did, the lines that changed and the
+        /// problems.
         #[arg(long, global = true)]
         json: bool,
+        /// Also print inspect's whole report on the recipe after the
+        /// change (under "report" with --json).
+        #[arg(long, global = true)]
+        report: bool,
         /// Say what would happen, and write nothing.
         #[arg(long, global = true)]
         dry_run: bool,
@@ -270,7 +289,9 @@ enum Command {
 const GUIDE: &str = include_str!("../../../docs/AI_GUIDE.md");
 
 fn main() -> ExitCode {
-    match Cli::parse().command {
+    let cli = Cli::parse();
+    PRETTY.store(cli.pretty, std::sync::atomic::Ordering::Relaxed);
+    match cli.command {
         Command::Inspect {
             file,
             json,
@@ -522,21 +543,39 @@ fn main() -> ExitCode {
         Command::Edit {
             recipe,
             change,
+            batch,
             json,
+            report,
             dry_run,
         } => {
-            let edit = match change.to_edit() {
-                Ok(edit) => edit,
-                Err(message) => {
-                    let issue =
-                        Issue::error(duck_mold_core::issue::Code::TypeMismatch, "", message);
-                    return fail(&Failure::Usage(Box::new(issue)), json);
-                }
+            let usage = |message: String| {
+                Failure::Usage(Box::new(Issue::error(
+                    duck_mold_core::issue::Code::TypeMismatch,
+                    "",
+                    message,
+                )))
             };
-            match duck_mold_core::edit::edit_file(&recipe, &edit, dry_run) {
+            let done = match (change, batch) {
+                (Some(change), None) => match change.to_edits() {
+                    Ok(edits) => duck_mold_core::edit::edit_file_many(&recipe, &edits, dry_run),
+                    Err(message) => Err(usage(message)),
+                },
+                (None, Some(batch)) => edit::read_batch(&batch)
+                    .map_err(usage)
+                    .and_then(|edits| {
+                        duck_mold_core::edit::edit_file_batch(&recipe, &edits, dry_run)
+                    }),
+                (Some(_), Some(_)) => Err(usage(
+                    "give one edit or --batch with a file of them, not both".to_owned(),
+                )),
+                (None, None) => Err(usage(
+                    "say which edit to make (duck-mold edit --help lists them), or --batch with a file of them".to_owned(),
+                )),
+            };
+            match done {
                 Ok(edited) => {
                     if json {
-                        say_json(&edited.to_json());
+                        say_json(&edited.to_json(report));
                     } else {
                         let info = &edited.edit;
                         say(&match (dry_run, info.written) {
@@ -562,7 +601,9 @@ fn main() -> ExitCode {
                         }
                         match &edited.inspection {
                             Some(inspection) => {
-                                say(inspection.to_text().trim_end());
+                                if report {
+                                    say(inspection.to_text().trim_end());
+                                }
                                 complain_about(&inspection.warnings);
                             }
                             None => complain(
@@ -612,8 +653,14 @@ fn complain_about(warnings: &[Issue]) {
     complain(report.to_string().trim_end());
 }
 
+/// Prints one JSON document: on one line, or spread out with `--pretty`.
 fn say_json<T: serde::Serialize>(value: &T) {
-    say(&serde_json::to_string_pretty(value).expect("a report is plain data"));
+    let text = if PRETTY.load(std::sync::atomic::Ordering::Relaxed) {
+        serde_json::to_string_pretty(value)
+    } else {
+        serde_json::to_string(value)
+    };
+    say(&text.expect("a report is plain data"));
 }
 
 /// Writes to standard output. If nobody is reading any more (as in

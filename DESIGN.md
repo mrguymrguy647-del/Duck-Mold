@@ -5195,6 +5195,35 @@ From the audit's table:
   so a Documents moved to OneDrive works.
 - **`add-socket --facing`.**
 
+*As built (step 9):*
+
+- **One-line JSON**: `--pretty` is a flag of every command. The golden
+  reports are stored with `--pretty`, so they read as before.
+- **`edit --json`** is `{ok, edit: {command, file, written, definition?,
+  also_changes?}, summary, lines, model, warnings, errors}`, plus
+  `report` with `--report`. `model` is `inspect`'s one-line summary.
+- **`--batch`**: each line is made in turn on the text in memory, each
+  seeing the model the lines before it made (not all on the first
+  model); each is checked as it is made, and the file is written once at
+  the end, or not at all. A line that isn't an edit is said before
+  anything is done. `"command"` is `batch`.
+- **Suggestions**: every part's path, nested ones too, sorted by how
+  close the path or its last name is; the nearest is the "Did you mean"
+  when its own name is close.
+- **`add-socket --facing`** is the socket, then `set-socket --facing`,
+  made together: two edits, written once. The Studio's sockets are
+  unchanged.
+- **A copy of a joined part** and **a part on the ground** were already
+  as the audit asked (Phase 3's later work): a copy goes on a free socket
+  facing the same way, else a new socket beside, else free; a left arm
+  goes on `body.right_arm` with `duplicate --mirror`. A free part on the
+  ground has no "floats" warning. Nothing changed for them.
+- **Documents** comes from the `dirs` crate (Windows' known folder; the
+  XDG setting on Linux): the workspace forbids `unsafe`, which calling
+  Windows directly needs.
+- **The wireframe**: faces turned away from the eye are drawn first,
+  halfway to the background.
+
 ### 1. Fitting between keys
 
 `fit-ground` stands every key's pose on the ground already. Between two keys,

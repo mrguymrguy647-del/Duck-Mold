@@ -59,9 +59,10 @@ too.
 
 Exit codes: **0** it worked (warnings included), **1** the recipe has
 errors, **2** the command was wrong or a file couldn't be read or written.
-With `--json`, standard output is exactly one JSON document, also when it
-failed. Without it, the report is on standard output and the problems are
-on standard error.
+With `--json`, standard output is exactly one JSON document **on one
+line**, also when it failed (`--pretty` spreads it over lines, indented,
+with the same fields). Without it, the report is on standard output and
+the problems are on standard error.
 
 The same recipe always gives exactly the same bytes, so a change you see
 is a change you made.
@@ -591,9 +592,11 @@ whole model.
 You can always change the recipe's text yourself. `duck-mold edit` makes
 the common changes for you, safely: it changes only the characters it
 has to (comments, order and layout stay), builds the result before it
-writes, and prints the same report as `inspect`, so one command is the
-edit and the check. These are the edits a person makes with the mouse in
-Duck Mold Studio, one for one.
+writes, and prints one line saying what changed, with any problems
+(`--report` adds `inspect`'s whole report), so one command is the edit
+and the check. These are the edits a person makes with the mouse in Duck
+Mold Studio, one for one. `duck-mold edit --help` lists them all,
+grouped by what they change.
 
 ```bash
 duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
@@ -614,7 +617,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
 | `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
 | `duck-mold edit <recipe> remove-color <name>` | Takes a colour out of the palette. Refused if anything is painted with it, naming what; `--replace-with <other colour>` paints those with the other colour first. |
-| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. |
+| `duck-mold edit <recipe> add-socket <part> <name> --on <side>` | Declares a socket on a side of a part (`top`, `bottom`, `left`, `right`, `front`, `back`), or on any face of a shaped box by its name (`--on glass`), slid across it by `--shift x,y,z` (each -1 to 1). It sits on the surface there (section 6). This is how to place a part anywhere on another: add a socket, then `add` or `join` to it. `--facing up` (or `down`, `left`, `right`, `front`, `back`) turns it as it is made, as `set-socket --facing` does. |
 | `duck-mold edit <recipe> set-socket <part.socket>` | Moves a socket declared on a side or at a point: `--shift x,y,z` and `--on <side>` for one on a side; `--at x,y,z` for an exact point in the part's own space (it also turns one on a side into one at a point, and `--on` does the opposite). Whatever is joined to it moves with it. |
 | `duck-mold edit <recipe> set-socket <part.socket> --facing <way>` | Turns a socket on a side or at a point: `up`, `down`, `left`, `right`, `front`, `back` writes `facing`; `out` takes it away, so the socket faces as it does when nothing says (straight out of its side; up, for one at a point). Whatever is joined to it turns to match: a door's hinge at a point, `--facing right`, stands the door out to the right. |
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
@@ -656,10 +659,24 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 - **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,
   or `#2` for a part with no name. `--to` takes the same
   (`left_arm/hand.bottom`).
-- **`--json`** prints `inspect`'s report for the recipe after the edit,
-  plus `"edit"`: `{ "command": "add", "summary": "added \"hat\" (cone)
-  on head.top", "file": "robot.toml", "written": true, "lines": [198,
-  206] }` (`lines`: the first and last line that changed).
+- **`--json`** prints one line, the edit first:
+  `{"ok":true,"edit":{"command":"add","file":"robot.toml","written":true},
+  "summary":"added \"hat\" (cone) on head.top","lines":[198,206],
+  "model":"robot: 0.90 x 1.95 x 0.39 m, ...","warnings":[],"errors":[]}`
+  (`lines`: the first and last line that changed; `model`: `inspect`'s
+  summary line). `--report` adds `inspect`'s whole report under
+  `"report"`.
+- **Many edits at once: `--batch edits.txt`** (or `--batch -` to read
+  them from standard input): one edit a line, each written as it would
+  follow `duck-mold edit <recipe>`, with `"..."` round a value that has
+  spaces; blank lines and `#` lines are skipped. They are made in turn
+  (each sees what the ones before it did) and the recipe is written
+  once, or not at all if any is refused: the refusal starts with its
+  line (`edits.txt line 3: there is no part "hnd"...`). `"command"` is
+  `batch` and `summary` lists every edit. One run instead of twenty.
+- **An unknown part** gets every part it could be, nested ones
+  (`left_arm/hand`) too, nearest first, and the nearest as the likely
+  fix.
 - **`--dry-run`** does everything but write: read the report, then
   decide.
 - **An edit that would leave the recipe with more mistakes than it had

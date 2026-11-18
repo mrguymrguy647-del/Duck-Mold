@@ -71,16 +71,12 @@ pub struct StudioApp {
 }
 
 /// The folder a person's own models go in: `Duck Mold` in their
-/// Documents folder.
+/// Documents folder, wherever the system says it is (on Windows, the
+/// known folder, which may have been moved to OneDrive or another
+/// drive).
 fn own_models_folder() -> PathBuf {
-    let documents = if cfg!(windows) {
-        std::env::var_os("USERPROFILE").map(|home| PathBuf::from(home).join("Documents"))
-    } else {
-        std::env::var_os("XDG_DOCUMENTS_DIR")
-            .map(PathBuf::from)
-            .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Documents")))
-    };
-    documents
+    dirs::document_dir()
+        .or_else(|| dirs::home_dir().map(|home| home.join("Documents")))
         .unwrap_or_else(|| PathBuf::from("."))
         .join("Duck Mold")
 }

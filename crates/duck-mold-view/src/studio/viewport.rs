@@ -529,8 +529,27 @@ pub fn draw_kept(
             .collect();
         if look.wire {
             // Wireframe: the outline of every face, in the face's own
-            // colour made lighter, and nothing filled in.
-            for (at, face) in model.faces.iter().enumerate() {
+            // colour made lighter, and nothing filled in. The faces
+            // turned away from the eye are drawn first and dimmer, so
+            // the front of the model reads over its back.
+            let eye = orbit.eye();
+            let turned_away = |face: &duck_mold_core::model::Face| {
+                face.normal()
+                    .is_some_and(|normal| normal.dot(eye - (face.corners[0] + offset)) <= 0.0)
+            };
+            let order = model
+                .faces
+                .iter()
+                .enumerate()
+                .filter(|(_, face)| turned_away(face))
+                .chain(
+                    model
+                        .faces
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, face)| !turned_away(face)),
+                );
+            for (at, face) in order {
                 if look.hidden.iter().any(|hidden| hidden.contains(&at)) {
                     continue;
                 }
@@ -554,7 +573,11 @@ pub fn draw_kept(
                         once
                     }
                 };
-                let color = Color::rgb(lighter(rgb[0]), lighter(rgb[1]), lighter(rgb[2]));
+                let mut color = [lighter(rgb[0]), lighter(rgb[1]), lighter(rgb[2])];
+                if turned_away(face) {
+                    color = halfway_back(color);
+                }
+                let color = Color::rgb(color[0], color[1], color[2]);
                 for (corner, &from) in face.corners.iter().enumerate() {
                     let to = face.corners[(corner + 1) % face.corners.len()];
                     line(&mut canvas, from + offset, to + offset, color);
@@ -896,6 +919,16 @@ fn mesh_of(
         }
     }
     mesh
+}
+
+/// A colour halfway to the background: a wireframe's back edges.
+fn halfway_back(rgb: [u8; 3]) -> [u8; 3] {
+    let back = [BACKGROUND.r, BACKGROUND.g, BACKGROUND.b];
+    let mut out = [0; 3];
+    for at in 0..3 {
+        out[at] = ((u16::from(rgb[at]) + u16::from(back[at])) / 2) as u8;
+    }
+    out
 }
 
 /// A colour most of the way to the background: a part that isn't being

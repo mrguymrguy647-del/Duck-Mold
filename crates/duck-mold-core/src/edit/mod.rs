@@ -773,6 +773,10 @@ impl Stop {
         Stop(Box::new(self.0.got(value)))
     }
 
+    fn suggest(self, suggestion: impl Into<String>) -> Stop {
+        Stop(Box::new(self.0.suggest(suggestion)))
+    }
+
     fn one_of<I, S>(self, written: &str, options: I) -> Stop
     where
         I: IntoIterator<Item = S>,
@@ -822,6 +826,62 @@ fn names_in(doc: &Doc, list: &[Step]) -> Vec<String> {
         .collect()
 }
 
+/// Every part's path in the recipe, as `inspect` prints them
+/// (`left_arm/hand`), in the file's order; with `within`, only those
+/// inside that part.
+fn every_path(doc: &Doc, within: &str) -> Vec<String> {
+    fn walk(doc: &Doc, list: &TreePath, prefix: &str, paths: &mut Vec<String>, depth: usize) {
+        if depth > MAX_NESTING {
+            return;
+        }
+        for (at, name) in names_in(doc, list).into_iter().enumerate() {
+            let path = if prefix.is_empty() {
+                name
+            } else {
+                format!("{prefix}/{name}")
+            };
+            paths.push(path.clone());
+            // Into it: its own parts, or those of what it uses.
+            let mut table = with(list, Step::Index(at));
+            for _ in 0..MAX_NESTING {
+                let Some(node) = doc.node(&table) else { break };
+                if has_field(node, "parts") {
+                    walk(doc, &with(&table, key("parts")), &path, paths, depth + 1);
+                    break;
+                }
+                match text_of(node, "use") {
+                    Some(used) => table = vec![key("define"), key(used)],
+                    None => break,
+                }
+            }
+        }
+    }
+    let mut paths = Vec::new();
+    walk(doc, &vec![key("parts")], "", &mut paths, 0);
+    if !within.is_empty() {
+        let inside = format!("{within}/");
+        paths.retain(|path| path.starts_with(&inside));
+    }
+    paths
+}
+
+/// How deep [`every_path`] looks into parts inside parts.
+const MAX_NESTING: usize = 32;
+
+/// Paths sorted by how close they are to what was written, nearest
+/// first: by the whole path, or by its last name alone, whichever is
+/// closer. Ties keep the file's order.
+fn nearest_first(written: &str, mut paths: Vec<String>) -> Vec<String> {
+    let last = |path: &str| path.rsplit('/').next().unwrap_or(path).to_lowercase();
+    let wanted = written.to_lowercase();
+    let wanted_last = last(written);
+    paths.sort_by_key(|path| {
+        crate::issue::edit_distance(&wanted, &path.to_lowercase())
+            .min(crate::issue::edit_distance(&wanted_last, &last(path)))
+    });
+    paths
+}
+
 /// Finds a part by the path `inspect` prints: `left_arm/hand`.
 fn find(doc: &Doc, part: &str) -> Result<Found, Stop> {
     let segments: Vec<&str> = part.split('/').collect();
@@ -837,12 +897,21 @@ fn find(doc: &Doc, part: &str) -> Result<Found, Stop> {
             } else {
                 format!("\"{so_far}\"")
             };
-            return Err(problem(
+            // Every part it could be, nested ones too, nearest first; the
+            // nearest is the likely fix if its own name is close.
+            let options = nearest_first(part, every_path(doc, &so_far));
+            let mut issue = problem(
                 Code::UnknownPart,
                 format!("there is no part \"{segment}\" in {place}"),
             )
-            .got(*segment)
-            .one_of(segment, names));
+            .got(*segment);
+            if let Some(nearest) = options.first() {
+                let own = nearest.rsplit('/').next().unwrap_or(nearest);
+                if crate::issue::closest(segment, [own]).is_some() {
+                    issue = issue.suggest(nearest.clone());
+                }
+            }
+            return Err(issue.one_of(part, options));
         };
         if depth + 1 == segments.len() {
             let item = &doc.items(&list).expect("the list was just read")[at];
@@ -4234,16 +4303,76 @@ pub struct Edited {
 }
 
 impl Edited {
-    /// The report as `--json` prints it: `inspect`'s report with an
-    /// `"edit"` field.
-    pub fn to_json(&self) -> serde_json::Value {
-        let mut value = match &self.inspection {
-            Some(inspection) => serde_json::to_value(inspection).expect("a report is plain data"),
-            None => serde_json::json!({ "ok": false, "errors": self.errors, "warnings": [] }),
-        };
-        value["edit"] = serde_json::to_value(&self.edit).expect("a report is plain data");
-        value
+    /// The result as `edit --json` prints it, the edit first: whether
+    /// the recipe builds, the edit (its command, file, whether it was
+    /// written, and the definition it changed), what it did, the lines
+    /// that changed, the model in one line, and the problems. With
+    /// `report`, `inspect`'s whole report too, under `"report"`.
+    pub fn to_json(&self, report: bool) -> EditJson<'_> {
+        EditJson {
+            ok: self.inspection.is_some(),
+            edit: EditDone {
+                command: self.edit.command,
+                file: &self.edit.file,
+                written: self.edit.written,
+                definition: self.edit.definition.as_deref(),
+                also_changes: &self.edit.also_changes,
+            },
+            summary: &self.edit.summary,
+            lines: self.edit.lines,
+            model: self
+                .inspection
+                .as_ref()
+                .map(|inspection| inspection.summary.as_str()),
+            warnings: self
+                .inspection
+                .as_ref()
+                .map_or(&[][..], |inspection| &inspection.warnings),
+            errors: &self.errors,
+            report: self.inspection.as_ref().filter(|_| report),
+        }
     }
+}
+
+/// An edit's result as `edit --json` prints it ([`Edited::to_json`]), its
+/// fields in this order.
+#[derive(Debug, Serialize)]
+pub struct EditJson<'a> {
+    /// True if the recipe builds after the edit.
+    pub ok: bool,
+    /// The edit.
+    pub edit: EditDone<'a>,
+    /// What it did, in a few words.
+    pub summary: &'a str,
+    /// The first and last line of the recipe that changed.
+    pub lines: Option<[usize; 2]>,
+    /// The model after it, in one line.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<&'a str>,
+    /// Things that look like mistakes.
+    pub warnings: &'a [Issue],
+    /// The recipe's mistakes, if it has any (it had them before, too).
+    pub errors: &'a [Issue],
+    /// `inspect`'s whole report, with `--report`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub report: Option<&'a Inspection>,
+}
+
+/// Which edit was made, in [`EditJson`].
+#[derive(Debug, Serialize)]
+pub struct EditDone<'a> {
+    /// Its name: `add`, `set-color`... (`batch` for `--batch`).
+    pub command: &'a str,
+    /// The recipe, as it was named.
+    pub file: &'a str,
+    /// False for `--dry-run`, and when the edit changed nothing.
+    pub written: bool,
+    /// The definition the edited part is inside, if it is.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub definition: Option<&'a str>,
+    /// Every other part that changed with it, by path.
+    #[serde(skip_serializing_if = "<[String]>::is_empty")]
+    pub also_changes: &'a [String],
 }
 
 fn io_problem(path: &Path, what: &str, error: &std::io::Error) -> Failure {
@@ -4308,6 +4437,123 @@ pub fn edit_file_built(
     built: Option<(&str, &Model)>,
     wanted_report: bool,
 ) -> Result<Edited, Failure> {
+    edit_file_with(
+        path,
+        dry_run,
+        built,
+        wanted_report,
+        edits.first().map_or("", Edit::command),
+        &|before, syntax, display, model| {
+            apply_many_built(before, syntax, path, display, edits, model)
+        },
+    )
+}
+
+/// `duck-mold edit --batch`: several edits, each with a label that says
+/// where it came from (`edits.txt line 3`), made one after the other on
+/// the recipe's text, each seeing the model the ones before it made.
+/// The file is written once at the end, or not at all if any edit is
+/// refused; the refusal starts with that edit's label.
+pub fn edit_file_batch(
+    path: &Path,
+    edits: &[(String, Edit)],
+    dry_run: bool,
+) -> Result<Edited, Failure> {
+    if edits.is_empty() {
+        return Err(Failure::Usage(boxed(problem(
+            Code::MissingField,
+            "the batch has no edits in it: one edit a line, as it would follow `duck-mold edit <recipe>`",
+        ))));
+    }
+    edit_file_with(
+        path,
+        dry_run,
+        None,
+        true,
+        "batch",
+        &|before, syntax, display, _| apply_in_order(before, syntax, path, display, edits),
+    )
+}
+
+/// The edits of a batch, made in turn on `text`: see [`edit_file_batch`].
+pub fn apply_in_order(
+    text: &str,
+    syntax: Syntax,
+    path: &Path,
+    display: &str,
+    edits: &[(String, Edit)],
+) -> Result<Applied, Failure> {
+    let mut now = text.to_owned();
+    let mut model: Option<Model> = None;
+    let mut said = Vec::new();
+    let mut shared = None;
+    let mut issues = Vec::new();
+    for (label, edit) in edits {
+        let applied = apply_many_built(
+            &now,
+            syntax,
+            path,
+            display,
+            std::slice::from_ref(edit),
+            model.as_ref(),
+        )
+        .map_err(|failure| labelled(failure, label))?;
+        said.push(applied.summary);
+        shared = shared.or(applied.shared);
+        model = applied.model;
+        issues = applied.issues;
+        now = applied.text;
+    }
+    Ok(Applied {
+        lines: changed_lines(text, &now),
+        summary: format!("{}: {}", count_of(said.len(), "edit"), said.join("; ")),
+        text: now,
+        shared,
+        model,
+        issues,
+    })
+}
+
+/// "1 edit", "3 edits".
+fn count_of(count: usize, word: &str) -> String {
+    if count == 1 {
+        format!("1 {word}")
+    } else {
+        format!("{count} {word}s")
+    }
+}
+
+/// A refusal, with where the refused edit came from at its start.
+fn labelled(failure: Failure, label: &str) -> Failure {
+    let mark = |issue: &mut Issue| issue.message = format!("{label}: {}", issue.message);
+    match failure {
+        Failure::Usage(mut issue) => {
+            mark(&mut issue);
+            Failure::Usage(issue)
+        }
+        Failure::Invalid(mut report) => {
+            report.errors.iter_mut().for_each(mark);
+            Failure::Invalid(report)
+        }
+    }
+}
+
+/// How [`edit_file_with`] makes the edits: given the recipe's text, its
+/// syntax, its name as shown, and the model it builds if the caller has
+/// it.
+type Apply<'a> = dyn Fn(&str, Syntax, &str, Option<&Model>) -> Result<Applied, Failure> + 'a;
+
+/// [`edit_file_built`] and [`edit_file_batch`]: reads the recipe, makes
+/// the edits with `apply`, writes it (trying again if another program
+/// saved it meanwhile), and reports.
+fn edit_file_with(
+    path: &Path,
+    dry_run: bool,
+    built: Option<(&str, &Model)>,
+    wanted_report: bool,
+    command: &'static str,
+    apply: &Apply<'_>,
+) -> Result<Edited, Failure> {
     let display = display_path(path);
     let Some(syntax) = Syntax::from_path(path) else {
         return Err(Failure::Usage(boxed(problem(
@@ -4321,7 +4567,7 @@ pub fn edit_file_built(
         let before =
             std::fs::read_to_string(path).map_err(|error| io_problem(path, "read", &error))?;
         let model = built.and_then(|(text, model)| (text == before).then_some(model));
-        let applied = apply_many_built(&before, syntax, path, &display, edits, model)?;
+        let applied = apply(&before, syntax, &display, model)?;
         let changed = applied.text != before;
         let written = if dry_run || !changed {
             false
@@ -4354,7 +4600,7 @@ pub fn edit_file_built(
             inspection,
             errors: report.errors,
             edit: EditInfo {
-                command: edits.first().map_or("", Edit::command),
+                command,
                 summary: applied.summary,
                 file: display,
                 written,
