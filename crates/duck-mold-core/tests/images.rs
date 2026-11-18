@@ -919,3 +919,390 @@ fn a_recipe_used_as_a_part_brings_its_images_from_its_own_folder() {
         Some("parts/textures/label.png")
     );
 }
+
+// ---- edits (step 3) --------------------------------------------------------
+
+mod edits {
+    use super::*;
+    use duck_mold_core::edit::{Applied, Changes, Edit, apply, describe};
+    use duck_mold_core::images::{new_image, plan_image};
+    use duck_mold_core::picture::read_png;
+
+    /// A crate recipe in a folder with the test images, as TOML or JSON.
+    const CRATE: &str = r##"# A crate.   (this comment stays)
+version = 0
+name = "crate"
+
+[palette]
+wood = "#B07A3F"   # the planks
+
+[[parts]]
+name  = "box"
+shape = "box"
+size  = [1, 1, 1]   # a metre each way
+color = "wood"
+"##;
+
+    const CRATE_JSON: &str = r##"{
+  "version": 0,
+  "name": "crate",
+  "palette": { "wood": "#B07A3F" },
+  "parts": [
+    { "name": "box", "shape": "box", "size": [1, 1, 1], "color": "wood" }
+  ]
+}
+"##;
+
+    fn set(changes: Changes) -> Edit {
+        Edit::Set {
+            part: "box".to_owned(),
+            changes,
+        }
+    }
+
+    fn done(folder: &Path, text: &str, syntax: Syntax, edit: &Edit) -> Applied {
+        let name = if syntax == Syntax::Toml {
+            "crate.toml"
+        } else {
+            "crate.json"
+        };
+        apply(text, syntax, &folder.join(name), name, edit).unwrap_or_else(|failure| {
+            panic!("{failure:?}");
+        })
+    }
+
+    /// The lines of `after` that aren't in `before`, and those of
+    /// `before` that aren't in `after`.
+    fn changed(before: &str, after: &str) -> (Vec<String>, Vec<String>) {
+        let old: Vec<&str> = before.lines().collect();
+        let new: Vec<&str> = after.lines().collect();
+        (
+            new.iter()
+                .filter(|line| !old.contains(line))
+                .map(|line| (*line).to_owned())
+                .collect(),
+            old.iter()
+                .filter(|line| !new.contains(line))
+                .map(|line| (*line).to_owned())
+                .collect(),
+        )
+    }
+
+    #[test]
+    fn set_image_writes_one_line_after_the_colour_and_none_takes_it_out() {
+        let folder = folder("edit_image");
+        let edit = set(Changes {
+            image: Some("textures/quad.png".into()),
+            ..Changes::default()
+        });
+        let applied = done(&folder, CRATE, Syntax::Toml, &edit);
+        assert_eq!(applied.summary, "set \"box\": image textures/quad.png");
+        assert_eq!(
+            changed(CRATE, &applied.text),
+            (vec!["image = \"textures/quad.png\"".to_owned()], vec![])
+        );
+        // Straight after the colour, and everything else as it was.
+        assert!(
+            applied
+                .text
+                .contains("color = \"wood\"\nimage = \"textures/quad.png\"\n")
+        );
+        assert!(
+            applied
+                .text
+                .starts_with("# A crate.   (this comment stays)\n")
+        );
+        assert_eq!(applied.model.as_ref().unwrap().pictures.len(), 1);
+
+        // Taking it off gives the first text back, byte for byte.
+        let off = set(Changes {
+            image: Some("none".into()),
+            ..Changes::default()
+        });
+        let back = done(&folder, &applied.text, Syntax::Toml, &off);
+        assert_eq!(back.summary, "set \"box\": no image");
+        assert_eq!(back.text, CRATE);
+    }
+
+    #[test]
+    fn set_face_image_writes_a_table_and_none_takes_an_entry_out() {
+        let folder = folder("edit_face_image");
+        for (text, syntax) in [(CRATE, Syntax::Toml), (CRATE_JSON, Syntax::Json)] {
+            let edit = set(Changes {
+                face_images: vec![
+                    ("front".into(), "textures/mouth.png".into()),
+                    ("top".into(), "textures/quad.png".into()),
+                ],
+                ..Changes::default()
+            });
+            let applied = done(&folder, text, syntax, &edit);
+            assert_eq!(
+                applied.summary,
+                "set \"box\": front image textures/mouth.png, top image textures/quad.png"
+            );
+            let (added, removed) = changed(text, &applied.text);
+            assert_eq!(added.len(), 1, "{added:?}");
+            assert!(removed.len() <= 1, "{removed:?}");
+            let model = applied.model.as_ref().unwrap();
+            assert_eq!(
+                file_on(model, faces(model, "box", "front")[0]),
+                Some("textures/mouth.png")
+            );
+            assert_eq!(
+                file_on(model, faces(model, "box", "top")[0]),
+                Some("textures/quad.png")
+            );
+            // What the Studio's panel reads back.
+            let facts = describe(&applied.text, syntax, applied.model.as_ref(), "box").unwrap();
+            assert_eq!(facts.image, None);
+            assert_eq!(
+                facts.face_images,
+                vec![
+                    ("front".to_owned(), "textures/mouth.png".to_owned()),
+                    ("top".to_owned(), "textures/quad.png".to_owned())
+                ]
+            );
+
+            // One taken off: its entry goes. Both: the whole line goes,
+            // and the text is as it was at the start.
+            let one = done(
+                &folder,
+                &applied.text,
+                syntax,
+                &set(Changes {
+                    face_images: vec![("front".into(), "none".into())],
+                    ..Changes::default()
+                }),
+            );
+            assert_eq!(one.summary, "set \"box\": front no image");
+            assert!(!one.text.contains("mouth.png") && one.text.contains("quad.png"));
+            let both = done(
+                &folder,
+                &one.text,
+                syntax,
+                &set(Changes {
+                    face_images: vec![("top".into(), "none".into())],
+                    ..Changes::default()
+                }),
+            );
+            assert_eq!(both.text, text);
+        }
+    }
+
+    #[test]
+    fn none_on_a_face_keeps_the_parts_own_image_off_it() {
+        let folder = folder("edit_none_under_whole");
+        let whole = done(
+            &folder,
+            CRATE,
+            Syntax::Toml,
+            &set(Changes {
+                image: Some("textures/quad.png".into()),
+                face_images: vec![("top".into(), "textures/wide.png".into())],
+                ..Changes::default()
+            }),
+        );
+        // The top has its own image: "none" there must not uncover the
+        // part's.
+        let off = done(
+            &folder,
+            &whole.text,
+            Syntax::Toml,
+            &set(Changes {
+                face_images: vec![
+                    ("top".into(), "none".into()),
+                    ("front".into(), "none".into()),
+                ],
+                ..Changes::default()
+            }),
+        );
+        assert!(
+            off.text
+                .contains("images = { top = \"none\", front = \"none\" }"),
+            "{}",
+            off.text
+        );
+        let model = off.model.as_ref().unwrap();
+        assert_eq!(file_on(model, faces(model, "box", "top")[0]), None);
+        assert_eq!(file_on(model, faces(model, "box", "front")[0]), None);
+        assert_eq!(
+            file_on(model, faces(model, "box", "back")[0]),
+            Some("textures/quad.png")
+        );
+        // A new image for the whole part, with the faces' own taken
+        // off in the same edit: their lines simply go.
+        let one = done(
+            &folder,
+            &off.text,
+            Syntax::Toml,
+            &set(Changes {
+                image: Some("textures/wide.png".into()),
+                face_images: vec![
+                    ("top".into(), "none".into()),
+                    ("front".into(), "none".into()),
+                ],
+                ..Changes::default()
+            }),
+        );
+        assert!(!one.text.contains("images ="), "{}", one.text);
+        assert!(one.text.contains("image = \"textures/wide.png\""));
+    }
+
+    #[test]
+    fn a_new_shape_drops_the_images_of_faces_it_does_not_have() {
+        let folder = folder("edit_shape");
+        let with = done(
+            &folder,
+            CRATE,
+            Syntax::Toml,
+            &set(Changes {
+                face_images: vec![
+                    ("front".into(), "textures/mouth.png".into()),
+                    ("top".into(), "textures/quad.png".into()),
+                ],
+                ..Changes::default()
+            }),
+        );
+        // A cylinder has a top, and no front.
+        let round = done(
+            &folder,
+            &with.text,
+            Syntax::Toml,
+            &set(Changes {
+                shape: Some("cylinder".into()),
+                ..Changes::default()
+            }),
+        );
+        assert!(
+            round
+                .text
+                .contains("images = { top = \"textures/quad.png\" }"),
+            "{}",
+            round.text
+        );
+    }
+
+    #[test]
+    fn an_edit_that_names_an_image_that_cannot_be_used_is_refused() {
+        let folder = folder("edit_refused");
+        let refused = |changes: Changes| -> String {
+            match apply(
+                CRATE,
+                Syntax::Toml,
+                &folder.join("crate.toml"),
+                "crate.toml",
+                &set(changes),
+            ) {
+                Err(failure) => format!("{failure:?}"),
+                Ok(applied) => panic!("not refused: {}", applied.summary),
+            }
+        };
+        let said = refused(Changes {
+            image: Some("textures/nowhere.png".into()),
+            ..Changes::default()
+        });
+        assert!(
+            said.contains("there is no file \\\"textures/nowhere.png\\\""),
+            "{said}"
+        );
+        let said = refused(Changes {
+            image: Some("textures/photo.jpg".into()),
+            ..Changes::default()
+        });
+        assert!(said.contains("isn't a PNG file"), "{said}");
+        let said = refused(Changes {
+            face_images: vec![("front".into(), "/tmp/face.png".into())],
+            ..Changes::default()
+        });
+        assert!(said.contains("starts from the top of the disk"), "{said}");
+        let said = refused(Changes {
+            face_images: vec![("frnt".into(), "textures/quad.png".into())],
+            ..Changes::default()
+        });
+        assert!(said.contains("no face called \\\"frnt\\\""), "{said}");
+    }
+
+    #[test]
+    fn new_image_makes_a_see_through_png_and_puts_it_on() {
+        let folder = folder("new_image");
+        let recipe = folder.join("crate.toml");
+        std::fs::write(&recipe, CRATE).unwrap();
+
+        // The plan writes nothing.
+        let plan = plan_image(&recipe, "box", Some("front"), None).unwrap();
+        assert_eq!(plan.file, "textures/crate_box_front.png");
+        assert_eq!(plan.metres, [1.0, 1.0]);
+        // The model's first image: 64 pixels to the metre.
+        assert_eq!(plan.size, [64, 64]);
+        assert_eq!(plan.like_the_others, None);
+        assert!(!plan.path.exists());
+        assert_eq!(std::fs::read_to_string(&recipe).unwrap(), CRATE);
+
+        let made = new_image(&recipe, "box", Some("front"), None, None).unwrap();
+        assert_eq!(
+            made.summary(),
+            "made textures/crate_box_front.png (64 x 64 pixels, see-through, 64 to the metre) and put it on the face \"front\" of \"box\""
+        );
+        let picture = read_png(&std::fs::read(&made.plan.path).unwrap(), "made").unwrap();
+        assert_eq!((picture.width, picture.height), (64, 64));
+        assert!(picture.pixels.iter().all(|pixel| pixel[3] == 0));
+        let text = std::fs::read_to_string(&recipe).unwrap();
+        assert_eq!(
+            changed(CRATE, &text),
+            (
+                vec!["images = { front = \"textures/crate_box_front.png\" }".to_owned()],
+                vec![]
+            )
+        );
+
+        // A second image matches the first one's pixels: the top of a
+        // crate half as big again gets half as many more.
+        let second = plan_image(&recipe, "box", Some("top"), Some("textures/lid.png")).unwrap();
+        assert_eq!(second.like_the_others, Some(64.0));
+        assert_eq!(second.size, [64, 64]);
+        // A size of one's own, and a name of one's own.
+        let made = new_image(
+            &recipe,
+            "box",
+            Some("top"),
+            Some("textures/lid.png"),
+            Some([16, 8]),
+        )
+        .unwrap();
+        assert_eq!(made.plan.size, [16, 8]);
+        assert!(folder.join("textures/lid.png").is_file());
+
+        // Never over a file that is there.
+        let taken =
+            new_image(&recipe, "box", Some("top"), Some("textures/lid.png"), None).unwrap_err();
+        assert!(
+            format!("{taken:?}").contains("is already there: a new image never writes over a file")
+        );
+        // A part or a face that isn't there: nothing is written.
+        assert!(new_image(&recipe, "nosuch", None, None, None).is_err());
+        assert!(new_image(&recipe, "box", Some("frnt"), None, None).is_err());
+        assert!(!folder.join("textures/crate_nosuch.png").exists());
+        assert!(!folder.join("textures/crate_box_frnt.png").exists());
+        // A size that can't be.
+        assert!(new_image(&recipe, "box", None, None, Some([0, 8])).is_err());
+        assert!(new_image(&recipe, "box", None, None, Some([2000, 8])).is_err());
+        assert!(!folder.join("textures/crate_box.png").exists());
+    }
+
+    #[test]
+    fn a_new_image_for_a_wrap_is_as_wide_as_the_way_round() {
+        let folder = folder("new_image_round");
+        let recipe = folder.join("can.toml");
+        std::fs::write(
+            &recipe,
+            "version = 0\n[palette]\nsteel = \"#8A939B\"\n[[parts]]\nname = \"can\"\nshape = \"cylinder\"\nradius = 0.25\nheight = 0.5\nsegments = 16\ncolor = \"steel\"\n",
+        )
+        .unwrap();
+        let plan = plan_image(&recipe, "can", Some("side"), None).unwrap();
+        // Round a can half a metre across: about 1.6 m, by half a metre
+        // high.
+        assert!((plan.metres[0] - 1.59).abs() < 0.02, "{:?}", plan.metres);
+        assert!((plan.metres[1] - 0.5).abs() < 1e-9);
+        assert_eq!(plan.size, [102, 32]);
+    }
+}

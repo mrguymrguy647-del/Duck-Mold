@@ -217,6 +217,14 @@ pub enum Change {
         /// has the part's.
         #[arg(long = "face-color", value_name = "FACE=COLOUR")]
         face_colors: Vec<String>,
+        /// An image for the whole part: a PNG file, its path from the
+        /// recipe's folder (textures/planks.png). none takes it away.
+        #[arg(long, value_name = "FILE.png")]
+        image: Option<String>,
+        /// An image for one face, like front=textures/face.png. Can be
+        /// given more than once. front=none takes it away.
+        #[arg(long = "face-image", value_name = "FACE=FILE.png")]
+        face_images: Vec<String>,
         /// Degrees to twist it around its join.
         #[arg(long, allow_negative_numbers = true)]
         twist: Option<f64>,
@@ -1011,6 +1019,8 @@ impl Change {
                 sizes,
                 color,
                 face_colors,
+                image,
+                face_images,
                 twist,
                 move_to,
                 rotate,
@@ -1029,6 +1039,18 @@ impl Change {
                         }
                         _ => Err(format!(
                             "--face-color needs a face and a colour, like top=plank, not \"{written}\""
+                        )),
+                    })
+                    .collect::<Result<_, _>>()?,
+                image: image.clone(),
+                face_images: face_images
+                    .iter()
+                    .map(|written| match written.split_once('=') {
+                        Some((face, image)) if !face.is_empty() && !image.is_empty() => {
+                            Ok((face.to_owned(), image.to_owned()))
+                        }
+                        _ => Err(format!(
+                            "--face-image needs a face and an image, like front=textures/face.png, not \"{written}\""
                         )),
                     })
                     .collect::<Result<_, _>>()?,

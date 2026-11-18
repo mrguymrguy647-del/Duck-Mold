@@ -334,7 +334,18 @@ impl Loader<'_> {
         if !self.files.contains(&path) {
             self.files.push(path.clone());
         }
-        let bytes = match std::fs::read(&path) {
+        let pretended = PRETENDED.with(|pretended| {
+            pretended
+                .borrow()
+                .iter()
+                .find(|(known, _)| *known == path)
+                .map(|(_, bytes)| bytes.clone())
+        });
+        let read = match pretended {
+            Some(bytes) => Ok(bytes),
+            None => std::fs::read(&path),
+        };
+        let bytes = match read {
             Ok(bytes) => bytes,
             Err(error) => {
                 let message = if error.kind() == std::io::ErrorKind::NotFound {
@@ -470,6 +481,26 @@ impl Loader<'_> {
     }
 }
 
+thread_local! {
+    /// Image files that are treated as being there, with these bytes,
+    /// while [`pretending`] runs.
+    static PRETENDED: std::cell::RefCell<Vec<(PathBuf, Vec<u8>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Runs `work` with an image file treated as being at `path`, holding
+/// `bytes`, though nothing is written to the disk: for working out what
+/// a recipe would build with an image that hasn't been made yet (how
+/// big to make it).
+pub fn pretending<R>(path: &Path, bytes: Vec<u8>, work: impl FnOnce() -> R) -> R {
+    PRETENDED.with(|pretended| pretended.borrow_mut().push((path.to_path_buf(), bytes)));
+    let done = work();
+    PRETENDED.with(|pretended| {
+        pretended.borrow_mut().pop();
+    });
+    done
+}
+
 /// Why a file couldn't be read, in a few words.
 fn reason(error: &std::io::Error) -> &'static str {
     match error.kind() {
@@ -489,7 +520,7 @@ pub fn display_path(path: &Path) -> String {
 /// The name, for messages, of a file that the recipe `parent` names as
 /// `written`: `examples/robot.toml` and `parts/arm.toml` give
 /// `examples/parts/arm.toml`.
-fn display_join(parent: &str, written: &str) -> String {
+pub(crate) fn display_join(parent: &str, written: &str) -> String {
     let written = written.replace('\\', "/");
     if written.starts_with('/') || written.contains(':') {
         return written;

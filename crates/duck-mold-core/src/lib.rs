@@ -18,6 +18,7 @@ pub mod edit;
 pub mod glb;
 pub mod gltf;
 pub mod hit;
+pub mod images;
 pub mod inspect;
 pub mod issue;
 pub mod lay;

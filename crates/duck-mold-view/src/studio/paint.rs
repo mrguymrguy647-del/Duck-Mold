@@ -33,6 +33,8 @@ impl Studio {
     /// `None` puts the colour down.
     pub fn pick_colour(&mut self, name: Option<&str>) {
         self.paint = name.map(str::to_owned);
+        // A colour in hand: the image, if one was, is put down.
+        self.paint_image = None;
         if let Some(name) = name {
             self.tool = Tool::Paint;
             self.say(format!(
@@ -83,6 +85,16 @@ impl Studio {
         whole: bool,
     ) -> Result<String, String> {
         self.hover(size, Some(at));
+        // With an image (or "no image") picked, the click is about the
+        // face's image, not its colour.
+        if let Some(image) = self.paint_image.clone() {
+            let Some((part, face)) = self.face_under(size, at) else {
+                let why = "Nothing to paint there: click a face of a part".to_owned();
+                self.say(why.clone());
+                return Err(why);
+            };
+            return self.paint_image_at(part, face, whole, image);
+        }
         let Some(color) = self.paint_colour() else {
             let why = "There is no colour to paint with: add one to the palette first".to_owned();
             self.say(why.clone());

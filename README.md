@@ -613,6 +613,7 @@ only: nothing can be changed there.
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. `--far 1` or `--far 2` draws a far-away version, as `<file>.far1.png`. |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`, `set-lods`, `set-lod`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints one line saying what changed (`--report`: the whole `inspect` report). `--batch edits.txt` makes a list of edits, one a line, written once or not at all. `--dry-run` writes nothing. |
+| `duck-mold new-image <recipe> <part>` | Makes a new image for a part and puts it on: a PNG that is see-through all over, with the proportions of what it covers and as many pixels to the metre as the model's other images, in `textures/` beside the recipe. `--face front` for one face; `--file` names it; `--size 64x48` sizes it. Paint on it with Duck Quill or any picture program. Nothing is written over. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
@@ -718,6 +719,7 @@ A recipe can be written as TOML (the examples) or as JSON
 | Recipe | Shows |
 |---|---|
 | [crate.toml](examples/crate.toml) | The smallest useful recipe: one box, two colours. |
+| [plank_crate.toml](examples/plank_crate.toml) | Images: the same box with wood planks on its sides and a lid on top, two PNGs painted with Duck Quill ([textures/](examples/textures/) has them, with the Duck Quill scripts that made them). |
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
 | [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, framed windows (one box inset to a frame and a pane, defined once) and a chimney placed by sockets, and a skylight on the roof's `slope`. |
@@ -740,6 +742,53 @@ A recipe can be written as TOML (the examples) or as JSON
 | [gnome.toml](examples/gnome.toml) | A second character with the robot's six part names: it takes the robot's walk from [animations/walk.toml](examples/animations/walk.toml) (written by `save-animation`), fitted to its shorter legs, and waves with the starter `wave`. |
 
 Each is commented line by line.
+
+## Images
+
+A part, or one face of it, can show a picture: a PNG file beside the
+recipe.
+
+```toml
+[[parts]]
+name = "box"
+shape = "box"
+color = "wood"
+image = "textures/planks.png"                    # every face
+images = { top = "textures/lid.png" }            # ...but the top has its own
+```
+
+![The plank crate](tests/golden/plank_crate.png)
+
+- **The image lies over the colour.** Where the PNG is see-through, the
+  face's palette colour shows. So a face is a small picture with only a
+  mouth on it, and a label is only the label.
+- **It is fitted to the face** as you see it straight on from outside,
+  upright on the sides. Round faces are wrapped: a cylinder's side like
+  the label on a tin, a sphere like a map of the world. It stretches to
+  fit and doesn't repeat. [The recipe format](docs/recipe-format.md) has
+  the rule for every shape, and for shaped boxes.
+- **Pixels stay sharp**, in Duck Mold's pictures and in a Duck Forge
+  game, however near the camera is.
+- **In the Studio:** the palette has a row of the model's images under
+  its colours. Click one and then a face to put it there (Shift+click:
+  the whole part); the first square, "no image", takes one off. A
+  selected part lists its images, each with *Choose...* (another PNG;
+  one from outside the recipe's folder is copied into `textures/`) and
+  a cross to take it off. *New image...* makes a see-through PNG of the
+  right proportions to paint on.
+- **From the command line:** `duck-mold new-image robot.toml head --face
+  front`, then `duck-mold edit robot.toml set head --face-image
+  front=textures/face.png` (or `front=none`), `set crate --image
+  textures/planks.png`.
+- **Any save of the PNG, by any program, shows on the model within half
+  a second** while the Studio is open. A file that isn't there, isn't a
+  PNG or is damaged is a mistake in plain words, never a crash.
+- `inspect` lists the images and how many pixels each has to the metre
+  on the model, and warns when one image's pixels are more than twice
+  as fine as another's: mixed pixel sizes look wrong in pixel art. New
+  images are made to match the ones the model has.
+- A model without images is built, drawn and exported exactly as
+  before.
 
 ## Hit shapes, for games
 
@@ -824,6 +873,11 @@ which is in Duck Forge. [docs/forge-handoff.md](docs/forge-handoff.md)
 says what is in the file and how to keep the two copies the same.
 A model faces +z, so a default Duck Forge camera sees it from behind:
 see the handoff note.
+
+A model's images come along inside the `.glb`, on one sheet, and Duck
+Forge draws them with the same two lines. It needs a Duck Forge that
+reads them (reader version 9); an older one says "update Duck Forge"
+rather than drawing the model's painted faces white.
 
 ## Documents
 

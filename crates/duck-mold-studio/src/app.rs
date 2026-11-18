@@ -43,6 +43,8 @@ pub struct StudioApp {
     shown_selected: Option<String>,
     /// What is being typed in the properties panel.
     draft: properties::Draft,
+    /// The images: their small pictures, and the "New image" window.
+    images: crate::images::Draft,
     /// What is being typed or picked in the palette panel.
     colours: palette::Draft,
     /// The library's small pictures.
@@ -110,6 +112,7 @@ impl StudioApp {
             titled: String::new(),
             shown_selected: None,
             draft: properties::Draft::default(),
+            images: crate::images::Draft::default(),
             timeline: crate::timeline::Timeline::default(),
             colours: palette::Draft::default(),
             thumbs: library::Thumbs::default(),
@@ -494,11 +497,13 @@ impl StudioApp {
                     .auto_shrink([false, false])
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                     .show(ui, |ui| {
-                        properties::show(ui, studio, &mut self.draft);
+                        properties::show(ui, studio, &mut self.draft, &mut self.images);
                         if studio.mode() != Mode::Pose {
                             ui.add_space(12.0);
                             palette::panel(ui, studio, &mut self.colours);
+                            crate::images::palette_row(ui, studio, &mut self.images);
                         }
+                        crate::images::windows(ui, studio, &mut self.images);
                     });
             });
 

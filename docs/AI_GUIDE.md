@@ -639,7 +639,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> remove <part>` | Removes a part. Refused, with their names, if other parts hang from it; `--with-attached` removes those too. |
 | `duck-mold edit <recipe> rename <part> <new-name>` | Renames a part, and every `to`, `from` and `origin` that names it. |
 | `duck-mold edit <recipe> join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes its own socket. A part placed with `move` loses it. |
-| `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`, `--bevel` (`0` makes the edges sharp again), `--bevel-steps`, `--taper n` or `--taper x,z` (`1` makes the sides straight again), `--color`, `--face-color top=plank` (repeatable; `top=none` takes the face's own colour away again), `--twist`. Several at once are one edit. A new shape drops the sizes, options and face colours it doesn't have. |
+| `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`, `--bevel` (`0` makes the edges sharp again), `--bevel-steps`, `--taper n` or `--taper x,z` (`1` makes the sides straight again), `--color`, `--face-color top=plank` (repeatable; `top=none` takes the face's own colour away again), `--image textures/planks.png` (the whole part's image; `none` takes it away), `--face-image front=textures/face.png` (repeatable; `front=none` takes the image off that face, writing `"none"` there if the part's own image would otherwise show), `--twist`. Several at once are one edit. A new shape drops the sizes, options and face colours it doesn't have. |
 | `duck-mold edit <recipe> set <part> --move x,y,z` | Puts a **free** part (one that isn't joined) there: its middle, in metres, measured from the recipe's own zero. Also `--rotate x,y,z` (degrees around x, then y, then z) and `--scale n` or `--scale x,y,z`. A joined part refuses `--move` and `--rotate`, and says what to do instead; `--scale` works on any part. |
 | `duck-mold edit <recipe> unjoin <part>` | Makes a joined part free, exactly where it stands: its `attach`, `to` and `twist` become a `move` and a `rotate`. The model doesn't change; the part can then be moved anywhere. |
 | `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. A copy of a joined part, with no `--to`, never sits on the part it copies: it goes to the next socket of the same part that nothing is joined to and that faces the same way (in the order they are written: the next table leg's socket); else to a new socket (`spot`) made beside the original's, 10 cm past it on the same side, if there is room; else (in the model's own list) it stands free on clear ground in front of the model. The summary says which. |
@@ -722,6 +722,20 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   with the palette colours it uses and none of where it stands: put it
   in the `parts` folder next to a recipe and it is in the Studio's
   library. It never writes over a file.
+- **`duck-mold new-image <recipe> <part>`** (an edit that also writes
+  a file) makes a new image and puts it on the part: a PNG that is
+  see-through all over, in `textures/` beside the recipe
+  (`textures/<model>_<part>_<face>.png`), with the proportions of what
+  it covers. `--face front` puts it on one face; `--file` names it;
+  `--size 64x48` sizes it. Without `--size`: as many pixels to the metre
+  as the model's other images (the middle one, when they differ), or 64
+  for its first image (its longer side at least 32), never more than 256
+  along a side. `--json` gives `file`, `width`, `height`, `metres`,
+  `pixels_per_metre`, `part`, `face` and the `edit`. Then write the PNG
+  with any tool (Duck Quill: `quill render face.json --transparent --out
+  textures`), and look with `duck-mold render`. It never writes over a
+  file; to use a PNG that is already there, `edit <recipe> set <part>
+  --face-image front=<file>`.
 - **`duck-mold save-animation <recipe> <animation> <file>`** (not an
   `edit` either) writes an animation and the poses it uses to a small
   file of their own, for another model to take with `add-animation

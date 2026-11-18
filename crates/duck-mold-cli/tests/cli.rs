@@ -2463,3 +2463,122 @@ fn the_release_notes_have_a_section_for_this_version() {
         "RELEASE_NOTES.md has no \"{heading}\" section"
     );
 }
+
+#[test]
+fn images_are_made_put_on_and_taken_off_from_the_command_line() {
+    let folder = folder("cli_images");
+    // A new image for the trunk's side: as wide as the way round it.
+    let output = run(
+        &folder,
+        &["new-image", "tree.toml", "trunk", "--face", "side"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let said = stdout(&output);
+    assert!(
+        said.starts_with("made textures/tree_trunk_side.png (64 x 77 pixels, see-through, 64 to the metre) and put it on the face \"side\" of \"trunk\""),
+        "{said}"
+    );
+    assert!(folder.join("textures/tree_trunk_side.png").is_file());
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(
+        text.contains("images = { side = \"textures/tree_trunk_side.png\" }"),
+        "{text}"
+    );
+
+    // As JSON, with a size and a name of its own.
+    let output = run(
+        &folder,
+        &[
+            "new-image",
+            "tree.toml",
+            "trunk",
+            "--face",
+            "top",
+            "--file",
+            "textures/rings.png",
+            "--size",
+            "16x16",
+            "--json",
+        ],
+    );
+    let made = json(&output);
+    assert_eq!(made["ok"], true);
+    assert_eq!(made["file"], "textures/rings.png");
+    assert_eq!(made["width"], 16);
+    assert_eq!(made["height"], 16);
+    assert_eq!(made["part"], "trunk");
+    assert_eq!(made["face"], "top");
+    assert_eq!(made["edit"]["edit"]["command"], "set");
+    // inspect lists them, with how big their pixels are on the model.
+    let report = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    assert_eq!(
+        report["images"]["files"][0]["file"],
+        "textures/tree_trunk_side.png"
+    );
+    assert_eq!(report["images"]["files"][0]["on"][0]["face"], "side");
+    assert_eq!(report["images"]["files"][1]["width"], 16);
+
+    // Put on and taken off with `edit set`.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--image",
+            "textures/rings.png",
+            "--face-image",
+            "side=none",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(text.contains("image = \"textures/rings.png\""), "{text}");
+    assert!(!text.contains("tree_trunk_side.png"), "{text}");
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--image",
+            "none",
+            "--face-image",
+            "top=none",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(!text.contains("image"), "{text}");
+
+    // Mistakes are one sentence each, and nothing is written.
+    let output = run(
+        &folder,
+        &["new-image", "tree.toml", "trunk", "--size", "big"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--size needs how many pixels wide and high, like 64x48"));
+    let output = run(
+        &folder,
+        &[
+            "new-image",
+            "tree.toml",
+            "trunk",
+            "--file",
+            "textures/rings.png",
+        ],
+    );
+    assert_ne!(output.status.code(), Some(0));
+    assert!(stderr(&output).contains("is already there: a new image never writes over a file"));
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "trunk", "--face-image", "side"],
+    );
+    assert_ne!(output.status.code(), Some(0));
+    assert!(
+        stderr(&output)
+            .contains("--face-image needs a face and an image, like front=textures/face.png")
+    );
+}

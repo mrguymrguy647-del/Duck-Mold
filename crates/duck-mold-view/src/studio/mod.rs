@@ -15,6 +15,7 @@ mod edges;
 mod group;
 pub mod handles;
 pub mod history;
+pub mod images;
 pub mod library;
 mod paint;
 mod pose;
@@ -162,11 +163,19 @@ pub struct Studio {
     /// once it has stayed the same for one more check. A program that
     /// writes a file in pieces isn't shown as a mistake for a moment.
     settling: Option<String>,
+    /// The same for the other files a recipe names (an image being
+    /// saved by a picture program): how they were when they last didn't
+    /// build.
+    settling_files: Option<Vec<Option<(SystemTime, u64)>>>,
     library: library::Library,
     /// The animation library's files, as last read.
     shelf: shelf::Shelf,
     /// The palette colour the Paint tool paints with.
     pub(crate) paint: Option<String>,
+    /// The image the Paint tool paints with instead, when one is picked:
+    /// its path from the recipe's folder, or `Some(None)` for "no
+    /// image". `None`: it paints with the colour.
+    pub(crate) paint_image: Option<Option<String>>,
     /// Which tool is in hand: what the handles on the selected part are.
     pub tool: handles::Tool,
     /// A handle being dragged, with the edit it would make.
@@ -241,9 +250,11 @@ impl Studio {
             written: None,
             gone: false,
             settling: None,
+            settling_files: None,
             library: library::Library::default(),
             shelf: shelf::Shelf::default(),
             paint: None,
+            paint_image: None,
             tool: handles::Tool::Move,
             grab: None,
             preview: None,
@@ -497,6 +508,7 @@ impl Studio {
     pub fn check_files(&mut self) -> bool {
         if !self.files_changed() {
             self.settling = None;
+            self.settling_files = None;
             return false;
         }
         if !self.path.is_file() {
@@ -512,13 +524,25 @@ impl Studio {
             return true;
         }
         let text = std::fs::read_to_string(&self.path).unwrap_or_default();
+        // The other files as they are now (an image a picture program is
+        // saving), to tell whether they have stopped changing.
+        let stamps: Vec<Option<(SystemTime, u64)>> =
+            self.watched.iter().map(|file| stamp(&file.path)).collect();
         let (built, files) = tools::build_watching(&self.path);
         if built.is_err() && text != self.text && self.settling.as_ref() != Some(&text) {
             // It may be half written: looked at again next check.
             self.settling = Some(text);
             return false;
         }
+        if built.is_err() && text == self.text && self.settling_files.as_ref() != Some(&stamps) {
+            // The recipe is as it was, so it is another file that
+            // changed and doesn't build: an image half saved, perhaps.
+            // Looked at again next check.
+            self.settling_files = Some(stamps);
+            return false;
+        }
         self.settling = None;
+        self.settling_files = None;
         self.gone = false;
         let before = std::mem::take(&mut self.text);
         self.take_build(text, built, files);

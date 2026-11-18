@@ -958,6 +958,63 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "export-note"));
     }
 
+    // Images (Phase 7b): the plank crate, with its images in the
+    // picture, in the Model section and in the row under the palette.
+    let plank_crate = |test: &str| {
+        let folder = folder(test);
+        std::fs::create_dir_all(folder.join("textures")).unwrap();
+        for file in [
+            "plank_crate.toml",
+            "textures/planks.png",
+            "textures/lid.png",
+        ] {
+            std::fs::copy(examples().join(file), folder.join(file)).unwrap();
+        }
+        let mut screen = harness(
+            StudioApp::with_file(folder.join("plank_crate.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+    };
+    {
+        let mut screen = plank_crate("pictures_images");
+        wrong.extend(check(&mut screen, "images"));
+    }
+    // A part with images selected: each image has its line in the
+    // properties.
+    {
+        let mut screen = plank_crate("pictures_images_part");
+        screen.state_mut().studio_mut().unwrap().select(Some("box"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "images-part"));
+    }
+    // The "New image" window.
+    {
+        use egui::accesskit::Role;
+        let mut screen = plank_crate("pictures_images_new");
+        screen.state_mut().studio_mut().unwrap().select(Some("box"));
+        screen.run_steps(2);
+        screen
+            .get_by_role_and_label(Role::Button, "New image...")
+            .click();
+        screen.run_steps(5);
+        wrong.extend(check(&mut screen, "images-new"));
+    }
+    // An image in hand, over a face: the hint says what a click would
+    // do, and the image picked has a yellow edge.
+    {
+        use egui::accesskit::Role;
+        let mut screen = plank_crate("pictures_images_paint");
+        screen
+            .get_by_role_and_label(Role::Button, "lid.png")
+            .click();
+        screen.run_steps(2);
+        screen.hover_at(IN_VIEW);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "images-paint"));
+    }
+
     assert!(
         wrong.is_empty(),
         "{} of the screens changed:\n{}\nIf the change is meant, store the new pictures with: UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures",

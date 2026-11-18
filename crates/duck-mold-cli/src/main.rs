@@ -229,6 +229,32 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Make a new image for a part and put it on: a PNG that is
+    /// see-through all over, with the proportions of what it covers and
+    /// as many pixels to the metre as the model's other images, written
+    /// in textures/ beside the recipe. Paint on it with Duck Quill or
+    /// any picture program. Never writes over a file.
+    NewImage {
+        /// The recipe (.toml or .json).
+        recipe: PathBuf,
+        /// The part, as inspect names it: head, or left_arm/hand.
+        part: String,
+        /// One face of the part, by name: front. Without it, the image
+        /// is for the whole part.
+        #[arg(long)]
+        face: Option<String>,
+        /// The image's file, from the recipe's folder. Without it:
+        /// textures/<model>_<part>_<face>.png.
+        #[arg(long, value_name = "FILE.png")]
+        file: Option<String>,
+        /// How many pixels wide and high: 64x48. Without it, a size
+        /// worked out from what the image covers.
+        #[arg(long, value_name = "WxH")]
+        size: Option<String>,
+        /// Print the result as JSON, for agents.
+        #[arg(long)]
+        json: bool,
+    },
     /// Write an animation of a recipe, and the poses it uses, to a small
     /// file of their own: for the animation library. Another model takes
     /// it with `edit <recipe> add-animation <name> --from <file>`. The
@@ -518,6 +544,59 @@ fn main() -> ExitCode {
             }
             Err(failure) => fail(&failure, json),
         },
+        Command::NewImage {
+            recipe,
+            part,
+            face,
+            file,
+            size,
+            json,
+        } => {
+            let size = match size.as_deref().map(image_size) {
+                None => None,
+                Some(Ok(size)) => Some(size),
+                Some(Err(why)) => {
+                    return fail(
+                        &Failure::Usage(Box::new(duck_mold_core::issue::Issue::error(
+                            duck_mold_core::issue::Code::OutOfRange,
+                            "",
+                            why,
+                        ))),
+                        json,
+                    );
+                }
+            };
+            match duck_mold_core::images::new_image(
+                &recipe,
+                &part,
+                face.as_deref(),
+                file.as_deref(),
+                size,
+            ) {
+                Ok(made) => {
+                    if json {
+                        say_json(&serde_json::json!({
+                            "ok": true,
+                            "file": made.plan.file,
+                            "width": made.plan.size[0],
+                            "height": made.plan.size[1],
+                            "metres": made.plan.metres,
+                            "pixels_per_metre":
+                                (made.plan.pixels_per_metre() * 10.0).round() / 10.0,
+                            "part": made.plan.part,
+                            "face": made.plan.face,
+                            "summary": made.summary(),
+                            "edit": made.edited.to_json(false),
+                        }));
+                    } else {
+                        say(&made.summary());
+                        say(&made.edited.edit.summary);
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(failure) => fail(&failure, json),
+            }
+        }
         Command::SaveAnimation {
             recipe,
             animation,
@@ -680,4 +759,14 @@ fn say(text: &str) {
 /// say so; the exit code still tells.
 fn complain(text: &str) {
     let _ = writeln!(std::io::stderr().lock(), "{text}");
+}
+
+/// A size written `64x48`: how many pixels wide and high.
+fn image_size(written: &str) -> Result<[u32; 2], String> {
+    let size = written
+        .split_once(['x', 'X'])
+        .and_then(|(wide, high)| Some([wide.trim().parse().ok()?, high.trim().parse().ok()?]));
+    size.ok_or_else(|| {
+        format!("--size needs how many pixels wide and high, like 64x48, not \"{written}\"")
+    })
 }

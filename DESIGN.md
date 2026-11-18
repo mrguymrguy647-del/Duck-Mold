@@ -6049,6 +6049,31 @@ The right column, with the robot's head selected (new lines marked `<`):
 - **Help > Duck Quill...** shows where Duck Mold thinks Duck Quill is,
   with *Find it...* and *Get Duck Quill*.
 
+*As built (step 3):*
+
+- **"No image" on a face always leaves it without one.** If the part
+  has an image of its own, `front = "none"` is written (so the part's
+  image doesn't show there); otherwise the face's own line simply goes.
+  Shift+click with an image puts it on the whole part and takes the
+  faces' own lines out in the same edit.
+- **One "New image..." window** for a part: a list chooses the whole
+  part or one face, and a new plan is worked out for each. Its sizes are
+  "as worked out" (the model's own pixels to the metre, when it has
+  images), Small 16, Medium 32, Large 64 and Fine 128.
+- The image lines in the properties show under the name **Images**
+  (the whole part's first), not "Images on faces"; a part without any
+  says "None yet." with the same *New image...* button.
+- The hint at the bottom of the picture says what a click would do
+  (`front of box: put lid.png on it`), rather than the status bar,
+  which keeps the last thing done.
+- A picked image shows with a yellow edge; a face with an image that
+  the pointer is over is drawn at full brightness (an image can't be
+  made lighter than it was painted).
+- `Help > Duck Quill...` and "Paint in Duck Quill" come with step 4.
+- A PNG chosen from outside the recipe's folder is checked first: one
+  that isn't a PNG, is damaged or is too big is refused with its
+  sentence, and nothing is copied.
+
 ### 9. The round trip with Duck Quill
 
 **The steps, for a person:**

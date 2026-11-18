@@ -15,6 +15,7 @@ pub mod far;
 pub mod gallery;
 pub mod hits;
 pub mod icons;
+pub mod images;
 pub mod library;
 pub mod palette;
 pub mod posing;
