@@ -335,6 +335,14 @@ and every sample of every animation. What is playing, how fast, the
 change-over from one animation to another and the game's own turns are
 `AnimatedModel`, Duck Forge's own, below the markers.
 
+**A body for physics** (Duck Forge's own, in its `hits.rs`, not the
+shared reader): `model.physics_body(feet)` is a `Body::block` round the
+model's hit shapes as it stands at rest (round its triangles if it has
+none), its bottom's middle at `feet`; `model.stands_at(&body)` is where to
+draw the model on it, and `model.hit_box()` the box itself. A part a
+recipe gives no hit shape (`collider = "none"`) doesn't make it taller.
+Duck Forge's `robot_click` example walks the robot into a wall with it.
+
 ## Files to test with
 
 `tests/golden/*.glb` in this repository, all laid out as a tree: crate
