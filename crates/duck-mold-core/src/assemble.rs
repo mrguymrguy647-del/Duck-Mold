@@ -48,7 +48,7 @@ const MAX_DEPTH: usize = 32;
 /// Builds the model. `None` if the recipe has any error, already found
 /// or found here; the errors are in `issues`.
 pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
-    let mut model = assemble_at(loaded, issues, 0, None)?;
+    let mut model = assemble_at(loaded, issues, 0)?;
     // The far-away versions: the same recipe, simpler.
     if let Some(lods) = loaded.recipe.lods
         && let Some(bounds) = model.bounds()
@@ -59,9 +59,10 @@ pub fn assemble(loaded: &Loaded, issues: &mut Vec<Issue>) -> Option<Model> {
         for (at, distance) in distances.into_iter().enumerate() {
             let detail = at as u8 + 1;
             let mut quiet = Vec::new();
-            let Some(far) = assemble_at(loaded, &mut quiet, detail, Some(model.zero)) else {
+            let Some(built) = assemble_at(loaded, &mut quiet, detail) else {
                 continue;
             };
+            let far = lined_up(&model, &built);
             // In Far 2, the small parts are left out.
             let left_out = if detail >= 2 {
                 far.leaves()
@@ -178,20 +179,71 @@ pub fn simplify(shape: &Shape, trim: &Trim, detail: u8) -> (Shape, Trim) {
     (shape, trim)
 }
 
+/// A far-away version as the model has it: the model itself, with each
+/// part's triangles swapped for the simpler ones `built` gives it, put
+/// where the model puts that part. So only triangles change: a part
+/// joined to a simpler shape doesn't move (on a sphere with fewer sides
+/// it would sit a little further in; on a box without its bevel, a
+/// little further out), and every pivot, socket and hit shape is the
+/// model's own.
+fn lined_up(model: &Model, built: &Model) -> Model {
+    fn swap(parts: &mut [Part], built: &Model, old: &[Face], faces: &mut Vec<Face>) {
+        for part in parts {
+            let start = faces.len();
+            if !part.parts.is_empty() {
+                swap(&mut part.parts, built, old, faces);
+            } else {
+                let simpler = built
+                    .leaves()
+                    .into_iter()
+                    .find(|other| other.path == part.path);
+                // From the simpler part's own space to where the model
+                // has the part.
+                let undo = simpler.and_then(|simpler| {
+                    let turn = simpler.place.turn.inverse()?;
+                    Some((simpler, turn))
+                });
+                match undo {
+                    Some((simpler, turn)) => {
+                        for face in &built.faces[simpler.faces.clone()] {
+                            let corners = face
+                                .corners
+                                .iter()
+                                .map(|&corner| {
+                                    part.place.apply(turn * (corner - simpler.place.shift))
+                                })
+                                .collect();
+                            faces.push(Face {
+                                corners,
+                                color: face.color,
+                            });
+                        }
+                    }
+                    // (Never: the same recipe gives the same parts.)
+                    None => faces.extend_from_slice(&old[part.faces.clone()]),
+                }
+            }
+            part.faces = start..faces.len();
+            part.bounds = Bounds::around(
+                faces[part.faces.clone()]
+                    .iter()
+                    .flat_map(|face| face.corners.iter().copied()),
+            );
+        }
+    }
+    let mut far = model.clone();
+    far.far = Vec::new();
+    let old = std::mem::take(&mut far.faces);
+    swap(&mut far.parts, built, &old, &mut far.faces);
+    far
+}
+
 /// [`assemble`] at a level of detail: 0 is the model itself, 1 and 2
-/// its far-away versions. A far-away version is given the model's own
-/// `zero`, so that it lines up with the model even where its simpler
-/// shapes are a little narrower.
-fn assemble_at(
-    loaded: &Loaded,
-    issues: &mut Vec<Issue>,
-    detail: u8,
-    zero: Option<Vec3>,
-) -> Option<Model> {
+/// its far-away versions.
+fn assemble_at(loaded: &Loaded, issues: &mut Vec<Issue>, detail: u8) -> Option<Model> {
     let recipe = &loaded.recipe;
     let mut assembler = Assembler {
         detail,
-        zero,
         issues,
         palette: loaded.palette.clone(),
         referenced: vec![false; loaded.palette.len()],
@@ -261,6 +313,7 @@ fn assemble_at(
         hit_setting: recipe.colliders,
         colliders: Vec::new(),
         without_collider: Vec::new(),
+        lod_setting: recipe.lods,
         far: Vec::new(),
     };
     let fitted = crate::hit::fit(&model, recipe.colliders);
@@ -839,9 +892,6 @@ struct Assembler<'a> {
     /// 0 for the model itself; 1 and 2 for its far-away versions, whose
     /// shapes are simpler.
     detail: u8,
-    /// For a far-away version: the model's own zero, used instead of the
-    /// one its simpler shapes would give.
-    zero: Option<Vec3>,
     /// The model's palette: the recipe's and its files', and the colours
     /// of imported materials the recipe gives none.
     palette: Vec<PaletteColor>,
@@ -869,9 +919,6 @@ impl Assembler<'_> {
     /// Builds a whole recipe (the one on the command line, or one used
     /// as a part) in its own space, zero point where `origin` says.
     fn recipe_body(&mut self, recipe: &Recipe) -> Body {
-        // Only the outermost recipe is lined up with the model's zero:
-        // taken before the recipes it uses as parts are built.
-        let zero = self.zero.take();
         let scope = Scope::of(recipe);
         let nodes = self.list(&recipe.parts, &scope);
         let mut body = Body::assembly(nodes, None);
@@ -905,13 +952,9 @@ impl Assembler<'_> {
                 }
             },
         };
-        let shift = match zero {
-            Some(zero) => Some(zero),
-            None => origin.map(|origin| -origin.at),
-        };
-        if let Some(shift) = shift {
-            body.shift(shift);
-            body.zero = shift;
+        if let Some(origin) = origin {
+            body.shift(-origin.at);
+            body.zero = -origin.at;
         }
         body
     }

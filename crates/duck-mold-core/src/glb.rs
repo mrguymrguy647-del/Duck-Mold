@@ -1533,6 +1533,7 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         hit_setting: None,
         colliders: Vec::new(),
         without_collider: Vec::new(),
+        lod_setting: None,
         far: Vec::new(),
     })
 }

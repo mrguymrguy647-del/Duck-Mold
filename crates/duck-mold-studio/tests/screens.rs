@@ -3058,6 +3058,73 @@ fn with_nothing_selected_the_panel_has_the_models_hit_shapes() {
     screen.get_by_label("One capsule round the whole model, and the parts that say their own.");
 }
 
+// ---- far-away versions ------------------------------------------------------------
+
+#[test]
+fn view_far_version_shows_one_in_the_picture_and_says_its_triangles() {
+    let (recipe, mut screen) = robot_with("screens_far_view", "head");
+    let far = |screen: &Harness<'static, StudioApp>| screen.state().studio().unwrap().far;
+    assert_eq!(far(&screen), 0);
+    screen.get_by_label("View").click();
+    screen.run_steps(3);
+    screen.get_by_label("Far version").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("Far 2 (from 36.6 m)")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(far(&screen), 2);
+    screen.get_by_label("Showing Far 2: 276 triangles");
+    assert!(new_lines(&recipe).is_empty(), "looking changes nothing");
+    assert!(screen.state().studio().unwrap().far_drawn().is_some());
+    screen.get_by_label("View").click();
+    screen.run_steps(3);
+    screen.get_by_label("Far version").click();
+    screen.run_steps(3);
+    screen
+        .query_all_by_label_contains("The model itself")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    assert_eq!(far(&screen), 0);
+    assert!(screen.query_by_label_contains("Showing Far").is_none());
+}
+
+#[test]
+fn the_model_section_sets_far_versions_and_a_part_can_be_kept_whole() {
+    use egui::accesskit::Role;
+    let (recipe, mut screen) = robot_with("screens_far_model", "head");
+    let text = || std::fs::read_to_string(&recipe).unwrap();
+    // A part: kept whole, one edit.
+    screen.get_by_label("Keep whole when far").click();
+    screen.run_steps(3);
+    assert!(text().contains("lod = \"keep\""), "{}", text());
+    // The model: its line, and none takes them away.
+    screen.state_mut().studio_mut().unwrap().select(None);
+    screen.run_steps(2);
+    screen.get_by_label_contains("Far 1 from 14.6 m: 288 triangles.");
+    screen
+        .get_by_role_and_label(Role::ComboBox, "Far versions")
+        .click();
+    screen.run_steps(2);
+    screen.query_all_by_label("none").last().unwrap().click();
+    screen.run_steps(3);
+    assert!(!text().contains("lods ="), "{}", text());
+    screen.get_by_label("None: a game draws every triangle however far off it is.");
+    // With none, the part's box isn't offered and View > Far version is
+    // greyed.
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    screen.run_steps(2);
+    assert!(screen.query_by_label("Keep whole when far").is_none());
+}
+
 #[test]
 fn typing_a_hit_shapes_number_makes_it_the_parts_own_and_fit_again_forgets_it() {
     use egui::accesskit::Role;

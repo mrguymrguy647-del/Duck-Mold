@@ -59,6 +59,9 @@ pub enum Action {
     Shadow,
     /// Show the hit shapes, or stop.
     HitShapes,
+    /// Show the model itself (0) or one of its far-away versions (1, 2)
+    /// in the picture.
+    FarVersion(usize),
     /// Start a new recipe.
     NewModel,
     /// Open another file.
@@ -291,6 +294,41 @@ pub fn menus(
             "",
             Action::HitShapes,
         );
+        // The far-away versions, when the model has them.
+        let far: Vec<f64> = studio
+            .model()
+            .map(|model| model.far.iter().map(|far| far.distance).collect())
+            .unwrap_or_default();
+        ui.add_enabled_ui(!far.is_empty(), |ui| {
+            ui.menu_button("Far version", |ui| {
+                let mark = |on: bool, words: String| {
+                    if on { format!("{words}  (now)") } else { words }
+                };
+                pick(
+                    ui,
+                    true,
+                    &mark(studio.far == 0, "The model itself".to_owned()),
+                    "",
+                    Action::FarVersion(0),
+                );
+                for (at, distance) in far.iter().enumerate() {
+                    pick(
+                        ui,
+                        true,
+                        &mark(
+                            studio.far == at + 1,
+                            format!("Far {} (from {distance} m)", at + 1),
+                        ),
+                        "",
+                        Action::FarVersion(at + 1),
+                    );
+                }
+            })
+            .response
+            .on_disabled_hover_text(
+                "This model has no far-away versions: set \"Far versions\" in the Model section",
+            );
+        });
         ui.separator();
         pick(ui, any, "Hide", "H", Action::Hide);
         pick(

@@ -25,6 +25,9 @@ description = "A small robot, assembled from parts by their sockets."
 # Every part gets a hit shape fitted to it, so a game can tell which part
 # was hit: a box for a box, a capsule for a cylinder, a ball for a ball.
 colliders = "parts"
+# And two simpler versions a game draws when the robot is far off (14.6 m
+# and 36.6 m: 8 and 20 times its height). `duck-mold render --far 2`.
+lods = "auto"
 
 [palette]
 steel = "#8A939B"

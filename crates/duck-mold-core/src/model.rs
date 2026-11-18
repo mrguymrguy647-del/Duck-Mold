@@ -55,6 +55,9 @@ pub struct Model {
     /// the model has hit shapes (`colliders` is set): each part's path,
     /// and true if the part says so itself (`collider = "none"`).
     pub without_collider: Vec<(String, bool)>,
+    /// The recipe's `lods`: whether it asks for far-away versions, and
+    /// at what distances.
+    pub lod_setting: Option<crate::recipe::Lods>,
     /// Its far-away versions (`lods`), nearest first: simpler triangles
     /// for the same parts, joins, sockets and hit shapes. Empty for a
     /// model without them.

@@ -656,6 +656,7 @@ impl StudioApp {
                         | Action::Wireframe
                         | Action::Shadow
                         | Action::HitShapes
+                        | Action::FarVersion(_)
                         | Action::Open
                         | Action::NewModel
                         | Action::Export
@@ -681,6 +682,7 @@ impl StudioApp {
                 Action::Wireframe => studio.wire = !studio.wire,
                 Action::Shadow => studio.shadow = !studio.shadow,
                 Action::HitShapes => studio.hits = !studio.hits,
+                Action::FarVersion(far) => studio.far = far,
                 Action::NewModel => new_model = true,
                 Action::Open => open_another = true,
                 Action::Export => {
@@ -1817,6 +1819,20 @@ fn status_bar(ui: &mut egui::Ui, studio: &Studio, open: &mut bool) {
             });
         if button.clicked() {
             *open = !*open;
+        }
+        // The far-away version the picture shows, and how many
+        // triangles it has.
+        if let Some(far) = studio.far_drawn() {
+            ui.separator();
+            ui.label(
+                RichText::new(format!(
+                    "Showing Far {}: {} triangles",
+                    studio.far,
+                    far.triangle_count()
+                ))
+                .color(theme::LOOK),
+            )
+            .on_hover_text("View > Far version > The model itself shows the model again");
         }
         ui.separator();
         ui.add(egui::Label::new(RichText::new(studio.status()).weak()).truncate());

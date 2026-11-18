@@ -254,6 +254,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         hit_setting: None,
         colliders: Vec::new(),
         without_collider: Vec::new(),
+        lod_setting: None,
         far: Vec::new(),
     }
 }

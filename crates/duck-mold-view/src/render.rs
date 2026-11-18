@@ -442,6 +442,15 @@ pub fn render_file(
         built.model = tools::far_version(&built.model, far, &built.source)?;
     }
     let mut inspection = inspect(&built.model, &built.source, built.warnings);
+    // A far-away version's simpler shapes can leave a gap of millimetres
+    // between parts that touch in the model (a nose on a rounder beard):
+    // invisible that far off, and no mistake of the recipe's. It is still
+    // listed in `floating`.
+    if far.is_some() {
+        inspection
+            .warnings
+            .retain(|warning| warning.code != Code::Floating);
+    }
     // In a pose, the picture and the report are of the model as the pose
     // puts it.
     let model = match pose {

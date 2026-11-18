@@ -11,6 +11,7 @@
 pub mod actions;
 pub mod app;
 pub mod crash;
+pub mod far;
 pub mod gallery;
 pub mod hits;
 pub mod icons;

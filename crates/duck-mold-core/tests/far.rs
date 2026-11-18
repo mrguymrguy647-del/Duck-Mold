@@ -271,7 +271,7 @@ fn keep_on_an_assembly_keeps_everything_inside_it() {
 }
 
 #[test]
-fn every_version_keeps_every_parts_colours_and_joins() {
+fn every_version_keeps_every_parts_place_colours_joins_and_hit_shapes() {
     let model = built(&FIGURE.replace("lods = \"auto\"", "lods = \"auto\"\ncolliders = \"parts\""));
     for far in &model.far {
         let paths = |model: &Model| -> Vec<String> {
@@ -282,16 +282,18 @@ fn every_version_keeps_every_parts_colours_and_joins() {
                 .collect()
         };
         assert_eq!(paths(&far.model), paths(&model));
+        // Only triangles change: every part is where the model has it,
+        // even one joined to a simpler sphere (which would otherwise sit
+        // a little further in) or to a box without its bevel.
         for (part, near) in far.model.all_parts().iter().zip(model.all_parts()) {
             assert_eq!(part.parent, near.parent, "{}", part.path);
+            assert_eq!(part.pivot, near.pivot, "{}", part.path);
+            assert_eq!(part.place, near.place, "{}", part.path);
+            assert_eq!(part.sockets, near.sockets, "{}", part.path);
             assert_eq!(part.limits, near.limits);
-            // A part joined to a simpler sphere sits a little further
-            // in, on its flatter side (here 1 cm in Far 1, 3 cm in Far
-            // 2: a pixel at those distances). The `.glb` keeps the full
-            // model's joins, and the far triangles where they are here.
-            let moved = (part.pivot - near.pivot).length();
-            assert!(moved < 0.04, "{} moved {moved}", part.path);
         }
+        assert_eq!(far.model.colliders, model.colliders);
+        assert_eq!(far.model.zero, model.zero);
         // The colours each part uses.
         for (part, near) in far.model.leaves().iter().zip(model.leaves()) {
             let colors = |model: &Model, faces: &std::ops::Range<usize>| {

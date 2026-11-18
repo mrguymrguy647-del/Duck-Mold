@@ -966,6 +966,18 @@
       "words": "box 0.13 x 0.07 x 0.22"
     }
   ],
+  "far_versions": [
+    {
+      "name": "Far 1",
+      "distance": 10.2,
+      "triangles": 228
+    },
+    {
+      "name": "Far 2",
+      "distance": 25.4,
+      "triangles": 216
+    }
+  ],
   "poses": [
     "step_left",
     "step_right",

@@ -31,6 +31,7 @@ pub use sockets::Clicked;
 pub use timeline::{KEY_STEP, KeyMark};
 
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::time::SystemTime;
 
 use duck_mold_core::edit::{self, Edit, Facts};
@@ -119,6 +120,13 @@ pub struct Studio {
     /// Whether the model's hit shapes are outlined over it (the Hits
     /// switch), as `render --colliders` draws them.
     pub hits: bool,
+    /// Which version of the model the picture shows (View > Far
+    /// version): 0 for the model itself, 1 or 2 for a far-away version.
+    /// Only the picture changes, and only outside Pose mode.
+    pub far: usize,
+    /// That far-away version as a game draws it, kept until the model
+    /// is built again: the build it is of, which version, and it.
+    far_shown: std::cell::RefCell<Option<(usize, usize, Rc<Model>)>>,
     /// The part that is selected, by path. When several are, this is
     /// the one selected last: the one the panel shows.
     pub(crate) selected: Option<String>,
@@ -215,6 +223,8 @@ impl Studio {
             wire: false,
             shadow: true,
             hits: false,
+            far: 0,
+            far_shown: std::cell::RefCell::new(None),
             selected: None,
             also: Vec::new(),
             hidden: Vec::new(),
@@ -975,6 +985,28 @@ impl Studio {
             .on_screen(point + self.offset(), self.view.0, self.view.1)
     }
 
+    /// The far-away version the picture shows, if View > Far version
+    /// asks for one and the model has it: not while a handle is held or
+    /// in Pose mode, which show the model itself.
+    pub fn far_drawn(&self) -> Option<Rc<Model>> {
+        if self.far == 0 || self.preview.is_some() || self.posed_model().is_some() {
+            return None;
+        }
+        let model = self.model()?;
+        let version = model.far.get(self.far - 1)?;
+        let mut kept = self.far_shown.borrow_mut();
+        match kept.as_ref() {
+            Some((builds, far, drawn)) if *builds == self.builds && *far == self.far => {
+                Some(drawn.clone())
+            }
+            _ => {
+                let drawn = Rc::new(version.drawn());
+                *kept = Some((self.builds, self.far, drawn.clone()));
+                Some(drawn)
+            }
+        }
+    }
+
     /// The model as the viewport shows it: what a drag would build, while
     /// a handle is held, and otherwise what the file builds.
     pub fn shown_model(&self) -> Option<&Model> {
@@ -1079,7 +1111,11 @@ impl Studio {
             }
             None => None,
         };
-        let model = self.shown_model();
+        let far = self.far_drawn();
+        let model = match &far {
+            Some(far) => Some(far.as_ref()),
+            None => self.shown_model(),
+        };
         // The selected parts as they are in what is shown.
         // (In Face mode the box isn't lit whole: its faces are.)
         let selected: Vec<&Part> = self
@@ -1107,8 +1143,8 @@ impl Studio {
         // for it (its shadow) stays until then, through a drag too (the
         // shadow catches up when the part is let go). A pose is worked
         // out afresh.
-        let model_key =
-            (self.preview.is_some() || self.posed_model().is_none()).then_some(self.builds as u64);
+        let model_key = (self.preview.is_some() || self.posed_model().is_none())
+            .then_some(self.builds as u64 * 4 + far.as_ref().map_or(0, |_| self.far as u64));
         viewport::draw_kept(
             &mut self.kept.borrow_mut(),
             model_key,

@@ -731,6 +731,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
         if let Some(edit) = crate::hits::model_line(ui, studio) {
             draft.failed = studio.apply(&edit).err();
         }
+        if let Some(edit) = crate::far::model_line(ui, studio) {
+            draft.failed = studio.apply(&edit).err();
+        }
         if let Some(why) = &draft.failed {
             ui.colored_label(theme::BAD, why);
         }
@@ -1447,6 +1450,11 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
         // ---- its hit shape
         if !studio.is_shaping()
             && let Some(edit) = crate::hits::part_section(ui, studio, &path, &mut draft.hits)
+        {
+            edits.push(edit);
+        }
+        if !studio.is_shaping()
+            && let Some(edit) = crate::far::part_line(ui, studio, &path)
         {
             edits.push(edit);
         }

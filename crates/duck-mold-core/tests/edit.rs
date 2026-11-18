@@ -3025,6 +3025,11 @@ fn every_kind_of_edit_has_a_name() {
             part: String::new(),
             to: duck_mold_core::edit::ColliderTo::None,
         },
+        Edit::SetLods { lods: None },
+        Edit::SetLod {
+            part: String::new(),
+            keep: true,
+        },
         Edit::SetEvent {
             animation: String::new(),
             key: 1,

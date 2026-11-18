@@ -737,6 +737,16 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "hits-own"));
     }
 
+    // A far-away version: View > Far version > Far 2, nothing selected,
+    // with the model's line and the count in the status bar.
+    {
+        let mut screen = robot();
+        screen.state_mut().studio_mut().unwrap().far = 2;
+        screen.state_mut().studio_mut().unwrap().select(None);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "far"));
+    }
+
     // Every icon, at three sizes, on the dark look and on the light.
     {
         use duck_mold_studio::icons::{self, Icon};

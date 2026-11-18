@@ -10,6 +10,9 @@
 version = 0
 name = "temple"
 description = "A small temple: platforms, columns and a pyramid roof."
+# Two simpler versions for a game to draw when it is far off: rounder
+# shapes with fewer sides, no bevels, the smallest parts left out.
+lods = "auto"
 
 [palette]
 stone = "#C9BFA5"

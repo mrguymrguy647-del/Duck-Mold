@@ -172,6 +172,32 @@ fn every_example_with_hit_shapes_renders_them_to_its_golden_picture() {
     }
 }
 
+/// The examples with far-away versions (`lods = "auto"`): each version
+/// is drawn to a golden picture (`render --far`).
+const WITH_FAR_VERSIONS: [&str; 4] = ["temple", "barn", "robot", "gnome"];
+
+#[test]
+fn every_far_version_renders_to_its_golden_picture() {
+    let scratch = scratch("golden_far");
+    for name in WITH_FAR_VERSIONS {
+        for far in ["1", "2"] {
+            let output = scratch.join(format!("{name}.far{far}.png"));
+            duck_mold(&[
+                "render",
+                &format!("examples/{name}.toml"),
+                "--far",
+                far,
+                "-o",
+                output.to_str().unwrap(),
+            ]);
+            check(
+                &format!("{name}.far{far}.png"),
+                &std::fs::read(output).unwrap(),
+            );
+        }
+    }
+}
+
 #[test]
 fn every_example_inspects_to_its_golden_report() {
     for name in EXAMPLES {

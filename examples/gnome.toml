@@ -33,6 +33,7 @@ version = 0
 name = "gnome"
 description = "A garden gnome that walks with the robot's walk."
 colliders = "parts"   # a hit shape fitted to every part
+lods = "auto"         # and two simpler versions for far away
 
 [palette]
 coat  = "#3E6FB0"
