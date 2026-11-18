@@ -5397,6 +5397,34 @@ Far 2 at 20 times: 15 m and 37 m for the robot.
   with the triangle count in the status bar. The Model section has the line
   and its setting.
 
+*As built (step 8):* as above, with these differences.
+
+- **Only triangles change, exactly.** A far version is the model itself
+  with each part's triangles swapped for the simpler ones, placed where
+  the model places that part. Built naively, a part joined to a simpler
+  shape moved: 1 to 3 cm in on a rounder sphere, 6 cm out where the
+  temple's platform lost its bevel. Now every pivot, socket and hit
+  shape is the model's own.
+- **The house has no `lods`.** It is all boxes and shaped boxes, so its
+  far versions came out the same as itself (120 triangles each): four
+  examples have them (temple, barn, robot, gnome), not five.
+- **Nothing is left out** of any example's Far 2: their smallest parts
+  are just over 4% of their size. The 4% rule is tested on a figure in
+  `tests/far.rs`.
+- **Duck Forge poses every version as the model moves**, not only the
+  one drawn: `draw_mesh` takes `&self` so a game calls it from
+  `draw()`, and posing only one would need a lock inside
+  `AnimatedModel`. The far versions have a half and a quarter of the
+  corners. Duck Forge's general glTF reader now draws only the scene,
+  as glTF says, so the far objects don't show there.
+- **`render --far` leaves out "floats" warnings**: simpler shapes can
+  open a gap of millimetres between parts that touch in the model (the
+  gnome's nose on its rounder beard), invisible that far off. The gap
+  is still listed in `--json`'s `floating`.
+- The Khronos validator: 0 errors, 0 warnings; "info" lines of the two
+  kinds expected (`UNSUPPORTED_EXTENSION`, `UNUSED_OBJECT`), one per far
+  object. Files without `lods` stay byte for byte as before.
+
 ### 5. Speed
 
 See "Speed" above, under the audit's fixes.

@@ -497,7 +497,7 @@ As JSON (`"ok": false`, with `errors` and `warnings`), each is:
 | `duplicate_name` | Two parts, or two sockets, with one name. |
 | `conflict` | Two fields that can't go together (`attach` with `move`; two sources of shape). The message says which to remove. |
 | `cycle` | A part that uses itself, or parts attached in a ring. The message shows the chain. |
-| `reserved` | `bones`, `colliders` and `lods` are kept for a later phase. Remove them. |
+| `reserved` | `bones` is kept for a later phase. Remove it. |
 | `unsupported` | Not available: see-through colours, compressed glTF. |
 | `file_not_found` | A file the recipe names can't be read. Paths start from the recipe's folder. |
 | `bad_mesh` | A mistake inside a mesh file (an `.obj`'s with its line). |
@@ -1078,6 +1078,37 @@ duck-mold inspect robot.toml --ray 0,1.4,5 --toward 0,0,-1   # what a click ther
 - Give tiny parts (eyes, a buckle) `none`: a hit on them is rarely
   wanted, and the part behind is named instead.
 
+### Far-away versions
+
+A model a game shows far off (a building, a crowd of characters) should
+carry simpler versions of itself. One line at the top does it:
+
+```toml
+lods = "auto"     # Far 1 from 8 times the largest side, Far 2 from 20 times
+lods = [12, 30]   # or at these distances, in metres
+```
+
+```sh
+duck-mold edit robot.toml set-lods auto        # the same, as an edit
+duck-mold edit robot.toml set-lod left_eye keep # never simplified or left out
+duck-mold inspect robot.toml                   # "far versions 2  (Far 1 at 14.6 m: 288 triangles; ...)"
+duck-mold render robot.toml --far 2            # robot.far2.png: what a game draws far off
+```
+
+- Far 1 halves the segments of round shapes and gives bevels one step;
+  Far 2 quarters them, takes bevels away, makes stairs one sloped block,
+  and leaves out parts smaller than 4% of the model's largest side.
+- Only triangles change: every part stays where it is, with its
+  colours, joins, sockets and hit shapes.
+- Check `inspect`'s triangle counts: a model of boxes has nothing to
+  simplify, and then `lods` only makes the file bigger. Take it away
+  (`set-lods none`).
+- `lod = "keep"` on small parts that must still show far off (eyes, a
+  badge). On an assembly it keeps everything inside.
+- `duck-mold new` starts a recipe with `lods = "auto"`.
+- `--json` has `far_versions`: each one's `name`, `distance`,
+  `triangles` and the `left_out` parts.
+
 ### In a game
 
 `duck-mold export` writes the animations and the poses into the `.glb`
@@ -1089,8 +1120,11 @@ let mut robot = AnimatedModel::load("assets/robot.glb")?; // duckforge::glb::Ani
 robot.play("idle");                                       // by the animation's name
 if walking { robot.play("walk") } else { robot.play("idle") } // every frame is fine
 robot.update(ctx.dt());
-canvas.draw_mesh(robot.mesh(), &Transform::at(position), &camera);
+robot.draw_mesh(canvas, &Transform::at(position), &camera); // the version that suits the distance
 ```
+
+(`canvas.draw_mesh(robot.mesh(), ...)` still works: it always draws the
+model itself.)
 
 `play_once`, `play_looping`, `stop`, `resume`, `rest`, `set_speed`,
 `set_pose("wave")`, `turn("head", vec3(0.0, 30.0, 0.0))` and
@@ -1150,8 +1184,8 @@ That is safe:
 Plan around these; don't look for them: no textures or UVs, no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
-bones, colliders or LODs (`bones`, `colliders` and `lods` are reserved
-names; parts turn on their joins instead of bending on bones). There is
+bones (`bones` is a reserved name; parts turn on their joins instead of
+bending on bones). There is
 a window, Duck Mold Studio, but it is for people: everything it does,
 you do with `edit`.
 

@@ -20,7 +20,7 @@ Duck Forge its own functions below them (`GlbModel::load`, `to_mesh`,
 `part`, `socket`, `GlbPart::range`, `GlbSocket::position` and
 `direction`, `Mesh::load_glb`, `AnimatedModel`, and the hit tests in
 `src/hits.rs`). The first marker says the reader's version; this note
-describes **version 7**.
+describes **version 8**.
 
 To change the reader: change it here, raise the version in both marker
 lines, run Duck Mold's tests, then copy the lines between the markers
@@ -40,6 +40,7 @@ diff <(sed -n '/^\/\/ ==== Duck Mold/,/^\/\/ ==== end of Duck Mold/p' Duck-Mold/
 | 5 | **Animations and poses** (below): `GlbModel.animations` and `poses`, each join's `turns_in`, and what it takes to play them: `GlbAnimation::at` (how an animation has every join at a time), `GlbPlace` (how a join stands, and `towards`, a place between two), `GlbModel::stands` and `posed` (where that puts every corner and socket) and `turn_by` (a join's turn from degrees). Duck Mold's Phase 5, step 5. |
 | 7 | **Events** (below): `GlbAnimation.events`, the names an animation's keys mark (`footstep`) with their times, each a `GlbEvent { name, at }`. Duck Mold's Phase 6, step 5. |
 | 6 | **Hit shapes** (below): `GlbModel.colliders`, a box, a ball or a capsule round each part that has one, each with the join that carries it, and `GlbHitShape::moved` (where a join's stand puts it). Duck Mold's Phase 6, step 2. |
+| 8 | **Far-away versions** (below): `GlbModel.far`, each a `GlbFar { distance, model }` whose model is the same model with fewer triangles (the same parts, joins, sockets, animations and hit shapes; its own triangle ranges and vertex ranges). Read from glTF's `MSFT_lod`. Duck Mold's Phase 7a, step 8. |
 
 **Which Duck Forge reads which file.** The file says how it is laid out
 in `extras.duck_mold.version`: 0 for one object with one list of
@@ -51,7 +52,8 @@ change that number: they are added beside the model, so reader version
 4 loads a file that has them as the same model, standing still. Nor did
 hit shapes: a reader from before version 6 loads a file that has them,
 without them. Events are the same: a reader from before version 7 plays
-the animations and never hears them.
+the animations and never hears them. And far-away versions: a reader
+from before version 8 draws the model itself at every distance.
 
 ## What a Duck Mold `.glb` is
 
@@ -397,3 +399,37 @@ them `#B07A3F` and 4 `#8A5A2B`.
 model **faces forward (+z)**, so its `front` is +z. The cube's comments
 (and `Mesh::block`'s) now say `near (-z)` and `far (+z)`, and Duck
 Forge's guide, section 11, says a model faces +z.
+
+## Far-away versions (reader version 8)
+
+A recipe with `lods = "auto"` (or two distances) gives the model two
+simpler versions. In the file:
+
+- Every part object with triangles has `"extensions": {"MSFT_lod":
+  {"ids": [far1, far2]}}`: two more objects, after the tree's, in no
+  scene and nobody's children, named `"<part> (far 1)"` and `"<part>
+  (far 2)"`. Each holds that part's simpler triangles in a mesh of its
+  own, measured from the same pivot as the part's own; a part Far 2
+  leaves out has an object with no mesh. An assembly has none.
+- `"extensionsUsed": ["MSFT_lod"]` at the top (not `extensionsRequired`:
+  a program that doesn't know it draws the model itself).
+- `extras.duck_mold.lods` is `[d1, d2]`: from how far away, in metres,
+  each is drawn. `extras.duck_mold.version` stays 1.
+- The Khronos glTF validator reports no errors or warnings; only "info"
+  lines, that it can't check `MSFT_lod` and that the far objects are in
+  no scene. A file without `lods` has none of this, byte for byte as
+  before.
+
+The reader gives each far version as a whole `GlbModel`: the part
+objects' far meshes, read in the order of `parts` like the model's own,
+with the triangle ranges, assembly ranges and join vertex ranges worked
+out again. It refuses distances that aren't numbers each further than
+the last, and a part with triangles whose `MSFT_lod` doesn't name an
+object outside the tree for each version.
+
+In Duck Forge, `AnimatedModel::draw_mesh(canvas, &place, &camera)` draws
+the version that suits the camera's distance, and `mesh_for` and
+`version_at` say which. The general glTF reader (`GltfModel`) draws only
+what the scene holds, so it reads a Duck Mold file with far versions as
+the model itself.
+

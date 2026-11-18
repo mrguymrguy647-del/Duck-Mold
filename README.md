@@ -602,10 +602,10 @@ only: nothing can be changed there.
 
 | Command | What it does |
 |---|---|
-| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. `--ray x,y,z --toward x,y,z` says what a game's click or shot along that ray would hit (with `--pose`, or `--animation` and `--at`, as the model stands then). |
+| `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. A model with far-away versions gets a `far versions` line. `--ray x,y,z --toward x,y,z` says what a game's click or shot along that ray would hit (with `--pose`, or `--animation` and `--at`, as the model stands then). |
 | `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
-| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. |
-| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
+| `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. `--far 1` or `--far 2` draws a far-away version, as `<file>.far1.png`. |
+| `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`, `set-lods`, `set-lod`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints the same report as `inspect`. `--dry-run` writes nothing. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
@@ -763,6 +763,34 @@ shapes** list is the model's line: none, each part, or one capsule,
 box or ball round the whole model.
 
 ![The Studio with Hits on and the head's hit shape in the panel](crates/duck-mold-studio/tests/screens/hits.png)
+
+## Far-away versions, for games
+
+A building on the horizon or a crowd of characters is a few pixels
+high: the many sides of its round shapes are wasted there. One line
+gives a model two simpler versions that a game draws when it is far
+off:
+
+```toml
+lods = "auto"     # Far 1 from 8 times the model's largest side, Far 2 from 20 times
+```
+
+Far 1 has half the sides on round shapes and plainer bevels; Far 2 a
+quarter, square edges, and no parts smaller than 4% of the model. Only
+triangles change: every part stays where it is, with its colours,
+joins and hit shapes. `lod = "keep"` on a part keeps it whole (a
+character's eyes). `duck-mold inspect` says each version's triangles,
+`render --far 2` draws one, and in the Studio View > Far version shows
+it. The temple, barn, robot and gnome examples have them (the house
+doesn't: it is all boxes, so there is nothing to simplify), and
+`duck-mold new` starts every recipe with `lods = "auto"`. In Duck Forge,
+`robot.draw_mesh(canvas, &place, &camera)` picks the version by
+distance.
+
+| The robot | Far 1 (from 14.6 m) | Far 2 (from 36.6 m) |
+|---|---|---|
+| ![The robot](tests/golden/robot.png) | ![Far 1](tests/golden/robot.far1.png) | ![Far 2](tests/golden/robot.far2.png) |
+| 384 triangles | 288 | 276 |
 
 ## Using a model in Duck Forge
 
