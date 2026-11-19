@@ -22,6 +22,10 @@ duck-mold inspect lamp.toml --json    # check it, build it in memory, measure it
 ```
 
 ```bash
+duck-mold check lamp.toml --json      # everything at once: problems worst first, each with its fix
+```
+
+```bash
 duck-mold render lamp.toml            # draw it: lamp.png, four views on one sheet
 ```
 
@@ -45,8 +49,10 @@ duck-mold export lamp.toml            # write lamp.glb next to the recipe
 ```
 
 1. Write or edit the recipe.
-2. Run `inspect --json`. If `"ok"` is false, fix every entry of `"errors"`
-   (each names a line, a field and usually the fix) and run it again.
+2. Run `check --json` (or `inspect --json`). If `"ok"` is false, fix
+   every error (each names a line, a field and usually the fix) and run
+   it again. `check` also gives each problem the command that fixes it
+   (section 7).
 3. Read the report: `size`, `triangles`, `ground`, `floating`,
    `overlapping`, `warnings`. Compare them with what you meant (section 7).
 4. If you can look at images, run `render` and look at the PNG: is each
@@ -76,7 +82,35 @@ is a change you made.
 
 ## 2. Set up (once)
 
-You need Rust (`cargo`). From the repository folder:
+If `duck-mold` is already there (`duck-mold --version` answers), skip
+this. Otherwise, on Linux or a Mac, one line installs it in
+`~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mrguymrguy647-del/Duck-Mold/main/install.sh | sh
+```
+
+Or take the program for your machine from the releases page:
+`duck-mold-<version>-linux-x86_64`, `-linux-arm64` or `-macos`. Each is
+one file that needs nothing else, and runs with no network:
+`chmod +x` it and run it. On Windows, `DuckMoldSetup-<version>.exe`
+installs it. With Rust: `cargo install --locked --git
+https://github.com/mrguymrguy647-del/Duck-Mold duck-mold-cli`.
+
+**In ChatGPT** (or any sandbox that runs programs but has no internet):
+the person uploads `duck-mold-<version>-linux-x86_64` and their recipe.
+Rename the program to `duck-mold`, run `chmod +x duck-mold`, then
+`./duck-mold guide`, and work from there with `./duck-mold`. Give the
+person the recipe and the `.glb` back as files to download.
+
+**As tools (MCP):** in an app that speaks MCP, `duck-mold mcp` gives
+these commands as tools with the same arguments (`guide`, `inspect`,
+`check`, `edit`, `render`, `export`, `new`); `render` returns the
+picture itself. Claude Code: `claude mcp add duck-mold -- duck-mold
+mcp`. `--folder <folder>` says where file names start. The README says
+how for Claude Desktop and Codex.
+
+From the source, you need Rust (`cargo`). From the repository folder:
 
 ```bash
 cargo build --release
@@ -504,6 +538,32 @@ Two parts *touch* when their surfaces come within a millimetre. The
 count of parts in the summary is of parts that have a shape of their own
 (not assemblies). `depth` is measured at corners, edge middles and face
 middles, so it is a good estimate rather than an exact figure.
+
+### `check`: every problem, worst first, with its fix
+
+`duck-mold check lamp.toml --json` does in one call what `inspect`,
+`inspect --animation` for each animation, and `render` do, and gives one
+list, `problems`, worst first. Each problem is an error or warning as
+above, plus:
+
+- `rank`: `error` (nothing is built until it is fixed), `warning` (it
+  builds, but a game would see it: a part in the air, a loop that
+  jumps, a broken limit) or `small` (a colour nobody uses, a hidden
+  part).
+- `fix`: the command that surely fixes it, when there is one:
+  `"duck-mold edit lamp.toml remove-color rust"`. Run it as it is.
+- `advice`: when no one command surely fixes it, what to do, in words.
+  It never guesses a fix.
+
+Besides `problems`: `errors`, `warnings` and `small` count them; `next`
+says what to do next; `picture` says where the four-view sheet went
+(`--no-render` draws none); `animations` lists each animation looked at;
+`inspection` is the whole `inspect` report. The exit code is 1 when
+there are errors. `inspect` and `edit` give `fix` on their warnings too.
+
+`duck-mold schema` prints the recipe format as a JSON Schema
+(`docs/recipe.schema.json`), to check a recipe's fields before running
+it. `check` finds much more: names that must exist, sizes that fit.
 
 ## 8. Errors and warnings
 
@@ -1392,6 +1452,8 @@ you do with `edit`.
   Read `robot.toml` for nested parts, `snowman.toml` and `duck.toml` for
   sockets on curved surfaces, and `desk.toml` for parts from files.
 - `docs/recipe-format.md`: every field, default and range.
+- `docs/recipe.schema.json` (`duck-mold schema`): the same, as a JSON
+  Schema.
 - `docs/forge-handoff.md`: what is in the `.glb`, and how Duck Forge
   reads it.
 - `DESIGN.md`: why each thing is the way it is.

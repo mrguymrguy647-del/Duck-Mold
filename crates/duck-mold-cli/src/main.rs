@@ -404,7 +404,12 @@ enum Command {
     /// and new, each with the same arguments as its command. Claude Code:
     /// `claude mcp add duck-mold -- duck-mold mcp`. The README says how
     /// for Claude Desktop and Codex. Nothing goes over the network.
-    Mcp,
+    Mcp {
+        /// The folder file names start from. By default, the folder the
+        /// app starts it in (Claude Desktop's is not one you chose).
+        #[arg(long, value_name = "FOLDER")]
+        folder: Option<PathBuf>,
+    },
     /// Print the recipe format as a JSON Schema (draft 2020-12).
     ///
     /// For editors and agents that check a recipe before running it: it
@@ -904,7 +909,16 @@ fn main() -> ExitCode {
                 Err(failure) => fail(&failure, json),
             }
         }
-        Command::Mcp => {
+        Command::Mcp { folder } => {
+            if let Some(folder) = folder
+                && let Err(error) = std::env::set_current_dir(&folder)
+            {
+                eprintln!(
+                    "error: can't work in the folder \"{}\": {error}",
+                    folder.display()
+                );
+                return ExitCode::from(2);
+            }
             let program = match std::env::current_exe() {
                 Ok(program) => program,
                 Err(error) => {

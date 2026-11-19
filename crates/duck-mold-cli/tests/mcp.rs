@@ -309,3 +309,43 @@ fn decode_base64(text: &str) -> Vec<u8> {
     }
     out
 }
+
+#[test]
+fn folder_says_where_file_names_start() {
+    let models = Path::new(env!("CARGO_TARGET_TMPDIR")).join("mcp-folder-models");
+    let _ = std::fs::remove_dir_all(&models);
+    std::fs::create_dir_all(&models).unwrap();
+    // Started somewhere else, as Claude Desktop starts it.
+    let mut child = Command::new(env!("CARGO_BIN_EXE_duck-mold"))
+        .args(["mcp", "--folder"])
+        .arg(&models)
+        .current_dir(std::env::temp_dir())
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let mut input = child.stdin.take().unwrap();
+    let mut output = BufReader::new(child.stdout.take().unwrap());
+    writeln!(
+        input,
+        "{}",
+        json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": { "name": "new", "arguments": { "recipe": "lamp.toml" } } })
+    )
+    .unwrap();
+    input.flush().unwrap();
+    let mut line = String::new();
+    output.read_line(&mut line).unwrap();
+    let answer: Value = serde_json::from_str(&line).unwrap();
+    assert_eq!(answer["result"]["isError"], false, "{answer}");
+    assert!(models.join("lamp.toml").is_file());
+    drop(input);
+    assert!(child.wait().unwrap().success());
+
+    // A folder that isn't there: said, and exit code 2.
+    let output = Command::new(env!("CARGO_BIN_EXE_duck-mold"))
+        .args(["mcp", "--folder", "/no/such/folder/here"])
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(2));
+}
