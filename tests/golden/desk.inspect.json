@@ -263,7 +263,8 @@
       "line": 70,
       "column": 1,
       "path": "parts[5]",
-      "message": "the materials \"shade\" and \"bulb\" of \"examples/parts/lamp.gltf\" have no colour in the recipe, so they keep the file's own, added to the palette under their names: shade #2E7D6B, bulb #FFE9A8. To choose others, give the part a \"color\", or \"colors\" by material name"
+      "message": "the materials \"shade\" and \"bulb\" of \"examples/parts/lamp.gltf\" have no colour in the recipe, so they keep the file's own, added to the palette under their names: shade #2E7D6B, bulb #FFE9A8. To choose others, give the part a \"color\", or \"colors\" by material name",
+      "part": "lamp"
     }
   ],
   "errors": []

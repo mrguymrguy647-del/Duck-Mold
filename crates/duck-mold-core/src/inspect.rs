@@ -861,6 +861,7 @@ pub struct Overlap {
 /// ones already found while reading and building it; the report adds its
 /// own (floating parts, hidden parts, a model off the ground).
 pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspection {
+    name_parts(model, &mut warnings);
     let bounds = model.bounds().unwrap_or(Bounds {
         min: Vec3::ZERO,
         max: Vec3::ZERO,
@@ -1036,9 +1037,34 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
 /// A warning that points at the recipe line of a part, when the part
 /// came from a recipe.
 fn warning_at(part: Option<&&Part>, source: &str, code: Code, message: String) -> Issue {
-    match part {
+    let issue = match part {
         Some(part) if !part.loc.file.is_empty() => part.loc.warning(code, message),
         _ => Issue::warning(code, "", message).in_file(source),
+    };
+    match part {
+        Some(part) => issue.on_part(part.path.clone()),
+        None => issue,
+    }
+}
+
+/// Names the part each warning is about, where the warning doesn't say
+/// and it is written at the place in the recipe one part, and only one,
+/// comes from (a part used from a definition twice comes from one place,
+/// so its warnings name neither).
+pub fn name_parts(model: &Model, warnings: &mut [Issue]) {
+    let parts = model.all_parts();
+    for warning in warnings
+        .iter_mut()
+        .filter(|w| w.part.is_none() && w.line.is_some())
+    {
+        let mut from_here = parts.iter().filter(|part| {
+            part.loc.file == warning.file
+                && Some(part.loc.pos.line) == warning.line
+                && part.loc.path == warning.path
+        });
+        if let (Some(part), None) = (from_here.next(), from_here.next()) {
+            warning.part = Some(part.path.clone());
+        }
     }
 }
 

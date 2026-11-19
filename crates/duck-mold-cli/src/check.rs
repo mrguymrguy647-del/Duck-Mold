@@ -172,7 +172,8 @@ pub fn check_file(path: &Path, options: &Options) -> Result<Checked, Failure> {
                         seconds(broken.at)
                     ),
                 )
-                .in_file(&source),
+                .in_file(&source)
+                .on_part(broken.part.clone()),
             );
         }
         for float in looked.floating.iter().filter(|float| float.new) {
@@ -189,7 +190,8 @@ pub fn check_file(path: &Path, options: &Options) -> Result<Checked, Failure> {
                         float.nearest
                     ),
                 )
-                .in_file(&source),
+                .in_file(&source)
+                .on_part(float.part.clone()),
             );
         }
         animations.push(AnimationCheck {
@@ -304,31 +306,36 @@ fn advice(issue: &Issue, source: &str) -> Option<String> {
     if issue.is_error() {
         return None;
     }
+    // The part it is about, by the path `edit` takes, when it is known.
+    let part = issue
+        .part
+        .as_deref()
+        .map_or_else(|| "<part>".to_owned(), shell_word);
     let words = match issue.code {
         Code::Floating if issue.path.starts_with("animations.") => format!(
-            "the pose at that time moves it away: change that pose (`duck-mold edit {file} set-pose ...`) or the part's limits (`set-limits`)"
+            "the pose at that time moves it away: change that pose (`duck-mold edit {file} set-pose <pose> {part} ...`) or the part's limits (`duck-mold edit {file} set-limits {part} ...`)"
         ),
         Code::Floating => format!(
-            "join it to the part it should touch: `duck-mold edit {file} join <part> --to <other>.<socket>` (or `add` it with --to); or move it until it touches. Render to see where it is"
+            "join it to the part it should touch: `duck-mold edit {file} join {part} --to <other>.<socket>`; or move it until it touches. Render to see where it is"
         ),
         Code::Hidden => format!(
-            "if nobody is meant to see it, `duck-mold edit {file} remove <part>`; otherwise move it out or make it bigger"
+            "if nobody is meant to see it, `duck-mold edit {file} remove {part}`; otherwise move it out or make it bigger"
         ),
         Code::OffGround => format!(
             "a model stands on y = 0, with its zero point at its bottom: look at its `origin` and at any `move` that lifts or sinks its lowest part (`duck-mold render {file}` shows it)"
         ),
         Code::LimitBroken => format!(
-            "turn the part less in that pose (`duck-mold edit {file} set-pose ...`), or let it turn further (`duck-mold edit {file} set-limits ...`)"
+            "turn the part less in that pose (`duck-mold edit {file} set-pose <pose> {part} ...`), or let it turn further (`duck-mold edit {file} set-limits {part} ...`)"
         ),
         Code::LoopJumps => format!(
             "add a last key with the first key's pose, at the animation's end: `duck-mold edit {file} add-key <animation> <seconds> <pose>`"
         ),
         Code::NoColor if rank(issue) == Rank::Small => return None,
         Code::NoColor => format!(
-            "give the part a colour from the palette: `duck-mold edit {file} set <part> --color <colour>`"
+            "give the part a colour from the palette: `duck-mold edit {file} set {part} --color <colour>`"
         ),
         Code::HitShape => format!(
-            "change the part's own hit-shape numbers, or let it be fitted again: `duck-mold edit {file} set-collider <part> fitted`"
+            "change the part's own hit-shape numbers, or let it be fitted again: `duck-mold edit {file} set-collider {part} fitted`"
         ),
         Code::Unused if issue.message.contains("is defined but never used") => format!(
             "use it (`duck-mold edit {file} add <name> --use <definition> --to <part>.<socket>`), or delete its [define] section if it isn't needed"

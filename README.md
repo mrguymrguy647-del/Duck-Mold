@@ -1010,7 +1010,8 @@ agents that work on Duck Mold's own code.
 `duck-mold mcp` makes Duck Mold a set of tools for any app that speaks
 MCP, the Model Context Protocol: `guide`, `inspect`, `check`, `edit`,
 `render` (which hands the picture itself to the AI), `export` and `new`,
-each with the same arguments as its command. The app starts it and talks
+each with the same arguments as its command (the file each works on can
+be given as `file` or as `recipe`, whichever). The app starts it and talks
 to it directly; nothing goes over the network. File names start from
 the folder the app starts it in, or from `--folder`.
 

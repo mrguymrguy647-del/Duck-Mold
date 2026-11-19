@@ -117,7 +117,15 @@ fn check_lists_every_problem_worst_first_with_its_fix() {
     let list = report["problems"].as_array().unwrap();
     // No command surely fixes a part in the air: it says what to do.
     assert!(list[0]["fix"].is_null());
-    assert!(list[0]["advice"].as_str().unwrap().contains("join"));
+    assert_eq!(list[0]["part"], "ball");
+    assert!(
+        list[0]["advice"]
+            .as_str()
+            .unwrap()
+            .contains("duck-mold edit problems.toml join ball --to"),
+        "{}",
+        list[0]["advice"]
+    );
     assert_eq!(
         list[1]["fix"],
         "duck-mold edit problems.toml remove-event bob 2 step"
@@ -219,4 +227,83 @@ fn check_of_a_missing_file_is_a_usage_failure() {
     let output = run(&folder, &["check", "nothing.toml", "--json"]);
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(json(&output)["ok"], false);
+}
+
+/// Parts with no colour: one on its own, one inside an assembly.
+const UNPAINTED: &str = r##"version = 0
+name = "unpainted"
+
+[palette]
+red = "#D0453A"
+
+[[parts]]
+name = "body"
+shape = "box"
+size = [1, 1, 1]
+color = "red"
+
+[[parts]]
+name = "head"
+shape = "sphere"
+radius = 0.3
+attach = "bottom"
+to = "body.top"
+
+[[parts]]
+name = "arm"
+attach = "left"
+to = "body.right"
+
+[[parts.parts]]
+name = "hand"
+shape = "box"
+size = [0.2, 0.2, 0.2]
+"##;
+
+#[test]
+fn advice_names_the_part_it_is_about() {
+    let folder = folder("named", &[("unpainted.toml", UNPAINTED)]);
+    let report = json(&run(
+        &folder,
+        &["check", "unpainted.toml", "--json", "--no-render"],
+    ));
+    let list = report["problems"].as_array().unwrap();
+    let advice_for = |part: &str| {
+        list.iter()
+            .find(|p| p["code"] == "no_color" && p["part"] == part)
+            .unwrap_or_else(|| panic!("no no_color problem on {part}: {report}"))["advice"]
+            .as_str()
+            .unwrap()
+            .to_owned()
+    };
+    assert!(
+        advice_for("head").contains("duck-mold edit unpainted.toml set head --color <colour>"),
+        "{}",
+        advice_for("head")
+    );
+    assert!(
+        advice_for("arm/hand").contains("set arm/hand --color <colour>"),
+        "{}",
+        advice_for("arm/hand")
+    );
+    // `inspect` names the part too.
+    let inspected = json(&run(&folder, &["inspect", "unpainted.toml", "--json"]));
+    assert!(
+        inspected["warnings"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|w| w["part"] == "head"),
+        "{inspected}"
+    );
+    // And the advice's command works, with a colour filled in.
+    let fixed = run(
+        &folder,
+        &["edit", "unpainted.toml", "set", "head", "--color", "red"],
+    );
+    assert!(
+        fixed.status.success(),
+        "{}",
+        String::from_utf8_lossy(&fixed.stderr)
+    );
 }
