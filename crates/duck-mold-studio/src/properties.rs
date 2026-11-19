@@ -144,6 +144,17 @@ fn model_section(ui: &mut egui::Ui, studio: &Studio) {
             if !animations.is_empty() {
                 row("Moves", animations.join(", "));
             }
+            if let Some(images) = &report.images {
+                row(
+                    "Images",
+                    format!(
+                        "{} ({} x {} pixels together)",
+                        images.files.len(),
+                        images.sheet[0],
+                        images.sheet[1]
+                    ),
+                );
+            }
         });
     ui.add_space(6.0);
     ui.label(RichText::new("Click a part to select it.").weak());
@@ -714,7 +725,13 @@ fn show_several(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft, count
 
 /// Draws the panel for the selected part, and makes the edit when a
 /// field's value is settled.
-pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
+pub fn show(
+    ui: &mut egui::Ui,
+    studio: &mut Studio,
+    draft: &mut Draft,
+    images: &mut crate::images::Draft,
+    exporting: &mut crate::export::Exporting,
+) {
     if studio.mode() == Mode::Pose {
         crate::posing::show(ui, studio, &mut draft.posing);
         return;
@@ -732,6 +749,9 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
             draft.failed = studio.apply(&edit).err();
         }
         if let Some(edit) = crate::far::model_line(ui, studio) {
+            draft.failed = studio.apply(&edit).err();
+        }
+        if let Some(edit) = crate::export::model_lines(ui, studio, exporting) {
             draft.failed = studio.apply(&edit).err();
         }
         if let Some(why) = &draft.failed {
@@ -1318,6 +1338,21 @@ pub fn show(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
 
         // ---- the changes to its shape
         changes_section(ui, &facts, draft, &path, &mut edits);
+
+        // ---- its images
+        // (A shape, or a part from a mesh file, whose materials can
+        // take images and may have brought their own.)
+        let from_mesh = studio
+            .model()
+            .and_then(|model| model.part(&path))
+            .is_some_and(|part| part.kind.shape == "mesh");
+        if facts.shape.is_some()
+            || from_mesh
+            || facts.image.is_some()
+            || !facts.face_images.is_empty()
+        {
+            crate::images::part_section(ui, studio, images, &path, &facts);
+        }
 
         // ---- the sockets it declares
         if !facts.sockets.is_empty() && draft.socket_names.len() == facts.sockets.len() {

@@ -1,0 +1,71 @@
+{
+  "ok": true,
+  "summary": "pip, \"idle\": 2.4 s, 3 keys, loops, stays on the ground, nothing floating, 3 overlaps, no limits broken",
+  "source": "examples/pip.toml",
+  "name": "pip",
+  "animation": "idle",
+  "length": 2.4,
+  "loops": true,
+  "smooth": true,
+  "keys": [
+    {
+      "key": 1,
+      "at": 0.0,
+      "pose": "look_left"
+    },
+    {
+      "key": 2,
+      "at": 1.2,
+      "pose": "look_right"
+    },
+    {
+      "key": 3,
+      "at": 2.4,
+      "pose": "look_left"
+    }
+  ],
+  "frames": 73,
+  "moves": [
+    "head",
+    "left_arm",
+    "right_arm"
+  ],
+  "ground": {
+    "stays_on_ground": true,
+    "lowest_y": 0.0,
+    "lowest_at": 0.0,
+    "highest_y": 0.0,
+    "highest_at": 0.0
+  },
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "body",
+      "b": "head",
+      "depth": 0.007481,
+      "hidden": false,
+      "at": 0.0,
+      "new": true
+    },
+    {
+      "a": "left_arm/sleeve",
+      "b": "body",
+      "depth": 0.003486,
+      "hidden": false,
+      "at": 0.0,
+      "new": true
+    },
+    {
+      "a": "right_arm/sleeve",
+      "b": "body",
+      "depth": 0.003486,
+      "hidden": false,
+      "at": 0.0,
+      "new": true
+    }
+  ],
+  "limits_broken": [],
+  "ends_as_it_starts": true,
+  "warnings": [],
+  "errors": []
+}

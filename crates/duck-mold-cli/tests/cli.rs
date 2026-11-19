@@ -168,7 +168,7 @@ fn mistakes_as_json_go_to_standard_output() {
             "path": "parts[0].colour",
             "message": "there is no field \"colour\" here",
             "got": "colour",
-            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "lod", "sockets", "note"] },
+            "allowed": { "options": ["name", "shape", "use", "file", "parts", "size", "radius", "tube", "wall", "height", "segments", "steps", "bevel", "bevel_steps", "taper", "color", "changes", "colors", "image", "images", "attach", "to", "twist", "rotate", "move", "scale", "mirror", "limits", "collider", "lod", "sockets", "note"] },
             "suggestion": "color"
         })
     );
@@ -1009,6 +1009,7 @@ fn json_is_one_line_unless_pretty() {
 fn an_unknown_part_lists_every_part_nearest_first() {
     let folder = folder("cli_nearest");
     std::fs::copy(examples().join("robot.toml"), folder.join("robot.toml")).unwrap();
+    with_robots_images(&folder.join("robot.toml"));
     let output = run(
         &folder,
         &["edit", "robot.toml", "rename", "hnd", "paw", "--json"],
@@ -1274,6 +1275,7 @@ fn studio_and_preview_start_the_studio_program_beside_duck_mold() {
     let folder = folder("cli_studio");
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     std::fs::copy(examples.join("robot.toml"), folder.join("robot.toml")).unwrap();
+    with_robots_images(&folder.join("robot.toml"));
     let with_studio_at = |program: &Path, arguments: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_duck-mold"))
             .current_dir(&folder)
@@ -1528,7 +1530,7 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 29, "the guide's tables list 29 fields");
+    assert_eq!(checked, 32, "the guide's tables list 32 fields");
 }
 
 #[test]
@@ -2080,6 +2082,7 @@ fn save_animation_and_add_animation_from_share_a_walk() {
         folder.join("robot.toml"),
     )
     .unwrap();
+    with_robots_images(&folder.join("robot.toml"));
     let saved = run(
         &folder,
         &[
@@ -2462,4 +2465,533 @@ fn the_release_notes_have_a_section_for_this_version() {
         notes.lines().any(|line| line == heading),
         "RELEASE_NOTES.md has no \"{heading}\" section"
     );
+}
+
+#[test]
+fn images_are_made_put_on_and_taken_off_from_the_command_line() {
+    let folder = folder("cli_images");
+    // A new image for the trunk's side: as wide as the way round it.
+    let output = run(
+        &folder,
+        &["new-image", "tree.toml", "trunk", "--face", "side"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let said = stdout(&output);
+    assert!(
+        said.starts_with("made textures/tree_trunk_side.png (64 x 77 pixels, see-through, 64 to the metre) and put it on the face \"side\" of \"trunk\""),
+        "{said}"
+    );
+    assert!(folder.join("textures/tree_trunk_side.png").is_file());
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(
+        text.contains("images = { side = \"textures/tree_trunk_side.png\" }"),
+        "{text}"
+    );
+
+    // As JSON, with a size and a name of its own.
+    let output = run(
+        &folder,
+        &[
+            "new-image",
+            "tree.toml",
+            "trunk",
+            "--face",
+            "top",
+            "--file",
+            "textures/rings.png",
+            "--size",
+            "16x16",
+            "--json",
+        ],
+    );
+    let made = json(&output);
+    assert_eq!(made["ok"], true);
+    assert_eq!(made["file"], "textures/rings.png");
+    assert_eq!(made["width"], 16);
+    assert_eq!(made["height"], 16);
+    assert_eq!(made["part"], "trunk");
+    assert_eq!(made["face"], "top");
+    assert_eq!(made["edit"]["edit"]["command"], "set");
+    // inspect lists them, with how big their pixels are on the model.
+    let report = json(&run(&folder, &["inspect", "tree.toml", "--json"]));
+    assert_eq!(
+        report["images"]["files"][0]["file"],
+        "textures/tree_trunk_side.png"
+    );
+    assert_eq!(report["images"]["files"][0]["on"][0]["face"], "side");
+    assert_eq!(report["images"]["files"][1]["width"], 16);
+
+    // Put on and taken off with `edit set`.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--image",
+            "textures/rings.png",
+            "--face-image",
+            "side=none",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(text.contains("image = \"textures/rings.png\""), "{text}");
+    assert!(!text.contains("tree_trunk_side.png"), "{text}");
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "tree.toml",
+            "set",
+            "trunk",
+            "--image",
+            "none",
+            "--face-image",
+            "top=none",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("tree.toml")).unwrap();
+    assert!(!text.contains("image"), "{text}");
+
+    // Mistakes are one sentence each, and nothing is written.
+    let output = run(
+        &folder,
+        &["new-image", "tree.toml", "trunk", "--size", "big"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("--size needs how many pixels wide and high, like 64x48"));
+    let output = run(
+        &folder,
+        &[
+            "new-image",
+            "tree.toml",
+            "trunk",
+            "--file",
+            "textures/rings.png",
+        ],
+    );
+    assert_ne!(output.status.code(), Some(0));
+    assert!(stderr(&output).contains("is already there: a new image never writes over a file"));
+    let output = run(
+        &folder,
+        &["edit", "tree.toml", "set", "trunk", "--face-image", "side"],
+    );
+    assert_ne!(output.status.code(), Some(0));
+    assert!(
+        stderr(&output)
+            .contains("--face-image needs a face and an image, like front=textures/face.png")
+    );
+}
+
+#[test]
+fn paint_hands_an_image_to_duck_quill_or_to_any_picture_program() {
+    let folder = folder("cli_paint");
+    // Settings of its own, so nothing on this computer is read or
+    // changed, and a PATH with no Duck Quill on it.
+    let settings = folder.join("settings");
+    let paint = |arguments: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_duck-mold"))
+            .args(arguments)
+            .current_dir(&folder)
+            .env("APPDATA", &settings)
+            .env("XDG_CONFIG_HOME", &settings)
+            .env("HOME", &settings)
+            .env("PATH", folder.join("empty"))
+            .output()
+            .expect("the program runs")
+    };
+    let output = run(
+        &folder,
+        &["new-image", "tree.toml", "trunk", "--face", "side"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    // Duck Quill isn't here: a sentence says the two ways on.
+    let output = paint(&["paint", "tree.toml", "trunk", "--face", "side", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(2));
+    let said = stderr(&output);
+    assert!(
+        said.contains("Duck Quill isn't on this computer, or Duck Mold can't find it")
+            && said.contains("--duck-quill <program>")
+            && said.contains("--system")
+            && said.contains("tree_trunk_side.png"),
+        "{said}"
+    );
+
+    // Any picture program: the PNG alone.
+    let output = paint(&[
+        "paint",
+        "tree.toml",
+        "trunk",
+        "--face",
+        "side",
+        "--system",
+        "--dry-run",
+        "--json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let job = json(&output);
+    assert_eq!(job["with"], "system");
+    assert_eq!(job["guide"], serde_json::Value::Null);
+    assert_eq!(job["paper"], "#6B4A2B");
+    let command: Vec<&str> = job["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    assert!(
+        command.last().unwrap().ends_with("tree_trunk_side.png"),
+        "{command:?}"
+    );
+
+    // Duck Quill, where it is said to be: the image, a guide of the
+    // faces, and the trunk's bark as the paper.
+    let quill = folder.join("DuckQuill");
+    std::fs::write(&quill, "a program").unwrap();
+    let output = paint(&[
+        "paint",
+        "tree.toml",
+        "trunk",
+        "--face",
+        "side",
+        "--duck-quill",
+        quill.to_str().unwrap(),
+        "--dry-run",
+        "--json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let job = json(&output);
+    assert_eq!(job["with"], "duck-quill");
+    let guide = PathBuf::from(job["guide"].as_str().unwrap());
+    assert!(guide.is_file(), "{guide:?}");
+    assert!(
+        guide.starts_with(&settings),
+        "the guide is in Duck Mold's own folder"
+    );
+    let command: Vec<&str> = job["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    assert_eq!(command[0], quill.to_str().unwrap());
+    assert_eq!(command[2], "--guide");
+    assert_eq!(command[4..], ["--paper", "#6B4A2B"]);
+
+    // A program that isn't there is said.
+    let output = paint(&[
+        "paint",
+        "tree.toml",
+        "trunk",
+        "--duck-quill",
+        "nowhere/DuckQuill",
+        "--dry-run",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("there is no program at"));
+    // A part without an image, with --dry-run: nothing is made.
+    let output = paint(&["paint", "tree.toml", "leaves", "--system", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains(
+            "\"leaves\" has no image: make one with duck-mold new-image tree.toml leaves"
+        ),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!folder.join("textures/tree_leaves.png").exists());
+}
+
+#[test]
+fn image_guide_writes_the_lines_to_paint_by() {
+    let folder = folder("cli_image_guide");
+    let output = run(
+        &folder,
+        &["new-image", "tree.toml", "trunk", "--face", "side"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    // Beside the image, unless told where.
+    let output = run(
+        &folder,
+        &["image-guide", "tree.toml", "trunk", "--face", "side"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("the guide for textures/tree_trunk_side.png"));
+    let guide = std::fs::read(folder.join("textures/tree_trunk_side.guide.png")).unwrap();
+    assert!(guide.starts_with(&[0x89, b'P', b'N', b'G']));
+    let output = run(
+        &folder,
+        &[
+            "image-guide",
+            "tree.toml",
+            "trunk",
+            "--face",
+            "side",
+            "-o",
+            "lines.png",
+            "--json",
+        ],
+    );
+    assert_eq!(json(&output)["wrote"], "lines.png");
+    assert!(folder.join("lines.png").is_file());
+    // A part without an image has no guide.
+    let output = run(&folder, &["image-guide", "tree.toml", "leaves"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("\"leaves\" has no image"));
+}
+
+#[test]
+fn a_parts_own_pictures_are_listed_taken_off_and_shown_again() {
+    // The signpost: a part from a glTF file that brings three pictures.
+    let folder = folder("cli_own_pictures");
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    std::fs::create_dir_all(folder.join("parts")).unwrap();
+    std::fs::copy(examples.join("signpost.toml"), folder.join("signpost.toml")).unwrap();
+    for file in ["sign.gltf", "sign_post.png"] {
+        std::fs::copy(
+            examples.join("parts").join(file),
+            folder.join("parts").join(file),
+        )
+        .unwrap();
+    }
+    let images = |folder: &Path| -> Vec<String> {
+        let report = json(&run(folder, &["inspect", "signpost.toml", "--json"]));
+        report["images"]["files"]
+            .as_array()
+            .map(|files| {
+                files
+                    .iter()
+                    .map(|file| file["file"].as_str().unwrap().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        images(&folder),
+        [
+            "parts/sign_post.png",
+            "parts/sign.gltf: board",
+            "parts/sign.gltf: cap"
+        ]
+    );
+    let said = stdout(&run(&folder, &["inspect", "signpost.toml"]));
+    assert!(
+        said.contains("parts/sign.gltf: board   64 x 32   sign: board"),
+        "{said}"
+    );
+
+    // "none" is written down: without it the file's picture would show.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "signpost.toml",
+            "set",
+            "sign",
+            "--face-image",
+            "board=none",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("signpost.toml")).unwrap();
+    assert!(text.contains("images = { board = \"none\" }"), "{text}");
+    assert_eq!(
+        images(&folder),
+        ["parts/sign_post.png", "parts/sign.gltf: cap"]
+    );
+
+    // "own" shows it again: the line goes.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "signpost.toml",
+            "set",
+            "sign",
+            "--face-image",
+            "board=own",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("board the file's own picture"),
+        "{}",
+        stdout(&output)
+    );
+    let text = std::fs::read_to_string(folder.join("signpost.toml")).unwrap();
+    assert!(!text.contains("\nimages ="), "{text}");
+    assert_eq!(images(&folder).len(), 3);
+
+    // The whole part: none of the file's pictures, then all again.
+    let output = run(
+        &folder,
+        &["edit", "signpost.toml", "set", "sign", "--image", "none"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(images(&folder).is_empty());
+    let output = run(
+        &folder,
+        &["edit", "signpost.toml", "set", "sign", "--image", "own"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(images(&folder).len(), 3);
+
+    // A new image for a material is the size of the picture's whole
+    // reach on the model, by the file's own layout: the board's is
+    // 0.64 by 0.32 metres, and the model's images are 100 pixels to
+    // the metre.
+    let output = run(
+        &folder,
+        &[
+            "new-image",
+            "signpost.toml",
+            "sign",
+            "--face",
+            "board",
+            "--json",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let made = json(&output);
+    assert_eq!(made["file"], "textures/signpost_sign_board.png");
+    let metres = [0, 1].map(|at| made["metres"][at].as_f64().unwrap());
+    assert!(
+        (metres[0] - 0.64).abs() < 0.01 && (metres[1] - 0.32).abs() < 0.01,
+        "{metres:?}"
+    );
+    let (wide, high) = (
+        made["width"].as_u64().unwrap(),
+        made["height"].as_u64().unwrap(),
+    );
+    assert_eq!(wide, high * 2, "{wide} x {high}");
+    assert_eq!((wide, high), (64, 32));
+    let text = std::fs::read_to_string(folder.join("signpost.toml")).unwrap();
+    assert!(
+        text.contains("images = { board = \"textures/signpost_sign_board.png\" }"),
+        "{text}"
+    );
+
+    // "own" is only for a part made from a file.
+    let output = run(
+        &folder,
+        &["edit", "signpost.toml", "set", "mound", "--image", "own"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("\"own\" shows the pictures a part's file brought with it, and this part isn't made from a file. To take an image off, say none"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn export_goes_where_the_recipe_says() {
+    let folder = folder("cli_export_line");
+    std::fs::create_dir_all(folder.join("art")).unwrap();
+    std::fs::rename(folder.join("tree.toml"), folder.join("art/tree.toml")).unwrap();
+
+    // Without the line: beside the recipe, as always.
+    let output = run(&folder, &["export", "art/tree.toml"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("wrote art/tree.glb ("),
+        "{}",
+        stdout(&output)
+    );
+    let beside = std::fs::read(folder.join("art/tree.glb")).unwrap();
+
+    // The edit writes the line, near the top of the recipe.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "art/tree.toml",
+            "set-export",
+            "../assets/models/tree.glb",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).lines().next().unwrap(),
+        "edited art/tree.toml: the model's .glb now goes to ../assets/models/tree.glb (from the recipe's folder)"
+    );
+    let text = std::fs::read_to_string(folder.join("art/tree.toml")).unwrap();
+    assert!(
+        text.contains("export = \"../assets/models/tree.glb\"\n"),
+        "{text}"
+    );
+
+    // Export with no -o goes there, and the folders are made. The line
+    // changes nothing in the model: the same bytes.
+    let output = run(&folder, &["export", "art/tree.toml", "--json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(json(&output)["output"], "assets/models/tree.glb");
+    assert_eq!(
+        std::fs::read(folder.join("assets/models/tree.glb")).unwrap(),
+        beside
+    );
+    // -o still says otherwise.
+    let output = run(&folder, &["export", "art/tree.toml", "-o", "elsewhere.glb"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(folder.join("elsewhere.glb").is_file());
+
+    // What isn't a place for a .glb is refused, and nothing changes.
+    for (wrong, why) in [
+        ("/models/tree.glb", "starts from the top of the disk"),
+        ("C:/models/tree.glb", "starts from the top of the disk"),
+        ("../assets/tree.png", "isn't a .glb file"),
+    ] {
+        let output = run(&folder, &["edit", "art/tree.toml", "set-export", wrong]);
+        assert_eq!(output.status.code(), Some(2), "{wrong}");
+        assert!(
+            stderr(&output).contains(why),
+            "{wrong}: {}",
+            stderr(&output)
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(folder.join("art/tree.toml")).unwrap(),
+        text
+    );
+    // Written by hand wrongly, it is a mistake with its line.
+    std::fs::write(
+        folder.join("art/wrong.toml"),
+        text.replace("../assets/models/tree.glb", "../assets/tree.obj"),
+    )
+    .unwrap();
+    let output = run(&folder, &["inspect", "art/wrong.toml"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("export: \"../assets/tree.obj\" isn't a .glb file"),
+        "{}",
+        stderr(&output)
+    );
+
+    // "none" takes the line away; twice says there is none.
+    let output = run(&folder, &["edit", "art/tree.toml", "set-export", "none"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        !std::fs::read_to_string(folder.join("art/tree.toml"))
+            .unwrap()
+            .contains("export")
+    );
+    let output = run(&folder, &["edit", "art/tree.toml", "set-export", "none"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("has no \"export\" to take away"));
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
+    }
 }

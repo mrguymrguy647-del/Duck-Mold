@@ -20,7 +20,9 @@
 //! view, where Duck Forge games usually use 60°), so the views look
 //! nearly flat, like drawings, and sizes can be compared by eye.
 
+use std::cell::RefCell;
 use std::path::Path;
+use std::rc::Rc;
 
 use duck_mold_core::inspect::{
     AnimationInspection, Inspection, inspect, inspect_animation, inspect_pose,
@@ -32,8 +34,9 @@ use duck_mold_core::math::{Vec3, sin_cos_degrees, vec3};
 use duck_mold_core::model::Model;
 use duck_mold_core::motion;
 use duck_mold_core::motion::{Animation, Motion};
+use duck_mold_core::picture::ImageSheet;
 use duck_mold_core::tools::{self, Failure};
-use duckforge::prelude::{Camera3D, Canvas, Color, Mesh, Rect, Transform, vec2};
+use duckforge::prelude::{Camera3D, Canvas, Color, Mesh, Rect, Sprite, Transform, Vec2, vec2};
 use serde::Serialize;
 
 /// The background: a dark blue-grey, so that the light grey of a face
@@ -364,10 +367,12 @@ pub fn render_small(model: &Model, size: usize) -> Vec<u32> {
 ///
 /// Every face keeps corners of its own, and its triangles keep the
 /// model's order and winding, which is already Duck Forge's: clockwise
-/// seen from the front.
+/// seen from the front. A model with images gets them as the mesh's one
+/// picture ([`Painted`]).
 pub fn forge_mesh(model: &Model, place: impl Fn(Vec3) -> Vec3) -> Mesh {
+    let painted = Painted::of(model);
     let mut mesh = Mesh::new();
-    for face in &model.faces {
+    for (number, face) in model.faces.iter().enumerate() {
         let [r, g, b] = face
             .color
             .and_then(|color| model.palette.get(color))
@@ -382,11 +387,130 @@ pub fn forge_mesh(model: &Model, place: impl Fn(Vec3) -> Vec3) -> Mesh {
                 at.z as f32,
             ));
         }
+        let on_sheet = painted
+            .as_ref()
+            .and_then(|painted| painted.corners(model, number));
         for at in 1..face.corners.len().saturating_sub(1) {
-            mesh.add_triangle(first, first + at, first + at + 1, color);
+            match &on_sheet {
+                // The image as it was painted: white underneath.
+                Some(on) => mesh.add_triangle_uv(
+                    first,
+                    first + at,
+                    first + at + 1,
+                    [on[0], on[at], on[at + 1]],
+                    Color::WHITE,
+                ),
+                None => mesh.add_triangle(first, first + at, first + at + 1, color),
+            }
         }
     }
-    mesh
+    match painted {
+        Some(painted) => mesh.with_texture(painted.sprite.clone()),
+        None => mesh,
+    }
+}
+
+/// A model's images as Duck Forge draws them: all of them on one sheet
+/// (Duck Forge draws one picture for each mesh), each already laid over
+/// the colour of the face it is on.
+#[derive(Debug)]
+pub struct Painted {
+    /// Where everything is on the sheet.
+    pub sheet: ImageSheet,
+    /// The sheet as a Duck Forge picture.
+    pub sprite: Sprite,
+}
+
+impl Painted {
+    /// The sheet of a model's images; `None` for a model without any.
+    ///
+    /// Making a sheet takes a moment, and the Studio draws the same
+    /// model many times a second, so the last few are kept: a model
+    /// whose images, places and colours are the same gets the same
+    /// sheet back.
+    pub fn of(model: &Model) -> Option<Rc<Painted>> {
+        if model.pictures.is_empty() {
+            return None;
+        }
+        thread_local! {
+            static KEPT: RefCell<Vec<(u64, Rc<Painted>)>> = const { RefCell::new(Vec::new()) };
+        }
+        let stamp = stamp_of(model);
+        if let Some(painted) = KEPT.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            let at = kept.iter().position(|(known, _)| *known == stamp)?;
+            // The one just used goes to the end: the oldest go first.
+            let found = kept.remove(at);
+            let painted = found.1.clone();
+            kept.push(found);
+            Some(painted)
+        }) {
+            return Some(painted);
+        }
+        // (A model whose images don't fit isn't built at all.)
+        let sheet = ImageSheet::of(model).ok().flatten()?;
+        let pixels = sheet
+            .pixels
+            .iter()
+            .map(|pixel| Color::rgb(pixel[0], pixel[1], pixel[2]))
+            .collect();
+        let sprite = Sprite::from_pixels(sheet.width as usize, sheet.height as usize, pixels);
+        let painted = Rc::new(Painted { sheet, sprite });
+        KEPT.with(|kept| {
+            let mut kept = kept.borrow_mut();
+            if kept.len() >= 12 {
+                kept.remove(0);
+            }
+            kept.push((stamp, painted.clone()));
+        });
+        Some(painted)
+    }
+
+    /// Where the corners of one of the model's faces are on the sheet,
+    /// as Duck Forge wants them; `None` for a face without an image.
+    pub fn corners(&self, model: &Model, face: usize) -> Option<Vec<Vec2>> {
+        let cell = (*self.sheet.cell_of.get(face)?)?;
+        let image = model.faces[face].image.as_ref()?;
+        Some(
+            image
+                .at
+                .iter()
+                .map(|&at| {
+                    let [across, down] = self.sheet.place(model, cell, at);
+                    vec2(across as f32, down as f32)
+                })
+                .collect(),
+        )
+    }
+}
+
+/// A number that changes when anything a model's sheet is made from
+/// does: its images, where each face is on them, and the colours under
+/// them.
+fn stamp_of(model: &Model) -> u64 {
+    let mut stamp: u64 = 0xcbf2_9ce4_8422_2325;
+    let mut take = |value: u64| {
+        stamp ^= value;
+        stamp = stamp.wrapping_mul(0x0000_0100_0000_01b3);
+    };
+    for picture in &model.pictures {
+        take(picture.stamp);
+    }
+    for (number, face) in model.faces.iter().enumerate() {
+        let Some(image) = &face.image else { continue };
+        take(number as u64);
+        take(image.picture as u64);
+        let under = face
+            .color
+            .and_then(|color| model.palette.get(color))
+            .map_or(UNCOLOURED, |color| color.rgb);
+        take(u64::from(under[0]) << 16 | u64::from(under[1]) << 8 | u64::from(under[2]));
+        for at in &image.at {
+            take(at[0].to_bits());
+            take(at[1].to_bits());
+        }
+    }
+    stamp
 }
 
 /// What `duck-mold render` did: the report on the model, and the picture

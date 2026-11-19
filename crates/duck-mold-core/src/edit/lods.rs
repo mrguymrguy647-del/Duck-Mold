@@ -1,5 +1,6 @@
 //! The edits of Phase 7's far-away versions: `set-lods` (the recipe's
-//! line) and `set-lod` (a part's own). Like every edit they work on the
+//! line) and `set-lod` (a part's own); and `set-export`, the recipe's
+//! line for where its `.glb` goes. Like every edit they work on the
 //! recipe's text and change only the lines they must.
 
 use super::doc::{Doc, Val};
@@ -43,6 +44,36 @@ pub(super) fn set_lods(doc: &mut Doc, to: Option<Lods>) -> Result<Outcome, Stop>
             }
             doc.remove_field(&[], "lods").map_err(cant)?;
             "took \"lods\" away: the model has no far-away versions now".to_owned()
+        }
+    };
+    Ok(Outcome {
+        summary,
+        touched: None,
+    })
+}
+
+/// `set-export`: the recipe's line saying where its `.glb` belongs,
+/// from the recipe's own folder. `None` takes it away: beside the
+/// recipe.
+pub(super) fn set_export(doc: &mut Doc, to: Option<&str>) -> Result<Outcome, Stop> {
+    let summary = match to {
+        Some(path) => {
+            let path = path.replace('\\', "/");
+            crate::recipe::check_export(&path)
+                .map_err(|message| problem(Code::TypeMismatch, message).got(path.as_str()))?;
+            doc.set_field(&[], "export", &Val::Str(path.clone()), &TOP_FIELDS)
+                .map_err(cant)?;
+            format!("the model's .glb now goes to {path} (from the recipe's folder)")
+        }
+        None => {
+            if doc.entry(&[], "export").is_none() {
+                return Err(problem(
+                    Code::MissingField,
+                    "the recipe has no \"export\" to take away: its .glb already goes beside it",
+                ));
+            }
+            doc.remove_field(&[], "export").map_err(cant)?;
+            "took \"export\" away: the model's .glb goes beside the recipe now".to_owned()
         }
     };
     Ok(Outcome {

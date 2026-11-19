@@ -186,6 +186,34 @@ impl Recent {
         }
     }
 
+    /// Whether "Export after every change" was ticked, if it was ever
+    /// set: kept apart for the Studio on its own and for the Studio
+    /// inside another program's window (`hosted`), which start
+    /// differently.
+    pub fn export_always(&self, hosted: bool) -> Option<bool> {
+        let file = self
+            .kept_in
+            .as_ref()?
+            .with_file_name(export_always_file(hosted));
+        match std::fs::read_to_string(file).ok()?.trim() {
+            "yes" => Some(true),
+            "no" => Some(false),
+            _ => None,
+        }
+    }
+
+    /// Remembers whether "Export after every change" is ticked.
+    pub fn keep_export_always(&self, hosted: bool, always: bool) {
+        let Some(kept_in) = &self.kept_in else {
+            return;
+        };
+        let file = kept_in.with_file_name(export_always_file(hosted));
+        if let Some(folder) = file.parent() {
+            let _ = std::fs::create_dir_all(folder);
+        }
+        let _ = std::fs::write(file, if always { "yes\n" } else { "no\n" });
+    }
+
     /// Notes that the tips have been shown, so they aren't again.
     pub fn saw_tips(&self) {
         if let Some(file) = self.tips_file() {
@@ -240,6 +268,15 @@ impl Recent {
             }
         }
         let _ = std::fs::write(kept_in.with_file_name("hidden.txt"), text);
+    }
+}
+
+/// The file that remembers "Export after every change".
+fn export_always_file(hosted: bool) -> &'static str {
+    if hosted {
+        "export-always-hosted.txt"
+    } else {
+        "export-always.txt"
     }
 }
 

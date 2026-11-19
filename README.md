@@ -491,6 +491,7 @@ than 12 points at 100%.
 | Key | Does |
 |---|---|
 | G, R, S, T, P | The Move, Rotate, Scale, Size and Paint tools |
+| Shift+P | Paint the selected part's image in Duck Quill (a new image, if it has none) |
 | Tab | Shape the selected box: Face mode. Tab again: back to parts |
 | E | The selected box's edges: click one to move it. E again: back to parts |
 | C | The selected box's corners: click one to move it. C again: back to parts |
@@ -610,9 +611,12 @@ only: nothing can be changed there.
 | Command | What it does |
 |---|---|
 | `duck-mold inspect <file>` | Checks a recipe, builds it in memory and reports on it. Writes nothing. Also measures a mesh file (`.obj`, `.gltf`, `.glb`). `--sockets` also lists every named socket and where it is; `--faces`, every face of every shaped box, by name; `--joins`, the tree the model moves by: what every part turns about, and how far it may turn. `--pose <name>` reports on the model as it stands in one of its poses. `--animation <name>` reports on one of its animations: its keys, and the worst that any frame gets wrong. `--colliders` lists every hit shape. A model with far-away versions gets a `far versions` line. `--ray x,y,z --toward x,y,z` says what a game's click or shot along that ray would hit (with `--pose`, or `--animation` and `--at`, as the model stands then). |
-| `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it. `-o other.glb` writes it somewhere else. |
+| `duck-mold export <recipe>` | Builds the recipe and writes the `.glb` next to it, or where the recipe's `export` line says (`export = "../assets/robot.glb"`, for a game's assets). `-o other.glb` writes it somewhere else. |
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. `--far 1` or `--far 2` draws a far-away version, as `<file>.far1.png`. |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`, `set-lods`, `set-lod`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints one line saying what changed (`--report`: the whole `inspect` report). `--batch edits.txt` makes a list of edits, one a line, written once or not at all. `--dry-run` writes nothing. |
+| `duck-mold new-image <recipe> <part>` | Makes a new image for a part and puts it on: a PNG that is see-through all over, with the proportions of what it covers and as many pixels to the metre as the model's other images, in `textures/` beside the recipe. `--face front` for one face; `--file` names it; `--size 64x48` sizes it. Paint on it with Duck Quill or any picture program. Nothing is written over. |
+| `duck-mold paint <recipe> <part>` | Opens the part's image in Duck Quill to paint on, with the outlines of its faces as a guide and the part's colour as paper. `--face front` for one face. A part with no image gets a new one first. Save in Duck Quill and the model has it. `--system` opens the PNG in whatever this computer opens pictures with; `--duck-quill <program>` says where Duck Quill is (remembered); `--dry-run` only says what would be started. |
+| `duck-mold image-guide <recipe> <part>` | Writes the guide alone: a see-through PNG with the outlines of the faces an image covers, which way is up, and where other parts are joined on. Beside the image as `<image>.guide.png`, or `-o <file>`. For painting in a program that isn't Duck Quill, or for an agent to see what goes where. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
@@ -718,10 +722,13 @@ A recipe can be written as TOML (the examples) or as JSON
 | Recipe | Shows |
 |---|---|
 | [crate.toml](examples/crate.toml) | The smallest useful recipe: one box, two colours. |
+| [plank_crate.toml](examples/plank_crate.toml) | Images: the same box with wood planks on its sides and a lid on top, two PNGs painted with Duck Quill ([textures/](examples/textures/) has them, with the Duck Quill scripts that made them). |
+| [signpost.toml](examples/signpost.toml) | A model from another program that brings its own pictures: [parts/sign.gltf](examples/parts/sign.gltf) has wood up its post (a PNG beside it, repeated), an arrow on its board (a PNG inside it) and green copper on its cap (a JPEG). Nothing about them is written in the recipe. |
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
 | [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, framed windows (one box inset to a frame and a pane, defined once) and a chimney placed by sockets, and a skylight on the roof's `slope`. |
-| [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. It moves: limits on its joins, eight poses and four animations (`idle`, `walk`, `wave`, and `jump` from the starters). |
+| [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. It moves: limits on its joins, eight poses and four animations (`idle`, `walk`, `wave`, and `jump` from the starters). It is painted: brows and a mouth on the front of its head, and the label "DM-1" on its chest panel, two small images over its own colours. |
+| [pip.toml](examples/pip.toml) | **One character made with all three Duck apps.** Pip's face is painted in Duck Quill ([textures/pip_face.json](examples/textures/pip_face.json) is the script); Pip is put together and animated here (`idle`, and `walk` with a `footstep` on each step, hit shapes, far-away versions); and Pip walks round a yard of plank crates in a Duck Forge game, [examples/pip_walk](https://github.com/mrguymrguy647-del/Duck-Forge/tree/main/examples/pip_walk) there. |
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
 | [duck.toml](examples/duck.toml) | A ball stretched into a body with a three-number `scale`, parts placed at points of a round surface, one wing used twice. Its picture is the Studio's icon. |
@@ -740,6 +747,72 @@ A recipe can be written as TOML (the examples) or as JSON
 | [gnome.toml](examples/gnome.toml) | A second character with the robot's six part names: it takes the robot's walk from [animations/walk.toml](examples/animations/walk.toml) (written by `save-animation`), fitted to its shorter legs, and waves with the starter `wave`. |
 
 Each is commented line by line.
+
+## Images
+
+A part, or one face of it, can show a picture: a PNG file beside the
+recipe.
+
+```toml
+[[parts]]
+name = "box"
+shape = "box"
+color = "wood"
+image = "textures/planks.png"                    # every face
+images = { top = "textures/lid.png" }            # ...but the top has its own
+```
+
+![The plank crate](tests/golden/plank_crate.png)
+
+- **The image lies over the colour.** Where the PNG is see-through, the
+  face's palette colour shows. So a face is a small picture with only a
+  mouth on it, and a label is only the label.
+- **It is fitted to the face** as you see it straight on from outside,
+  upright on the sides. Round faces are wrapped: a cylinder's side like
+  the label on a tin, a sphere like a map of the world. It stretches to
+  fit and doesn't repeat. [The recipe format](docs/recipe-format.md) has
+  the rule for every shape, and for shaped boxes.
+- **Pixels stay sharp**, in Duck Mold's pictures and in a Duck Forge
+  game, however near the camera is.
+- **In the Studio:** the palette has a row of the model's images under
+  its colours. Click one and then a face to put it there (Shift+click:
+  the whole part); the first square, "no image", takes one off. A
+  selected part lists its images, each with *Choose...* (another PNG;
+  one from outside the recipe's folder is copied into `textures/`) and
+  a cross to take it off. *New image...* makes a see-through PNG of the
+  right proportions to paint on.
+- **Painting it:** *Paint in Duck Quill* beside an image (or Shift+P
+  with a part selected, or *Make it and paint in Duck Quill* in the New
+  image window) opens the picture in
+  [Duck Quill](https://github.com/mrguymrguy647-del/duck-quill), zoomed
+  in, with the hard one-pixel brush, on paper the colour of the part,
+  and with thin lines showing the faces it covers and which way is up.
+  Paint, press Ctrl+S there, and the model in Duck Mold has it. Both
+  windows stay open. Duck Quill keeps the picture's layers in a
+  `.quill` file beside the PNG; Duck Mold only reads the PNG.
+- **Without Duck Quill** nothing is lost: the image is a plain PNG. The
+  first time, a window asks where Duck Quill is, or offers *Open in my
+  picture program instead*, and the choice is remembered (Help > Duck
+  Quill... changes it). Duck Quill needs version 0.6.0 or newer.
+- **From the command line:** `duck-mold new-image robot.toml head --face
+  front`, then `duck-mold edit robot.toml set head --face-image
+  front=textures/face.png` (or `front=none`), `set crate --image
+  textures/planks.png`.
+- **A model from Blender keeps its pictures.** A glTF file used as a
+  part brings each material's picture with it (PNG or JPEG), laid on
+  the way the file says. The Studio lists them on the part as "from the
+  file"; *Choose...* puts a PNG of yours there instead and the cross
+  takes one off. Painting the material a colour takes its picture off
+  too. See [signpost.toml](examples/signpost.toml).
+- **Any save of the PNG, by any program, shows on the model within half
+  a second** while the Studio is open. A file that isn't there, isn't a
+  PNG or is damaged is a mistake in plain words, never a crash.
+- `inspect` lists the images and how many pixels each has to the metre
+  on the model, and warns when one image's pixels are more than twice
+  as fine as another's: mixed pixel sizes look wrong in pixel art. New
+  images are made to match the ones the model has.
+- A model without images is built, drawn and exported exactly as
+  before.
 
 ## Hit shapes, for games
 
@@ -825,6 +898,49 @@ says what is in the file and how to keep the two copies the same.
 A model faces +z, so a default Duck Forge camera sees it from behind:
 see the handoff note.
 
+A model's images come along inside the `.glb`, on one sheet, and Duck
+Forge draws them with the same two lines. It needs a Duck Forge that
+reads them (reader version 9); an older one says "update Duck Forge"
+rather than drawing the model's painted faces white.
+
+### Straight into a game, and into a game that is running
+
+A recipe can say where its `.glb` belongs, from the recipe's own folder:
+
+```toml
+export = "../assets/robot.glb"     # this recipe is in the game's art folder
+```
+
+`duck-mold export art/robot.toml` (with no `-o`) and the Studio's Export
+then write there. With nothing selected, the Studio's Model section
+shows where the `.glb` goes and has *Choose...* to set it; the edit is
+`duck-mold edit robot.toml set-export ../assets/robot.glb`.
+
+**Export after every change**, a tick box in the same place, writes the
+`.glb` again after each change that builds. A Duck Forge game that is
+running takes the new model at once, mid-animation, if its code has one
+line for it:
+
+```rust
+fn reload(&mut self, _ctx: &mut Context, file: &Path) -> bool {
+    self.robot.reload_if_changed(file)
+}
+```
+
+So you can drag the robot's arm longer in Duck Mold and watch the robot
+in the game, still walking, get the longer arm. A recipe with a mistake
+isn't exported: the game keeps the last model that worked.
+
+### Inside Duck Forge Studio
+
+Duck Forge Studio shows a game's models in tabs beside the game, and
+each tab is Duck Mold's Studio itself: the same screens, from the same
+code. Click a recipe or a `.glb` in its Files panel. There, Export reads
+**Send to game**, the model goes to the game's `assets` folder, and it
+is sent after every change unless you turn that off. Undo in the tab is
+the same Undo as here: it is kept on disk for each recipe, so a change
+made in one Studio can be undone in the other.
+
 ## Documents
 
 | | |
@@ -843,6 +959,7 @@ see the handoff note.
 | [PHASE6_REPORT.md](PHASE6_REPORT.md) | Phase 6, game-ready: hit shapes, events on keys, fitting to the ground, a timeline that zooms, Duck Forge's `robot_click`, and what Phase 7 should start with. |
 | [POLISH_AUDIT.md](POLISH_AUDIT.md) | Every screen looked at before Phase 7a, and what was wrong with it. |
 | [PHASE7A_REPORT.md](PHASE7A_REPORT.md) | Phase 7a, polish: every changed screen before and after, the speed before and after, far-away versions, the command line for agents, and the first real release. |
+| [PHASE7_REPORT.md](PHASE7_REPORT.md) | All of Phase 7, the last planned phase: images on models, the round trip with Duck Quill, Duck Mold inside Duck Forge Studio, Pip (a character made with all three apps), version 1.0.0, a picture of every changed screen, the known limits, and what a Phase 8 could be. |
 | [RELEASE_NOTES.md](RELEASE_NOTES.md) | What changed in each version, in plain words. |
 
 ## Project layout
@@ -854,8 +971,8 @@ Duck-Mold/
 ├── Start Duck Mold Studio.bat double-click: builds the Studio and starts it
 ├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
 ├── release/                   the installer's script, and what goes in the download beside the programs
-├── Cargo.toml                 the workspace: four crates, built together
-├── examples/                  eighteen recipes to read and change, and parts/ for files they use
+├── Cargo.toml                 the workspace: five crates, built together
+├── examples/                  twenty-four recipes to read and change, textures/ for their images, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/
@@ -878,8 +995,9 @@ Duck-Mold/
     │   │   └── tools.rs       what the commands do, for any front end; the examples, inside the program
     │   └── tests/             one file of tests per step
     ├── duck-mold-view/        pictures (`render`), and all the Studio does, with no window
-    ├── duck-mold-studio/      the Studio's window (egui): the `DuckMoldStudio` program
+    ├── duck-mold-studio/      the Studio's screens (egui), as a library: Duck Forge Studio shows them in a tab
     │   └── assets/            its icon (a picture of examples/duck.toml) and the examples' pictures
+    ├── duck-mold-studio-app/  the `DuckMoldStudio` program: opens a window for those screens, with the icon
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 

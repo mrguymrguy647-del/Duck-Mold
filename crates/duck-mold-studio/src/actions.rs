@@ -112,13 +112,21 @@ pub enum Action {
     MakeDefinition,
     /// Write the selected part alone to the library's folder.
     SaveToLibrary,
+    /// Open the selected part's image in Duck Quill (or make it one).
+    PaintInDuckQuill,
+    /// Show where Duck Quill is, and what images are painted in.
+    DuckQuill,
 }
 
 /// Every key and what it does, for Help's list and the README's.
-pub const KEYS: [(&str, &str); 28] = [
+pub const KEYS: [(&str, &str); 29] = [
     (
         "G, R, S, T, P",
         "The Move, Rotate, Scale, Size and Paint tools",
+    ),
+    (
+        "Shift+P",
+        "Paint the selected part's image in Duck Quill (a new image, if it has none)",
     ),
     (
         "Tab",
@@ -183,7 +191,8 @@ pub fn menus(
     ui: &mut egui::Ui,
     studio: &Studio,
     recent: &[std::path::PathBuf],
-    interface: Option<u32>,
+    interface: Option<Option<u32>>,
+    hosted: bool,
 ) -> Option<Action> {
     let mut chosen = None;
     let edits = !studio.look_only();
@@ -198,39 +207,50 @@ pub fn menus(
             ui.close();
         }
     };
-    ui.menu_button("File", |ui| {
-        pick(ui, true, "New model...", "Ctrl+N", Action::NewModel);
-        pick(ui, true, "Open...", "Ctrl+O", Action::Open);
-        ui.menu_button("Open an example", |ui| {
-            ui.label(RichText::new("Opens a copy of your own").weak().small());
-            for example in duck_mold_core::tools::EXAMPLES {
-                pick(
-                    ui,
-                    true,
-                    example.name,
-                    "",
-                    Action::OpenExample(example.name),
-                );
-            }
-        });
-        ui.add_enabled_ui(!recent.is_empty(), |ui| {
-            ui.menu_button("Opened lately", |ui| {
-                for file in recent {
-                    let name = file
-                        .file_name()
-                        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
-                    pick(ui, true, &name, "", Action::OpenFile(file.clone()));
+    // Inside another program's window (`hosted`), that program opens
+    // files: the File menu has only what is done with this model.
+    if hosted {
+        if recipe {
+            ui.menu_button("File", |ui| {
+                pick(ui, true, "Send to game", "Ctrl+E", Action::Export);
+                pick(ui, true, "Render picture", "", Action::RenderPicture);
+            });
+        }
+    } else {
+        ui.menu_button("File", |ui| {
+            pick(ui, true, "New model...", "Ctrl+N", Action::NewModel);
+            pick(ui, true, "Open...", "Ctrl+O", Action::Open);
+            ui.menu_button("Open an example", |ui| {
+                ui.label(RichText::new("Opens a copy of your own").weak().small());
+                for example in duck_mold_core::tools::EXAMPLES {
+                    pick(
+                        ui,
+                        true,
+                        example.name,
+                        "",
+                        Action::OpenExample(example.name),
+                    );
                 }
             });
-        });
-        ui.separator();
-        if recipe {
-            pick(ui, true, "Export", "Ctrl+E", Action::Export);
-            pick(ui, true, "Render picture", "", Action::RenderPicture);
+            ui.add_enabled_ui(!recent.is_empty(), |ui| {
+                ui.menu_button("Opened lately", |ui| {
+                    for file in recent {
+                        let name = file
+                            .file_name()
+                            .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+                        pick(ui, true, &name, "", Action::OpenFile(file.clone()));
+                    }
+                });
+            });
             ui.separator();
-        }
-        pick(ui, true, "Back to the start page", "", Action::StartPage);
-    });
+            if recipe {
+                pick(ui, true, "Export", "Ctrl+E", Action::Export);
+                pick(ui, true, "Render picture", "", Action::RenderPicture);
+                ui.separator();
+            }
+            pick(ui, true, "Back to the start page", "", Action::StartPage);
+        });
+    }
     // Looking only, there is nothing to edit: no Edit menu.
     if edits {
         ui.menu_button("Edit", |ui| {
@@ -254,6 +274,14 @@ pub fn menus(
             pick(ui, edits && one, "Rename", "F2", Action::Rename);
             pick(ui, edits && any, "Unjoin", "", Action::Unjoin);
             pick(ui, edits && any, "Remove", "Delete", Action::Remove);
+            ui.separator();
+            pick(
+                ui,
+                edits && one,
+                "Paint in Duck Quill",
+                "Shift+P",
+                Action::PaintInDuckQuill,
+            );
             ui.separator();
             pick(ui, edits, "Tidy sockets", "", Action::TidySockets);
             pick(ui, true, "Select all", "Ctrl+A", Action::SelectAll);
@@ -339,35 +367,40 @@ pub fn menus(
             Action::ShowAll,
         );
         ui.separator();
-        ui.menu_button("Interface size", |ui| {
-            let mark = |on: bool, words: &str| {
-                if on {
-                    format!("{words}  (now)")
-                } else {
-                    words.to_owned()
-                }
-            };
-            pick(
-                ui,
-                true,
-                &mark(interface.is_none(), "Like Windows"),
-                "",
-                Action::InterfaceSize(None),
-            );
-            for percent in INTERFACE_SIZES {
+        // (Not inside another program's window: the size of everything
+        // is that program's to set.)
+        if let Some(interface) = interface {
+            ui.menu_button("Interface size", |ui| {
+                let mark = |on: bool, words: &str| {
+                    if on {
+                        format!("{words}  (now)")
+                    } else {
+                        words.to_owned()
+                    }
+                };
                 pick(
                     ui,
                     true,
-                    &mark(interface == Some(percent), &format!("{percent}%")),
+                    &mark(interface.is_none(), "Like Windows"),
                     "",
-                    Action::InterfaceSize(Some(percent)),
+                    Action::InterfaceSize(None),
                 );
-            }
-        });
+                for percent in INTERFACE_SIZES {
+                    pick(
+                        ui,
+                        true,
+                        &mark(interface == Some(percent), &format!("{percent}%")),
+                        "",
+                        Action::InterfaceSize(Some(percent)),
+                    );
+                }
+            });
+        }
     });
     ui.menu_button("Help", |ui| {
         pick(ui, true, "Show the tips again", "", Action::ShowTips);
         pick(ui, true, "The keys", "", Action::ShowKeys);
+        pick(ui, true, "Duck Quill...", "", Action::DuckQuill);
         pick(ui, true, "About Duck Mold Studio", "", Action::About);
     });
     chosen

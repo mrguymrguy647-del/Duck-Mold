@@ -4,6 +4,9 @@
 //! opens that recipe (dropping a recipe on the program does the same);
 //! `DuckMoldStudio --look robot.toml` only shows it, which is what
 //! `duck-mold preview` starts.
+//!
+//! Everything the window shows is the `duck-mold-studio` library; this
+//! program opens the window and carries the icon.
 
 // On Windows, a release build opens no black console window behind the
 // Studio. Debug builds keep it, so `cargo run` shows messages.
@@ -58,8 +61,9 @@ fn main() -> eframe::Result {
     .remembering(recent);
     // The duck in the title bar and the taskbar: a picture of
     // examples/duck.toml.
-    let icon = eframe::icon_data::from_png_bytes(include_bytes!("../assets/icon.png"))
-        .expect("the icon is a PNG picture");
+    let icon =
+        eframe::icon_data::from_png_bytes(include_bytes!("../../duck-mold-studio/assets/icon.png"))
+            .expect("the icon is a PNG picture");
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_title(app.title())

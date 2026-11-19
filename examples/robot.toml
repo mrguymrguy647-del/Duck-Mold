@@ -137,21 +137,30 @@ right_arm = { on = "right", shift = [0, 0.7, 0] }
 left_leg  = { on = "bottom", shift = [-0.5, 0, 0] }
 right_leg = { on = "bottom", shift = [0.5, 0, 0] }
 
+# Its label is an image: letters painted in Duck Quill
+# (textures/robot_label.json is the script that painted them). The
+# picture is see-through round the letters, so the panel's own red
+# shows there.
 [[parts]]
 name = "panel"
 shape = "box"
 size = [0.3, 0.2, 0.02]
 color = "red"
+images = { front = "textures/robot_label.png" }
 attach = "back"
 to = "body.chest"
 limits = "fixed"
 collider = "none"     # too thin to aim at: a hit there names the body
 
+# Its brows and mouth are painted on (textures/robot_face.png), over the
+# head's steel. The eyes stay parts: they stand out from the face, and a
+# game can still find them.
 [[parts]]
 name = "head"
 shape = "box"
 size = [0.42, 0.32, 0.36]
 color = "steel"
+images = { front = "textures/robot_face.png" }
 attach = "bottom"
 to = "body.neck"
 # It nods (around x) and looks left and right (around y).

@@ -108,6 +108,7 @@ fn shots() -> Vec<Shot> {
         || {
             let folder = folder("audit_recent");
             std::fs::copy(examples().join("robot.toml"), folder.join("my_robot.toml")).unwrap();
+            with_robots_images(&folder.join("my_robot.toml"));
             std::fs::copy(examples().join("gate.toml"), folder.join("castle.toml")).unwrap();
             std::fs::write(
                 folder.join("mistake.toml"),
@@ -510,5 +511,17 @@ fn every_screen_at_two_sizes() {
             save(&mut screen, &dir.join(format!("{}.png", shot.name)));
             eprintln!("{label} {}", shot.name);
         }
+    }
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
     }
 }

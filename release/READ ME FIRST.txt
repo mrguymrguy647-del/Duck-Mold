@@ -57,6 +57,31 @@ A FIRST LOOK
   You can also drop a recipe file on DuckMoldStudio.exe to open it.
 
 
+PICTURES ON MODELS  (new in 1.0)
+  A part, or one face of it, can show a picture: a face, a label, wood
+  planks. Open the robot, Pip or the plank crate from the start page to
+  see.
+  - Select a part. Under "Images" on the right, "New image..." makes a
+    picture the right shape for the part or for one of its faces.
+  - "Paint in Duck Quill" opens the picture in Duck Quill (another free
+    Duck program), with thin lines that show the face. Paint, press
+    Ctrl+S there, and the model here has it. Without Duck Quill the
+    picture opens in whatever you use for pictures: it is a plain PNG
+    file in the folder "textures" beside your model.
+  - The picture lies over the part's colour. Where you paint nothing,
+    the colour shows.
+  - Under the palette is a row of the model's pictures. Click one, then
+    a face, to put it there. The first square takes a picture off.
+
+  FOR A GAME
+  - With nothing selected, the panel on the right says where "Export"
+    puts the model, with "Choose..." to pick a game's assets folder.
+  - Tick "Export after every change" and a Duck Forge game that is
+    running shows each change at once.
+  - Duck Forge Studio opens a game's models in tabs, and each tab is
+    this Studio.
+
+
 MODELS THAT MOVE  (new in 0.5)
   A recipe can say how a model moves: how far each part may turn, its
   poses, and animations made of poses. Open the robot, the door, the

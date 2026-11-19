@@ -16,7 +16,8 @@ use std::sync::Arc;
 use crate::gltf::read_gltf;
 use crate::issue::{Code, Issue};
 use crate::mesh::read_obj;
-use crate::recipe::{self, Loc, PaletteColor, PaletteDef, PartDef, Recipe, Source, hex};
+use crate::picture::{self, Picture};
+use crate::recipe::{self, ImageName, Loc, PaletteColor, PaletteDef, PartDef, Recipe, Source, hex};
 use crate::source::{self, Syntax};
 
 /// A recipe and everything it names, read and checked file by file.
@@ -30,6 +31,9 @@ pub struct Loaded {
     /// Every file that was read, the recipe itself first: what a window
     /// watches, to build the model again when one is saved.
     pub files: Vec<PathBuf>,
+    /// The images the parts name, each file once. A part's
+    /// [`crate::recipe::ImageName::picture`] is a place in this list.
+    pub pictures: Vec<Arc<Picture>>,
 }
 
 /// Reads the recipe at `path` and every file it names.
@@ -59,12 +63,15 @@ pub fn load(path: &Path, issues: &mut Vec<Issue>) -> Result<Loaded, Box<Issue>> 
         palette: Vec::new(),
         open: Vec::new(),
         files: vec![path.to_path_buf()],
+        pictures: Vec::new(),
+        picture_paths: Vec::new(),
     };
     let recipe = loader.recipe(&text, syntax, path, &display, true);
     Ok(Loaded {
         recipe,
         palette: loader.palette,
         files: loader.files,
+        pictures: loader.pictures,
     })
 }
 
@@ -83,12 +90,15 @@ pub fn load_text(
         palette: Vec::new(),
         open: Vec::new(),
         files: Vec::new(),
+        pictures: Vec::new(),
+        picture_paths: Vec::new(),
     };
     let recipe = loader.recipe(text, syntax, &folder.join(display), display, true);
     Loaded {
         recipe,
         palette: loader.palette,
         files: loader.files,
+        pictures: loader.pictures,
     }
 }
 
@@ -108,12 +118,15 @@ pub fn load_text_at(
         palette: Vec::new(),
         open: Vec::new(),
         files: vec![path.to_path_buf()],
+        pictures: Vec::new(),
+        picture_paths: Vec::new(),
     };
     let recipe = loader.recipe(text, syntax, path, display, true);
     Loaded {
         recipe,
         palette: loader.palette,
         files: loader.files,
+        pictures: loader.pictures,
     }
 }
 
@@ -126,6 +139,9 @@ struct Loader<'a> {
     open: Vec<(PathBuf, String)>,
     /// Every file read so far.
     files: Vec<PathBuf>,
+    /// Every image read so far, and where each came from.
+    pictures: Vec<Arc<Picture>>,
+    picture_paths: Vec<PathBuf>,
 }
 
 impl Loader<'_> {
@@ -166,6 +182,7 @@ impl Loader<'_> {
                     animations: Vec::new(),
                     colliders: None,
                     lods: None,
+                    export: None,
                 };
             }
         };
@@ -282,6 +299,12 @@ impl Loader<'_> {
     /// Replaces every `file = "..."` in a part, and in the parts inside
     /// it, with what the file holds.
     fn resolve(&mut self, part: &mut PartDef, folder: &Path, display: &str) {
+        if let Some(image) = &mut part.image {
+            image.picture = self.picture(image, folder, display);
+        }
+        for face in &mut part.images {
+            face.image.picture = self.picture(&face.image, folder, display);
+        }
         match &mut part.source {
             Source::Parts(parts) => {
                 for inner in parts {
@@ -293,6 +316,71 @@ impl Loader<'_> {
                 part.source = self.file_part(&named.text, &named.loc, folder, display);
             }
             _ => {}
+        }
+    }
+
+    /// Reads the image a part names. Its place in the list of pictures;
+    /// `None` for `"none"`, and for a file that can't be used, which is a
+    /// mistake in the recipe, reported where the recipe names it.
+    fn picture(&mut self, image: &ImageName, folder: &Path, display: &str) -> Option<usize> {
+        if image.is_none() {
+            return None;
+        }
+        let written = image.text.as_str();
+        let path = folder.join(written);
+        let key = std::fs::canonicalize(&path).unwrap_or_else(|_| path.clone());
+        if let Some(at) = self.picture_paths.iter().position(|known| *known == key) {
+            return Some(at);
+        }
+        if !self.files.contains(&path) {
+            self.files.push(path.clone());
+        }
+        let pretended = PRETENDED.with(|pretended| {
+            pretended
+                .borrow()
+                .iter()
+                .find(|(known, _)| *known == path)
+                .map(|(_, bytes)| bytes.clone())
+        });
+        let read = match pretended {
+            Some(bytes) => Ok(bytes),
+            None => std::fs::read(&path),
+        };
+        let bytes = match read {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                let message = if error.kind() == std::io::ErrorKind::NotFound {
+                    let beside = display.rsplit('/').next().unwrap_or(display);
+                    format!(
+                        "there is no file \"{written}\" beside {beside}. Check the name (paths start from the recipe's own folder), or make one: duck-mold new-image"
+                    )
+                } else {
+                    format!("can't read \"{written}\": {}", reason(&error))
+                };
+                self.issues
+                    .push(image.loc.error(Code::FileNotFound, message).got(written));
+                return None;
+            }
+        };
+        let shown = display_join(display, written);
+        match picture::read_png_at(&key, bytes, &shown) {
+            Ok(picture) => {
+                self.pictures.push(picture);
+                self.picture_paths.push(key);
+                Some(self.pictures.len() - 1)
+            }
+            Err(bad) => {
+                self.issues.push(
+                    image
+                        .loc
+                        .error(
+                            Code::BadImage,
+                            format!("\"{written}\" {}. {}", bad.what, bad.fix),
+                        )
+                        .got(written),
+                );
+                None
+            }
         }
     }
 
@@ -360,8 +448,16 @@ impl Loader<'_> {
                 };
                 let beside = path.parent().unwrap_or(folder);
                 match read_gltf(&bytes, &shown, beside, self.issues) {
-                    Some(mesh) => {
+                    Some(mut mesh) => {
                         self.files.extend(mesh.extra_files.iter().cloned());
+                        // Its own pictures join the recipe's, after the
+                        // ones read so far.
+                        mesh.first_picture = self.pictures.len();
+                        for picture in &mesh.pictures {
+                            self.pictures.push(picture.clone());
+                            // No recipe names them by a path.
+                            self.picture_paths.push(PathBuf::new());
+                        }
                         // A model Duck Mold wrote brings its palette, as a
                         // recipe used as a part does.
                         if mesh.from_duck_mold {
@@ -394,6 +490,26 @@ impl Loader<'_> {
     }
 }
 
+thread_local! {
+    /// Image files that are treated as being there, with these bytes,
+    /// while [`pretending`] runs.
+    static PRETENDED: std::cell::RefCell<Vec<(PathBuf, Vec<u8>)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Runs `work` with an image file treated as being at `path`, holding
+/// `bytes`, though nothing is written to the disk: for working out what
+/// a recipe would build with an image that hasn't been made yet (how
+/// big to make it).
+pub fn pretending<R>(path: &Path, bytes: Vec<u8>, work: impl FnOnce() -> R) -> R {
+    PRETENDED.with(|pretended| pretended.borrow_mut().push((path.to_path_buf(), bytes)));
+    let done = work();
+    PRETENDED.with(|pretended| {
+        pretended.borrow_mut().pop();
+    });
+    done
+}
+
 /// Why a file couldn't be read, in a few words.
 fn reason(error: &std::io::Error) -> &'static str {
     match error.kind() {
@@ -413,7 +529,7 @@ pub fn display_path(path: &Path) -> String {
 /// The name, for messages, of a file that the recipe `parent` names as
 /// `written`: `examples/robot.toml` and `parts/arm.toml` give
 /// `examples/parts/arm.toml`.
-fn display_join(parent: &str, written: &str) -> String {
+pub(crate) fn display_join(parent: &str, written: &str) -> String {
     let written = written.replace('\\', "/");
     if written.starts_with('/') || written.contains(':') {
         return written;

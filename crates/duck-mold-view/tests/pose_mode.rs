@@ -27,6 +27,7 @@ fn robot(test: &str) -> (PathBuf, Studio) {
     std::fs::create_dir_all(&folder).unwrap();
     let recipe = folder.join("robot.toml");
     std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+    with_robots_images(&recipe);
     let mut studio = Studio::open(&recipe, false);
     studio.hover(VIEW, None);
     studio.pose_mode().unwrap();
@@ -479,4 +480,16 @@ fn pose_mode_is_drawn_with_the_rings_at_the_join() {
     studio.select(Some("head"));
     studio.frame();
     check_picture("studio-pose-rings", &studio.picture(VIEW.0, VIEW.1));
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
+    }
 }

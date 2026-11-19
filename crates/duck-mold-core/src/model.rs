@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use crate::math::{Bounds, Mat3, Transform, Vec3};
 use crate::motion::{Animation, Pose};
+use crate::picture::Picture;
 use crate::recipe::{ColliderDef, Colliders, Limits, Loc, PaletteColor};
 use crate::shaping::Shaped;
 
@@ -22,6 +23,9 @@ pub struct Model {
     pub name: String,
     /// The palette: every colour a face can have.
     pub palette: Vec<PaletteColor>,
+    /// The images the model's faces show ([`Face::image`]). Empty for a
+    /// model without images.
+    pub pictures: Vec<Arc<Picture>>,
     /// Every face of the model, where it finally is, in the order the
     /// recipe lists the parts.
     pub faces: Vec<Face>,
@@ -168,6 +172,21 @@ pub struct Face {
     /// Which palette colour it has: a place in [`Model::palette`]. `None`
     /// for a face nobody coloured.
     pub color: Option<usize>,
+    /// The image on it, if it has one. It lies over the colour: the
+    /// colour shows where the image is see-through.
+    pub image: Option<FaceImage>,
+}
+
+/// The image on a face, and where the face is on it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FaceImage {
+    /// Which image: a place in [`Model::pictures`].
+    pub picture: usize,
+    /// For each corner of the face, in order, where it is on the image:
+    /// across from the left edge (0) to the right (1), and down from the
+    /// top edge (0) to the bottom (1). Beyond 0 to 1, the image repeats
+    /// (a face across the two ends of an image wrapped round a shape).
+    pub at: Vec<[f64; 2]>,
 }
 
 impl Face {

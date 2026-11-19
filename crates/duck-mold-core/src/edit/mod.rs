@@ -37,7 +37,9 @@ use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
 use crate::math::{Bounds, Mat3, Vec3};
 use crate::model::{Model, Part};
-use crate::recipe::{Colliders, Limits, Lods, PART_FIELDS, Shape, Side, rgb_of};
+use crate::recipe::{
+    Colliders, Limits, Lods, NO_IMAGE, OWN_IMAGE, PART_FIELDS, Shape, Side, rgb_of,
+};
 use crate::source::{Node, Syntax, Value};
 use crate::tools::Failure;
 use doc::{Doc, Step, TreePath, Val, key, with};
@@ -156,6 +158,12 @@ pub struct Changes {
     pub color: Option<String>,
     /// Colours for single faces: `("top", "plank")`.
     pub face_colors: Vec<(String, String)>,
+    /// A new image for the whole part: a PNG's path from the recipe's
+    /// folder, or `none` for no image.
+    pub image: Option<String>,
+    /// Images for single faces: `("front", "textures/face.png")`, or
+    /// `("front", "none")` for no image there.
+    pub face_images: Vec<(String, String)>,
     /// Degrees to twist it around its join.
     pub twist: Option<f64>,
     /// Where a free part's middle goes: `move = [x, y, z]`.
@@ -465,6 +473,13 @@ pub enum Edit {
         /// What it becomes.
         lods: Option<Lods>,
     },
+    /// Sets the recipe's `export`: where its `.glb` belongs, from the
+    /// recipe's own folder (`../assets/robot.glb`). `None` takes the
+    /// line away: the `.glb` goes beside the recipe.
+    SetExport {
+        /// Where, or `None`.
+        path: Option<String>,
+    },
     /// Keeps a part whole in the far-away versions (`lod = "keep"`), or
     /// lets them simplify it again.
     SetLod {
@@ -638,7 +653,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 47] = [
+    pub const COMMANDS: [&'static str; 48] = [
         "add",
         "remove",
         "rename",
@@ -683,6 +698,7 @@ impl Edit {
         "set-collider",
         "set-lods",
         "set-lod",
+        "set-export",
         "set-event",
         "remove-event",
         "fit-ground",
@@ -721,6 +737,7 @@ impl Edit {
             Edit::SetColliders { .. } => "set-colliders",
             Edit::SetCollider { .. } => "set-collider",
             Edit::SetLods { .. } => "set-lods",
+            Edit::SetExport { .. } => "set-export",
             Edit::SetLod { .. } => "set-lod",
             Edit::SetPose { .. } => "set-pose",
             Edit::AddPose { .. } => "add-pose",
@@ -1424,6 +1441,7 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
         Edit::SetColliders { colliders } => hits::set_colliders(doc, *colliders),
         Edit::SetCollider { part, to } => hits::set_collider(doc, part, *to, model),
         Edit::SetLods { lods } => lods::set_lods(doc, *lods),
+        Edit::SetExport { path } => lods::set_export(doc, path.as_deref()),
         Edit::SetLod { part, keep } => lods::set_lod(doc, part, *keep),
         Edit::SetPose {
             pose,
@@ -1794,6 +1812,8 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
                 sizes,
                 color,
                 face_colors,
+                image,
+                face_images,
                 twist,
                 move_to,
                 rotate,
@@ -1844,6 +1864,21 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
                 }
                 if doc.entries(&colors).is_some_and(<[_]>::is_empty) {
                     doc.remove_field(&table, "colors").map_err(cant)?;
+                }
+                // And the images of faces it doesn't have.
+                let images = with(&table, key("images"));
+                let gone: Vec<String> = doc
+                    .entries(&images)
+                    .unwrap_or_default()
+                    .iter()
+                    .map(|entry| entry.key.clone())
+                    .filter(|face| !faces.contains(&face.as_str()))
+                    .collect();
+                for face in &gone {
+                    doc.remove_field(&images, face).map_err(cant)?;
+                }
+                if doc.entries(&images).is_some_and(<[_]>::is_empty) {
+                    doc.remove_field(&table, "images").map_err(cant)?;
                 }
                 said.push(format!("shape {shape}"));
                 // Only a box can be shaped: another shape loses its
@@ -1913,6 +1948,101 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
                 }
                 said.push(format!("{face} {color}"));
             }
+            // A part made from a file can have pictures the file
+            // brought: "own" shows them again, and "none" has to be
+            // written down to keep one off.
+            let from_file = doc.entry(&table, "file").is_some();
+            let own_needs_a_file = |what: &str| {
+                problem(
+                    Code::Unsupported,
+                    format!(
+                        "\"own\" shows the pictures a part's file brought with it, and {what} isn't made from a file. To take an image off, say none"
+                    ),
+                )
+                .got("own")
+            };
+            if let Some(image) = image {
+                made_changed = true;
+                if image == OWN_IMAGE {
+                    if !from_file {
+                        return Err(own_needs_a_file("this part"));
+                    }
+                    if doc.entry(&table, "image").is_some() {
+                        doc.remove_field(&table, "image").map_err(cant)?;
+                    }
+                    said.push("its file's own pictures".to_owned());
+                } else if image == NO_IMAGE && doc.entry(&table, "image").is_some() && !from_file {
+                    // Its own image goes.
+                    doc.remove_field(&table, "image").map_err(cant)?;
+                    said.push("no image".to_owned());
+                } else {
+                    // A new image; or "none" written down, for a part
+                    // that would otherwise take the image of the part
+                    // it is inside.
+                    check_image(image)?;
+                    set(doc, &table, "image", text(image))?;
+                    said.push(if image == NO_IMAGE {
+                        "no image".to_owned()
+                    } else {
+                        format!("image {image}")
+                    });
+                }
+            }
+            let part_image_given = image.is_some();
+            for (face, image) in face_images {
+                made_changed = true;
+                let images = with(&table, key("images"));
+                let has_own = doc.entry(&images, face).is_some();
+                // The part's own image would show on a face that has no
+                // image of its own: "none" is written to keep it off.
+                // (Not when this same edit gives the part its image:
+                // then "none" for a face means the face takes the
+                // part's, and its own line simply goes.)
+                let whole = !part_image_given
+                    && doc
+                        .text_at(&table, "image")
+                        .is_some_and(|whole| whole != NO_IMAGE);
+                if image == OWN_IMAGE {
+                    if !from_file {
+                        return Err(own_needs_a_file("this part"));
+                    }
+                    if has_own {
+                        doc.remove_field(&images, face).map_err(cant)?;
+                        if doc.entries(&images).is_some_and(<[_]>::is_empty) {
+                            doc.remove_field(&table, "images").map_err(cant)?;
+                        }
+                    }
+                    said.push(format!("{face} the file's own picture"));
+                    continue;
+                }
+                if image == NO_IMAGE && !whole && !from_file {
+                    if has_own {
+                        doc.remove_field(&images, face).map_err(cant)?;
+                        if doc.entries(&images).is_some_and(<[_]>::is_empty) {
+                            doc.remove_field(&table, "images").map_err(cant)?;
+                        }
+                    }
+                    said.push(format!("{face} no image"));
+                    continue;
+                }
+                check_image(image)?;
+                if doc.entries(&images).is_some() {
+                    doc.set_field(&images, face, &text(image), &[])
+                        .map_err(cant)?;
+                } else {
+                    set(
+                        doc,
+                        &table,
+                        "images",
+                        Val::Table(vec![(face.clone(), text(image))]),
+                    )?;
+                }
+                said.push(if image == NO_IMAGE {
+                    format!("{face} no image")
+                } else {
+                    format!("{face} image {image}")
+                });
+            }
             if let Some(twist) = twist {
                 set(doc, &own, "twist", Val::Num(*twist))?;
                 said.push(format!("twist {}", doc::number_text(*twist)));
@@ -1958,7 +2088,7 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
             if said.is_empty() {
                 return Err(problem(
                     Code::MissingField,
-                    "nothing to set: give at least one of --shape, --size, --radius, --tube, --wall, --height, --segments, --steps, --bevel, --bevel-steps, --taper, --color, --face-color, --twist, --move, --rotate, --scale",
+                    "nothing to set: give at least one of --shape, --size, --radius, --tube, --wall, --height, --segments, --steps, --bevel, --bevel-steps, --taper, --color, --face-color, --image, --face-image, --twist, --move, --rotate, --scale",
                 ));
             }
             // Changing what a definition is made of changes every part
@@ -2974,7 +3104,7 @@ fn add_change(
 
 /// What a part is made of, as fields to copy: its shape and sizes (or
 /// its file), colours, changes and own sockets, as they are written.
-const MADE_OF: [&str; 17] = [
+const MADE_OF: [&str; 19] = [
     "shape",
     "file",
     "size",
@@ -2990,9 +3120,63 @@ const MADE_OF: [&str; 17] = [
     "color",
     "changes",
     "colors",
+    "image",
+    "images",
     "sockets",
     "note",
 ];
+
+/// The entries of a table of words under `field`: a part's `colors` or
+/// `images`, each face with what it is given.
+fn text_table(part: &Node, field: &str) -> Vec<(String, String)> {
+    let Value::Table(entries) = &part.value else {
+        return Vec::new();
+    };
+    entries
+        .iter()
+        .find(|entry| entry.key == field)
+        .and_then(|entry| match &entry.node.value {
+            Value::Table(faces) => Some(faces),
+            _ => None,
+        })
+        .map(|faces| {
+            faces
+                .iter()
+                .filter_map(|face| match &face.node.value {
+                    Value::Str(word) => Some((face.key.clone(), word.clone())),
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Checks an image's path as an edit gives it: `none`, or a PNG file
+/// whose path starts from the recipe's folder.
+fn check_image(image: &str) -> Result<(), Stop> {
+    if image == NO_IMAGE {
+        return Ok(());
+    }
+    if image.starts_with('/') || image.starts_with('\\') || image.as_bytes().get(1) == Some(&b':') {
+        return Err(problem(
+            Code::Unsupported,
+            format!(
+                "\"{image}\" starts from the top of the disk: an image's path starts from the recipe's own folder, like textures/face.png"
+            ),
+        )
+        .got(image));
+    }
+    if !image.to_lowercase().ends_with(".png") {
+        return Err(problem(
+            Code::Unsupported,
+            format!(
+                "\"{image}\" isn't a PNG file: an image is a file whose name ends in .png (or none, for no image)"
+            ),
+        )
+        .got(image));
+    }
+    Ok(())
+}
 
 /// A value of the tree, to write again.
 fn val_of(node: &Node) -> Option<Val> {
@@ -3388,6 +3572,12 @@ pub struct Facts {
     /// The colours its single faces have: `colors = { top = "grass" }`,
     /// its own or its definition's.
     pub face_colors: Vec<(String, String)>,
+    /// Its image, as written: a PNG's path, or `none`. Its own or its
+    /// definition's.
+    pub image: Option<String>,
+    /// The images its single faces have: `images = { front =
+    /// "textures/face.png" }`, its own or its definition's.
+    pub face_images: Vec<(String, String)>,
     /// The sockets it declares, by name, each with how many things use
     /// it (parts joined to it, its own join, a socket that passes it
     /// on).
@@ -3565,26 +3755,9 @@ pub fn describe(text: &str, syntax: Syntax, model: Option<&Model>, part: &str) -
         shape,
         sizes,
         color: text_of(made_node, "color").map(str::to_owned),
-        face_colors: match &made_node.value {
-            Value::Table(entries) => entries
-                .iter()
-                .find(|entry| entry.key == "colors")
-                .and_then(|entry| match &entry.node.value {
-                    Value::Table(faces) => Some(faces),
-                    _ => None,
-                })
-                .map(|faces| {
-                    faces
-                        .iter()
-                        .filter_map(|face| match &face.node.value {
-                            Value::Str(color) => Some((face.key.clone(), color.clone())),
-                            _ => None,
-                        })
-                        .collect()
-                })
-                .unwrap_or_default(),
-            _ => Vec::new(),
-        },
+        face_colors: text_table(made_node, "colors"),
+        image: text_of(made_node, "image").map(str::to_owned),
+        face_images: text_table(made_node, "images"),
         sockets: declared_sockets(&doc, &found)
             .into_iter()
             .map(|socket| {
@@ -3742,6 +3915,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::FitGround { .. }
         | Edit::SetColliders { .. }
         | Edit::SetLods { .. }
+        | Edit::SetExport { .. }
         | Edit::TidySockets => "",
     }
 }

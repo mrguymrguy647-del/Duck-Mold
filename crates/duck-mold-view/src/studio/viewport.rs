@@ -17,7 +17,7 @@ use duck_mold_core::math::{Bounds, Vec3, sin_cos_degrees, vec3};
 use duck_mold_core::model::{Model, Part};
 use duckforge::prelude::{Camera3D, Canvas, Color, Lighting, Mesh, Rect, Transform, Vec2, vec2};
 
-use crate::render::{BACKGROUND, png_of};
+use crate::render::{BACKGROUND, Painted, png_of};
 
 /// How much the camera sees, top to bottom, in degrees.
 pub const FIELD_OF_VIEW: f64 = 40.0;
@@ -894,16 +894,26 @@ fn mesh_of(
     hidden: &[Range<usize>],
     focus: Option<&Range<usize>>,
 ) -> Mesh {
+    let painted = Painted::of(model);
     let mut mesh = Mesh::new();
     for (at, face) in model.faces.iter().enumerate() {
         if hidden.iter().any(|hidden| hidden.contains(&at)) {
             continue;
         }
-        let mut rgb = face
-            .color
-            .and_then(|color| model.palette.get(color))
-            .map_or(UNCOLOURED, |color| color.rgb);
-        if lit.iter().any(|lit| lit.contains(&at)) {
+        let on_sheet = painted
+            .as_ref()
+            .and_then(|painted| painted.corners(model, at));
+        // A face with an image is white underneath, so the image shows
+        // as it was painted.
+        let mut rgb = match on_sheet {
+            Some(_) => [255; 3],
+            None => face
+                .color
+                .and_then(|color| model.palette.get(color))
+                .map_or(UNCOLOURED, |color| color.rgb),
+        };
+        let is_lit = lit.iter().any(|lit| lit.contains(&at));
+        if is_lit {
             rgb = rgb.map(|channel| channel + (255 - channel) / 3);
         }
         if focus.is_some_and(|focus| !focus.contains(&at)) {
@@ -915,10 +925,30 @@ fn mesh_of(
             mesh.add_vertex(forge(orbit.to_view(corner + offset)));
         }
         for step in 1..face.corners.len().saturating_sub(1) {
-            mesh.add_triangle(first, first + step, first + step + 1, color);
+            match &on_sheet {
+                Some(on) => {
+                    mesh.add_triangle_uv(
+                        first,
+                        first + step,
+                        first + step + 1,
+                        [on[0], on[step], on[step + 1]],
+                        color,
+                    );
+                    // An image can't be made lighter than it was
+                    // painted; a lit face with one is drawn at full
+                    // brightness instead, whatever the light.
+                    if is_lit {
+                        mesh.set_glow(mesh.triangles.len() - 1, 1.0);
+                    }
+                }
+                None => mesh.add_triangle(first, first + step, first + step + 1, color),
+            }
         }
     }
-    mesh
+    match painted {
+        Some(painted) => mesh.with_texture(painted.sprite.clone()),
+        None => mesh,
+    }
 }
 
 /// A colour halfway to the background: a wireframe's back edges.

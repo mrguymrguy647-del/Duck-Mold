@@ -35,6 +35,7 @@ Rules that hold everywhere:
 | `animations` | table of animations | none | The model's animations, by name. See "Animations" below. |
 | `colliders` | text | none: no hit shapes | `"parts"`: a hit shape fitted to every part, moving with it; `"capsule"`, `"box"` or `"sphere"`: one round the whole model. See "Hit shapes" below. |
 | `lods` | text, or two numbers | none: no far-away versions | `"auto"`: two simpler versions for a game to draw far off, at 8 and 20 times the model's largest side; `[12, 30]`: at those distances, in metres; `"none"`: none. See "Far-away versions" below. |
+| `export` | text | none: beside the recipe | Where the model's `.glb` belongs, from the recipe's own folder: `"../assets/robot.glb"` for a recipe in a game's `art` folder. `duck-mold export` with no `-o`, and the Studio's Export, write there; the folder is made if it isn't there. Must end in `.glb` and can't start from the top of the disk. It changes nothing in the model. |
 | `bones` | | | Reserved for a later phase. Using it is an error that says so. |
 
 ### `palette`
@@ -96,6 +97,8 @@ Each entry of `parts`, and each entry of `define`, is a part.
 | `name` | text | none | Letters, digits, `_`, `-`. Names in one list must differ. An unnamed part is called by its place in the list, counting from 0 as error messages do: `#2` is `parts[2]`. Only a named part can be attached to. |
 | `color` | text | none | A palette name: the colour of the whole part. |
 | `colors` | table | none | Colours for single faces, by face name: `{ top = "grass" }`. |
+| `image` | text | none | A PNG file: the image on the whole part. The path starts from the recipe's folder. See "Images" below. |
+| `images` | table | none | Images for single faces, by face name: `{ front = "textures/face.png" }`. |
 | `attach` | text | none | The part's own socket to join. Needs `to`. |
 | `to` | text | none | `"part.socket"`: the socket of another part **in the same list** to join it to. Needs `attach`. |
 | `twist` | number | `0` | With `attach` only: degrees to turn the part around its join. -36000 to 36000. |
@@ -307,6 +310,78 @@ everything inside it that has none of its own.
   warning.
 - A `color` that changes nothing (every face inside already has one) is
   a warning.
+
+### Images
+
+```toml
+[[parts]]
+name = "head"
+shape = "box"
+color = "steel"
+images = { front = "textures/robot_face.png" }   # one face
+
+[[parts]]
+name = "crate"
+shape = "box"
+color = "wood"
+image = "textures/planks.png"                    # every face
+images = { top = "textures/lid.png" }            # ...but the top has its own
+```
+
+- An image is a **PNG file**, 1 x 1 to 1024 x 1024 pixels. Its path
+  starts from the recipe's folder and is written with `/`. A path from
+  the top of the disk (`C:\...`, `/home/...`) is an error.
+- `image` and `images` work as `color` and `colors` do, and the nearest
+  setting wins: a face name in `images` beats `image`; a part's `image`
+  is the image of everything inside it that has none of its own; a
+  definition's beats that of the part that uses it. `images` on an
+  assembly is an error.
+- `"none"` means no image: `images = { top = "none" }`.
+- **The image lies over the colour.** Where the image is solid you see
+  the image as it was painted; where it is see-through you see the
+  face's colour; a half see-through pixel is a mix.
+- **How it lies on flat faces:** fitted to the rectangle round the faces
+  it was given to, as you see them looking straight at them from
+  outside. Faces that face the same way share one copy; faces that face
+  different ways get a copy each. On a box's four sides it is upright;
+  on the top it is as seen from above with the front edge at the bottom
+  of the image; on the bottom, as seen from below with the front edge at
+  the top. It stretches to fit, and doesn't repeat.
+- **Round faces are wrapped:**
+
+  | Shape | Face | How the image lies |
+  |---|---|---|
+  | `cylinder`, `capsule`, `cone`, `tube` | `side` (a tube's `inside` too) | Once round, like the label on a tin: the middle of the image at the front, its two ends meeting at the back. |
+  | | `top`, `bottom` | Seen from above or below, as a box's: a round face shows the circle in the middle of the image. |
+  | `sphere` | `side` | Like a map of the world: the middle of the image at the front, its top edge at the top. |
+  | `torus` | `side` | Once round the ring and once round its tube. |
+  | `wedge`, `pyramid`, `prism` | slopes | Laid flat on the slope, the image's bottom edge along the slope's lower edge. |
+  | `stairs` | `front`, `top` | All the risers together, seen from the front; all the treads together, seen from above. |
+  | `arch` | `inside` | Along the inside of the doorway, from the foot on the model's right, over the top, to the other foot. |
+  | a box or cylinder with `bevel` | `bevel` | Never: the cut edges keep their colour. Naming them in `images` is an error. |
+
+- **A shaped box** (`changes`): an image given to a face name is on the
+  faces that name stands for. A pulled face keeps its image; an inset
+  leaves the image in place round the new face, like a picture frame;
+  after a cut it is on the piece that kept the name. The part's own
+  `image` is fitted to each whole side of the part, so it carries on
+  across every cut, inset and pull.
+- A mirrored part shows the mirror image.
+- A recipe used as a part brings its images; their paths start from that
+  recipe's folder.
+- **A part made from a mesh file** has its materials for faces. An
+  image goes on by the file's own layout (its "UVs"), not by the rules
+  above, and a glTF file's own pictures come with it: see
+  [Files as parts](#files-as-parts). A file with no layout can't take
+  an image, and says so.
+- A file that isn't there (`file_not_found`), or that isn't a PNG, is
+  damaged or is too big (`bad_image`), is an error that names the file
+  and the fix. All of a model's images together must fit in 4096 x 4096
+  pixels.
+- `inspect` lists the images, where each is and how many of its pixels
+  there are to a metre there, and warns (`mixed_pixels`) when one
+  image's pixels are more than twice as fine as another's.
+- A recipe without `image` or `images` builds exactly as it always has.
 
 ## Sockets
 
@@ -597,9 +672,11 @@ the Studio shows one with View > Far version. `duck-mold edit` has
   names are read; faces with more than three corners are cut into
   triangles. The file is read as y up, facing +z, the way glTF means it
   and Blender writes OBJ. For a file in other units or directions, use
-  `scale` and `rotate` on the part. The file's own colours and textures
-  are not used: colour it with `color`, and with `colors` by material
-  name. `duck-mold inspect rock.obj` lists a file's size and materials.
+  `scale` and `rotate` on the part. The file's own colours and pictures
+  are not used (its `.mtl` file isn't read): colour it with `color`, and
+  with `colors` by material name. Its layout for pictures (`vt`) is
+  read, so `images` can put a PNG on a material. `duck-mold inspect
+  rock.obj` lists a file's size and materials.
 - **A glTF file** (`file = "lamp.gltf"` or `file = "lamp.glb"`): every
   mesh in the file's main scene, each placed, turned and sized as its
   object says (by numbers or by a matrix), merged into one part.
@@ -615,10 +692,33 @@ the Studio shows one with View > Far version. `duck-mold edit` has
     `no_color` warning lists what was kept. A `.glb` Duck Mold wrote
     brings its palette, as a recipe used as a part does: its face names
     are its palette names.
+  - **Pictures:** a material's colour picture (its "base colour
+    texture") comes in with it, laid on by the file's own layout (its
+    "UVs"). Nothing is written in the recipe for that.
+    - PNG and JPEG are read, inside the file or in a file beside it.
+    - A picture that repeats across a face is laid out repeated, up to 8
+      times each way; beyond that it is shown once, with a note.
+    - A base colour that isn't white tints the picture, as glTF says.
+    - A picture over 1024 pixels along a side is made smaller, with a
+      note.
+    - A material wholly under a solid picture is given no palette
+      colour: none would show.
+    - **The recipe has the last word.** `colors = { Body = "steel" }`,
+      or a `color` on the part, paints those faces and their picture
+      goes. `images = { Body = "textures/new.png" }` puts another image
+      on that material, by the file's layout. `images = { Body = "none"
+      }` leaves the material's own colour; `image = "none"` does that
+      for the whole part.
+    - `inspect` lists them with the model's other images, named
+      `lamp.gltf: shade` when the picture is inside the file.
+    - A `.glb` Duck Mold wrote keeps its images.
+    - A picture that can't be read (missing, damaged, or a kind other
+      than PNG and JPEG) is left out with a note, and its faces keep
+      their material's colour.
   - **Left out, with a note:** lines and points, skins, animations,
-    shape keys (morph targets), cameras and textures (a material's
-    colour is its base colour). Normals and texture coordinates are
-    passed over.
+    shape keys (morph targets), cameras, every picture but the colour
+    one (bump, shine and glow maps), and the extension that moves or
+    turns a picture on its faces. Normals are passed over.
   - **Refused, with a sentence:** a file that says it needs an extension
     to be read (Draco or meshopt compression, for example), corners
     packed into whole numbers, sparse accessors, and glTF 1.

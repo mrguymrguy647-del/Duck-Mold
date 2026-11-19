@@ -572,7 +572,7 @@ fn a_copy_of_a_joined_part_does_not_sit_on_the_part_it_copies() {
     assert!(looked.overlapping.is_empty(), "{:?}", looked.overlapping);
     // 3. With no room beside it either, free, in front of the model, on
     // the ground.
-    let robot = example("robot");
+    let robot = robot();
     let applied = done(&robot, Syntax::Toml, &copy("left_arm"));
     assert_eq!(
         applied.summary,
@@ -1638,9 +1638,15 @@ fn the_recipes_definitions_and_free_names_are_listed() {
 
 // ---- Phase 3, step 1: free parts ---------------------------------------------
 
+/// The robot's recipe, without the two lines that put images on it:
+/// these tests write the text into folders that don't have the images.
 fn robot() -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/robot.toml"))
         .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with("images = { front = \"textures/robot_"))
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 /// Every corner of two models, compared.
@@ -2621,7 +2627,14 @@ fn examples() -> Vec<(String, String)> {
     .into_iter()
     .map(|name| {
         let path = folder.join(format!("{name}.toml"));
-        (name.to_owned(), std::fs::read_to_string(path).unwrap())
+        // (The robot without its images: the edits are tried on text
+        // alone, away from the examples' folder.)
+        let text = if name == "robot" {
+            robot()
+        } else {
+            std::fs::read_to_string(path).unwrap()
+        };
+        (name.to_owned(), text)
     })
     .collect()
 }
@@ -3037,6 +3050,7 @@ fn every_kind_of_edit_has_a_name() {
             part: String::new(),
             keep: true,
         },
+        Edit::SetExport { path: None },
         Edit::SetEvent {
             animation: String::new(),
             key: 1,

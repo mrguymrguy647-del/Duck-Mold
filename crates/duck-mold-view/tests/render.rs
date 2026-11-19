@@ -204,6 +204,7 @@ fn a_model_with_no_faces_gives_empty_views() {
     let model = Model {
         name: "nothing".to_owned(),
         palette: Vec::new(),
+        pictures: Vec::new(),
         faces: Vec::new(),
         parts: Vec::new(),
         sockets: Vec::new(),

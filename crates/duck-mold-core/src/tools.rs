@@ -66,6 +66,9 @@ pub struct Built {
     pub warnings: Vec<Issue>,
     /// For a mesh file: its materials and how many triangles each has.
     pub materials: Vec<MaterialUse>,
+    /// For a recipe: where its `export` line says its `.glb` belongs,
+    /// from the recipe's own folder. `None` if it has no such line.
+    pub export: Option<String>,
 }
 
 /// Reads and builds a file: a recipe (`.toml`, `.json`), or a model to
@@ -101,6 +104,7 @@ fn build_noting(path: &Path, files: &mut Vec<PathBuf>) -> Result<Built, Failure>
                     source,
                     warnings: Report::from_issues(issues).warnings,
                     materials: Vec::new(),
+                    export: loaded.recipe.export.clone(),
                 }),
                 None => Err(Failure::Invalid(Report::from_issues(issues))),
             }
@@ -114,6 +118,7 @@ fn build_noting(path: &Path, files: &mut Vec<PathBuf>) -> Result<Built, Failure>
                 source,
                 warnings: Vec::new(),
                 materials: Vec::new(),
+                export: None,
             })
         }
         "glb" | "gltf" => {
@@ -132,6 +137,7 @@ fn build_noting(path: &Path, files: &mut Vec<PathBuf>) -> Result<Built, Failure>
                             .into_iter()
                             .map(|(name, triangles)| MaterialUse { name, triangles })
                             .collect(),
+                        export: None,
                     })
                 }
                 None => Err(Failure::Invalid(Report::from_issues(issues))),
@@ -156,6 +162,7 @@ fn build_noting(path: &Path, files: &mut Vec<PathBuf>) -> Result<Built, Failure>
                         .into_iter()
                         .map(|(name, triangles)| MaterialUse { name, triangles })
                         .collect(),
+                    export: None,
                 }),
                 None => Err(Failure::Invalid(Report::from_issues(issues))),
             }
@@ -203,9 +210,18 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         .triangles
         .iter()
         .zip(&mesh.material_of)
-        .map(|(corners, &material)| Face {
+        .enumerate()
+        .map(|(triangle, (corners, &material))| Face {
             corners: corners.map(|corner| Vec3::from(corner).tidied()).to_vec(),
             color: color_of_material[material],
+            // The file's own picture, by its own layout.
+            image: mesh
+                .picture(triangle)
+                .zip(mesh.lie(triangle))
+                .map(|(picture, at)| crate::model::FaceImage {
+                    picture,
+                    at: at.to_vec(),
+                }),
         })
         .collect();
     let part = Part {
@@ -244,6 +260,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
     Model {
         name,
         palette,
+        pictures: mesh.pictures.clone(),
         faces,
         parts: vec![part],
         sockets: Vec::new(),
@@ -462,11 +479,43 @@ pub struct Exported {
     pub output: String,
     /// How big it is.
     pub bytes: usize,
+    /// The file that was written, as a path.
+    #[serde(skip)]
+    pub path: PathBuf,
+}
+
+/// Where a recipe's `.glb` is written when nobody says: where its
+/// `export` line says (from the recipe's own folder), or else beside
+/// the recipe under the recipe's name.
+pub fn export_path(recipe: &Path, export: Option<&str>) -> PathBuf {
+    let Some(export) = export else {
+        return recipe.with_extension("glb");
+    };
+    let folder = recipe.parent().unwrap_or(Path::new(""));
+    // Tidied, so `art/../assets/robot.glb` is written, and shown, as
+    // `assets/robot.glb`.
+    let mut tidy = PathBuf::new();
+    for piece in folder.join(export.replace('\\', "/")).components() {
+        match piece {
+            std::path::Component::ParentDir
+                if matches!(
+                    tidy.components().next_back(),
+                    Some(std::path::Component::Normal(_))
+                ) =>
+            {
+                tidy.pop();
+            }
+            std::path::Component::CurDir => {}
+            other => tidy.push(other),
+        }
+    }
+    tidy
 }
 
 /// `duck-mold export`: builds a recipe and writes the `.glb`. Without
-/// `output`, the file goes next to the recipe, with the same name.
-/// Nothing is written if the recipe has mistakes.
+/// `output`, the file goes where the recipe's `export` line says, or
+/// else next to the recipe, with the same name. Nothing is written if
+/// the recipe has mistakes.
 pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Failure> {
     let is_recipe = recipe
         .extension()
@@ -485,7 +534,18 @@ pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Fai
     let built = build(recipe)?;
     let output: PathBuf = match output {
         Some(output) => output.to_path_buf(),
-        None => recipe.with_extension("glb"),
+        None => {
+            let output = export_path(recipe, built.export.as_deref());
+            // The folder an `export` line names is made if it isn't
+            // there: a new game's `assets`, say.
+            if built.export.is_some()
+                && let Some(folder) = output.parent()
+                && !folder.as_os_str().is_empty()
+            {
+                let _ = std::fs::create_dir_all(folder);
+            }
+            output
+        }
     };
     let bytes = write_glb(&built.model);
     write_file(&output, &bytes)?;
@@ -493,6 +553,7 @@ pub fn export_file(recipe: &Path, output: Option<&Path>) -> Result<Exported, Fai
         inspection: inspect(&built.model, &built.source, built.warnings),
         output: display_path(&output),
         bytes: bytes.len(),
+        path: output,
     })
 }
 
@@ -552,12 +613,60 @@ pub struct Example {
 }
 
 /// The examples, in the order the start page shows them.
-pub const EXAMPLES: [Example; 18] = [
+pub const EXAMPLES: [Example; 21] = [
     Example {
         name: "robot",
-        about: "Parts made of parts, a mirrored arm, and four animations",
+        about: "Parts made of parts, a mirrored arm, a painted face, and four animations",
         recipe: include_str!("../../../examples/robot.toml"),
-        files: &[],
+        files: &[
+            (
+                "textures/robot_face.png",
+                include_bytes!("../../../examples/textures/robot_face.png"),
+            ),
+            (
+                "textures/robot_label.png",
+                include_bytes!("../../../examples/textures/robot_label.png"),
+            ),
+        ],
+    },
+    Example {
+        name: "pip",
+        about: "A small explorer: a face painted in Duck Quill, a walk, and a game in Duck Forge",
+        recipe: include_str!("../../../examples/pip.toml"),
+        files: &[(
+            "textures/pip_face.png",
+            include_bytes!("../../../examples/textures/pip_face.png"),
+        )],
+    },
+    Example {
+        name: "plank_crate",
+        about: "Images: wood planks on a box, and a lid on top",
+        recipe: include_str!("../../../examples/plank_crate.toml"),
+        files: &[
+            (
+                "textures/planks.png",
+                include_bytes!("../../../examples/textures/planks.png"),
+            ),
+            (
+                "textures/lid.png",
+                include_bytes!("../../../examples/textures/lid.png"),
+            ),
+        ],
+    },
+    Example {
+        name: "signpost",
+        about: "A model from another program that brings its own pictures",
+        recipe: include_str!("../../../examples/signpost.toml"),
+        files: &[
+            (
+                "parts/sign.gltf",
+                include_bytes!("../../../examples/parts/sign.gltf"),
+            ),
+            (
+                "parts/sign_post.png",
+                include_bytes!("../../../examples/parts/sign_post.png"),
+            ),
+        ],
     },
     Example {
         name: "house",

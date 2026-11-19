@@ -396,6 +396,8 @@ pub fn show(
         || (shaping && !posing && !studio.selected_faces().is_empty())
         || (posing && !studio.grips().is_empty());
     let why_not = studio.why_no_pose_handles();
+    // With the Paint tool over a face: what a click there would do.
+    let would_paint = studio.paint_hint(ui.input(|input| input.modifiers.shift));
     let hint = if view.moving {
         "Let go to make the change. Escape lets go without changing anything."
     } else if posing && studio.selected().is_none() {
@@ -429,7 +431,9 @@ pub fn show(
     } else if shaping {
         "Drag the arrow to pull the face out, or push it in. Shift+click adds a face. G, R, S, I: other tools."
     } else if studio.tool == Tool::Paint && !studio.look_only() {
-        "Click a face to colour it. Shift+click colours the whole part. Pick the colour in the palette."
+        would_paint.as_deref().unwrap_or(
+            "Click a face to colour it, or to put the image you picked on it. Shift+click does the whole part. Pick a colour or an image in the palette.",
+        )
     } else if studio.selection().len() > 1 {
         "Drag a handle, or one of the parts, to change them together. Shift+click adds or takes out a part."
     } else if handles {

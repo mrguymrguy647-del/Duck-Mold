@@ -51,7 +51,30 @@ jobs:
         run: cargo build --workspace --all-targets
       - name: Test
         run: cargo test --workspace
+      # The Studio's screens are compared with stored pictures, and the
+      # pictures are this machine's: its software driver drew them, and
+      # another driver draws letters a little differently. So a screen
+      # that was changed on purpose, or a new one, can only be drawn for
+      # storing here. When the test above fails on Linux, the screens
+      # are drawn as they are now and kept with the run (the file
+      # "screens" at the bottom of the run's page): look at them, and
+      # put the ones that are right in crates/duck-mold-studio/tests/screens.
+      - name: Draw the screens as they are now
+        if: failure() && runner.os == 'Linux'
+        run: |
+          UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures
+          mkdir changed-screens
+          git status --porcelain -- crates/duck-mold-studio/tests/screens \
+            | awk '{print $2}' | xargs -r -I{} cp {} changed-screens/
+          ls changed-screens
+      - name: Keep them with the run
+        if: failure() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: screens
+          path: changed-screens
       - name: Clippy
+        if: success() || failure()
         run: cargo clippy --workspace --all-targets -- -D warnings
       # How fast the Studio is with a big model (50 parts, about 20,000
       # triangles), on GitHub's Windows machine, which stands for an

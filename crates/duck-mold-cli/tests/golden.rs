@@ -27,8 +27,11 @@ use std::process::Command;
 #[allow(dead_code)]
 mod forge;
 
-const EXAMPLES: [&str; 21] = [
+const EXAMPLES: [&str; 24] = [
     "crate",
+    "plank_crate",
+    "signpost",
+    "pip",
     "table",
     "tree",
     "house",
@@ -50,6 +53,9 @@ const EXAMPLES: [&str; 21] = [
     "cart",
     "gnome",
 ];
+
+/// The examples with images.
+const WITH_IMAGES: [&str; 4] = ["plank_crate", "signpost", "robot", "pip"];
 
 /// The top of the repository.
 fn root() -> PathBuf {
@@ -147,7 +153,7 @@ fn every_example_renders_to_its_golden_picture() {
 /// The examples with hit shapes, drawn with them outlined
 /// (`render --colliders`), and their hit shapes listed (`inspect
 /// --colliders`).
-const WITH_HIT_SHAPES: [&str; 4] = ["robot", "gnome", "door", "cart"];
+const WITH_HIT_SHAPES: [&str; 5] = ["robot", "gnome", "door", "cart", "pip"];
 
 #[test]
 fn every_example_with_hit_shapes_renders_them_to_its_golden_picture() {
@@ -177,7 +183,7 @@ fn every_example_with_hit_shapes_renders_them_to_its_golden_picture() {
 
 /// The examples with far-away versions (`lods = "auto"`): each version
 /// is drawn to a golden picture (`render --far`).
-const WITH_FAR_VERSIONS: [&str; 4] = ["temple", "barn", "robot", "gnome"];
+const WITH_FAR_VERSIONS: [&str; 5] = ["temple", "barn", "robot", "gnome", "pip"];
 
 #[test]
 fn every_far_version_renders_to_its_golden_picture() {
@@ -211,7 +217,8 @@ fn every_example_inspects_to_its_golden_report() {
 
 /// The examples that move, each with its animations and the view its
 /// strips are drawn from.
-const MOVING: [(&str, &[(&str, &str)]); 4] = [
+const MOVING: [(&str, &[(&str, &str)]); 5] = [
+    ("pip", &[("idle", "three-quarter"), ("walk", "right")]),
     (
         "robot",
         &[
@@ -335,14 +342,15 @@ fn every_example_is_a_clean_model() {
         // steps go through its ground and platform, and its tip is on
         // the roof's point; the barn's silo has half a ball in its top;
         // and the gate's towers lean into its arch. The gnome's beard is
-        // in its head and over its chest.
+        // in its head and over its chest. The signpost's stone is
+        // sunk into its mound.
         let overlaps = report["overlapping"].as_array().unwrap().len();
         let meant = match name {
             "tree" | "duck" | "gate" | "gnome" => 2,
             "snowman" => 5,
             "dog" => 7,
             "temple" => 3,
-            "doughnut" | "mug" | "barn" => 1,
+            "doughnut" | "mug" | "barn" | "signpost" => 1,
             _ => 0,
         };
         assert_eq!(overlaps, meant, "{name}");
@@ -400,7 +408,21 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
             .collect();
         assert_eq!(palette, expected, "{name}");
         // Every triangle has one of the palette's colours, and each
-        // colour paints as many triangles as the report says.
+        // colour paints as many triangles as the report says. (A
+        // triangle with an image is white in the file, whatever colour
+        // is under its image, so it is counted apart.)
+        let with_image = model
+            .triangles
+            .iter()
+            .filter(|triangle| triangle.on_picture.is_some())
+            .count();
+        assert_eq!(
+            with_image > 0,
+            WITH_IMAGES.contains(&name),
+            "{name}: {with_image} triangles with an image"
+        );
+        assert_eq!(model.picture.is_some(), with_image > 0, "{name}");
+        let mut painted_in_all = 0;
         for (color, entry) in model
             .palette
             .iter()
@@ -409,13 +431,37 @@ fn the_duck_forge_reader_reads_every_golden_glb() {
             let painted = model
                 .triangles
                 .iter()
-                .filter(|triangle| triangle.color == color.rgb)
+                .filter(|triangle| triangle.on_picture.is_none() && triangle.color == color.rgb)
                 .count();
+            painted_in_all += painted;
+            if with_image == 0 {
+                assert_eq!(
+                    painted as u64,
+                    entry["triangles"].as_u64().unwrap(),
+                    "{name}: {}",
+                    color.name
+                );
+            } else {
+                assert!(
+                    painted as u64 <= entry["triangles"].as_u64().unwrap(),
+                    "{name}: {}",
+                    color.name
+                );
+            }
+        }
+        if with_image > 0 {
+            let unpainted = report["unpainted_triangles"].as_u64().unwrap_or(0) as usize;
+            assert!(
+                painted_in_all + with_image + unpainted >= model.triangles.len(),
+                "{name}: every triangle has a colour or an image"
+            );
+            // The picture is the size the report says the images are
+            // together.
+            let picture = model.picture.as_ref().unwrap();
             assert_eq!(
-                painted as u64,
-                entry["triangles"].as_u64().unwrap(),
-                "{name}: {}",
-                color.name
+                serde_json::json!([picture.width, picture.height]),
+                report["images"]["sheet"],
+                "{name}"
             );
         }
         // The model stands on the ground and is the size the report says.
@@ -614,7 +660,18 @@ fn inspecting_a_golden_glb_gives_the_recipes_tree_of_parts() {
             "floating",
             "overlapping",
         ] {
+            // In the file, a face with an image is white under it: its
+            // colour isn't counted there.
+            if field == "palette" && WITH_IMAGES.contains(&name) {
+                continue;
+            }
             assert_eq!(from_glb[field], from_recipe[field], "{name}: {field}");
         }
+        // A model with images still has them, read back from its file.
+        assert_eq!(
+            from_glb["images"].is_object(),
+            from_recipe["images"].is_object(),
+            "{name}"
+        );
     }
 }

@@ -26,13 +26,15 @@
 //! Reading does the same in reverse.
 
 use std::ops::Range;
+use std::sync::Arc;
 
 use serde::Serialize;
 
 use crate::issue::{Code, Issue};
 use crate::math::{Bounds, Mat3, Transform, Vec3, tidy, vec3};
-use crate::model::{Face, Model, Part, PartKind, Socket};
+use crate::model::{Face, FaceImage, Model, Part, PartKind, Socket};
 use crate::motion::{self, Motion};
+use crate::picture::{self, ImageSheet, MAX_SHEET, Picture};
 use crate::recipe::{Loc, PaletteColor, hex, rgb_of};
 
 /// The grey of a face nobody coloured: `#B4B4B4`.
@@ -43,6 +45,13 @@ pub const UNPAINTED: [u8; 3] = [0xB4, 0xB4, 0xB4];
 /// (Phases 0 to 4). 1: a tree of objects, one for every part, each with
 /// its own triangles (Phase 5).
 pub const EXTRAS_VERSION: i64 = 1;
+
+/// The number a file with images says instead: 2. A reader from before
+/// images would draw every face with an image plain white, so it must
+/// refuse the file (with "update Duck Forge") rather than read past
+/// what it doesn't know. A file without images still says
+/// [`EXTRAS_VERSION`], and is byte for byte as it always was.
+pub const EXTRAS_VERSION_IMAGES: i64 = 2;
 
 /// The usual `#RRGGBB` numbers (sRGB, 0 to 255) as linear light, which is
 /// how glTF wants vertex colours. A fixed table rather than a formula, so
@@ -95,6 +104,10 @@ const UNSIGNED_INT: u32 = 5125;
 const ARRAY_BUFFER: u32 = 34962;
 const ELEMENT_ARRAY_BUFFER: u32 = 34963;
 const TRIANGLES: u32 = 4;
+/// Sharp pixels: the nearest pixel of a picture, never a blend.
+const NEAREST: u32 = 9728;
+/// A picture doesn't repeat past its edges.
+const CLAMP_TO_EDGE: u32 = 33071;
 
 #[derive(Serialize)]
 struct Gltf {
@@ -104,6 +117,14 @@ struct Gltf {
     nodes: Vec<Node>,
     meshes: Vec<Mesh>,
     materials: Vec<Material>,
+    /// For a model with images: the one picture its material shows, how
+    /// it is drawn (sharp pixels), and the PNG itself.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    textures: Vec<Texture>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    samplers: Vec<TextureSampler>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    images: Vec<Image>,
     accessors: Vec<Accessor>,
     #[serde(rename = "bufferViews")]
     buffer_views: Vec<BufferView>,
@@ -212,6 +233,47 @@ struct Attributes {
     normal: u32,
     #[serde(rename = "COLOR_0")]
     color: u32,
+    /// Where each corner is on the sheet of images: only in a model
+    /// that has images.
+    #[serde(rename = "TEXCOORD_0", skip_serializing_if = "Option::is_none")]
+    on_sheet: Option<u32>,
+}
+
+/// A picture as a material uses it: which image, drawn how.
+#[derive(Serialize)]
+struct Texture {
+    sampler: u32,
+    source: u32,
+}
+
+/// How a picture is drawn: with sharp pixels (glTF's "nearest", 9728,
+/// for near and far), and never repeating (33071, "clamp to edge").
+#[derive(Serialize)]
+struct TextureSampler {
+    #[serde(rename = "magFilter")]
+    near: u32,
+    #[serde(rename = "minFilter")]
+    far: u32,
+    #[serde(rename = "wrapS")]
+    across: u32,
+    #[serde(rename = "wrapT")]
+    down: u32,
+}
+
+/// A picture inside the file: a PNG, in the block of numbers.
+#[derive(Serialize)]
+struct Image {
+    name: &'static str,
+    #[serde(rename = "bufferView")]
+    buffer_view: u32,
+    #[serde(rename = "mimeType")]
+    kind: &'static str,
+}
+
+/// Which picture a material shows.
+#[derive(Serialize)]
+struct TextureRef {
+    index: u32,
 }
 
 #[derive(Serialize)]
@@ -225,6 +287,9 @@ struct Material {
 struct Surface {
     #[serde(rename = "baseColorFactor")]
     color: [f32; 4],
+    /// The sheet of images, in a model that has images.
+    #[serde(rename = "baseColorTexture", skip_serializing_if = "Option::is_none")]
+    picture: Option<TextureRef>,
     #[serde(rename = "metallicFactor")]
     metallic: f32,
     #[serde(rename = "roughnessFactor")]
@@ -313,6 +378,39 @@ struct DuckMold {
     /// `MSFT_lod` names.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     lods: Vec<f64>,
+    /// The sheet of images, in a model that has images: what is where
+    /// on it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    images: Option<ImagesEntry>,
+}
+
+/// What is on the sheet of a model's images.
+#[derive(Serialize)]
+struct ImagesEntry {
+    /// How big the sheet is, across and down, in pixels.
+    sheet: [u32; 2],
+    /// The place on it that is plain white, across and down from 0 to
+    /// 1: every corner of a face without an image points there, so the
+    /// face shows its own colour. A triangle whose three corners are
+    /// all exactly there has no image.
+    plain_at: [f32; 2],
+    /// The images on it.
+    files: Vec<ImageFileEntry>,
+}
+
+/// One image on the sheet.
+#[derive(Serialize)]
+struct ImageFileEntry {
+    /// The file it came from, as the recipe's report names it.
+    file: String,
+    /// Where it is on the sheet: its left, its top, its width and its
+    /// height, in pixels.
+    at: [i64; 4],
+    /// The palette colour it was laid over, where it is see-through.
+    /// Absent for an image that is solid all over, and for one on a
+    /// face nobody coloured.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    over: Option<String>,
 }
 
 /// One hit shape: its part, the object that carries it (0 is the model
@@ -544,6 +642,9 @@ struct Lists {
     positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
     colors: Vec<[f32; 3]>,
+    /// Where each corner is on the sheet of images. Stays empty for a
+    /// model without images.
+    on_sheet: Vec<[f32; 2]>,
     indices: Vec<u32>,
     accessors: Vec<Accessor>,
     meshes: Vec<Mesh>,
@@ -559,6 +660,7 @@ impl Lists {
         leaf: &Part,
         pivot: Vec3,
         name: &str,
+        sheet: Option<&ImageSheet>,
     ) -> (usize, usize, Option<u32>) {
         let first_triangle = self.indices.len() / 3;
         let first_corner = self.positions.len();
@@ -571,9 +673,22 @@ impl Lists {
                 Some(color) => model.palette[color].rgb,
                 None => UNPAINTED,
             };
-            let linear = rgb.map(|channel| SRGB_TO_LINEAR[channel as usize]);
+            // A face with an image is white underneath: the sheet holds
+            // the image already laid over the face's colour.
+            let cell = sheet.and_then(|sheet| sheet.cell(model, face));
+            let linear = match cell {
+                Some(_) => [1.0; 3],
+                None => rgb.map(|channel| SRGB_TO_LINEAR[channel as usize]),
+            };
             let base = (self.positions.len() - first_corner) as u32;
-            for corner in &face.corners {
+            for (at, corner) in face.corners.iter().enumerate() {
+                if let Some(sheet) = sheet {
+                    let [across, down] = match (cell, &face.image) {
+                        (Some(cell), Some(image)) => sheet.place(model, cell, image.at[at]),
+                        _ => sheet.plain,
+                    };
+                    self.on_sheet.push([across as f32, down as f32]);
+                }
                 // glTF's right is -x.
                 let own = [
                     from_pivot(corner.x, pivot.x),
@@ -630,6 +745,17 @@ impl Lists {
             min: None,
             max: None,
         });
+        if sheet.is_some() {
+            self.accessors.push(Accessor {
+                buffer_view: 4,
+                offset: first_corner * 8,
+                component_type: FLOAT,
+                count: self.positions.len() - first_corner,
+                kind: "VEC2",
+                min: None,
+                max: None,
+            });
+        }
         let mesh = self.meshes.len() as u32;
         self.meshes.push(Mesh {
             name: name.to_owned(),
@@ -638,6 +764,7 @@ impl Lists {
                     position: first,
                     normal: first + 1,
                     color: first + 2,
+                    on_sheet: sheet.map(|_| first + 4),
                 },
                 indices: first + 3,
                 material: 0,
@@ -697,11 +824,15 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
     // The numbers, every part's one after the other: positions (measured
     // from the part's pivot), directions, colours, and the triangles'
     // corners (counted from the part's first corner).
+    // A model with images has them all on one sheet. (A model whose
+    // images don't fit on one isn't built at all.)
+    let sheet = ImageSheet::of(model).ok().flatten();
+    let sheet = sheet.as_ref();
     let mut lists = Lists::default();
     let mut parts: Vec<PartEntry> = Vec::new();
     for leaf in model.leaves() {
         let (first_triangle, triangles, mesh) =
-            lists.add(model, leaf, as_stored(leaf.pivot), &leaf.path);
+            lists.add(model, leaf, as_stored(leaf.pivot), &leaf.path, sheet);
         let node = node_of(&leaf.path);
         nodes[node].mesh = mesh;
         parts.push(PartEntry {
@@ -734,7 +865,9 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
                     .filter(|_| !far.left_out.contains(&leaf.path))
                     .and_then(|part| {
                         let name = format!("{} (far {})", leaf.path, at + 1);
-                        lists.add(&far.model, part, as_stored(leaf.pivot), &name).2
+                        lists
+                            .add(&far.model, part, as_stored(leaf.pivot), &name, sheet)
+                            .2
                     });
                 ids.push(nodes.len() as u32);
                 nodes.push(Node {
@@ -752,6 +885,7 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
         positions,
         normals,
         colors,
+        on_sheet,
         indices,
         meshes,
         mut accessors,
@@ -787,6 +921,22 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
         stride: None,
         target: Some(ELEMENT_ARRAY_BUFFER),
     });
+    // Where each corner is on the sheet of images.
+    if sheet.is_some() {
+        let offset = bin.len();
+        for pair in &on_sheet {
+            for number in pair {
+                bin.extend(number.to_le_bytes());
+            }
+        }
+        views.push(BufferView {
+            buffer: 0,
+            offset,
+            length: bin.len() - offset,
+            stride: Some(8),
+            target: Some(ARRAY_BUFFER),
+        });
+    }
 
     // The animations and the poses: their numbers go after the model's.
     let moving = motions(
@@ -800,6 +950,24 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
     if let Some(view) = moving.view {
         views.push(view);
     }
+    // The sheet itself, as a PNG, last; then zeros up to a multiple of
+    // four bytes.
+    let picture_view = sheet.map(|sheet| {
+        let png = sheet.png();
+        let offset = bin.len();
+        bin.extend(&png);
+        while !bin.len().is_multiple_of(4) {
+            bin.push(0);
+        }
+        views.push(BufferView {
+            buffer: 0,
+            offset,
+            length: png.len(),
+            stride: None,
+            target: None,
+        });
+        views.len() as u32 - 1
+    });
 
     let gltf = Gltf {
         asset: Asset {
@@ -815,10 +983,35 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
             name: "palette",
             surface: Surface {
                 color: [1.0; 4],
+                picture: sheet.map(|_| TextureRef { index: 0 }),
                 metallic: 0.0,
                 roughness: 1.0,
             },
         }],
+        textures: match sheet {
+            Some(_) => vec![Texture {
+                sampler: 0,
+                source: 0,
+            }],
+            None => Vec::new(),
+        },
+        samplers: match sheet {
+            Some(_) => vec![TextureSampler {
+                near: NEAREST,
+                far: NEAREST,
+                across: CLAMP_TO_EDGE,
+                down: CLAMP_TO_EDGE,
+            }],
+            None => Vec::new(),
+        },
+        images: match picture_view {
+            Some(buffer_view) => vec![Image {
+                name: "images",
+                buffer_view,
+                kind: "image/png",
+            }],
+            None => Vec::new(),
+        },
         accessors,
         buffer_views: views,
         buffers: vec![Buffer { length: bin.len() }],
@@ -830,7 +1023,10 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
         },
         extras: Extras {
             duck_mold: DuckMold {
-                version: EXTRAS_VERSION,
+                version: match sheet {
+                    Some(_) => EXTRAS_VERSION_IMAGES,
+                    None => EXTRAS_VERSION,
+                },
                 name: model.name.clone(),
                 palette: model
                     .palette
@@ -862,6 +1058,30 @@ pub fn write_glb(model: &Model) -> Vec<u8> {
                     .map(|collider| collider_entry(collider, &node_of))
                     .collect(),
                 lods,
+                images: sheet.map(|sheet| ImagesEntry {
+                    sheet: [sheet.width, sheet.height],
+                    plain_at: [sheet.plain[0] as f32, sheet.plain[1] as f32],
+                    files: sheet
+                        .cells
+                        .iter()
+                        .map(|cell| {
+                            let picture = &model.pictures[cell.picture];
+                            ImageFileEntry {
+                                file: picture.file.clone(),
+                                at: [
+                                    cell.x,
+                                    cell.y,
+                                    i64::from(picture.width),
+                                    i64::from(picture.height),
+                                ],
+                                over: cell
+                                    .over
+                                    .and_then(|color| model.palette.get(color))
+                                    .map(|color| color.name.clone()),
+                            }
+                        })
+                        .collect(),
+                }),
             },
         },
     };
@@ -1209,8 +1429,43 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         ));
     }
     let version = extras["version"].as_i64();
-    if !matches!(version, Some(0 | EXTRAS_VERSION)) {
+    if !matches!(version, Some(0 | EXTRAS_VERSION | EXTRAS_VERSION_IMAGES)) {
         return Err(bad("it was written by a newer Duck Mold"));
+    }
+
+    // A file with images: the one picture they are all on, and the
+    // place on it that is plain white (where a corner without an image
+    // is written).
+    let mut pictures: Vec<Arc<Picture>> = Vec::new();
+    let mut plain_at: Option<[f32; 2]> = None;
+    if version == Some(EXTRAS_VERSION_IMAGES) {
+        let no_picture = "it says it has images, but its picture can't be read";
+        let place = extras["images"]["plain_at"].as_array();
+        let (Some(across), Some(down)) = (
+            place
+                .and_then(|place| place.first())
+                .and_then(|n| n.as_f64()),
+            place
+                .and_then(|place| place.get(1))
+                .and_then(|n| n.as_f64()),
+        ) else {
+            return Err(bad(no_picture));
+        };
+        plain_at = Some([across as f32, down as f32]);
+        let png = (|| {
+            let texture = gltf["materials"][0]["pbrMetallicRoughness"]["baseColorTexture"]["index"]
+                .as_u64()?;
+            let image = gltf["textures"][texture as usize]["source"].as_u64()?;
+            let view = gltf["images"][image as usize]["bufferView"].as_u64()?;
+            let view = &gltf["bufferViews"][view as usize];
+            let start = usize::try_from(view["byteOffset"].as_u64().unwrap_or(0)).ok()?;
+            let length = usize::try_from(view["byteLength"].as_u64()?).ok()?;
+            bin.get(start..start.checked_add(length)?)
+        })()
+        .ok_or_else(|| bad(no_picture))?;
+        let picture = picture::read_png_up_to(png, &format!("{file}: its images"), MAX_SHEET)
+            .map_err(|_| bad(no_picture))?;
+        pictures.push(Arc::new(picture));
     }
 
     // One list of numbers, found through the description.
@@ -1298,6 +1553,8 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         corners: usize,
         positions: &'a [u8],
         colors: &'a [u8],
+        /// In a file with images: where each corner is on the picture.
+        on_picture: Option<&'a [u8]>,
         triangles: usize,
         indices: &'a [u8],
         from: Vec3,
@@ -1307,10 +1564,21 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         let (corners, positions) = numbers(&attributes["POSITION"], "VEC3", FLOAT, 3)?;
         let (color_count, colors) = numbers(&attributes["COLOR_0"], "VEC3", FLOAT, 3)?;
         let (index_count, indices) = numbers(&primitive["indices"], "SCALAR", UNSIGNED_INT, 1)?;
+        let on_picture = match plain_at {
+            Some(_) => {
+                let (count, places) = numbers(&attributes["TEXCOORD_0"], "VEC2", FLOAT, 2)?;
+                if count != corners {
+                    return None;
+                }
+                Some(places)
+            }
+            None => None,
+        };
         (color_count == corners && index_count % 3 == 0).then_some(Lump {
             corners,
             positions,
             colors,
+            on_picture,
             triangles: index_count / 3,
             indices,
             from,
@@ -1406,6 +1674,23 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
         palette.iter().position(|color| color.rgb == rgb)
     };
 
+    // The image on a face, from its corners' places on the picture: none
+    // if every corner is at the plain white place.
+    let image_of = |lump: &Lump, corners: &[usize]| -> Option<FaceImage> {
+        let (places, plain) = (lump.on_picture?, plain_at?);
+        let at: Vec<[f32; 2]> = corners
+            .iter()
+            .map(|&corner| [float(places, corner * 2), float(places, corner * 2 + 1)])
+            .collect();
+        at.iter().any(|place| *place != plain).then(|| FaceImage {
+            picture: 0,
+            at: at
+                .iter()
+                .map(|place| [f64::from(place[0]), f64::from(place[1])])
+                .collect(),
+        })
+    };
+
     // The faces. Duck Mold writes a face as a fan of triangles from its
     // first corner: (b, b+2, b+1), (b, b+3, b+2), ... Reading the fan
     // back gives the face as it was.
@@ -1432,12 +1717,15 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
                 faces.push(Face {
                     corners: vec![corner(lump, a), corner(lump, b), corner(lump, c)],
                     color: color_of(lump, a),
+                    image: image_of(lump, &[a, b, c]),
                 });
                 fan = 1;
             } else {
+                let corners: Vec<usize> = (base..base + fan + 2).collect();
                 faces.push(Face {
-                    corners: (base..base + fan + 2).map(|at| corner(lump, at)).collect(),
+                    corners: corners.iter().map(|&at| corner(lump, at)).collect(),
                     color: color_of(lump, base),
+                    image: image_of(lump, &corners),
                 });
             }
             face_of_triangle.extend(std::iter::repeat_n(faces.len() - 1, fan));
@@ -1523,6 +1811,7 @@ pub fn read_glb(bytes: &[u8], file: &str) -> Result<Model, Box<Issue>> {
     Ok(Model {
         name: extras["name"].as_str().unwrap_or("model").to_owned(),
         palette,
+        pictures,
         faces,
         parts,
         sockets,

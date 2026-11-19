@@ -909,6 +909,7 @@ fn the_screens_look_as_they_did() {
         let folder = folder("pictures_glb");
         let recipe = folder.join("robot.toml");
         std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+        with_robots_images(&recipe);
         duck_mold_core::tools::export_file(&recipe, None).unwrap();
         let mut screen = harness(StudioApp::with_file(folder.join("robot.glb"), false), true);
         screen.run_steps(3);
@@ -958,10 +959,115 @@ fn the_screens_look_as_they_did() {
         wrong.extend(check(&mut screen, "export-note"));
     }
 
+    // Images (Phase 7b): the plank crate, with its images in the
+    // picture, in the Model section and in the row under the palette.
+    let plank_crate = |test: &str| {
+        let folder = folder(test);
+        std::fs::create_dir_all(folder.join("textures")).unwrap();
+        for file in [
+            "plank_crate.toml",
+            "textures/planks.png",
+            "textures/lid.png",
+        ] {
+            std::fs::copy(examples().join(file), folder.join(file)).unwrap();
+        }
+        let mut screen = harness(
+            StudioApp::with_file(folder.join("plank_crate.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+    };
+    {
+        let mut screen = plank_crate("pictures_images");
+        wrong.extend(check(&mut screen, "images"));
+    }
+    // A part with images selected: each image has its line in the
+    // properties.
+    {
+        let mut screen = plank_crate("pictures_images_part");
+        screen.state_mut().studio_mut().unwrap().select(Some("box"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "images-part"));
+    }
+    // A part from a mesh file, with the pictures the file brought: each
+    // has its line, "from the file".
+    {
+        let folder = folder("pictures_images_from_file");
+        std::fs::create_dir_all(folder.join("parts")).unwrap();
+        for file in ["signpost.toml", "parts/sign.gltf", "parts/sign_post.png"] {
+            std::fs::copy(examples().join(file), folder.join(file)).unwrap();
+        }
+        let mut screen = harness(
+            StudioApp::with_file(folder.join("signpost.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("sign"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "images-from-file"));
+    }
+    // The "New image" window.
+    {
+        use egui::accesskit::Role;
+        let mut screen = plank_crate("pictures_images_new");
+        screen.state_mut().studio_mut().unwrap().select(Some("box"));
+        screen.run_steps(2);
+        screen
+            .get_by_role_and_label(Role::Button, "New image...")
+            .click();
+        screen.run_steps(5);
+        wrong.extend(check(&mut screen, "images-new"));
+    }
+    // "Paint in Duck Quill" where Duck Quill can't be found: the
+    // window that asks what to do instead.
+    {
+        use egui::accesskit::Role;
+        let mut screen = plank_crate("pictures_images_no_quill");
+        screen.state_mut().studio_mut().unwrap().select(Some("box"));
+        screen.run_steps(2);
+        if screen.state_mut().painting().program().is_none() {
+            screen
+                .get_by_role_and_label(Role::Button, "Paint in Duck Quill: top")
+                .click();
+            screen.run_steps(5);
+            wrong.extend(check(&mut screen, "images-no-duck-quill"));
+        }
+    }
+    // An image in hand, over a face: the hint says what a click would
+    // do, and the image picked has a yellow edge.
+    {
+        use egui::accesskit::Role;
+        let mut screen = plank_crate("pictures_images_paint");
+        screen
+            .get_by_role_and_label(Role::Button, "lid.png")
+            .click();
+        screen.run_steps(2);
+        screen.hover_at(IN_VIEW);
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "images-paint"));
+    }
+
     assert!(
         wrong.is_empty(),
         "{} of the screens changed:\n{}\nIf the change is meant, store the new pictures with: UPDATE_SNAPSHOTS=1 cargo test -p duck-mold-studio --test pictures",
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
+    }
 }

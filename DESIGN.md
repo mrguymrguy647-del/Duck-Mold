@@ -5631,3 +5631,1181 @@ Then `PHASE7A_REPORT.md`, with:
     the end of 7b.** *The other way:* call 7a's release 1.0.0. But 7b is
     still to change the file format (textures), and 1.0 should be the
     version that doesn't need to.
+
+---
+
+## 24. Phase 7b: images on models, and Duck Mold inside Duck Forge's Studio
+
+Phase 7b is the last planned phase. It does two things:
+
+- **Images.** A part, or one face of it, can show a picture (a PNG file)
+  painted in Duck Quill or in any picture program.
+- **One place to work.** A model opens in a tab of Duck Forge's Studio,
+  and a game that is running shows each change at once.
+
+It ends with version **1.0.0**.
+
+The rules don't change:
+
+- The recipe is the model.
+- Every Studio action is an edit command an agent can run.
+- An edit changes only what it must in the file.
+- The picture is drawn by Duck Forge's CPU renderer.
+- Duck Forge's reader is the same code in both repositories, with its
+  version raised, the shared test files updated and the handoff note
+  updated.
+
+### What I found first
+
+Four facts from reading the three projects shape this design:
+
+- **Duck Forge can already draw a picture on a mesh.** One picture for
+  each mesh, with sharp pixels (it never blurs), and the picture's colours
+  are multiplied by the triangle's colour. So drawing needs no new code in
+  Duck Forge. What is missing is the reader: it skips everything about
+  pictures in a `.glb` today.
+- **Duck Quill can't open a PNG**, and its Save writes only its own
+  `.quill` file. It has no installer, so nothing records where it is.
+  Duck Forge's Studio already has an "Open in Duck Quill" button that
+  hands it a PNG, and gets a blank picture. The round trip needs a small
+  pull request in Duck Quill.
+- **Duck Forge's Studio already tells a running game when a file in its
+  `assets` folder changes.** No game loads a model again yet, because the
+  engine gives no easy way to.
+- **Nothing is docked in Duck Forge's Studio yet.** It starts Duck Quill
+  as a separate program. Its screen is fixed panels, with no tabs for
+  documents.
+
+### In one picture
+
+```text
+  Duck Quill                 Duck Mold                        Duck Forge
+ +--------------+   Save    +------------------------+ Export +-------------------+
+ | robot_face   | --------> | robot.toml             | -----> | assets/robot.glb  |
+ |   .png       |  seen in  |  images = { front =    |  seen  |  the running game |
+ | (and .quill, |  half a   |   "textures/           |  in    |  loads it again   |
+ |  its layers) |  second   |    robot_face.png" }   | half a |  and carries on   |
+ +--------------+           +------------------------+ second +-------------------+
+        ^                               |
+        +---- "Paint in Duck Quill" ----+
+```
+
+Every arrow is a file being saved and the next program noticing. There
+is no hidden link between the programs, so each one also works alone,
+and an agent can stand in for any of them.
+
+### 1. Images in a recipe
+
+```toml
+[[parts]]
+name = "head"
+shape = "box"
+size = [0.42, 0.32, 0.36]
+color = "steel"
+images = { front = "textures/robot_face.png" }   # one face
+
+[[parts]]
+name = "box"
+shape = "box"
+size = [1, 1, 1]
+color = "wood"
+image = "textures/planks.png"                    # every face of the part
+images = { top = "textures/lid.png" }            # ...but the top has its own
+```
+
+The same in JSON:
+
+```json
+{ "name": "head", "shape": "box", "size": [0.42, 0.32, 0.36], "color": "steel",
+  "images": { "front": "textures/robot_face.png" } }
+```
+
+- **`image`** is for the whole part and **`images`** is for single faces
+  by name. They work exactly as `color` and `colors` do, and the nearest
+  one wins: `images.front` beats `image`.
+- On an assembly, `image` is the image for every part inside that has none
+  of its own, as `color` is. `images` on an assembly is a mistake, as
+  `colors` is.
+- A part in `define` can have them. A part that `use`s it can give its
+  own, which win.
+- **The path starts from the recipe's folder**, as `file` and `palette`
+  do, and is written with `/`. `textures/` is where the Studio puts new
+  ones. `../shared/planks.png` works. A path from the top of the disk
+  (`C:\...`, `/home/...`) is refused, so a recipe can be moved with its
+  folder.
+- **Only PNG files.** A PNG can have see-through pixels, which matter
+  below.
+- **Any size from 1 x 1 to 1024 x 1024 pixels.** It need not be square.
+- `"none"` takes an image away: `images = { top = "none" }` on a part
+  with an `image` leaves the top plain.
+- A recipe used as a part (`file = "wheel.toml"`) brings its images with
+  it. Their paths start from that recipe's folder.
+- **A recipe without `image` or `images` builds exactly as before**: the
+  same `.glb`, the same report, the same picture, byte for byte. The
+  recipe's `version` stays 0.
+
+*As built (step 1):*
+
+- **A definition's image beats the image of the part that uses it**, not
+  the other way round as written above. That is how `color` works (a
+  defined arm fixes its red hand), and "the nearest setting wins" is one
+  rule for both.
+- A path from the top of the disk, and a name that doesn't end in `.png`,
+  are refused when the recipe is read (`unsupported`); a file that isn't
+  there is `file_not_found`; one that isn't a PNG, is damaged or too big
+  is `bad_image`.
+- In a far-away version, a face name the simpler shape doesn't have
+  (stairs drawn as one slope have no `front`) is passed over for images
+  and, now, for colours too. Before, such a `colors` entry made the far
+  version fail to build, and it was silently left out. A far version's
+  parts now also go by the simpler shape's face names.
+- An image on a part from a mesh file waits for step 5.
+
+### 2. How an image is laid on
+
+One rule, for flat faces:
+
+> **The image is fitted to the rectangle round the faces it was given to,
+> as you see them looking straight at them from outside.** Faces that
+> face the same way share one copy. Faces that face different ways get a
+> copy each.
+
+For a box that is the paper cross a cardboard box unfolds into. Each
+square below shows one whole image, the right way up as drawn:
+
+```text
+                +---------+
+                |   top   |
+      +---------+---------+---------+---------+
+      |  right  |  front  |  left   |  back   |
+      +---------+---------+---------+---------+
+                | bottom  |
+                +---------+
+```
+
+("Left" and "right" are the model's own, so its right side is on your
+left when it faces you.)
+
+So `image = "planks.png"` on a crate puts the planks on all six faces,
+upright on the four sides. `images = { front = "robot_face.png" }` puts
+the face on the front only.
+
+Round faces are wrapped instead:
+
+| Shape | Face | How the image lies |
+|---|---|---|
+| `box` | each of the six | Fitted to the face, as in the cross. |
+| `cylinder`, `capsule`, `cone`, `tube` | `side` | Wrapped once round, like the label on a tin. The middle of the image is at the front, and its two ends meet at the back. On a cone it is squeezed towards the point. A tube's `inside` is wrapped the same way. |
+| | `top`, `bottom` | Seen from above or below, like a box's. A round face shows the circle in the middle of the image. A capsule's round ends are seen from above and below too. |
+| `sphere` | `side` | Wrapped like a map of the world: the middle of the image at the front, its top edge at the top. |
+| `torus` | `side` | Once round the ring, and once round the tube. |
+| `wedge`, `pyramid`, `prism` | the slopes | Laid flat on the slope, the image's bottom edge along the slope's lower edge. A three-cornered face shows that part of the image. Their other faces are as a box's. |
+| `stairs` | `front`, `top` | All the risers together, seen from the front; all the treads together, seen from above. The rest as a box's. |
+| `arch` | `front`, `back` | As a box's, with the doorway cut out of the image. `inside` runs along the inside of the doorway, from one foot over the top to the other. |
+| a box or cylinder with `bevel` | `bevel` | The cut edges never take an image. They keep their colour, which looks like a worn edge. |
+| a part from a mesh file | its materials | By the file's own layout (section 6 below). |
+
+More rules:
+
+- **The image stretches to fit.** A square image on a face twice as wide
+  as it is high is stretched. The Studio makes new images with the face's
+  own proportions, so pixels come out square.
+- **It doesn't repeat.** One image covers the face once. A brick wall is
+  one image of the whole wall. (Repeating is left for later.)
+- **It moves and stretches with the part**: `scale`, `rotate` and poses
+  carry it along.
+- **A mirrored part shows the mirror image.** A right arm made from a
+  left arm with `mirror = "x"` has its picture flipped. Writing would
+  read backwards, so put a label on a part that isn't mirrored.
+
+**Shaped boxes** (`changes`, from Phase 4) follow the same one rule,
+because every face a change makes has a name and knows which way it
+faces:
+
+| Change | What happens to images |
+|---|---|
+| **Pull** | The pulled face keeps its name, so it keeps its image and carries it out with it. The new walls are new faces: they show the part's `image` if it has one, and otherwise their colour. Give them their own by name: `images = { leg = "wood.png" }`. |
+| **Inset** | The old name now stands for the ring, and the ring's rectangle is the whole old face. So the image stays where it was, at the same size, with a hole in the middle: a picture frame. The new face in the middle is a face of its own: `images = { window = "glass.png" }` fits a whole image to it. |
+| **Cut** | The piece towards the middle keeps the name, so the image is now fitted to that piece. The slice is a new face, plain until it is given an image. |
+| **Move, turn, scale** a face, an edge or a corner | The image stays on its face and stretches with it, like a slide thrown on a screen that is tilted. |
+
+- **The part's own `image` carries on across every change.** It is
+  fitted to each whole side of the part, whatever was cut, inset or
+  pulled there. A plank crate that is cut and pulled keeps its planks
+  unbroken on each side.
+- **An image given to one face behaves like a colour given to one
+  face**: it belongs to that name. Cut the face in two and the picture is
+  on the piece that kept the name. So shape first, then paint. The Paint
+  tool puts an image back with one click.
+
+### 3. Colour and image together
+
+**The image lies over the colour.**
+
+- Where the image is solid, you see the image, as it was painted. It is
+  not tinted by the colour.
+- Where the image is see-through, you see the face's palette colour.
+- Where a pixel is half see-through, the two are mixed.
+
+So the robot's face is a small picture with only a mouth and two brows
+on it. The rest of it is see-through, and the head's `steel` shows
+there. Change `steel` in the palette and the head changes, with the
+mouth still on it. A label is the same: only the label is painted.
+
+A plank image with no see-through pixels simply covers the colour.
+
+*Why not tint?* Tinting (image times colour) suits grey images made to
+be coloured. But a face painted in Duck Quill would come out steel-blue
+all over, and a person would have to know to paint the head white first.
+"A sticker on a painted face" needs no explaining.
+
+**How the Paint tool chooses.** The palette section gains a row of
+images under the colours:
+
+- Pick a **colour**, click a face: the face's colour changes. If the face
+  has an image, the image stays on top and the colour shows through its
+  see-through parts.
+- Pick an **image**, click a face: the face gets that image (`images`).
+  Its colour stays underneath.
+- Pick **"no image"** (the first square of the row), click a face: the
+  image comes off. The colour is what is left.
+- **Shift+click** does the same for the whole part (`color`, `image`), as
+  it does for colour today.
+- The face lights up under the pointer first, and the status bar names
+  what a click will do: *"front of head: put robot_face.png on it"*.
+
+### 4. Mistakes and warnings
+
+A recipe that names an image that can't be used has a mistake, said like
+every other mistake: the file, the line, what is wrong and the likely
+fix. Nothing is built, the Studio keeps showing the last model that
+worked, and nothing ever crashes.
+
+```text
+error: robot.toml:153: parts[2].images.front: there is no file "textures/robot_face.png" beside robot.toml. Check the name, or make one: duck-mold new-image robot.toml head --face front
+error: robot.toml:153: parts[2].images.front: "textures/robot_face.jpg" isn't a PNG picture. Save it as a PNG
+error: robot.toml:153: parts[2].images.front: "textures/robot_face.png" is damaged: it ends before its picture does. Save it again
+error: robot.toml:153: parts[2].images.front: "textures/photo.png" is 4000 x 3000 pixels, and an image can be 1024 x 1024 at most. Make it smaller
+error: crate.toml:24: parts[0].images.bevel: the cut edges ("bevel") can't take an image: they keep their colour
+error: robot.toml:153: parts[2].images.frnt: there is no face "frnt" on "head". Did you mean "front"?
+error: robot.toml:12: the images of this model need 5200 x 4096 pixels together, and a model can have 4096 x 4096 at most. The biggest are "wall.png" (1024 x 1024) and ...
+```
+
+- **A picture program that is half-way through saving** isn't shown as a
+  mistake: the Studio already waits until a file has stayed the same for
+  half a second (Phase 7a).
+- **An image that was deleted** is the first mistake above. The Studio's
+  problem line offers *Make a new one*, *Choose another* and *Take the
+  image off*.
+- **Mixed pixel sizes are a warning.** In pixel art, big pixels beside
+  small ones look wrong. `inspect` works out how many pixels each image
+  has to the metre on the model, and warns when the finest is more than
+  about twice the coarsest, naming the two:
+
+  ```text
+  warning: robot.toml: mixed pixel sizes: "textures/robot_label.png" on panel has 213 pixels a metre and "textures/robot_face.png" on head has 76. Pixels look best all one size: make one image smaller or the other bigger
+  ```
+
+  (Added on approval.)
+
+### 5. What `inspect` and `render` say
+
+```text
+  images       2 files on 2 faces; 64 x 64 pixels together in the .glb
+    textures/robot_face.png    32 x 24   head: front     76 pixels a metre
+    textures/robot_label.png   32 x 21   panel: front   107 pixels a metre
+```
+
+- `--json` adds `"images"`: each file, its size, and the faces it is on
+  with each face's size in metres. An agent uses that to make an image of
+  the right proportions.
+- `inspect --faces` adds each face's image to its line.
+- A model without images has no `images` line and no `"images"` field,
+  so its report is as before.
+- `render`, the Studio's picture, the start page's pictures and the
+  library's pictures all show images. They are drawn by Duck Forge's CPU
+  renderer, with sharp pixels.
+
+### 6. Models from Blender keep their pictures
+
+Today a glTF file's pictures are dropped and its faces come in white or
+in their base colour. From 7b:
+
+- **A material's picture is kept**, laid on by the file's own layout
+  (its "UVs"). Nothing has to be written in the recipe, just as a
+  material's base colour is kept today.
+- Pictures inside the file, and pictures in files beside it, are both
+  read. **PNG and JPEG**: Blender keeps a JPEG as a JPEG when it
+  exports, so many models from Blender carry them.
+- A picture that repeats across a face (bricks on a long wall) is laid
+  out repeated, up to 8 times each way. Beyond that it is a warning, and
+  the picture is shown once.
+- A material's base colour that isn't white tints its picture, as glTF
+  says. Duck Mold works that into the picture as it reads it.
+- **The recipe still has the last word**, as it does for colour:
+  - `colors = { Body = "steel" }` or a `color` on the part paints those
+    faces, and the file's picture for them is dropped.
+  - `images = { Body = "textures/new_body.png" }` puts another image on
+    that material, by the file's own layout.
+  - `images = { Body = "none" }` leaves the base colour.
+- An OBJ file's layout is read too, so `images` works on its materials.
+  Its `.mtl` file still isn't read.
+- A `.glb` Duck Mold wrote, used as a part, keeps its images.
+- Still left out, with a note in the report: bump maps, shine maps and
+  glow maps (only the base colour picture is read), and the glTF
+  extension that moves or turns a picture.
+
+*As built (step 5):*
+
+- As designed, with the example signpost
+  (`examples/parts/sign.gltf`, used by `examples/signpost.toml`): a PNG
+  beside the file that repeats, a PNG inside it, and a JPEG.
+- **JPEGs** are read with the `jpeg-decoder` library, built without its
+  speed-ups for particular processors, so that every computer reads the
+  same pixels: a test holds the number worked out from the cap's pixels,
+  and runs on Windows and Linux.
+- **A picture over 1024 pixels a side is made smaller**, by whole steps
+  (each pixel the average of a square of the file's), with a note. The
+  design didn't say; refusing would have turned away most models from
+  Blender, which often carry 2048 x 2048 pictures. Up to 8192 is read.
+- **A material wholly under a solid picture gets no palette colour**,
+  so a textured model doesn't fill the palette with whites nobody sees,
+  and there is no `no_color` warning for it. `inspect` doesn't count
+  those triangles as uncoloured.
+- **See-through pictures.** glTF's ordinary materials are solid
+  whatever their picture's file says, so the picture is made solid. A
+  material that says its picture has gaps (`alphaMode` `MASK` or
+  `BLEND`) keeps them, and its base colour shows there, with a note
+  that nothing is truly see-through.
+- **A picture that stops at its edge** (`CLAMP_TO_EDGE`) has its layout
+  held inside the picture; one that repeats turned over each time
+  (`MIRRORED_REPEAT`) repeats the plain way, with a note.
+- **"none" has to be written for a file's picture**, and there is a
+  word to get it back: `edit ... set sign --face-image board=own` (or
+  `--image own`) takes the recipe's line away, so the file's own
+  picture shows again. `own` is only for the edit; it is never written
+  in a recipe.
+- **The Studio** lists a file part's own pictures under its Images as
+  "from the file", each with *Choose...* (a PNG of yours instead) and a
+  cross (off). They aren't in the row of images to paint with unless
+  they are PNG files on the disk, since a recipe can only name those;
+  and they have no *Paint in Duck Quill*, since Duck Mold never writes
+  into a model file.
+- **The same PNG named by the recipe and used by a file** is one
+  picture in the model, not two.
+- **How big an image is on the model** (`inspect`'s `metres` and
+  `pixels_per_metre`) now counts each triangle by its area on the model
+  times its area on the image. A file from another program often
+  stretches a thin strip of its picture along an edge; counted by model
+  area alone, those strips made the sign's board look 8% bigger than
+  it is. For Duck Mold's own layouts the answer is the same as before.
+- **A `.glb` Duck Mold wrote**, used as a part, keeps its images. Its
+  faces under an image come in under the material `default`: the file
+  holds what they look like, not which palette colour was under them.
+
+### 7. New commands
+
+Edits (`duck-mold edit <recipe> ...`), each also a Studio action:
+
+| Command | What it does |
+|---|---|
+| `set <part> --image textures/planks.png` | The image of the whole part. `--image none` takes it away. |
+| `set <part> --face-image front=textures/face.png` | The image of one face, by name. Repeatable. `front=none` takes it away. Goes with `--color` and `--face-color` in one edit. |
+| `set-export <path>` | Where Export writes the `.glb`, written in the recipe as `export = "../assets/robot.glb"` (section 11). `none` takes the line away. |
+
+Commands that also write a picture file (as `save-part` writes a recipe):
+
+| Command | What it does |
+|---|---|
+| `duck-mold new-image <recipe> <part>` | Makes a new, wholly see-through PNG of a sensible size (below), in `textures/` beside the recipe, and puts it on the part with a `set --image` edit. `--face front` puts it on one face. `--file` names it; `--size 64x48` sizes it; `--guide guide.png` also writes the guide (below). Refused if the file is already there. |
+| `duck-mold paint <recipe> <part> [--face front]` | Opens that image in Duck Quill, as the Studio's button does. Makes the image first if there is none. |
+| `duck-mold image-guide <recipe> <part> [--face front] -o guide.png` | Writes the guide for that image. |
+
+**A sensible size.** A new image has the proportions of what it covers,
+so pixels are square on the model:
+
+- **as many pixels to the metre as the model's images already have**
+  (the middle one, when they differ), so a new image matches the old
+  ones; 64 pixels to the metre for a model's first image;
+- for a first image, the longer side is at least 32 pixels; always at
+  most 256;
+- a wrap round a cylinder is as wide as the way round it.
+
+The robot's head front (42 x 32 cm) gets 32 x 24. A one-metre crate face
+gets 64 x 64. The Studio's window offers Small (16), Medium (32), Large
+(64) and Fine (128) for the longer side, with the worked-out size
+chosen.
+
+**The guide** is a second PNG, the same size as the image, mostly
+see-through, with thin lines:
+
+- the outline of every face the image covers (a ring and its hole; a
+  round top's circle; each flat side of a cylinder's wrap);
+- small words: `up`, `front`, and on a wrap `back` at the two ends;
+- a dotted outline where another part is joined to the face (the robot's
+  eyes on its head), so a mouth isn't painted under an eye.
+
+Duck Quill shows it over the picture and never saves it into the
+picture.
+
+### 8. The Studio
+
+The right column, with the robot's head selected (new lines marked `<`):
+
+```text
++--------------------------------+
+| PROPERTIES                     |
+|  head            box           |
+|  Size   0.42  0.32  0.36       |
+|  Colour  [■ steel        v]    |
+|  Image   [none           v]    | <  the whole part
+| IMAGES ON FACES                | <
+|  front  [▦] robot_face.png     | <  a small picture of it
+|         32 x 24                | <
+|   [Paint in Duck Quill] [Choose...] [x] | <
+|  [+ Image on a face...]        | <
+| SOCKETS  ...                   |
+| PALETTE                        |
+|  ■ steel  ■ red  ■ glow  [+]   |
+|  [∅] [▦ face] [▦ label]  [+]   | <  images: none, the model's, add
++--------------------------------+
+```
+
+- **Choose...** opens the system's file window. A PNG from outside the
+  recipe's folder is copied into `textures/` beside the recipe, and the
+  status bar says so.
+- **[+] in the image row**, and **Image on a face...**, open one small
+  window:
+
+  ```text
+  +-- New image for the front of "head" -------------------+
+  |  Name   textures/robot_head_front.png                  |
+  |  Size   ( ) Small 16  (•) Medium 32  ( ) Large 64      |
+  |         ( ) Fine 128        32 x 24 pixels             |
+  |  [Make it and paint in Duck Quill]  [Just make it]     |
+  |  [Choose a PNG I already have...]            [Cancel]  |
+  +--------------------------------------------------------+
+  ```
+
+- **In the picture**, images show on the model at once, in every mode,
+  with sharp pixels however close the view.
+- **The Paint tool** is as in section 3.
+- **The Model section** (nothing selected) gains: *Images: 2 (64 x 64
+  together)*, and the Export line of section 11.
+- **Edit > Paint in Duck Quill** (`Shift+P`) does it for the face under
+  the pointer, or for the selected part.
+- **Help > Duck Quill...** shows where Duck Mold thinks Duck Quill is,
+  with *Find it...* and *Get Duck Quill*.
+
+*As built (step 3):*
+
+- **"No image" on a face always leaves it without one.** If the part
+  has an image of its own, `front = "none"` is written (so the part's
+  image doesn't show there); otherwise the face's own line simply goes.
+  Shift+click with an image puts it on the whole part and takes the
+  faces' own lines out in the same edit.
+- **One "New image..." window** for a part: a list chooses the whole
+  part or one face, and a new plan is worked out for each. Its sizes are
+  "as worked out" (the model's own pixels to the metre, when it has
+  images), Small 16, Medium 32, Large 64 and Fine 128.
+- The image lines in the properties show under the name **Images**
+  (the whole part's first), not "Images on faces"; a part without any
+  says "None yet." with the same *New image...* button.
+- The hint at the bottom of the picture says what a click would do
+  (`front of box: put lid.png on it`), rather than the status bar,
+  which keeps the last thing done.
+- A picked image shows with a yellow edge; a face with an image that
+  the pointer is over is drawn at full brightness (an image can't be
+  made lighter than it was painted).
+- `Help > Duck Quill...` and "Paint in Duck Quill" come with step 4.
+- A PNG chosen from outside the recipe's folder is checked first: one
+  that isn't a PNG, is damaged or is too big is refused with its
+  sentence, and nothing is copied.
+
+### 9. The round trip with Duck Quill
+
+**The steps, for a person:**
+
+1. Select the head. Under *Images on faces*, press **Image on a
+   face...**, choose `front`, then **Make it and paint in Duck Quill**.
+2. Duck Mold writes `textures/robot_head_front.png` (32 x 24, see-through)
+   and the edit `set head --face-image front=textures/robot_head_front.png`.
+   The model looks the same: the image is empty.
+3. Duck Quill opens with that picture:
+   - zoomed in to fit, with sharp pixels;
+   - on **paper the colour of the head** (`steel`), so what is painted
+     looks as it will on the model. Paper is never saved into the
+     picture: it stays see-through there;
+   - with the guide's thin lines over it (View > Guide hides them).
+4. Paint a mouth. Press **Ctrl+S**.
+5. Within half a second the head in Duck Mold has a mouth. Paint more,
+   save again, and it changes again. Both windows stay open.
+6. Later, **Paint in Duck Quill** on the same face opens the same
+   picture again, with its layers.
+
+**What Duck Quill writes on Save:**
+
+- `robot_head_front.png`: the picture, see-through where nothing was
+  painted. This is the file the recipe names.
+- `robot_head_front.quill` beside it: the same picture with its layers,
+  so that work can carry on later. Duck Mold never reads it.
+
+**If the PNG was changed by something else** since its `.quill` was saved
+(an agent wrote a new one, or it was edited in another program), the PNG
+wins. Duck Quill compares the two pictures when it opens. If they
+differ, it opens the PNG as one layer and says so. The old layers stay
+in the `.quill` until the next save.
+
+**Undo.** The image's own undo is Duck Quill's. In Duck Mold, putting an
+image on a face is an edit and is undone like any other. A new look of
+the same file isn't a step in Duck Mold's Undo, because the recipe
+didn't change.
+
+**What Duck Quill gains** (a pull request there, version 0.6.0):
+
+| Change | Why |
+|---|---|
+| It opens a PNG: from the command line, from File > Open, and so from Duck Forge Studio's "Open in Duck Quill", which hands it a PNG and gets a blank picture today. | The round trip starts here. |
+| Saving a picture that was opened from a PNG writes that PNG back (see-through kept), and its layers in a `.quill` beside it. The title bar shows the PNG's name. | "Saving in Duck Quill updates the model." |
+| `DuckQuill.exe picture.png --guide guide.png --paper #8A939B` | The guide's lines, and paper in the face's colour. Both are for looking at only. |
+| Each time it starts, it notes where its program is, in `program.txt` in its settings folder. | It has no installer, so nothing else says where it is. |
+| A picture under 256 pixels opens with the hard square brush, one pixel wide. | A soft round brush is no use at 32 x 24. |
+
+**How Duck Mold finds Duck Quill**, in this order:
+
+1. the place chosen before, kept in Duck Mold's settings;
+2. Duck Quill's own note, `program.txt`;
+3. a `Duck Quill` folder beside Duck Mold's own folder (where Duck
+   Forge's Studio looks too);
+4. the PATH.
+
+**Without Duck Quill**, the button reads **Open in my picture program**
+and nothing else changes:
+
+```text
++-- Duck Quill isn't on this computer (or Duck Mold can't find it) --+
+|  [Find DuckQuill.exe...]   [Get Duck Quill]                        |
+|  [Open in my picture program instead]                              |
+|  The image is a plain PNG: any program that saves it works.        |
++--------------------------------------------------------------------+
+```
+
+- The window shows once. The choice is remembered.
+- *Open in my picture program* opens the PNG with whatever the system
+  uses for PNG files, and opens the guide beside it as a second picture
+  to look at.
+- **Any save of that PNG, by any program or agent, updates the model
+  within half a second.** That is the whole link: Duck Mold watches the
+  image files a recipe names, as it watches the recipe.
+
+**For an agent** the same trip is three commands, with no window:
+
+```bash
+duck-mold new-image robot.toml head --face front --json   # says the file and its size: 32 x 24
+quill render face.json --transparent --out textures       # Duck Quill's script, or any tool that writes the PNG
+duck-mold render robot.toml                                # look at it
+```
+
+*As built (step 4):*
+
+- **Two commands were added that the design didn't list**, so that the
+  round trip's two halves are things an agent can run: `duck-mold paint
+  <recipe> <part> [--face F]` (what the Studio's button does: a new
+  image if there is none, the guide, then the program) and `duck-mold
+  image-guide <recipe> <part> [--face F] [-o file]` (the guide alone).
+  `paint --dry-run --json` says what would be started and starts
+  nothing.
+- **The guide** is a see-through PNG about 512 pixels on its longer
+  side, whatever the image's size (a whole number of times the image,
+  so every image pixel is a square of guide pixels). It has the outline
+  of each face, a word at the top edge (`up`, or `back` on a top face,
+  `front` on a bottom one), `front` where a wrapped image passes the
+  part's front, and a dashed box where another part is joined on. The
+  Studio keeps guides in `guides/` in Duck Mold's settings folder,
+  never beside the recipe; `image-guide` writes beside the image
+  because it was asked to.
+- **What is remembered** is one line in `paint-with.txt` in the
+  settings folder: `duck-quill: <program>` or `system`. A remembered
+  Duck Quill that has since gone is looked for again in the other
+  places before the window asks.
+- **Which image "the part's image" is.** With no face named, the part's
+  own `image` line if it has one, else the first of its faces' images.
+  Each image in a part's list has its own *Paint in Duck Quill* button,
+  so any of them is one press away.
+- **The plain picture program gets the PNG alone.** The design had the
+  guide opened beside it as a second picture; two windows opening at
+  once from one press was confusing, and many picture programs open
+  the second in place of the first. `image-guide` writes the guide for
+  whoever wants it.
+- **Duck Quill's side** is in its pull request (version 0.6.0), as the
+  table above says, with two things found on the way: the pixel brush
+  now puts down exactly whole pixels at full strength (a soft edge left
+  them a little see-through, and the model showed the under-colour
+  through the paint), and the eraser is one hard pixel too when the
+  picture is small.
+- **A stand-in for Duck Quill in the tests.** No test starts a window.
+  The Studio's tests set a small program in Duck Quill's place that
+  writes a painted PNG over the image and exits, and then check the
+  model shows it; the real Duck Quill's opening and saving of PNGs is
+  tested in its own repository.
+
+### 10. The `.glb`, the shared reader, and Duck Forge
+
+**In the file.** A model with images has, as well as everything it has
+today:
+
+- **One picture, inside the file**: all the model's images side by side
+  on one sheet, as a PNG. Duck Forge draws one picture for each mesh, and
+  one mesh for each model is what keeps a model one quick draw, so the
+  images share a sheet.
+- **Where each corner is on the sheet** ("texture coordinates",
+  `TEXCOORD_0`), for the triangles that have an image.
+- **A material that names the sheet and asks for sharp pixels** (glTF's
+  "nearest" for both near and far), so other glTF programs don't blur it
+  either.
+
+How the sheet is made:
+
+- An image with see-through pixels is laid over the colour of the face
+  it is on, and the result goes on the sheet. So the file holds plain,
+  solid pictures that every glTF program shows the same way. (glTF itself
+  can't say "this image over that colour".) The same image over two
+  colours is on the sheet twice.
+- Each image has a border of its own edge pixels, so its neighbour never
+  shows at an edge.
+- The sheet's sides are powers of two (64, 128, ...), at most 4096.
+- The same recipe and images always give the same sheet, byte for byte.
+- The sheet also lists, in Duck Mold's corner of the file, which image
+  is where (`"images": [{ "file": "textures/robot_face.png", "at": [x, y,
+  w, h], "over": "steel" }]`).
+
+A face without an image is written as today: its colour, and no place
+on the sheet.
+
+**A file with images says layout 2** (`extras.duck_mold.version`), not 1.
+A Duck Forge from before would otherwise draw every painted face plain
+white without a word. Now it refuses the file with the sentence it
+already has: *"this .glb was written by a newer Duck Mold than this
+reader knows: update Duck Forge"*. **A file without images still says 1,
+and is byte for byte as before.**
+
+**Reader version 9** reads them. It still uses only the standard
+library and `serde_json`:
+
+- `GlbModel.picture`: the sheet, as the PNG bytes found in the file.
+  Turning them into pixels is Duck Forge's own code below the markers,
+  with the PNG library it already has.
+- `GlbTriangle.on_picture`: for a triangle with an image, where its
+  three corners are on the sheet. `None` for a plain one.
+- Far versions (below) carry theirs the same way and share the sheet.
+- It refuses, with a sentence: a sheet that isn't inside the file, a
+  corner off the sheet, a file that says layout 2 and has no sheet.
+
+**In Duck Forge** (the first pull request):
+
+- `Mesh::load_glb`, `GlbModel::to_mesh` and `AnimatedModel` give a mesh
+  with its `texture` and `uvs` set. **A game changes nothing**: the same
+  `canvas.draw_mesh(...)` and `robot.draw_mesh(...)` now draw the
+  images, on the CPU and on the graphics card, sharp at every distance.
+- A triangle with an image is white underneath, so the image shows as
+  painted. A game that recolours a part (`mesh.triangles[part.range()]`)
+  tints its images, and still recolours its plain faces exactly.
+- The shared test files gain the painted examples, with their reports
+  and pictures.
+- Its README, guide and decisions are updated; the handoff note here
+  describes version 9.
+
+**Far-away versions keep their images.** Far 1 and Far 2 change only
+triangles, as in 7a. The same images are laid by the same rules on the
+simpler shapes (a wrap round a 6-sided cylinder is still a wrap), and
+all versions share the one sheet. Stairs that become a wedge in Far 2
+lose the images of their `front` and `top`, which the wedge doesn't
+have, and show the part's `image` or colour.
+
+*As built (step 2):*
+
+- **One primitive for each part, as before**, with `TEXCOORD_0` on every
+  corner. A face without an image points all its corners at one plain
+  white place on the sheet, `extras.duck_mold.images.plain_at`, so other
+  glTF programs show its colour; the reader turns a triangle whose
+  three corners are exactly there back into "no image".
+- The reader's `GlbPicture` also has the sheet's `width` and `height`
+  (from the file's description, without reading the PNG). A far-away
+  version's `picture` is empty: it shows the model's own.
+- `GlbModel::picture_sprite()` in Duck Forge is the picture as a
+  `Sprite`; `GlbModel::load` reads the picture once to check it.
+- A face's colour isn't in the file once it has an image (the sheet
+  holds image and colour together), so `inspect` on a `.glb` counts such
+  a face under "no colour". `extras.duck_mold.images.files` says which
+  colour each image was laid over.
+- The Khronos validator reports no errors, warnings, infos or hints on a
+  file with images.
+- Duck Mold points at the Duck Forge pull request's commit until it is
+  merged, as in 7a.
+
+### 11. Duck Mold inside Duck Forge's Studio
+
+**How it looks.** The middle of Duck Forge's Studio gets tabs. The first
+is always the game. Each open model is a tab:
+
+```text
++--------------------------------------------------------------------------------------+
+| Duck Forge Studio   my_game        [> Play] [|| Freeze] [Restart]          Build ... |
++--------------------------------------------------------------------------------------+
+| [ Game ]  [ robot.toml x ]  [ crate.toml x ]                                         |
++------------+----------------------------------------------------+--------------------+
+| PARTS      | [Part][Face][Edge][Corner][Pose]    idle v  > Play | PROPERTIES         |
+|  body      | +--+                               +-------------+ |  head   box        |
+|  panel     | |↔ |                               | the game,   | |  Colour ■ steel    |
+|  head      | |⟳ |        (the model)            | running     | | IMAGES ON FACES    |
+|  left_arm  | |⤢ |                               | (look only) | |  front ▦ robot_... |
+|  ...       | |🖌|                               +-------------+ | PALETTE            |
++------------+                                                    |  ■ steel ■ red ... |
+| LIBRARY    |                                                    |  ∅ ▦ ▦  +          |
++------------+----------------------------------------------------+--------------------+
+| ✓ No problems    Sent robot.glb to the game (92 KB)                Duck Mold 1.0.0   |
++--------------------------------------------------------------------------------------+
+| Console                                                                              |
++--------------------------------------------------------------------------------------+
+```
+
+- **Everything inside the tab is Duck Mold's Studio itself**: the same
+  parts list, tools, modes, timeline, palette and status bar, because it
+  is the same code (below).
+- What is left out there, because Duck Forge's Studio already has it:
+  the start page, the File menu's Open, New and recent files, and the
+  window's title.
+- **Export .glb reads "Send to game"**.
+- **A small picture of the running game** sits in the corner of the
+  model's picture, for looking only. A click on it goes to the Game tab.
+  It can be hidden.
+- The Game tab is Duck Forge's Studio as it is today.
+
+**How a model opens:**
+
+- In the Files panel, a click on a recipe (`art/robot.toml`) opens it in
+  a tab. Today it opens in the system's text editor; that moves to the
+  right-click menu.
+- A click on a model file (`assets/robot.glb`) opens the recipe that
+  made it, if Duck Mold can find it: the recipe in the game's folder
+  whose `export` line names that file, or one with the same name in
+  `art/`. If there is none, the `.glb` opens for looking only, as in
+  Duck Mold today.
+- Open tabs are remembered for each game.
+
+**The same edits and the same Undo:**
+
+- Every action in the tab is the same Duck Mold edit, written to the
+  recipe at once, as in the standalone Studio.
+- **Undo in a model's tab is Duck Mold's Undo**, the one kept on disk
+  for each recipe. Change the robot in Duck Forge's Studio, close it,
+  open the recipe in Duck Mold's own Studio, and Ctrl+Z still takes the
+  last change back.
+- Ctrl+Z belongs to the tab in front. On the Game tab it is Duck Forge's
+  own Undo, which doesn't hold model edits.
+- **The standalone Duck Mold Studio keeps working**, unchanged. Both can
+  have the same recipe open: each sees the other's saves within half a
+  second, as with an agent today.
+
+**For agents**, Duck Forge's Studio gets four commands in its own
+command list (run with `DuckForgeStudio --run`):
+
+| Command | What it does |
+|---|---|
+| `{"do": "model.open", "path": "art/robot.toml"}` | Opens the model in a tab. |
+| `{"do": "model.edit", "path": "art/robot.toml", "edit": "set head --face-image front=textures/face.png"}` | One Duck Mold edit, written as it follows `duck-mold edit <recipe>`. |
+| `{"do": "model.send", "path": "art/robot.toml"}` | Exports it to the game. |
+| `{"do": "model.close", "path": "art/robot.toml"}` | Closes the tab. |
+
+An agent can equally run `duck-mold edit` and `duck-mold export` itself:
+the tab shows what they did.
+
+**Where Export goes.** A recipe can say where its `.glb` belongs:
+
+```toml
+export = "../assets/robot.glb"     # from the recipe's folder
+```
+
+- `duck-mold export art/robot.toml` with no `-o`, the Studio's Export and
+  "Send to game" all write there. Without the line, Export writes beside
+  the recipe, as today.
+- The edit is `set-export <path>`.
+- In Duck Forge's Studio, a recipe in a game's folder that has no
+  `export` line shows *"Send to game: assets/robot.glb [Set]"* in the
+  Model section. One click writes the line.
+
+**Saving a model while a game runs updates it in the game:**
+
+1. Export (or "Send to game") writes `assets/robot.glb`. It is written
+   beside the old file and swapped in, so the game never reads half a
+   model (Phase 7a).
+2. Duck Forge's Studio sees the file change, as it sees a picture change
+   today, and tells the running game.
+3. The game loads the model again and carries on: the same animation at
+   the same moment, in the same place.
+
+- **Export after every change**, a tick box in the Model section, does
+  step 1 by itself after each edit that builds. Then dragging the
+  robot's arm longer in the tab shows in the running game as the mouse
+  is let go. It is on in Duck Forge's Studio and off in the standalone,
+  and remembered in each.
+- A recipe with a mistake isn't sent. The game keeps the last model that
+  worked.
+- **Without Duck Forge's Studio it works too**: a game started from the
+  command line now looks, twice a second, at the model files it loaded.
+  So the standalone Duck Mold Studio, or an agent's `duck-mold export`,
+  updates a running game as well.
+
+### 12. Sharing code, and keeping the pin sane
+
+**No copy.** Duck Mold's Studio is already a library with a small
+program on top: `StudioApp::ui` draws into whatever space it is given.
+Duck Forge's Studio uses that library.
+
+```text
+  duckforge, the engine  <----  Duck Mold  <----  Duck Forge's Studio
+  (drawing, the reader)         core, view,       (its own program;
+                                Studio library     uses both)
+```
+
+The rules:
+
+1. **The engine never uses Duck Mold.** Only Duck Forge's Studio does.
+   So there is no circle: the engine builds and tests alone, as today,
+   and its list of libraries doesn't change.
+2. **Duck Mold names one commit of the engine**, as today. It moves only
+   when Duck Mold needs something new from the engine.
+3. **Duck Forge's Studio names one commit of Duck Mold.** It moves only
+   when the Studio wants a newer Duck Mold.
+4. **Inside the tab, Duck Mold draws with the engine commit that Duck
+   Mold names**, not with the Studio's own copy of the engine.
+   - A change to the engine can never break the tab.
+   - The tab's picture is exactly the standalone Studio's picture.
+   - The cost: the Studio's program holds the engine's drawing code
+     twice. That part of the engine is small (no window, no graphics
+     card, no sound).
+5. **Nothing of the engine passes between the two.** The tab is given a
+   place on the screen and a file. It answers "I wrote this file".
+6. **A test in Duck Forge's Studio** exports a painted example with the
+   Duck Mold it names and loads it with its own engine. So "Send to
+   game" can never write a file the game can't read; if Duck Mold's
+   reader gets ahead of the engine's, this test is red.
+
+Two small moves make the library clean to use:
+
+- The Studio's screens become a library crate with no Windows icon in
+  it; `DuckMoldStudio.exe` becomes a few lines on top that add the icon
+  and open the window. Otherwise Duck Mold's icon would be linked into
+  Duck Forge's Studio as well.
+- The library gets a "hosted" switch that leaves out the start page and
+  the File menu.
+
+Both Studios use the same interface library at the same version (eframe
+0.37), which earlier phases kept on purpose.
+
+### 13. The Duck Forge API
+
+For a game, nothing new is needed to see images:
+
+```rust
+let robot = AnimatedModel::load("assets/robot.glb")?;   // images and all
+robot.draw_mesh(canvas, &place, &camera);               // drawn with them
+```
+
+To take a model saved again while the game runs, one line in the game's
+`reload`, where a game already reloads its pictures:
+
+```rust
+fn reload(&mut self, _ctx: &mut Context, file: &Path) -> bool {
+    self.robot.reload_if_changed(file)      // true if `file` was the robot's, and it was loaded again
+}
+```
+
+| New in Duck Forge | What it is |
+|---|---|
+| `AnimatedModel::reload_if_changed(&mut self, file) -> bool` | If `file` is the file this model was loaded from, loads it again and carries on: the same animation at the same moment and speed, the same turns the game gave its parts. An animation that is gone leaves it at rest. A file that can't be read leaves the old model, with the reason in the console. |
+| `AnimatedModel::file(&self)` | The file it was loaded from. |
+| `GlbModel.picture`, `GlbTriangle.on_picture` | The shared reader's two new fields (section 10). |
+| The window looks at loaded model files | Twice a second, as it looks at level files today; a change calls `reload`. |
+| The Studio's `model.open`, `model.edit`, `model.send`, `model.close` | Section 11. |
+
+The robot examples and the game template get the `reload` line.
+
+*As built (step 6):* as designed in sections 11 to 13, with these
+choices made on the way.
+
+- **Five commands, not four.** `model.show` brings a model's tab, or
+  the game, to the front: the tab that is in front is something a
+  command should be able to say, like everything else in Duck Forge's
+  Studio.
+- **Which tabs are open is kept by Duck Forge Studio's core**, with no
+  window, so the commands work in `DuckForgeStudio --run`. The window
+  keeps one Duck Mold Studio for each tab.
+- **`model.edit` with no window** opens a Duck Mold Studio for the
+  moment (the library in `duck-mold-view`, which has no window), with
+  Duck Mold's Undo kept where Duck Mold keeps it, makes the edit and
+  lets go. With the tab open, the tab's own Studio makes it. Either way
+  it is one step of the same Undo.
+- **The words of an edit** are read by the code `duck-mold edit` uses:
+  the command-line crate is now a small library as well as a program
+  (`duck_mold_cli::edit::edits_from_words`).
+- **"Send to game" goes to the game's assets even with no `export`
+  line** (`assets/<name>.glb`). In the tab, the Model section says
+  "Goes to: the game's assets" and has *Write it in the recipe*, which
+  makes the `set-export` edit so that Duck Mold on its own exports
+  there too. The design had the line as a thing to set first; a model
+  that silently landed beside its recipe on the first change would
+  have been a trap.
+- **The Studio on its own** has *Choose...* (a save window) and *Beside
+  the recipe* in the same place, and the tick box.
+- **Export after every change** exports once for each new build that
+  worked, edits, Undo and Redo alike; a drag writes when the handle is
+  let go, so it exports once. Opening a model exports nothing. It is
+  remembered apart for the Studio on its own (off to start with) and
+  hosted (on to start with).
+- **The hosted Studio leaves these to the program around it:** the
+  start page, New, Open, examples and recent files; the size of
+  everything (View > Interface size); the crash note; the first run's
+  tips; and Escape closing a look-only window. Its top bar has no duck
+  and no title: the tab says which model it is.
+- **The small picture of the game** is drawn by Duck Forge Studio over
+  the corner of the model's picture (Duck Mold's Studio says where its
+  picture is), with *Hide*. A click on it goes to the game.
+- **The game hears of a new `.glb` as it hears of a new picture.** Duck
+  Forge Studio already looked at the game's `assets` every frame and
+  sent changed files' names over its link; the game's `reload` gets the
+  name and loads the file itself. Outside the Studio, the game's window
+  looks at the `.glb` files it loaded twice a second (their time and
+  size, not their bytes).
+- **`reload_if_changed` returns true for its own file even if the file
+  can't be read** (the old model stays, the reason is printed). False
+  would make the Studio offer Restart, which is the wrong advice for a
+  recipe that is half changed.
+- **The split.** `duck-mold-studio` is the screens, as a library with no
+  icon in it; `duck-mold-studio-app` is `DuckMoldStudio`, a few lines
+  that open the window, with the icon and its build script.
+- **Pins.** Duck Forge Studio names one commit of Duck Mold (this
+  branch, until 1.0.0 is out; then the `v1.0.0` tag). The pull requests
+  are merged with real merge commits, not squashed, so the commits the
+  two repositories name in each other stay reachable.
+- **Not done:** the tab was drawn and tested with no window on Linux;
+  it has not been tried by hand on Windows in this phase.
+
+### 14. Examples
+
+- **The robot** (`examples/robot.toml`): a mouth and brows on its head
+  (`textures/robot_face.png`), round its two eyes, which stay parts; and
+  a label, "DM-1", on its chest panel (`textures/robot_label.png`). Its
+  `.glb`, report and pictures change, here and in Duck Forge's test
+  files.
+- **A plank crate** (`examples/plank_crate.toml`): one box,
+  `image = "textures/planks.png"`, with a lid image on top.
+  `examples/crate.toml` stays as it is: it is the smallest recipe, the
+  first test of the reader, and the proof that a model without images
+  doesn't change.
+- **One character made with all three apps**, `examples/pip.toml`: a
+  small explorer with a box head and a backpack.
+  - Its face is painted with Duck Quill: `textures/pip_face.json` is the
+    Duck Quill script, `pip_face.png` what it draws.
+  - It is animated in Duck Mold: `idle` and `walk`, with `footstep`
+    events, hit shapes and far versions.
+  - It walks in a Duck Forge game, `examples/pip_walk/` there: a yard
+    with plank crates to walk round, the arrow keys to walk.
+  - Stored pictures: the face in Duck Quill, Pip in Duck Mold's Studio,
+    Pip in Duck Forge's Studio's tab, and three frames of the game.
+- A small imported model with a picture (`examples/parts/sign.gltf`,
+  written by a script as the lamp was), to test section 6.
+
+*As built (step 7):*
+
+- **The robot** has brows and a mouth on the front of its head
+  (`textures/robot_face.png`, 42 x 32) and "DM-1" in a thin frame on its
+  chest panel (`textures/robot_label.png`, 30 x 20), both 100 pixels to
+  the metre, each see-through round the paint so the part's own colour
+  shows. Both are drawn by Duck Quill scripts kept beside them. Its
+  eyes stay parts. Its golden files changed where the face or the label
+  shows (`robot.glb`, its report, its picture, the pictures of its hit
+  shapes and far versions, and two animation strips); the reports of
+  its four animations did not.
+- **Tests that use the robot elsewhere** copy its two images along with
+  its recipe, or use it "unpainted" (the recipe without its two
+  `images` lines) where the test is about text alone. The file from
+  before Phase 5 is still compared with the unpainted robot, triangle
+  for triangle.
+- **Pip** (`examples/pip.toml`): a box head with the face on its front
+  (`textures/pip_face.png`, 36 x 32, from a Duck Quill script), a hat
+  of three cylinders, a backpack with a rolled blanket, arms and legs
+  from two definitions. `idle` and `walk`; the walk was stood on the
+  ground with `fit-ground`, has a `footstep` on each step, and takes
+  two steps of about a quarter of a metre in 0.6 seconds. Hit shapes
+  for every part that matters, and two far-away versions.
+- **The game** is Duck Forge's `examples/pip_walk`: the arrows walk Pip
+  round four plank crates. Its `art` folder has both recipes (each with
+  an `export` line into the game's `assets`), the pictures and their
+  Duck Quill scripts. Its `reload` takes a model saved again.
+- **The start page** offers Pip, the plank crate and the signpost
+  beside the others (21 examples), each copied out with the pictures
+  and files it uses.
+- **The stored pictures** of the face in Duck Quill, Pip in the Studio,
+  Pip in Duck Forge Studio's tab and three frames of the game are in
+  `docs/phase7/`, shown in `PHASE7_REPORT.md`.
+
+### 15. Steps, one commit each
+
+| Step | What | Where |
+|---|---|---|
+| 1 | Images in the recipe and the core: reading PNGs, laying them on every shape, the mistakes, `inspect`, `render`. Models without images byte for byte the same. | Duck Mold |
+| 2 | The sheet in the `.glb`, layout 2, reader version 9, Duck Forge giving meshes their picture. | Duck Mold; **Duck Forge pull request 1** |
+| 3 | The Studio: images in the right column and the palette, the new-image window, the Paint tool, `set --image`, `set --face-image`, `new-image`. | Duck Mold |
+| 4 | The round trip: `paint`, the guide, finding Duck Quill, watching image files, the plain PNG way. Duck Quill opens and saves PNGs. | Duck Mold; **Duck Quill pull request** |
+| 5 | Imported glTF and OBJ keep their pictures. | Duck Mold |
+| 6 | The library split and the hosted switch; `export` and `set-export`; tabs in Duck Forge's Studio; `reload_if_changed` and the window's watching; the four Studio commands. | Duck Mold; **Duck Forge pull request 2** |
+| 7 | The examples and their stored pictures; Pip's game and the refreshed test files go into Duck Forge's pull request 2. | all three |
+| 8 | Version 1.0.0: release notes, the installer, the install test. | Duck Mold |
+
+Then `PHASE7_REPORT.md`, the merges in the order you gave, and the
+release.
+
+*As built (step 8):* version 1.0.0. `RELEASE_NOTES.md` has its
+section (which is also the text of the release's page); the installer
+is `DuckMoldSetup-1.0.0.exe`, made as in 7a. The release's own test now
+also checks that the examples' pictures are in the zip and installed
+(`examples/textures/robot_face.png`, Pip, the signpost and its
+picture), exports Pip and the signpost from the unzipped folder, and
+exports the installed robot and reads its images back. The read-me in
+the download has a section on pictures and on models for a game.
+
+### 16. Testing
+
+- **Every step has tests**; edits have golden files; every changed
+  screen has a picture test.
+- **Laying on**: for every shape and every face name, a test image with
+  a different colour in each corner comes out with the right corner in
+  the right place. Shaped boxes: a pull, an inset and a cut each, against
+  the table in section 2.
+- **Byte for byte**: every golden file of every example without images
+  is untouched by steps 1 to 6.
+- **Mistakes**: a missing file, a file that isn't a PNG, a damaged one, a
+  too big one, a sheet too big, `bevel`, a misspelt face. Each is a
+  sentence and none is a crash. A PNG cut off at every length is tried.
+- **The `.glb`**: the painted examples are golden files. The Khronos
+  validator reports no errors or warnings on them. The reader's sheet
+  and corners are checked against Duck Mold's own, triangle by triangle.
+  A file with images is refused by reader version 8 with its sentence.
+- **Duck Forge**: the painted crate and robot drawn on the CPU and on
+  the graphics card match their stored pictures; a pixel in the middle
+  of the robot's mouth has the mouth's colour, unblurred, near and far.
+- **The round trip** is tested by doing it without a person: a program
+  standing in for Duck Quill saves the PNG, and the Studio's model has
+  the new pixels within the time it promises. In Duck Quill: a PNG
+  opened, painted and saved is that PNG changed; the layers come back;
+  a PNG changed elsewhere wins over its `.quill`.
+- **Without Duck Quill**: with none to be found, the button, the window
+  and the plain way are pictured and clicked.
+- **Imported pictures**: the sign, with a PNG inside the file, a PNG
+  beside it and a JPEG; a repeated picture; a recipe overriding one.
+- **Inside Duck Forge's Studio**: a model opened in a tab, an edit made
+  there, Undo, and the same Undo continued in the standalone Studio; a
+  game running the robot shows a new arm after "Send to game", still
+  mid-walk; pictures of the tab.
+- `cargo fmt` and `clippy -D warnings`. Windows and Linux green in Duck
+  Mold and Duck Quill. Duck Forge's checks run on Windows only, as they
+  always have; they stay green.
+- README and AI_GUIDE updated in all three; every new command has its
+  line in Duck Mold's agent guide; the handoff note describes version 9.
+
+### 17. What 7b won't do
+
+- Parts that bend, IK, sculpting, booleans, bump maps, shiny or
+  see-through materials (your list).
+- **See-through models.** A see-through pixel shows the face's colour,
+  not what is behind the model.
+- **An image that repeats** across a recipe's own face.
+- **Painting on the model in 3D.** Painting is done on the flat image.
+- One image across two faces with different names (a wrap round a box).
+- An image on bevelled edges.
+- An OBJ's `.mtl` file.
+- Models placed by Duck Forge's Studio's scene files. Its scenes keep a
+  `"model"` line and don't draw it yet. Pip's game loads Pip in code, as
+  the robot's games do.
+- A Duck Quill installer.
+
+### 18. The decisions
+
+1. **`image` and `images`, shaped like `color` and `colors`.** *The other
+   way:* one unfolded sheet for each part, as a Minecraft skin is. That
+   is one file for six faces, but most of it is wasted when only the
+   front has a face, and a person has to learn which patch is which.
+2. **Fitted to the rectangle round the faces, seen straight on; round
+   faces wrapped.** *The other way:* texture coordinates written in the
+   recipe. They are numbers nobody can read, and they break when a size
+   changes.
+3. **An image given to a face belongs to that face's name, as a colour
+   does; the part's own `image` carries across cuts.** *The other way:* a
+   cut-off slice keeps its share of the picture. That needs every face
+   to remember what it was cut from, through every change, and then a
+   face's picture depends on the order things were done in, not on what
+   the recipe says.
+4. **The image lies over the colour.** *The other way:* the image tinted
+   by the colour, which is what glTF itself does. See section 3.
+5. **Stretch to fit, no repeating.** *The other way:* repeat every so
+   many metres. Then the images couldn't share one sheet, and every
+   model would be several draws in Duck Forge.
+6. **A missing or broken image is a mistake, and nothing is built.** *The
+   other way:* build without it and warn. A game would then ship a robot
+   with no face and a warning nobody read.
+7. **One sheet inside the `.glb`, with images already laid over their
+   colours.** *The other way:* each image as its own picture in the
+   file. That is simpler to write, but Duck Forge draws one picture for
+   each mesh, so a model would become a mesh for each image.
+8. **Layout 2 for files with images.** *The other way:* leave it at 1,
+   as for far versions. An older Duck Forge drew far versions correctly
+   by ignoring them; it would draw images wrong, in white.
+9. **The reader hands over the sheet as PNG bytes.** *The other way:* the
+   reader reads PNGs itself. It would need a PNG library, and it has
+   stayed on the standard library and `serde_json` since Phase 0.
+10. **Far versions keep their images.** *The other way:* Far 2 painted in
+    each image's average colour. That is a little quicker to draw, and
+    stops small pictures sparkling far off. But it adds colours that
+    aren't in the palette, and 7a's rule was that only triangles
+    change.
+11. **The programs are linked by files and nothing else.** *The other
+    way:* Duck Mold and Duck Quill talking to each other directly. That
+    is quicker by a fraction of a second, breaks when either changes,
+    and leaves agents and other picture programs out.
+12. **Duck Quill saves both the PNG and a `.quill`.** *The other way:*
+    only the PNG. Layers would be lost each time it closed.
+13. **JPEG is read for imported models only.** A recipe's own images are
+    PNG. *The other way:* PNG only. Then most photo-textured Blender
+    models would still come in without their pictures. It costs one
+    small library, and a test that it gives the same pixels on Windows
+    and Linux.
+14. **Tabs in Duck Forge's Studio, each holding Duck Mold's whole
+    Studio.** *The other way:* a narrow panel beside the game. Duck
+    Mold's Studio has three columns and a timeline, which don't fit in a
+    side panel.
+15. **Duck Forge's Studio uses Duck Mold's library; the engine doesn't;
+    the tab draws with Duck Mold's own engine commit.** *The other way:*
+    make the tab draw with the Studio's engine, so there is one copy.
+    Then every change to the engine could break Duck Mold inside the
+    Studio, and the two would have to be changed together for ever.
+16. **`export = "..."` in the recipe.** *The other way:* each Studio
+    remembers where a recipe exports to. Then the command line, the two
+    Studios and an agent could each send the model somewhere else.
+17. **A game takes a new model with one line in `reload`.** *The other
+    way:* the engine swaps it by itself. The engine doesn't hold a
+    game's models, and a game may want to do more (place a hat again).
+
+### 19. Three things to say yes or no to
+
+1. **The robot example itself is painted** (decision in section 14), so
+   its golden files and Duck Forge's copies of them change in step 7.
+   The other way is a second file, `painted_robot.toml`, and an
+   unpainted robot for ever.
+2. **Two more releases with 1.0.0**, so that the three downloads work
+   together: Duck Quill 0.6.0 (its zip, as it is released now) and a new
+   Duck Forge Studio (its installer, as now). Without them, "Paint in
+   Duck Quill" has only the plain PNG way, and the tab isn't there.
+3. **After 1.0.0 is published, one small pull request in Duck Forge**
+   that moves the Studio's Duck Mold pin from the branch's commit to the
+   `v1.0.0` tag. The code is the same either way; the tag reads better.

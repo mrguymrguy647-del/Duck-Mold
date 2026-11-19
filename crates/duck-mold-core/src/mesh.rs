@@ -30,8 +30,25 @@ pub struct MeshFile {
     /// True for a `.glb` Duck Mold wrote: its materials are its palette
     /// colours, which join the model's palette as a recipe's do.
     pub from_duck_mold: bool,
-    /// Other files read for it: a `.gltf`'s `.bin`.
+    /// Other files read for it: a `.gltf`'s `.bin`, and the pictures
+    /// beside it.
     pub extra_files: Vec<std::path::PathBuf>,
+    /// The file's own layout for pictures (its "UVs"): for each
+    /// triangle, where its three corners are on a picture, across and
+    /// down. 0 to 1 is once over the picture; further is the picture
+    /// again. `None` for a triangle the file gives no place. Empty when
+    /// the file has no layout at all.
+    pub lies: Vec<Option<[[f64; 2]; 3]>>,
+    /// The file's own pictures, as they were read: tinted by their
+    /// material's colour where the file says so.
+    pub pictures: Vec<std::sync::Arc<crate::picture::Picture>>,
+    /// For each triangle, which of `pictures` the file shows on it.
+    /// Empty when the file has no pictures.
+    pub picture_of: Vec<Option<usize>>,
+    /// Where `pictures` start among the pictures of the recipe that
+    /// uses this file as a part: its loader sets it. 0 for a mesh on
+    /// its own.
+    pub first_picture: usize,
 }
 
 /// The most mistakes reported for one mesh file. A damaged file can have
@@ -44,9 +61,10 @@ pub const DEFAULT_MATERIAL: &str = "default";
 /// Reads the text of an OBJ file.
 ///
 /// What is read: points (`v`), faces (`f`, of three or more corners; a
-/// face with more is cut into triangles) and material names (`usemtl`).
-/// Everything else is passed over: normals, texture coordinates,
-/// smoothing, object and group names, and the material file. Lines,
+/// face with more is cut into triangles), material names (`usemtl`) and
+/// the layout for pictures (`vt`), so that a recipe can put an image on
+/// a material. Everything else is passed over: normals, smoothing,
+/// object and group names, and the material file. Lines,
 /// points and curves are passed over with a note, since only faces can
 /// be built.
 ///
@@ -64,6 +82,10 @@ pub fn read_obj(text: &str, file: &str, issues: &mut Vec<Issue>) -> Option<MeshF
         ..MeshFile::default()
     };
     let mut points: Vec<[f64; 3]> = Vec::new();
+    // Places on a picture (`vt`), counted from the picture's top as
+    // Duck Mold does; an OBJ file counts from the bottom.
+    let mut places: Vec<[f64; 2]> = Vec::new();
+    let mut too_many = 0;
     let mut material = DEFAULT_MATERIAL.to_owned();
     let mut mistakes = 0;
     let mut skipped = 0;
@@ -109,11 +131,25 @@ pub fn read_obj(text: &str, file: &str, issues: &mut Vec<Issue>) -> Option<MeshF
             }
             "f" => {
                 let mut corners: Vec<[f64; 3]> = Vec::new();
+                let mut on_picture: Vec<Option<[f64; 2]>> = Vec::new();
                 let mut good = true;
                 for word in words {
-                    // A corner is `7`, `7/2`, `7/2/5` or `7//5`: only the
-                    // first number, the point, is used.
-                    let first = word.split('/').next().unwrap_or("");
+                    // A corner is `7`, `7/2`, `7/2/5` or `7//5`: the
+                    // point, its place on a picture if it has one, and
+                    // a normal, which isn't used.
+                    let mut numbers = word.split('/');
+                    let first = numbers.next().unwrap_or("");
+                    let counted = |text: &str, so_far: usize| match text.parse::<i64>() {
+                        Ok(index) if index >= 1 => Some(index as usize - 1),
+                        Ok(index) if index < 0 => so_far.checked_sub(index.unsigned_abs() as usize),
+                        _ => None,
+                    };
+                    on_picture.push(
+                        numbers
+                            .next()
+                            .and_then(|second| counted(second, places.len()))
+                            .and_then(|at| places.get(at).copied()),
+                    );
                     let point = match first.parse::<i64>() {
                         // Counting from 1...
                         Ok(index) if index >= 1 => points.get(index as usize - 1),
@@ -172,7 +208,28 @@ pub fn read_obj(text: &str, file: &str, issues: &mut Vec<Issue>) -> Option<MeshF
                     };
                     mesh.triangles.push(triangle);
                     mesh.material_of.push(slot);
+                    mesh.lies.push(
+                        match (on_picture[0], on_picture[next + 1], on_picture[next]) {
+                            (Some(a), Some(b), Some(c)) => {
+                                MeshFile::tidy_lie([a, b, c], &mut too_many)
+                            }
+                            _ => None,
+                        },
+                    );
                 }
+            }
+            "vt" => {
+                let numbers: Vec<Option<f64>> = words
+                    .take(2)
+                    .map(|word| word.parse::<f64>().ok().filter(|number| number.is_finite()))
+                    .collect();
+                // A place that can't be read is no place: the faces
+                // that name it simply have no layout.
+                places.push(match numbers.as_slice() {
+                    [Some(across), Some(up)] => [*across, 1.0 - up],
+                    [Some(across)] => [*across, 1.0],
+                    _ => [f64::NAN, f64::NAN],
+                });
             }
             "usemtl" => {
                 // A material's name is the rest of the line.
@@ -184,7 +241,7 @@ pub fn read_obj(text: &str, file: &str, issues: &mut Vec<Issue>) -> Option<MeshF
                 };
             }
             // Read by other programs, not needed here.
-            "vn" | "vt" | "vp" | "o" | "g" | "s" | "mtllib" | "mg" => {}
+            "vn" | "vp" | "o" | "g" | "s" | "mtllib" | "mg" => {}
             // Things that aren't faces.
             _ => skipped += 1,
         }
@@ -236,7 +293,21 @@ pub fn read_obj(text: &str, file: &str, issues: &mut Vec<Issue>) -> Option<MeshF
             .in_file(file),
         );
     }
+    if mesh.lies.iter().all(Option::is_none) {
+        mesh.lies.clear();
+    }
+    if too_many > 0 {
+        issues.push(Issue::warning(Code::Skipped, "", too_many_repeats(too_many)).in_file(file));
+    }
     Some(mesh)
+}
+
+/// The note for triangles a picture would repeat across too often.
+pub(crate) fn too_many_repeats(triangles: usize) -> String {
+    format!(
+        "{triangles} triangles of this file repeat a picture more than {} times across: there the picture is shown once",
+        crate::picture::MAX_REPEATS
+    )
 }
 
 /// True for a triangle squashed to a line or a point.
@@ -254,7 +325,69 @@ pub(crate) fn has_no_area(triangle: &[[f64; 3]; 3]) -> bool {
     cross.0 * cross.0 + cross.1 * cross.1 + cross.2 * cross.2 <= 1e-24
 }
 
+/// A place on a picture, tidied to one part in 65,536, so that a
+/// corner meant to be exactly on a picture's edge is.
+fn tidy_place(value: f64) -> f64 {
+    (value * 65536.0).round() / 65536.0 + 0.0
+}
+
 impl MeshFile {
+    /// Puts a triangle's place on a picture into the form the rest of
+    /// Duck Mold works with: tidied, and moved by whole pictures so
+    /// that it starts in the first one (a picture that repeats looks
+    /// the same wherever along it a triangle is). A triangle that
+    /// crosses more than `MAX_REPEATS` copies is given the picture
+    /// once, and counted in `too_many`.
+    pub(crate) fn tidy_lie(lie: [[f64; 2]; 3], too_many: &mut usize) -> Option<[[f64; 2]; 3]> {
+        if lie
+            .iter()
+            .flatten()
+            .any(|value| !value.is_finite() || value.abs() > 1e6)
+        {
+            return None;
+        }
+        let mut lie = lie.map(|corner| corner.map(tidy_place));
+        let mut squeezed = false;
+        for axis in 0..2 {
+            let low = lie
+                .iter()
+                .map(|corner| corner[axis])
+                .fold(f64::INFINITY, f64::min);
+            let high = lie
+                .iter()
+                .map(|corner| corner[axis])
+                .fold(f64::NEG_INFINITY, f64::max);
+            let start = low.floor();
+            if high - start > crate::picture::MAX_REPEATS as f64 {
+                // Once over the picture instead.
+                squeezed = true;
+                let reach = (high - low).max(1e-9);
+                for corner in &mut lie {
+                    corner[axis] = tidy_place((corner[axis] - low) / reach);
+                }
+            } else {
+                for corner in &mut lie {
+                    corner[axis] -= start;
+                }
+            }
+        }
+        if squeezed {
+            *too_many += 1;
+        }
+        Some(lie)
+    }
+
+    /// Where a triangle's corners are on a picture, by the file's own
+    /// layout.
+    pub fn lie(&self, triangle: usize) -> Option<[[f64; 2]; 3]> {
+        self.lies.get(triangle).copied().flatten()
+    }
+
+    /// Which of the file's pictures it shows on a triangle.
+    pub fn picture(&self, triangle: usize) -> Option<usize> {
+        self.picture_of.get(triangle).copied().flatten()
+    }
+
     /// How many triangles each material has, in the file's order.
     pub fn material_counts(&self) -> Vec<(String, usize)> {
         let mut counts: Vec<(String, usize)> = self

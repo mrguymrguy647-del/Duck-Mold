@@ -939,7 +939,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "duck-mold-cli"
-version = "0.7.0"
+version = "1.0.0"
 dependencies = [
  "clap",
  "duck-mold-core",
@@ -950,8 +950,10 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-core"
-version = "0.7.0"
+version = "1.0.0"
 dependencies = [
+ "jpeg-decoder",
+ "png",
  "serde",
  "serde_json",
  "toml",
@@ -959,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-studio"
-version = "0.7.0"
+version = "1.0.0"
 dependencies = [
  "dirs",
  "duck-mold-core",
@@ -968,12 +970,20 @@ dependencies = [
  "egui_kittest",
  "png",
  "rfd",
+]
+
+[[package]]
+name = "duck-mold-studio-app"
+version = "1.0.0"
+dependencies = [
+ "duck-mold-studio",
+ "eframe",
  "winresource",
 ]
 
 [[package]]
 name = "duck-mold-view"
-version = "0.7.0"
+version = "1.0.0"
 dependencies = [
  "duck-mold-core",
  "duckforge",
@@ -985,7 +995,7 @@ dependencies = [
 [[package]]
 name = "duckforge"
 version = "0.1.0"
-source = "git+https://github.com/mrguymrguy647-del/Duck-Forge?rev=3a21f0a377f9b572fa73b60527873b3bb956c212#3a21f0a377f9b572fa73b60527873b3bb956c212"
+source = "git+https://github.com/mrguymrguy647-del/Duck-Forge?rev=c5547127301430ec4e68da548653bf9d65282c38#c5547127301430ec4e68da548653bf9d65282c38"
 dependencies = [
  "ab_glyph",
  "gif",
@@ -1951,6 +1961,12 @@ dependencies = [
  "getrandom 0.4.3",
  "libc",
 ]
+
+[[package]]
+name = "jpeg-decoder"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "00810f1d8b74be64b13dbf3db89ac67740615d6c891f0e7b6179326533011a07"
 
 [[package]]
 name = "js-sys"

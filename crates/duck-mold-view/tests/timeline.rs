@@ -23,6 +23,7 @@ fn robot(test: &str) -> (PathBuf, Studio) {
         &recipe,
     )
     .unwrap();
+    with_images_of("robot", &recipe);
     let mut studio = Studio::open(&recipe, false);
     studio.hover(VIEW, None);
     studio.pose_mode().unwrap();
@@ -362,5 +363,21 @@ fn check_picture(name: &str, picture: &Picture) {
             "the picture {name} changed (the new one is in {}). If the change is meant, accept it with: DUCK_MOLD_ACCEPT=1 cargo test -p duck-mold-view --test timeline",
             new.display()
         );
+    }
+}
+
+/// The images an example's recipe names (`textures/<example>_*.png`),
+/// put beside a copy of it: it doesn't build without them.
+#[allow(dead_code)]
+fn with_images_of(example: &str, recipe: &std::path::Path) {
+    let stem = example.rsplit_once('.').map_or(example, |(stem, _)| stem);
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    for entry in std::fs::read_dir(from).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&format!("{stem}_")) && name.ends_with(".png") {
+            std::fs::create_dir_all(&to).unwrap();
+            std::fs::copy(entry.path(), to.join(&name)).unwrap();
+        }
     }
 }

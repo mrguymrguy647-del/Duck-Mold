@@ -717,12 +717,23 @@ fn from_before(name: &str) -> Vec<u8> {
     std::fs::read(path).unwrap()
 }
 
-/// The example `name`, built now.
-fn example(name: &str) -> Model {
+/// The example `name`, built now without its images, as it was before
+/// examples had any: the files from before are compared with this.
+fn example_unpainted(name: &str) -> Model {
     let path = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../examples")
         .join(format!("{name}.toml"));
-    duck_mold_core::tools::build(&path).unwrap().model
+    let text: String = std::fs::read_to_string(path)
+        .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with("images = { front = \"textures/"))
+        .map(|line| format!("{line}\n"))
+        .collect();
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR")).join("glb_unpainted");
+    std::fs::create_dir_all(&folder).unwrap();
+    let copy = folder.join(format!("{name}.toml"));
+    std::fs::write(&copy, text).unwrap();
+    duck_mold_core::tools::build(&copy).unwrap().model
 }
 
 #[test]
@@ -731,7 +742,7 @@ fn files_from_before_the_tree_still_read_and_give_the_same_model() {
         let old = from_before(name);
         assert_eq!(open(&old).json["extras"]["duck_mold"]["version"], 0);
         assert_eq!(open(&old).json["nodes"].as_array().unwrap().len(), 1);
-        let new = write_glb(&example(name));
+        let new = write_glb(&example_unpainted(name));
 
         // Duck Forge's reader: the same triangles in the same order with
         // the same colours, the same parts, assemblies and sockets. A
@@ -830,7 +841,7 @@ fn a_file_from_before_assemblies_still_reads() {
 fn a_file_from_a_newer_duck_mold_is_refused_with_a_sentence() {
     let newer = with_json(&write_glb(&built(TOWER)), |json| {
         assert!(json.contains("\"version\":1,\"name\":\"tower\""));
-        json.replacen("\"version\":1,\"name\"", "\"version\":2,\"name\"", 1)
+        json.replacen("\"version\":1,\"name\"", "\"version\":3,\"name\"", 1)
     });
     let error = forge::read_duck_mold_glb(&newer).unwrap_err();
     assert!(error.contains("newer Duck Mold"), "{error}");

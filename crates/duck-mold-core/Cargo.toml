@@ -10,6 +10,11 @@ repository.workspace = true
 toml = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+# Reads the PNG images a recipe puts on its parts, and writes the sheet
+# of them that goes inside the .glb.
+png = { workspace = true }
+# Reads the JPEG pictures a glTF file from another program can carry.
+jpeg-decoder = { workspace = true }
 
 [lints]
 workspace = true

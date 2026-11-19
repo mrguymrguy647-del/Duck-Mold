@@ -180,6 +180,7 @@ The top of the file:
 | `parts` | Required. The model's parts, at least one. |
 | `sockets` | Extra sockets on the whole model. |
 | `origin` | The model's zero point: a socket, like `"bottom"` (the default), `"center"` or `"trunk.bottom"`. |
+| `export` | Where the model's `.glb` belongs, from the recipe's folder: `"../assets/robot.glb"`. `duck-mold export` with no `-o` writes there. Default: beside the recipe. |
 | `poses` | The model's poses, by name: which parts are turned, and how far (section 11). |
 | `animations` | The model's animations, by name: poses at times (section 11). |
 
@@ -200,6 +201,8 @@ Its other fields:
 | `name` | Letters, digits, `_`, `-`. Needed if another part attaches to it. |
 | `color` | A palette name: the colour of the whole part. |
 | `colors` | Colours for single faces: `{ top = "grass", sides = "dirt" }`. |
+| `image` | A PNG file beside the recipe: the image on the whole part. `"none"` for none. |
+| `images` | Images for single faces: `{ front = "textures/face.png" }`. |
 | `changes` | A box only: changes made to its shape once it is built, in order. See "Shaping a box" below. |
 | `attach`, `to` | Join my socket `attach` to `to = "part.socket"`, a socket of another part in the same list. Always both. |
 | `twist` | Attached part only: one number, degrees to twist it around the join. |
@@ -309,6 +312,34 @@ is an error that tells you to add it to the palette. `colors` beats
 none of its own, so the nearest setting wins. A face with no colour at
 all is built plain grey, with a warning. An assembly has no faces of its
 own: `colors` on it is an error; colour the parts inside.
+
+**Images.** `image = "textures/planks.png"` puts a PNG on every face of
+a part; `images = { front = "textures/face.png" }` on one face. They
+follow the colour rules (`images` beats `image`; the nearest setting
+wins; `"none"` takes one away; `images` on an assembly is an error).
+
+- The path starts from the recipe's folder. PNG only, at most 1024 x
+  1024 pixels.
+- **The image lies over the colour**: paint only the mouth and leave the
+  rest of the PNG see-through, and the face's palette colour shows
+  there.
+- It is fitted to the face as you see it straight on from outside,
+  upright on the sides (top: from above, front edge at the bottom of the
+  image). It stretches to fit and doesn't repeat, so give it the face's
+  proportions: `inspect --json` lists, under `images`, each image, the
+  faces it is on, the size it has there in `metres` and its
+  `pixels_per_metre`.
+- Round faces are wrapped: a cylinder's `side` once round like a label
+  (the middle of the image at the front), a sphere like a map of the
+  world.
+- On a shaped box, an image belongs to the face name it was given to: a
+  pull carries it out, an inset leaves it round the new face, a cut
+  leaves it on the piece that kept the name. Shape first, then give
+  images. The part's own `image` carries on across every change.
+- Keep pixels one size: `inspect` warns (`mixed_pixels`) when one image
+  has more than twice as many pixels to the metre as another.
+- A missing file is `file_not_found`; a file that isn't a PNG, is
+  damaged or too big is `bad_image`. Nothing is built.
 
 ## 6. Sockets
 
@@ -579,9 +610,20 @@ centimetres). A glTF material you give no colour keeps the file's own
 base colour, added to the palette under the material's name, with a
 `no_color` warning that lists them: give the part a `color`, or `colors`
 by material name, to choose your own. A `.glb` Duck Mold wrote brings its
-palette, so it looks as it did (`examples/desk.toml`). Only the mesh is
-read: animations, bones and textures are left out with a note, and a
-compressed file is refused.
+palette, so it looks as it did (`examples/desk.toml`). Animations and
+bones are left out with a note, and a compressed file is refused.
+
+**A glTF file's pictures come with it** (`examples/signpost.toml`): each
+material's colour picture, PNG or JPEG, laid on by the file's own
+layout. Nothing is written in the recipe for that, and a material wholly
+under a solid picture gets no palette colour and no warning. `inspect`
+lists them under `images` (`parts/sign.gltf: board` for one inside the
+file). To change one: `colors = { board = "steel" }` paints the material
+and its picture goes; `images = { board = "textures/mine.png" }` puts
+your PNG on by the same layout; `images = { board = "none" }` leaves the
+material's colour. An OBJ file's layout is read too, so `images` works
+on its materials. A file with no layout ("UVs") can't take an image:
+the error says so.
 
 **Choose where the model's zero point is.** `origin = "pole.bottom"`
 puts it at a socket of one part instead of under the middle of the
@@ -609,7 +651,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> remove <part>` | Removes a part. Refused, with their names, if other parts hang from it; `--with-attached` removes those too. |
 | `duck-mold edit <recipe> rename <part> <new-name>` | Renames a part, and every `to`, `from` and `origin` that names it. |
 | `duck-mold edit <recipe> join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes its own socket. A part placed with `move` loses it. |
-| `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`, `--bevel` (`0` makes the edges sharp again), `--bevel-steps`, `--taper n` or `--taper x,z` (`1` makes the sides straight again), `--color`, `--face-color top=plank` (repeatable; `top=none` takes the face's own colour away again), `--twist`. Several at once are one edit. A new shape drops the sizes, options and face colours it doesn't have. |
+| `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`, `--bevel` (`0` makes the edges sharp again), `--bevel-steps`, `--taper n` or `--taper x,z` (`1` makes the sides straight again), `--color`, `--face-color top=plank` (repeatable; `top=none` takes the face's own colour away again), `--image textures/planks.png` (the whole part's image; `none` takes it away), `--face-image front=textures/face.png` (repeatable; `front=none` takes the image off that face, writing `"none"` there if the part's own image would otherwise show), `--twist`. On a part made from a mesh file the faces are its materials: `board=none` always writes `"none"` (the file's own picture would show otherwise), and `board=own`, or `--image own`, takes the recipe's line away so the file's own pictures show again. Several at once are one edit. A new shape drops the sizes, options and face colours it doesn't have. |
 | `duck-mold edit <recipe> set <part> --move x,y,z` | Puts a **free** part (one that isn't joined) there: its middle, in metres, measured from the recipe's own zero. Also `--rotate x,y,z` (degrees around x, then y, then z) and `--scale n` or `--scale x,y,z`. A joined part refuses `--move` and `--rotate`, and says what to do instead; `--scale` works on any part. |
 | `duck-mold edit <recipe> unjoin <part>` | Makes a joined part free, exactly where it stands: its `attach`, `to` and `twist` become a `move` and a `rotate`. The model doesn't change; the part can then be moved anywhere. |
 | `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. A copy of a joined part, with no `--to`, never sits on the part it copies: it goes to the next socket of the same part that nothing is joined to and that faces the same way (in the order they are written: the next table leg's socket); else to a new socket (`spot`) made beside the original's, 10 cm past it on the same side, if there is room; else (in the model's own list) it stands free on clear ground in front of the model. The summary says which. |
@@ -626,6 +668,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> set-colliders <parts\|capsule\|box\|sphere\|none>` | The model's hit shapes (section 11, "Hit shapes"): `parts` fits one to every part; `capsule`, `box` or `sphere` puts one round the whole model; `none` takes the line away. |
 | `duck-mold edit <recipe> set-collider <part> <box\|sphere\|capsule\|none\|fitted>` | A part's own hit shape: a shape fitted to it, `none` (no hit shape), or `fitted` (take its own away: it follows `colliders`). `--size x,y,z`, `--radius r`, `--length l` (end to end), `--center x,y,z` and `--along x\|y\|z` give it numbers of its own; any not given keep the fitted shape's. |
 | `duck-mold edit <recipe> set-lods <auto\|none\|near,far>` | The model's far-away versions (section 11, "Far-away versions"): `auto` puts two at 8 and 20 times the model's largest side; `12,30` puts them at 12 m and 30 m; `none` takes the line away. |
+| `duck-mold edit <recipe> set-export <path\|none>` | Where the model's `.glb` belongs, from the recipe's own folder: `set-export ../assets/robot.glb` writes `export = "../assets/robot.glb"` at the top of the recipe. `duck-mold export <recipe>` with no `-o`, and the Studio's Export, then write there (the folder is made if it isn't there). `none` takes the line away: beside the recipe again. The line changes nothing in the model. |
 | `duck-mold edit <recipe> set-lod <part> <keep\|auto>` | `keep`: the part is never simplified or left out of the far-away versions (a character's eyes). `auto` takes that away again. On an assembly, it keeps everything inside it. |
 | `duck-mold edit <recipe> set-limits <part> --x <low,high> --y ... --z ...` | Says how far a part may turn when the model is posed (section 11). Each of `--x`, `--y`, `--z` takes two angles (`-30,40`), `free` (any amount) or `none` (not that way); directions not given stay as they are. `--fixed`: it never turns or moves. `--none`: no limits again. |
 | `duck-mold edit <recipe> set-pose <pose> <part> --turn x,y,z` | Turns a part in a pose, in degrees about its pivot (section 11); `--move x,y,z` slides it, in metres. Makes the pose if it isn't there. `--rest` puts the part back at rest in that pose. |
@@ -692,6 +735,41 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   with the palette colours it uses and none of where it stands: put it
   in the `parts` folder next to a recipe and it is in the Studio's
   library. It never writes over a file.
+- **`duck-mold new-image <recipe> <part>`** (an edit that also writes
+  a file) makes a new image and puts it on the part: a PNG that is
+  see-through all over, in `textures/` beside the recipe
+  (`textures/<model>_<part>_<face>.png`), with the proportions of what
+  it covers. `--face front` puts it on one face; `--file` names it;
+  `--size 64x48` sizes it. Without `--size`: as many pixels to the metre
+  as the model's other images (the middle one, when they differ), or 64
+  for its first image (its longer side at least 32), never more than 256
+  along a side. `--json` gives `file`, `width`, `height`, `metres`,
+  `pixels_per_metre`, `part`, `face` and the `edit`. Then write the PNG
+  with any tool (Duck Quill: `quill render face.json --transparent --out
+  textures`), and look with `duck-mold render`. It never writes over a
+  file; to use a PNG that is already there, `edit <recipe> set <part>
+  --face-image front=<file>`.
+- **`duck-mold image-guide <recipe> <part>`** (changes nothing) writes
+  a see-through PNG that shows what an image covers: the outline of
+  every face it lies on, a word at its top edge saying which way that
+  is on the part (`up`; `back` on a top face), `front` where a wrapped
+  image passes the part's front, and dashed boxes where other parts are
+  joined on. `--face front` for one face's image. It is written beside
+  the image as `<image>.guide.png`, or where `-o <file>` says. It is a
+  whole number of times the image's size (about 512 pixels on its
+  longer side), so that its lines are thin: read it as "this fraction
+  of the way across", not pixel for pixel.
+- **`duck-mold paint <recipe> <part>`** is for a person at the
+  computer: it opens the image in Duck Quill's window (with the guide,
+  and the part's colour as paper), or with `--system` in whatever the
+  computer opens PNG files with. A part with no image gets a new one
+  first, as `new-image` makes it. An agent has no use for the window
+  but can check what would happen: `--dry-run --json` gives `image`,
+  `guide`, `paper`, `with` (`duck-quill` or `system`) and the
+  `command`, and starts nothing. If Duck Quill can't be found, it says
+  so and exits with 2; `--duck-quill <program>` says where it is, and
+  is remembered. To paint without a window, write the PNG yourself (the
+  `new-image` bullet above).
 - **`duck-mold save-animation <recipe> <animation> <file>`** (not an
   `edit` either) writes an animation and the poses it uses to a small
   file of their own, for another model to take with `add-animation
@@ -1150,6 +1228,43 @@ give animations, poses and parts are the names game code uses: keep
 them plain (`idle`, `walk`, `wave`, `jump`, `open`). `examples/robot.toml`
 has limits, six poses and three animations to copy from.
 
+**A whole character, start to finish:** `examples/pip.toml`. Its face
+is an image painted with a Duck Quill script
+(`examples/textures/pip_face.json`), on the front of a box head; it has
+`idle` and `walk` (with `footstep` events), `colliders = "parts"` and
+`lods = "auto"`. In Duck Forge, `examples/pip_walk` loads it and walks
+it round a yard, with its recipe in the game's `art` folder and an
+`export` line that sends the model to the game's `assets`.
+
+**Images in a game.** `duck-mold export` puts every image the model
+uses inside the `.glb`, on one sheet, and the game's code doesn't
+change: `Mesh::load_glb` and `AnimatedModel` draw them, with sharp
+pixels. A model with images needs a Duck Forge that reads them (reader
+version 9): an older one refuses the file with "update Duck Forge". A
+model without images exports exactly as it always did.
+
+**Straight into a game.** Give the recipe an `export` line and
+`duck-mold export` (with no `-o`) writes the `.glb` where the game
+loads it from:
+
+```bash
+duck-mold edit art/robot.toml set-export ../assets/robot.glb   # once: writes export = "../assets/robot.glb"
+duck-mold export art/robot.toml                                # from now on: writes assets/robot.glb
+```
+
+The path starts from the recipe's own folder, must end in `.glb`, and
+can't start from the top of the disk. A recipe with a mistake isn't
+exported, so the game keeps the last model that worked.
+
+**Into a game that is running.** A Duck Forge game whose `reload` has
+the line `self.robot.reload_if_changed(file)` takes a `.glb` saved
+again and carries on mid-animation. Its own window looks at the model
+files it loaded twice a second; Duck Forge Studio tells it at once. So
+the loop for a model in a game is: `duck-mold edit` (or change the
+recipe), `duck-mold export`, look at the game. In Duck Forge Studio the
+same two steps are its commands `model.edit` and `model.send`, and a
+model's tab there is Duck Mold's Studio itself.
+
 ### Working beside the Studio
 
 A person may have the recipe open in Duck Mold Studio while you edit it.
@@ -1198,7 +1313,8 @@ That is safe:
 
 ## 13. What it can't do yet
 
-Plan around these; don't look for them: no textures or UVs, no smooth
+Plan around these; don't look for them: no images that repeat across a
+face, no painting on the model itself (an image is a flat PNG), no smooth
 shading (every face is flat, as in Duck Forge), no see-through or
 glowing colours, no booleans (cutting one shape out of another), no
 bones (`bones` is a reserved name; parts turn on their joins instead of

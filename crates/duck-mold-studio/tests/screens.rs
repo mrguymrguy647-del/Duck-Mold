@@ -1771,8 +1771,10 @@ fn the_menus_do_what_the_buttons_and_keys_do() {
     choose(&mut screen, "View", "Show everything hidden");
     assert!(!screen.state().studio().unwrap().is_hidden("post"));
 
-    // File: export writes the model next to the recipe.
-    choose(&mut screen, "File", "Export");
+    // File: export writes the model next to the recipe. (Found by its
+    // key: "Export" is also in the Model section's "Export after every
+    // change".)
+    choose(&mut screen, "File", "Ctrl+E");
     assert!(recipe.with_extension("glb").is_file());
 
     // Help: the keys, in a window; Escape closes it.
@@ -1788,7 +1790,7 @@ fn the_menus_do_what_the_buttons_and_keys_do() {
             .is_none()
     );
     choose(&mut screen, "Help", "About");
-    screen.get_by_label_contains("Version 0.");
+    screen.get_by_label_contains(&format!("Version {}", env!("CARGO_PKG_VERSION")));
     screen.get_by_label("Copy version");
     screen.key_press(egui::Key::Escape);
     screen.run_steps(3);
@@ -2062,7 +2064,7 @@ fn an_example_on_the_start_page_opens_a_copy_of_your_own() {
     // begin, every example by name, and how it works.
     screen.get_by_label("Duck Mold Studio");
     screen.get_by_label("Build 3D models from parts, for Duck Forge games.");
-    screen.get_by_label_contains("version 0.");
+    screen.get_by_label_contains(&format!("version {}", env!("CARGO_PKG_VERSION")));
     screen.get_by_label("New model");
     screen.get_by_label("Open a model");
     screen.get_by_label("Examples: click one to open a copy of your own");
@@ -2165,6 +2167,7 @@ fn hidden_parts_are_hidden_again_when_the_file_is_next_opened() {
     let list = folder.join("settings/recent.txt");
     let robot = folder.join("robot.toml");
     std::fs::copy(examples().join("robot.toml"), &robot).unwrap();
+    with_robots_images(&robot);
     let open = || {
         let mut screen = harness(
             StudioApp::with_file(&robot, false).remembering(Recent::kept_in(list.clone())),
@@ -2290,6 +2293,7 @@ fn the_first_model_opened_gets_five_tips_once() {
     let settings = folder.join("settings/recent.txt");
     let recipe = folder.join("robot.toml");
     std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+    with_robots_images(&recipe);
     let before = text_of(&recipe);
     let fresh = || {
         harness(
@@ -3441,6 +3445,7 @@ fn a_crash_last_time_is_told_on_the_start_page_once() {
     let folder = folder("screens_crashed");
     let recipe = folder.join("robot.toml");
     std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+    with_robots_images(&recipe);
     let settings = folder.join("settings");
     std::fs::create_dir_all(&settings).unwrap();
     std::fs::write(
@@ -3634,4 +3639,16 @@ fn a_click_on_the_gizmo_looks_along_that_axis() {
     let mut side = now;
     side.look_from(Viewpoint::Side);
     assert_eq!((now.round, now.above), (side.round, side.above));
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
+    }
 }

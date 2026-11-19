@@ -27,6 +27,20 @@ pub fn copy_of(example: &str, test: &str) -> PathBuf {
     let folder = folder(test);
     let copy = folder.join(example);
     std::fs::copy(examples().join(example), &copy).unwrap();
+    // The images its recipe names (`textures/<example>_*.png`) come
+    // along: it doesn't build without them.
+    let stem = example.rsplit_once('.').map_or(example, |(stem, _)| stem);
+    for entry in std::fs::read_dir(examples().join("textures"))
+        .into_iter()
+        .flatten()
+        .flatten()
+    {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with(&format!("{stem}_")) && name.ends_with(".png") {
+            std::fs::create_dir_all(folder.join("textures")).unwrap();
+            std::fs::copy(entry.path(), folder.join("textures").join(&name)).unwrap();
+        }
+    }
     copy
 }
 

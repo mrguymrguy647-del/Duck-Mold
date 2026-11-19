@@ -1,0 +1,75 @@
+{
+  "format": "duckquill-script",
+  "version": 1,
+  "title": "The robot's label: 30 x 20",
+  "notes": "A Duck Quill script. The letters DM-1 and a thin frame, on a see-through picture: the chest panel's own red shows round them. Make the PNG with: quill render robot_label.json --transparent --out .",
+  "palette": {
+    "paint": "#FFE08A",
+    "edge": "#8E2A22"
+  },
+  "commands": [
+    {
+      "cmd": "canvas",
+      "width": 30,
+      "height": 20,
+      "pixel": true
+    },
+    {
+      "cmd": "layer",
+      "name": "Frame"
+    },
+    {
+      "cmd": "rect",
+      "x": 1,
+      "y": 1,
+      "width": 28,
+      "height": 1,
+      "fill": "edge"
+    },
+    {
+      "cmd": "rect",
+      "x": 1,
+      "y": 18,
+      "width": 28,
+      "height": 1,
+      "fill": "edge"
+    },
+    {
+      "cmd": "rect",
+      "x": 1,
+      "y": 1,
+      "width": 1,
+      "height": 18,
+      "fill": "edge"
+    },
+    {
+      "cmd": "rect",
+      "x": 28,
+      "y": 1,
+      "width": 1,
+      "height": 18,
+      "fill": "edge"
+    },
+    {
+      "cmd": "layer",
+      "name": "Letters"
+    },
+    {
+      "cmd": "pixels",
+      "at": [
+        6,
+        7
+      ],
+      "colors": {
+        "x": "paint"
+      },
+      "rows": [
+        "xx..x...x......x.",
+        "x.x.xx.xx.....xx.",
+        "x.x.x.x.x.xxx..x.",
+        "x.x.x...x......x.",
+        "xx..x...x.....xxx"
+      ]
+    }
+  ]
+}

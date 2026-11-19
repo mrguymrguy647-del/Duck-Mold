@@ -14,8 +14,17 @@ pub const PICTURE_SIZE: usize = 192;
 
 /// The picture of each example, as a PNG file: drawn from its recipe by
 /// the same code as `duck-mold render` (a test keeps them so).
-pub const PICTURES: [(&str, &[u8]); 18] = [
+pub const PICTURES: [(&str, &[u8]); 21] = [
     ("robot", include_bytes!("../assets/examples/robot.png")),
+    ("pip", include_bytes!("../assets/examples/pip.png")),
+    (
+        "plank_crate",
+        include_bytes!("../assets/examples/plank_crate.png"),
+    ),
+    (
+        "signpost",
+        include_bytes!("../assets/examples/signpost.png"),
+    ),
     ("house", include_bytes!("../assets/examples/house.png")),
     ("snowman", include_bytes!("../assets/examples/snowman.png")),
     ("desk", include_bytes!("../assets/examples/desk.png")),

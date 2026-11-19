@@ -59,9 +59,13 @@ pub fn panel(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
             .small(),
         );
     }
-    let in_hand = (studio.tool == Tool::Paint)
-        .then(|| studio.paint_colour())
-        .flatten();
+    // The colour in hand: none while an image is (see `images.rs`).
+    let in_hand = match studio.brush() {
+        Some(duck_mold_view::studio::images::Brush::Colour(name)) if studio.tool == Tool::Paint => {
+            Some(name)
+        }
+        _ => None,
+    };
     {
         if palette.is_empty() {
             ui.label(RichText::new("No colours yet.").weak());

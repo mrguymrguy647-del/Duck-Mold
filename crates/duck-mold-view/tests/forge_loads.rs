@@ -7,8 +7,11 @@ use std::path::Path;
 use duckforge::glb::GlbModel;
 use duckforge::prelude::Mesh;
 
-const EXAMPLES: [&str; 21] = [
+const EXAMPLES: [&str; 24] = [
     "crate",
+    "plank_crate",
+    "signpost",
+    "pip",
     "table",
     "tree",
     "house",
@@ -186,4 +189,59 @@ fn robots_poses_hold(root: &Path) {
     let here = posed(&model, &model.pose("wave").unwrap().joints);
     let (_, high) = robot.mesh().bounds();
     assert!((f64::from(high.y) - here.bounds().unwrap().max.y).abs() < 1e-4);
+}
+
+#[test]
+fn duck_forge_loads_a_model_with_its_images() {
+    use duck_mold_core::picture::read_png_up_to;
+
+    let golden = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/golden");
+    let model = GlbModel::load(golden.join("plank_crate.glb")).unwrap();
+    let report: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(golden.join("plank_crate.inspect.json")).unwrap(),
+    )
+    .unwrap();
+    // The one picture its images are on: the size the report says, and
+    // a PNG Duck Mold reads back.
+    let picture = model.picture.as_ref().expect("a picture");
+    assert_eq!(
+        serde_json::json!([picture.width, picture.height]),
+        report["images"]["sheet"]
+    );
+    let pixels = read_png_up_to(&picture.png, "the picture", 4096).unwrap();
+    assert_eq!(
+        (pixels.width, pixels.height),
+        (picture.width, picture.height)
+    );
+    // The mesh a game draws comes with it: every triangle of the crate
+    // has a place on the picture.
+    let mesh = Mesh::load_glb(golden.join("plank_crate.glb")).unwrap();
+    let texture = mesh.texture.as_ref().expect("a texture");
+    assert_eq!(texture.width() as u32, picture.width);
+    assert_eq!(mesh.triangles.len(), 12);
+    assert!((0..12).all(|at| mesh.uvs.get(at).is_some_and(Option::is_some)));
+    // A model without images has none.
+    let plain = Mesh::load_glb(golden.join("crate.glb")).unwrap();
+    assert!(plain.texture.is_none());
+
+    // The signpost, whose pictures came inside a glTF file: its sign's
+    // triangles have a place on the picture, its mound and stone don't.
+    let model = GlbModel::load(golden.join("signpost.glb")).unwrap();
+    let mesh = model.to_mesh();
+    assert!(mesh.texture.is_some());
+    let placed = model
+        .triangles
+        .iter()
+        .filter(|triangle| triangle.on_picture.is_some())
+        .count();
+    assert_eq!((placed, mesh.triangles.len()), (28, 96));
+    let report: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(golden.join("signpost.inspect.json")).unwrap(),
+    )
+    .unwrap();
+    let picture = model.picture.as_ref().unwrap();
+    assert_eq!(
+        serde_json::json!([picture.width, picture.height]),
+        report["images"]["sheet"]
+    );
 }

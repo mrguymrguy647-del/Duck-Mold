@@ -1,0 +1,193 @@
+{
+  "ok": true,
+  "summary": "signpost: 0.90 x 1.35 x 0.90 m, 96 triangles, 3 parts, 2 colours, rests on the ground, nothing floating, 1 overlap",
+  "source": "examples/signpost.toml",
+  "name": "signpost",
+  "size": [
+    0.9,
+    1.35,
+    0.9
+  ],
+  "bounds": {
+    "min": [
+      -0.45,
+      0.0,
+      -0.45
+    ],
+    "max": [
+      0.45,
+      1.35,
+      0.45
+    ]
+  },
+  "triangles": 96,
+  "vertices": 216,
+  "ground": {
+    "rests_on_ground": true,
+    "lowest_y": 0.0
+  },
+  "palette": [
+    {
+      "name": "grass",
+      "hex": "#5E9A45",
+      "triangles": 44
+    },
+    {
+      "name": "stone",
+      "hex": "#8C8F94",
+      "triangles": 24
+    }
+  ],
+  "parts": [
+    {
+      "name": "mound",
+      "kind": "cylinder",
+      "triangles": 44,
+      "size": [
+        0.9,
+        0.08,
+        0.9
+      ],
+      "bounds": {
+        "min": [
+          -0.45,
+          0.01,
+          -0.45
+        ],
+        "max": [
+          0.45,
+          0.09,
+          0.45
+        ]
+      },
+      "colors": [
+        "grass"
+      ],
+      "attached_to": null,
+      "parts": []
+    },
+    {
+      "name": "sign",
+      "kind": "mesh",
+      "file": "examples/parts/sign.gltf",
+      "triangles": 28,
+      "size": [
+        0.64,
+        1.26,
+        0.16
+      ],
+      "bounds": {
+        "min": [
+          -0.32,
+          0.09,
+          -0.08
+        ],
+        "max": [
+          0.32,
+          1.35,
+          0.08
+        ]
+      },
+      "colors": [],
+      "attached_to": "mound.top",
+      "parts": []
+    },
+    {
+      "name": "stone",
+      "kind": "sphere",
+      "triangles": 24,
+      "size": [
+        0.155884,
+        0.18,
+        0.135
+      ],
+      "bounds": {
+        "min": [
+          0.147058,
+          0.0,
+          0.09
+        ],
+        "max": [
+          0.302942,
+          0.18,
+          0.225
+        ]
+      },
+      "colors": [
+        "stone"
+      ],
+      "attached_to": "mound.stone",
+      "parts": []
+    }
+  ],
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "stone",
+      "b": "mound",
+      "depth": 0.035,
+      "hidden": false
+    }
+  ],
+  "images": {
+    "sheet": [
+      128,
+      128
+    ],
+    "files": [
+      {
+        "file": "examples/parts/sign_post.png",
+        "width": 8,
+        "height": 16,
+        "solid": true,
+        "on": [
+          {
+            "part": "sign",
+            "face": "post",
+            "metres": [
+              0.08,
+              0.1596
+            ],
+            "pixels_per_metre": 100.1
+          }
+        ]
+      },
+      {
+        "file": "examples/parts/sign.gltf: board",
+        "width": 64,
+        "height": 32,
+        "solid": true,
+        "on": [
+          {
+            "part": "sign",
+            "face": "board",
+            "metres": [
+              0.6409,
+              0.3219
+            ],
+            "pixels_per_metre": 99.6
+          }
+        ]
+      },
+      {
+        "file": "examples/parts/sign.gltf: cap",
+        "width": 16,
+        "height": 8,
+        "solid": true,
+        "on": [
+          {
+            "part": "sign",
+            "face": "cap",
+            "metres": [
+              0.16,
+              0.1
+            ],
+            "pixels_per_metre": 89.4
+          }
+        ]
+      }
+    ]
+  },
+  "warnings": [],
+  "errors": []
+}
