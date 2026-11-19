@@ -1,16 +1,23 @@
-# The Cargo "workspace": one project made of three crates (two Rust
-# libraries and a program) that are built together.
+# The Cargo "workspace": one project made of five crates (three Rust
+# libraries and two programs) that are built together.
 #
-#   crates/duck-mold-core - the library: recipes, parts, sockets, colour,
-#                           the .glb writer and `inspect`. No command line,
-#                           no pictures, no game engine.
-#   crates/duck-mold-view - pictures of a model (`render`), drawn by Duck
-#                           Forge's CPU renderer.
-#   crates/duck-mold-cli  - the `duck-mold` program: a thin layer that reads
-#                           the command line and prints what the libraries say.
+#   crates/duck-mold-core       - the library: recipes, parts, sockets,
+#                                 colour, the .glb writer and `inspect`. No
+#                                 command line, no pictures, no game engine.
+#   crates/duck-mold-view       - pictures of a model (`render`), drawn by
+#                                 Duck Forge's CPU renderer, and everything
+#                                 the Studio does, with no window.
+#   crates/duck-mold-cli        - the `duck-mold` program: a thin layer that
+#                                 reads the command line and prints what the
+#                                 libraries say.
+#   crates/duck-mold-studio     - the Studio's screens, as a library: it
+#                                 draws into whatever space it is given.
+#   crates/duck-mold-studio-app - the `DuckMoldStudio` program: opens a
+#                                 window for those screens, with the icon.
+#                                 Duck Forge's Studio shows the same screens
+#                                 in a tab, from the same library.
 #
-# The program uses the libraries; the libraries never use the program. A
-# GUI or an MCP server can later sit on the same libraries.
+# The programs use the libraries; the libraries never use the programs.
 
 [workspace]
 resolver = "3"
@@ -19,6 +26,7 @@ members = [
     "crates/duck-mold-view",
     "crates/duck-mold-cli",
     "crates/duck-mold-studio",
+    "crates/duck-mold-studio-app",
 ]
 
 # Settings shared by every crate.
@@ -33,6 +41,7 @@ repository = "https://github.com/mrguymrguy647-del/Duck-Mold"
 [workspace.dependencies]
 duck-mold-core = { path = "crates/duck-mold-core" }
 duck-mold-view = { path = "crates/duck-mold-view" }
+duck-mold-studio = { path = "crates/duck-mold-studio" }
 # Reads TOML and says where every field is, for line numbers in errors.
 toml = { version = "1", default-features = false, features = ["std", "parse"] }
 # Writes JSON: reports, and the JSON block inside a .glb.

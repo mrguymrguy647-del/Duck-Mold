@@ -180,6 +180,7 @@ The top of the file:
 | `parts` | Required. The model's parts, at least one. |
 | `sockets` | Extra sockets on the whole model. |
 | `origin` | The model's zero point: a socket, like `"bottom"` (the default), `"center"` or `"trunk.bottom"`. |
+| `export` | Where the model's `.glb` belongs, from the recipe's folder: `"../assets/robot.glb"`. `duck-mold export` with no `-o` writes there. Default: beside the recipe. |
 | `poses` | The model's poses, by name: which parts are turned, and how far (section 11). |
 | `animations` | The model's animations, by name: poses at times (section 11). |
 
@@ -667,6 +668,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> set-colliders <parts\|capsule\|box\|sphere\|none>` | The model's hit shapes (section 11, "Hit shapes"): `parts` fits one to every part; `capsule`, `box` or `sphere` puts one round the whole model; `none` takes the line away. |
 | `duck-mold edit <recipe> set-collider <part> <box\|sphere\|capsule\|none\|fitted>` | A part's own hit shape: a shape fitted to it, `none` (no hit shape), or `fitted` (take its own away: it follows `colliders`). `--size x,y,z`, `--radius r`, `--length l` (end to end), `--center x,y,z` and `--along x\|y\|z` give it numbers of its own; any not given keep the fitted shape's. |
 | `duck-mold edit <recipe> set-lods <auto\|none\|near,far>` | The model's far-away versions (section 11, "Far-away versions"): `auto` puts two at 8 and 20 times the model's largest side; `12,30` puts them at 12 m and 30 m; `none` takes the line away. |
+| `duck-mold edit <recipe> set-export <path\|none>` | Where the model's `.glb` belongs, from the recipe's own folder: `set-export ../assets/robot.glb` writes `export = "../assets/robot.glb"` at the top of the recipe. `duck-mold export <recipe>` with no `-o`, and the Studio's Export, then write there (the folder is made if it isn't there). `none` takes the line away: beside the recipe again. The line changes nothing in the model. |
 | `duck-mold edit <recipe> set-lod <part> <keep\|auto>` | `keep`: the part is never simplified or left out of the far-away versions (a character's eyes). `auto` takes that away again. On an assembly, it keeps everything inside it. |
 | `duck-mold edit <recipe> set-limits <part> --x <low,high> --y ... --z ...` | Says how far a part may turn when the model is posed (section 11). Each of `--x`, `--y`, `--z` takes two angles (`-30,40`), `free` (any amount) or `none` (not that way); directions not given stay as they are. `--fixed`: it never turns or moves. `--none`: no limits again. |
 | `duck-mold edit <recipe> set-pose <pose> <part> --turn x,y,z` | Turns a part in a pose, in degrees about its pivot (section 11); `--move x,y,z` slides it, in metres. Makes the pose if it isn't there. `--rest` puts the part back at rest in that pose. |

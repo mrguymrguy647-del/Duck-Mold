@@ -473,6 +473,13 @@ pub enum Edit {
         /// What it becomes.
         lods: Option<Lods>,
     },
+    /// Sets the recipe's `export`: where its `.glb` belongs, from the
+    /// recipe's own folder (`../assets/robot.glb`). `None` takes the
+    /// line away: the `.glb` goes beside the recipe.
+    SetExport {
+        /// Where, or `None`.
+        path: Option<String>,
+    },
     /// Keeps a part whole in the far-away versions (`lod = "keep"`), or
     /// lets them simplify it again.
     SetLod {
@@ -646,7 +653,7 @@ impl Edit {
     /// The name of every kind of edit, as the command line and the agent
     /// guide write it. A test checks each has a command and is in the
     /// guide.
-    pub const COMMANDS: [&'static str; 47] = [
+    pub const COMMANDS: [&'static str; 48] = [
         "add",
         "remove",
         "rename",
@@ -691,6 +698,7 @@ impl Edit {
         "set-collider",
         "set-lods",
         "set-lod",
+        "set-export",
         "set-event",
         "remove-event",
         "fit-ground",
@@ -729,6 +737,7 @@ impl Edit {
             Edit::SetColliders { .. } => "set-colliders",
             Edit::SetCollider { .. } => "set-collider",
             Edit::SetLods { .. } => "set-lods",
+            Edit::SetExport { .. } => "set-export",
             Edit::SetLod { .. } => "set-lod",
             Edit::SetPose { .. } => "set-pose",
             Edit::AddPose { .. } => "add-pose",
@@ -1432,6 +1441,7 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
         Edit::SetColliders { colliders } => hits::set_colliders(doc, *colliders),
         Edit::SetCollider { part, to } => hits::set_collider(doc, part, *to, model),
         Edit::SetLods { lods } => lods::set_lods(doc, *lods),
+        Edit::SetExport { path } => lods::set_export(doc, path.as_deref()),
         Edit::SetLod { part, keep } => lods::set_lod(doc, part, *keep),
         Edit::SetPose {
             pose,
@@ -3905,6 +3915,7 @@ fn part_of(edit: &Edit) -> &str {
         | Edit::FitGround { .. }
         | Edit::SetColliders { .. }
         | Edit::SetLods { .. }
+        | Edit::SetExport { .. }
         | Edit::TidySockets => "",
     }
 }

@@ -3037,6 +3037,7 @@ fn every_kind_of_edit_has_a_name() {
             part: String::new(),
             keep: true,
         },
+        Edit::SetExport { path: None },
         Edit::SetEvent {
             animation: String::new(),
             key: 1,

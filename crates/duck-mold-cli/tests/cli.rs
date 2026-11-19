@@ -1528,7 +1528,7 @@ fn every_field_the_guide_lists_is_a_real_field() {
             checked += 1;
         }
     }
-    assert_eq!(checked, 31, "the guide's tables list 31 fields");
+    assert_eq!(checked, 32, "the guide's tables list 32 fields");
 }
 
 #[test]
@@ -2883,4 +2883,100 @@ fn a_parts_own_pictures_are_listed_taken_off_and_shown_again() {
         "{}",
         stderr(&output)
     );
+}
+
+#[test]
+fn export_goes_where_the_recipe_says() {
+    let folder = folder("cli_export_line");
+    std::fs::create_dir_all(folder.join("art")).unwrap();
+    std::fs::rename(folder.join("tree.toml"), folder.join("art/tree.toml")).unwrap();
+
+    // Without the line: beside the recipe, as always.
+    let output = run(&folder, &["export", "art/tree.toml"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).starts_with("wrote art/tree.glb ("),
+        "{}",
+        stdout(&output)
+    );
+    let beside = std::fs::read(folder.join("art/tree.glb")).unwrap();
+
+    // The edit writes the line, near the top of the recipe.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "art/tree.toml",
+            "set-export",
+            "../assets/models/tree.glb",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(
+        stdout(&output).lines().next().unwrap(),
+        "edited art/tree.toml: the model's .glb now goes to ../assets/models/tree.glb (from the recipe's folder)"
+    );
+    let text = std::fs::read_to_string(folder.join("art/tree.toml")).unwrap();
+    assert!(
+        text.contains("export = \"../assets/models/tree.glb\"\n"),
+        "{text}"
+    );
+
+    // Export with no -o goes there, and the folders are made. The line
+    // changes nothing in the model: the same bytes.
+    let output = run(&folder, &["export", "art/tree.toml", "--json"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(json(&output)["output"], "assets/models/tree.glb");
+    assert_eq!(
+        std::fs::read(folder.join("assets/models/tree.glb")).unwrap(),
+        beside
+    );
+    // -o still says otherwise.
+    let output = run(&folder, &["export", "art/tree.toml", "-o", "elsewhere.glb"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(folder.join("elsewhere.glb").is_file());
+
+    // What isn't a place for a .glb is refused, and nothing changes.
+    for (wrong, why) in [
+        ("/models/tree.glb", "starts from the top of the disk"),
+        ("C:/models/tree.glb", "starts from the top of the disk"),
+        ("../assets/tree.png", "isn't a .glb file"),
+    ] {
+        let output = run(&folder, &["edit", "art/tree.toml", "set-export", wrong]);
+        assert_eq!(output.status.code(), Some(2), "{wrong}");
+        assert!(
+            stderr(&output).contains(why),
+            "{wrong}: {}",
+            stderr(&output)
+        );
+    }
+    assert_eq!(
+        std::fs::read_to_string(folder.join("art/tree.toml")).unwrap(),
+        text
+    );
+    // Written by hand wrongly, it is a mistake with its line.
+    std::fs::write(
+        folder.join("art/wrong.toml"),
+        text.replace("../assets/models/tree.glb", "../assets/tree.obj"),
+    )
+    .unwrap();
+    let output = run(&folder, &["inspect", "art/wrong.toml"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(
+        stderr(&output).contains("export: \"../assets/tree.obj\" isn't a .glb file"),
+        "{}",
+        stderr(&output)
+    );
+
+    // "none" takes the line away; twice says there is none.
+    let output = run(&folder, &["edit", "art/tree.toml", "set-export", "none"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        !std::fs::read_to_string(folder.join("art/tree.toml"))
+            .unwrap()
+            .contains("export")
+    );
+    let output = run(&folder, &["edit", "art/tree.toml", "set-export", "none"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("has no \"export\" to take away"));
 }

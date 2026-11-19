@@ -182,6 +182,7 @@ impl Loader<'_> {
                     animations: Vec::new(),
                     colliders: None,
                     lods: None,
+                    export: None,
                 };
             }
         };

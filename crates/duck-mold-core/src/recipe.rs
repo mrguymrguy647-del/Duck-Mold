@@ -85,6 +85,28 @@ pub struct Recipe {
     /// Far-away versions (`lods`): simpler triangles for a model seen
     /// from far. `None`: none.
     pub lods: Option<Lods>,
+    /// Where the model's `.glb` belongs (`export`), from the recipe's
+    /// folder: `../assets/robot.glb`. `None`: beside the recipe.
+    pub export: Option<String>,
+}
+
+/// Checks a recipe's `export` line: where its `.glb` goes, from the
+/// recipe's own folder. `Err` says what is wrong, as a sentence.
+pub fn check_export(path: &str) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("\"export\" is the .glb file the model is written to, like \"../assets/robot.glb\": it can't be empty".to_owned());
+    }
+    if path.starts_with('/') || path.starts_with('\\') || path.as_bytes().get(1) == Some(&b':') {
+        return Err(format!(
+            "\"{path}\" starts from the top of the disk: \"export\" starts from the recipe's own folder, like \"../assets/robot.glb\", so that it still works when the folder is moved or copied"
+        ));
+    }
+    if !path.to_lowercase().ends_with(".glb") {
+        return Err(format!(
+            "\"{path}\" isn't a .glb file: \"export\" is where the model's .glb goes, like \"../assets/robot.glb\""
+        ));
+    }
+    Ok(())
 }
 
 /// When a model's far-away versions are used: `lods = "auto"`, or
@@ -1037,11 +1059,12 @@ fn a_shape(name: &str) -> String {
 }
 
 /// The fields at the top of a recipe.
-pub(crate) const TOP_FIELDS: [&str; 13] = [
+pub(crate) const TOP_FIELDS: [&str; 14] = [
     "version",
     "name",
     "description",
     "note",
+    "export",
     "palette",
     "colliders",
     "lods",
@@ -1388,6 +1411,7 @@ impl Decoder<'_> {
             animations: Vec::new(),
             colliders: None,
             lods: None,
+            export: None,
         };
         let Some(mut fields) = self.table(root, "", "a recipe: a table of fields") else {
             return recipe;
@@ -1534,6 +1558,21 @@ impl Decoder<'_> {
 
         if let Some(entry) = fields.take("lods") {
             recipe.lods = self.lods(&entry.node);
+        }
+
+        if let Some(entry) = fields.take("export")
+            && let Some(text) = self.text(&entry.node, "export", "../assets/model.glb")
+        {
+            match check_export(&text) {
+                Ok(()) => recipe.export = Some(text),
+                Err(message) => {
+                    let issue = Issue::error(Code::TypeMismatch, "export", message)
+                        .in_file(self.file)
+                        .at(entry.node.pos)
+                        .got(text.as_str());
+                    self.issues.push(issue);
+                }
+            }
         }
 
         if let Some(entry) = fields.take("poses") {

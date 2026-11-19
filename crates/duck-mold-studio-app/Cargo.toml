@@ -1,0 +1,25 @@
+[package]
+name = "duck-mold-studio-app"
+description = "Duck Mold Studio, the program: opens the window that the duck-mold-studio library draws, with the duck icon."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+
+# The program is DuckMoldStudio, like DuckQuill and DuckForgeStudio.
+[[bin]]
+name = "DuckMoldStudio"
+path = "src/main.rs"
+
+[dependencies]
+duck-mold-studio = { workspace = true }
+eframe = { workspace = true }
+
+# Puts the icon inside DuckMoldStudio.exe on Windows. It is here, not in
+# the library, so that another program that shows Duck Mold's Studio
+# inside its own window (Duck Forge's Studio) keeps its own icon.
+[build-dependencies]
+winresource = "0.1"
+
+[lints]
+workspace = true

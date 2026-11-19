@@ -970,6 +970,14 @@ dependencies = [
  "egui_kittest",
  "png",
  "rfd",
+]
+
+[[package]]
+name = "duck-mold-studio-app"
+version = "0.7.0"
+dependencies = [
+ "duck-mold-studio",
+ "eframe",
  "winresource",
 ]
 

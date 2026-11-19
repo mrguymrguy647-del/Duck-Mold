@@ -20,7 +20,7 @@ Edits, by what they change:
               mirror-pose, add-animation, set-animation, rename-animation,
               remove-animation, add-key, move-key, set-key, remove-key
   games       set-colliders, set-collider, set-event, remove-event,
-              fit-ground, set-lods, set-lod
+              fit-ground, set-lods, set-lod, set-export
 
 `duck-mold edit <recipe> <edit> --help` explains one. Many at once:
 `duck-mold edit <recipe> --batch edits.txt`, one edit a line.";
@@ -48,26 +48,32 @@ pub fn read_batch(from: &str) -> Result<Vec<(String, Edit)>, String> {
         } else {
             format!("{from} line {}", at + 1)
         };
-        let words = words(line).map_err(|why| format!("{label}: {why}"))?;
-        let parsed = Line::try_parse_from(std::iter::once("edit".to_owned()).chain(words))
-            .map_err(|error| {
-                let said = error.to_string();
-                let first = said
-                    .lines()
-                    .next()
-                    .unwrap_or_default()
-                    .trim_start_matches("error: ");
-                format!("{label}: {first}")
-            })?;
-        for edit in parsed
-            .change
-            .to_edits()
-            .map_err(|why| format!("{label}: {why}"))?
-        {
+        for edit in edits_from_words(line).map_err(|why| format!("{label}: {why}"))? {
             edits.push((label.clone(), edit));
         }
     }
     Ok(edits)
+}
+
+/// Reads one edit written as it follows `duck-mold edit <recipe>` on
+/// the command line: `set head --face-image front=textures/face.png`.
+/// Words are cut as a shell cuts them, with "..." and '...' keeping
+/// spaces inside a word. A few commands are more than one edit.
+///
+/// This is how a program that isn't the command line (Duck Forge's
+/// Studio, for its `model.edit` command) takes the same words.
+pub fn edits_from_words(line: &str) -> Result<Vec<Edit>, String> {
+    let words = words(line)?;
+    let parsed =
+        Line::try_parse_from(std::iter::once("edit".to_owned()).chain(words)).map_err(|error| {
+            let said = error.to_string();
+            said.lines()
+                .next()
+                .unwrap_or_default()
+                .trim_start_matches("error: ")
+                .to_owned()
+        })?;
+    parsed.change.to_edits()
 }
 
 /// One line of a batch, read as clap reads the command line.
@@ -147,6 +153,8 @@ pub enum Change {
         /// socket it joins (its bottom on a top), otherwise its bottom.
         #[arg(long, value_name = "SOCKET")]
         attach: Option<String>,
+        // (Its sizes: see `SizeOptions`.)
+        #[allow(missing_docs)]
         #[command(flatten)]
         sizes: SizeOptions,
         /// Its colour, by palette name.
@@ -207,6 +215,8 @@ pub enum Change {
         /// A new shape. Sizes the new shape doesn't have are dropped.
         #[arg(long)]
         shape: Option<String>,
+        // (Its sizes: see `SizeOptions`.)
+        #[allow(missing_docs)]
         #[command(flatten)]
         sizes: SizeOptions,
         /// A new colour for the whole part, by palette name.
@@ -486,6 +496,14 @@ pub enum Change {
     SetLods {
         /// auto, none, or near,far in metres.
         setting: String,
+    },
+    /// Say where the model's .glb belongs, from the recipe's own
+    /// folder: ../assets/robot.glb for a game's assets. `duck-mold
+    /// export` with no -o, and the Studio's Export, write there. none
+    /// takes the line away: beside the recipe.
+    SetExport {
+        /// The .glb file, from the recipe's folder; or none.
+        path: String,
     },
     /// Keep a part whole in the far-away versions (keep: never
     /// simplified or left out, like a character's eyes), or let them
@@ -1341,6 +1359,9 @@ impl Change {
                         )
                     })?),
                 },
+            },
+            Change::SetExport { path } => Edit::SetExport {
+                path: (path != "none").then(|| path.clone()),
             },
             Change::SetLods { setting } => Edit::SetLods {
                 lods: match setting.as_str() {

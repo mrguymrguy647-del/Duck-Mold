@@ -35,6 +35,7 @@ Rules that hold everywhere:
 | `animations` | table of animations | none | The model's animations, by name. See "Animations" below. |
 | `colliders` | text | none: no hit shapes | `"parts"`: a hit shape fitted to every part, moving with it; `"capsule"`, `"box"` or `"sphere"`: one round the whole model. See "Hit shapes" below. |
 | `lods` | text, or two numbers | none: no far-away versions | `"auto"`: two simpler versions for a game to draw far off, at 8 and 20 times the model's largest side; `[12, 30]`: at those distances, in metres; `"none"`: none. See "Far-away versions" below. |
+| `export` | text | none: beside the recipe | Where the model's `.glb` belongs, from the recipe's own folder: `"../assets/robot.glb"` for a recipe in a game's `art` folder. `duck-mold export` with no `-o`, and the Studio's Export, write there; the folder is made if it isn't there. Must end in `.glb` and can't start from the top of the disk. It changes nothing in the model. |
 | `bones` | | | Reserved for a later phase. Using it is an error that says so. |
 
 ### `palette`

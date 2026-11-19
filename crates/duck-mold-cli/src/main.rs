@@ -21,7 +21,8 @@ use duck_mold_core::issue::{Issue, Report};
 use duck_mold_core::tools::{self, Failure};
 use duck_mold_view::render;
 
-mod edit;
+use duck_mold_cli::edit;
+
 mod studio;
 
 /// Duck Mold makes game-ready 3D models for Duck Forge from text recipes.
@@ -119,8 +120,9 @@ enum Command {
     Export {
         /// The recipe (.toml or .json).
         recipe: PathBuf,
-        /// Where to write the model. By default: next to the recipe, with
-        /// the same name and the ending .glb.
+        /// Where to write the model. By default: where the recipe's
+        /// `export` line says, or else next to the recipe, with the
+        /// same name and the ending .glb.
         #[arg(short, long, value_name = "FILE")]
         output: Option<PathBuf>,
         /// Print the full report as JSON, for agents.

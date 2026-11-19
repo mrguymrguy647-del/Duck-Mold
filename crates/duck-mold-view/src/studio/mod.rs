@@ -156,6 +156,11 @@ pub struct Studio {
     /// The file the Studio wrote last (a `.glb`, a picture, the recipe
     /// saved again), for the window to offer to show in its folder.
     written: Option<PathBuf>,
+    /// The `.glb` files exported and not yet asked for (see
+    /// [`Studio::take_exported`]).
+    exported: Vec<PathBuf>,
+    /// The recipe's `export` line, as of the last build that worked.
+    export_line: Option<String>,
     /// True when the file isn't there any more (deleted or moved): the
     /// model stays, and nothing is changed until it is saved again.
     gone: bool,
@@ -248,6 +253,8 @@ impl Studio {
             history_file: None,
             kept: Default::default(),
             written: None,
+            exported: Vec::new(),
+            export_line: None,
             gone: false,
             settling: None,
             settling_files: None,
@@ -368,7 +375,7 @@ impl Studio {
     /// The same words with files named from the recipe's folder:
     /// `parts/lamp.gltf`, not the whole way to it from the top of the
     /// disk. That is how the recipe itself names them.
-    fn shorten(&self, words: &str) -> String {
+    pub fn shorten(&self, words: &str) -> String {
         match self.path.parent() {
             Some(folder) if !folder.as_os_str().is_empty() => {
                 words.replace(&format!("{}/", display_path(folder)), "")
@@ -416,6 +423,7 @@ impl Studio {
             .collect();
         match built {
             Ok(built) => {
+                self.export_line.clone_from(&built.export);
                 let mut report = inspect(&built.model, &built.source, built.warnings);
                 report.materials = built.materials;
                 self.problems = report
@@ -1196,23 +1204,65 @@ impl Studio {
     /// Writes the model as a `.glb` next to the recipe, as `duck-mold
     /// export` does. Says where it went.
     pub fn export(&mut self) -> Result<String, String> {
-        let done = tools::export_file(&self.path, None)
-            .map(|exported| {
-                self.shorten(&format!(
-                    "Wrote {} ({})",
-                    exported.output,
-                    tools::size_in_words(exported.bytes)
-                ))
-            })
-            .map_err(|failure| self.shorten(&first_error(&failure)));
+        let exported = tools::export_file(&self.path, None);
+        let done = match &exported {
+            // Named as the recipe names it, when it does.
+            Ok(exported) => Ok(format!(
+                "Wrote {} ({})",
+                match self.export_line() {
+                    Some(line) => line.to_owned(),
+                    None => self.shorten(&exported.output),
+                },
+                tools::size_in_words(exported.bytes)
+            )),
+            Err(failure) => Err(self.shorten(&first_error(failure))),
+        };
         self.say(match &done {
             Ok(said) => said.clone(),
             Err(why) => format!("Not exported: {why}"),
         });
-        if done.is_ok() {
-            self.written = Some(self.path.with_extension("glb"));
+        if let Ok(exported) = exported {
+            self.written = Some(exported.path.clone());
+            self.exported.push(exported.path);
         }
         done
+    }
+
+    /// Exports as [`Studio::export`] does, after a change, without a
+    /// word when it works: the status line keeps saying what the
+    /// change was. If it can't be written, the status line says why.
+    pub fn export_after_change(&mut self) -> Result<PathBuf, String> {
+        match tools::export_file(&self.path, None) {
+            Ok(exported) => {
+                self.exported.push(exported.path.clone());
+                Ok(exported.path)
+            }
+            Err(failure) => {
+                let why = self.shorten(&first_error(&failure));
+                self.say(format!("Not exported: {why}"));
+                Err(why)
+            }
+        }
+    }
+
+    /// The `.glb` files written since this was last asked: what a
+    /// program that shows the Studio inside its own window (Duck
+    /// Forge's) passes on to a running game.
+    pub fn take_exported(&mut self) -> Vec<PathBuf> {
+        std::mem::take(&mut self.exported)
+    }
+
+    /// Where the recipe's `export` line says its `.glb` belongs, as
+    /// the line has it (from the recipe's folder). `None` if it has no
+    /// such line, or this isn't a recipe.
+    pub fn export_line(&self) -> Option<&str> {
+        self.export_line.as_deref()
+    }
+
+    /// Where Export writes: where the `export` line says, or else
+    /// beside the recipe.
+    pub fn export_path(&self) -> PathBuf {
+        tools::export_path(&self.path, self.export_line())
     }
 
     /// Writes the four-view picture next to the recipe, as `duck-mold

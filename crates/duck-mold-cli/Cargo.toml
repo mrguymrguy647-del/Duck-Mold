@@ -6,6 +6,12 @@ edition.workspace = true
 rust-version.workspace = true
 repository.workspace = true
 
+# The words of `duck-mold edit` are a library too, for other programs
+# that take the same words (Duck Forge's Studio).
+[lib]
+name = "duck_mold_cli"
+path = "src/lib.rs"
+
 # The program is called `duck-mold`, not `duck-mold-cli`.
 [[bin]]
 name = "duck-mold"

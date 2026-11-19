@@ -730,6 +730,7 @@ pub fn show(
     studio: &mut Studio,
     draft: &mut Draft,
     images: &mut crate::images::Draft,
+    exporting: &mut crate::export::Exporting,
 ) {
     if studio.mode() == Mode::Pose {
         crate::posing::show(ui, studio, &mut draft.posing);
@@ -748,6 +749,9 @@ pub fn show(
             draft.failed = studio.apply(&edit).err();
         }
         if let Some(edit) = crate::far::model_line(ui, studio) {
+            draft.failed = studio.apply(&edit).err();
+        }
+        if let Some(edit) = crate::export::model_lines(ui, studio, exporting) {
             draft.failed = studio.apply(&edit).err();
         }
         if let Some(why) = &draft.failed {

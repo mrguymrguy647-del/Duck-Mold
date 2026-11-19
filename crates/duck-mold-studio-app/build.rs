@@ -6,7 +6,7 @@
 
 fn main() {
     // Only run again when the icon or the version number changes.
-    println!("cargo:rerun-if-changed=assets/icon.ico");
+    println!("cargo:rerun-if-changed=../duck-mold-studio/assets/icon.ico");
     println!("cargo:rerun-if-changed=Cargo.toml");
     println!("cargo:rerun-if-changed=../../Cargo.toml");
 
@@ -16,7 +16,7 @@ fn main() {
     }
 
     let mut resource = winresource::WindowsResource::new();
-    resource.set_icon("assets/icon.ico");
+    resource.set_icon("../duck-mold-studio/assets/icon.ico");
     resource.set("ProductName", "Duck Mold Studio");
     resource.set("FileDescription", "Duck Mold Studio");
     if let Err(error) = resource.compile() {

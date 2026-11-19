@@ -12,7 +12,8 @@
 //! - `assets/icon.png`: 256 pixels square, see-through around the duck.
 //!   The window's icon.
 //! - `assets/icon.ico`: the same at 256, 48, 32 and 16 pixels. Windows
-//!   shows it for `DuckMoldStudio.exe` (`build.rs` puts it in).
+//!   shows it for `DuckMoldStudio.exe` (the `build.rs` of
+//!   `duck-mold-studio-app` puts it in).
 
 use std::path::Path;
 

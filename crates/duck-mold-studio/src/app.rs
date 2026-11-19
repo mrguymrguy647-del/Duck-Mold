@@ -70,6 +70,13 @@ pub struct StudioApp {
     defining: Option<(String, String)>,
     /// The timeline, in Pose mode.
     timeline: crate::timeline::Timeline,
+    /// Where the model's `.glb` goes and when: for a game, after every
+    /// change; and whether this Studio is inside another program's
+    /// window.
+    exporting: crate::export::Exporting,
+    /// How many times the model had been built when it was last
+    /// exported by "Export after every change" (or opened).
+    exported_build: usize,
 }
 
 /// The folder a person's own models go in: `Duck Mold` in their
@@ -124,15 +131,76 @@ impl StudioApp {
             defining: None,
             tour: None,
             add_button: None,
+            exporting: crate::export::Exporting::default(),
+            exported_build: 0,
         }
+    }
+
+    /// For showing the Studio inside another program's window (Duck
+    /// Forge's Studio shows a model in a tab this way): `path` open,
+    /// with no start page and nothing in the File menu about other
+    /// files, since the program around it has those. Export reads
+    /// "Send to game", and the model is exported after every change
+    /// unless that is turned off.
+    ///
+    /// The program around it draws it with [`StudioApp::ui`] into
+    /// whatever space it likes, and asks [`StudioApp::take_exported`]
+    /// which `.glb` files were written.
+    pub fn hosted(path: impl Into<PathBuf>, look_only: bool) -> StudioApp {
+        let mut app = StudioApp::new();
+        app.exporting.hosted = true;
+        app.exporting.always = true;
+        app.open(path.into(), look_only);
+        app
+    }
+
+    /// Says which game the model is being made for: its `assets` folder
+    /// is offered as the place to export to.
+    pub fn for_game(mut self, folder: impl Into<PathBuf>) -> StudioApp {
+        self.exporting.game = Some(folder.into());
+        self
+    }
+
+    /// Whether this Studio is inside another program's window.
+    pub fn is_hosted(&self) -> bool {
+        self.exporting.hosted
+    }
+
+    /// Where the model's `.glb` goes, and whether after every change.
+    pub fn exporting(&self) -> &crate::export::Exporting {
+        &self.exporting
+    }
+
+    /// Turns "Export after every change" on or off.
+    pub fn export_after_every_change(&mut self, always: bool) {
+        self.exporting.always = always;
+        self.recent
+            .keep_export_always(self.exporting.hosted, always);
+    }
+
+    /// The `.glb` files written since this was last asked, by Export or
+    /// by "Export after every change": for the program around a hosted
+    /// Studio to pass on to a running game.
+    pub fn take_exported(&mut self) -> Vec<PathBuf> {
+        self.studio
+            .as_mut()
+            .map(Studio::take_exported)
+            .unwrap_or_default()
     }
 
     /// Remembers the files that are opened in `recent`, and shows them on
     /// the start page.
     pub fn remembering(mut self, recent: Recent) -> StudioApp {
         self.recent = recent;
-        self.crashed = self.recent.folder().and_then(crate::crash::take_unseen);
-        self.interface = self.recent.interface_size();
+        // (A crash, and the size of everything, are the business of the
+        // program whose window this is.)
+        if !self.exporting.hosted {
+            self.crashed = self.recent.folder().and_then(crate::crash::take_unseen);
+            self.interface = self.recent.interface_size();
+        }
+        if let Some(always) = self.recent.export_always(self.exporting.hosted) {
+            self.exporting.always = always;
+        }
         // Images are painted in Duck Quill, found on this computer, or in
         // whatever was chosen before, which is remembered in the same
         // folder.
@@ -175,11 +243,16 @@ impl StudioApp {
             self.recent.opened(&path);
             let mut studio = Studio::open(path, look_only);
             studio.hide_again(self.recent.hidden_in(studio.path()));
+            // Opening a model isn't a change to export.
+            self.exported_build = studio.builds();
             self.studio = Some(studio);
             self.keep_history();
             self.notice = None;
             // The first model a person opens to work on gets the tips.
-            self.tour = (!look_only && !self.recent.tips_seen()).then_some(0);
+            // (Not inside another program's window, which has its own
+            // way of showing a newcomer round.)
+            self.tour =
+                (!look_only && !self.exporting.hosted && !self.recent.tips_seen()).then_some(0);
         } else {
             self.notice = Some(format!("There is no file \"{}\".", path.display()));
         }
@@ -296,18 +369,32 @@ impl StudioApp {
 
     /// Draws the whole screen into `ui`.
     pub fn ui(&mut self, ui: &mut egui::Ui) {
-        // Everything bigger or smaller, as chosen.
-        let zoom = self.interface.map_or(1.0, |percent| percent as f32 / 100.0);
-        if (ui.ctx().zoom_factor() - zoom).abs() > 0.001 {
-            ui.ctx().set_zoom_factor(zoom);
-        }
-        // For a note, if the Studio crashes.
-        match &self.studio {
-            Some(studio) => crate::crash::remember(Some(studio.path()), studio.status()),
-            None => crate::crash::remember(None, ""),
+        let hosted = self.exporting.hosted;
+        if !hosted {
+            // Everything bigger or smaller, as chosen.
+            let zoom = self.interface.map_or(1.0, |percent| percent as f32 / 100.0);
+            if (ui.ctx().zoom_factor() - zoom).abs() > 0.001 {
+                ui.ctx().set_zoom_factor(zoom);
+            }
+            // For a note, if the Studio crashes.
+            match &self.studio {
+                Some(studio) => crate::crash::remember(Some(studio.path()), studio.status()),
+                None => crate::crash::remember(None, ""),
+            }
         }
         let Some(studio) = &mut self.studio else {
-            self.start_page(ui);
+            if hosted {
+                // Inside another program's window there is no start
+                // page: that program opens files.
+                ui.centered_and_justified(|ui| {
+                    ui.label(
+                        RichText::new(self.notice.as_deref().unwrap_or("No model is open here."))
+                            .weak(),
+                    );
+                });
+            } else {
+                self.start_page(ui);
+            }
             return;
         };
 
@@ -339,14 +426,18 @@ impl StudioApp {
             ui.add_space(3.0);
             // One row on a wide window; it wraps to two on a narrow one.
             ui.horizontal_wrapped(|ui| {
-                if let Some(duck) = self.gallery.example(ui.ctx(), "duck") {
-                    ui.add(
-                        egui::Image::new(duck)
-                            .fit_to_exact_size(egui::vec2(22.0, 22.0))
-                            .corner_radius(4.0),
-                    );
+                // (Inside another program's window, its tab says which
+                // model this is.)
+                if !hosted {
+                    if let Some(duck) = self.gallery.example(ui.ctx(), "duck") {
+                        ui.add(
+                            egui::Image::new(duck)
+                                .fit_to_exact_size(egui::vec2(22.0, 22.0))
+                                .corner_radius(4.0),
+                        );
+                    }
+                    ui.label(RichText::new(studio.title()).strong());
                 }
-                ui.label(RichText::new(studio.title()).strong());
                 if studio.look_only() {
                     ui.label(RichText::new("looking only").weak())
                         .on_hover_text("Nothing can be changed here. Open the recipe in the Studio to edit it.");
@@ -358,7 +449,8 @@ impl StudioApp {
                     .into_iter()
                     .map(Path::to_path_buf)
                     .collect();
-                if let Some(action) = actions::menus(ui, studio, &recent, self.interface) {
+                let interface = (!hosted).then_some(self.interface);
+                if let Some(action) = actions::menus(ui, studio, &recent, interface, hosted) {
                     asked = Some(action);
                 }
                 if !studio.look_only() {
@@ -426,9 +518,16 @@ impl StudioApp {
                         {
                             asked = Some(Action::RenderPicture);
                         }
+                        let goes_to = studio.shorten(&duck_mold_core::load::display_path(
+                            &studio.export_path(),
+                        ));
                         let export = ui
-                            .add(theme::primary_button("Export .glb"))
-                            .on_hover_text("Write the model as a .glb file next to the recipe, for a game (Ctrl+E)");
+                            .add(theme::primary_button(self.exporting.button()))
+                            .on_hover_text(if hosted {
+                                format!("Write the model's .glb for the game ({goes_to}). A game that is running shows it at once (Ctrl+E)")
+                            } else {
+                                format!("Write the model as a .glb file, for a game: {goes_to} (Ctrl+E)")
+                            });
                         export.widget_info(|| {
                             egui::WidgetInfo::labeled(egui::Role::Button, true, "Export")
                         });
@@ -509,7 +608,18 @@ impl StudioApp {
                     .auto_shrink([false, false])
                     .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysVisible)
                     .show(ui, |ui| {
-                        properties::show(ui, studio, &mut self.draft, &mut self.images);
+                        let always = self.exporting.always;
+                        properties::show(
+                            ui,
+                            studio,
+                            &mut self.draft,
+                            &mut self.images,
+                            &mut self.exporting,
+                        );
+                        if self.exporting.always != always {
+                            self.recent
+                                .keep_export_always(hosted, self.exporting.always);
+                        }
                         if studio.mode() != Mode::Pose {
                             ui.add_space(12.0);
                             palette::panel(ui, studio, &mut self.colours);
@@ -657,6 +767,23 @@ impl StudioApp {
                         | Action::Export
                 )
             }));
+        }
+        // Inside another program's window, other files are that
+        // program's to open.
+        if hosted
+            && matches!(
+                asked,
+                Some(
+                    Action::Open
+                        | Action::NewModel
+                        | Action::StartPage
+                        | Action::OpenFile(_)
+                        | Action::OpenExample(_)
+                        | Action::InterfaceSize(_)
+                )
+            )
+        {
+            asked = None;
         }
         // What has to wait until the file is let go of.
         let mut open_another = false;
@@ -868,8 +995,23 @@ impl StudioApp {
                 // The viewport lets go of what it was dragging.
             } else if studio.escape() {
                 // A step back: the faces, Face mode, then the selection.
-            } else if studio.look_only() {
+            } else if studio.look_only() && !hosted {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        }
+        // Export after every change: once for each new build, if it
+        // worked. (A handle being dragged writes nothing until it is
+        // let go, so this is once for a drag too.)
+        let builds = studio.builds();
+        if builds != self.exported_build {
+            self.exported_build = builds;
+            if self.exporting.always
+                && studio.is_recipe()
+                && !studio.look_only()
+                && !studio.has_mistakes()
+            {
+                // If it can't be written, the status line says why.
+                let _ = studio.export_after_change();
             }
         }
         // The first run's tips, one at a time.
