@@ -6962,15 +6962,14 @@ How to add it (the guide and README give each, in full):
   `mcp`.
 - **Codex** (OpenAI's coding agent, in a terminal or an editor): three
   lines in `~/.codex/config.toml`.
-- **ChatGPT** (the website and the app) is different: it only talks to
-  MCP servers on the internet, at an `https://` address, not to a
-  program on your computer. So for ChatGPT the guide shows how to put
-  `duck-mold mcp` behind a small bridge that gives it an address, and
-  says plainly that this is more setup than the others and that the
-  address must be kept private. **Question for you:** is that enough, or
-  should Duck Mold also have `duck-mold mcp --http` (the same tools over
-  the web protocol), which still needs a public address to reach
-  ChatGPT?
+- **ChatGPT** (the website and the app) only talks to MCP servers on
+  the internet, at an `https://` address. *Decided:* no `--http` for
+  now. ChatGPT's real problem was its sandbox, not MCP: it can run a
+  program it is given. So the README and the guide get a short section,
+  "Using Duck Mold in ChatGPT": upload
+  `duck-mold-<version>-linux-x86_64` and your recipe, `chmod +x
+  duck-mold`, run `./duck-mold guide`, and work from there. A test runs
+  the Linux file with no network at all.
 
 **Tests** start `duck-mold mcp` as a separate program and drive it as an
 app would: say hello, list the tools, call each one (an edit, a batch
@@ -7034,8 +7033,8 @@ fails the tests.
 
 ### 7. AGENTS.md and CLAUDE.md in each repository
 
-At the top of Duck Mold, Duck Forge and Duck Quill (**question for you:**
-those three? Duck Echo too?):
+At the top of Duck Mold, Duck Forge, Duck Quill and Duck Echo (*decided*:
+all four):
 
 - **AGENTS.md** (the file Codex, Cursor and others read): what the
   project is in three lines; how to build and test it, including with no
@@ -7080,8 +7079,8 @@ CI checks them with `shellcheck` and runs the build part.
 4. Duck Mold: the release jobs (static Linux and Mac files, the Linux
    Studio, the source archive, the bare-machine tests), the install
    script, the `cargo install` steps.
-5. Duck Forge and Duck Quill: AGENTS.md and CLAUDE.md, one pull request
-   each.
+5. Duck Forge, Duck Quill and Duck Echo: AGENTS.md and CLAUDE.md, one
+   pull request each.
 6. README and AI_GUIDE in every repository changed; `AGENT_KIT_REPORT.md`.
 7. Merge, then release 1.1.0.
 
@@ -7103,3 +7102,5 @@ CI checks them with `shellcheck` and runs the build part.
    way:* made from the code; the code reads recipes by hand, so there is
    nothing to make it from.
 7. **No Mac Studio** this time (it needs Apple's paid signing).
+
+*Approved*, all seven decisions, on 2026-11-19.
