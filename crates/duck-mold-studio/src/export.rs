@@ -52,16 +52,34 @@ impl Exporting {
 /// it: with `/` between folders and `..` to go up. `None` if there is
 /// no such way (on Windows, a file on another drive).
 pub fn from_folder_of(recipe: &Path, file: &Path) -> Option<String> {
-    // Whole paths, so that the two can be compared folder by folder.
+    // Whole paths, so that the two can be compared folder by folder:
+    // the nearest folder that is there, made whole by the system, and
+    // then the rest as written. (The file itself, and a game's
+    // `assets` folder, may not be there yet; and on Windows the system
+    // writes a whole path its own way, so both must be made whole the
+    // same way to be compared.)
     let whole = |path: &Path| -> PathBuf {
-        let folder = path
-            .parent()
-            .filter(|folder| !folder.as_os_str().is_empty());
-        let folder = folder.unwrap_or(Path::new("."));
-        let folder = std::fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
-        match path.file_name() {
-            Some(name) => folder.join(name),
-            None => folder,
+        let mut there = path.to_path_buf();
+        let mut rest: Vec<std::ffi::OsString> = Vec::new();
+        loop {
+            let folder = if there.as_os_str().is_empty() {
+                Path::new(".")
+            } else {
+                there.as_path()
+            };
+            if let Ok(whole) = std::fs::canonicalize(folder) {
+                return rest
+                    .iter()
+                    .rev()
+                    .fold(whole, |path, piece| path.join(piece));
+            }
+            match there.file_name() {
+                Some(name) => {
+                    rest.push(name.to_owned());
+                    there.pop();
+                }
+                None => return path.to_path_buf(),
+            }
         }
     };
     let (recipe, file) = (whole(recipe), whole(file));
@@ -229,6 +247,19 @@ mod tests {
         );
         assert_eq!(Exporting::default().into_the_game(&recipe), None);
         assert_eq!(exporting.button(), "Send to game");
+        // A game whose assets folder isn't there yet.
+        std::fs::create_dir_all(root.join("new_game/art")).unwrap();
+        let new_game = Exporting {
+            hosted: true,
+            game: Some(root.join("new_game")),
+            always: true,
+        };
+        assert_eq!(
+            new_game
+                .into_the_game(&root.join("new_game/art/hero.toml"))
+                .as_deref(),
+            Some("../assets/hero.glb")
+        );
         assert_eq!(Exporting::default().button(), "Export .glb");
     }
 }
