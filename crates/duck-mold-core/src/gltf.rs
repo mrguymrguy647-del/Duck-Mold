@@ -14,12 +14,16 @@
 //!   its object (node) says, by numbers or by a matrix, all merged;
 //! - triangles in all three of glTF's layouts (separate, strips, fans),
 //!   with corner numbers of any size, or none;
-//! - material names and base colours.
+//! - material names and base colours;
+//! - each material's colour picture (its "base colour texture"), a PNG
+//!   or a JPEG inside the file or beside it, and the file's own layout
+//!   for it (its "UVs"). A base colour that isn't white tints the
+//!   picture, as glTF says.
 //!
 //! What is left out, with a note: lines and points, skins, animations,
-//! shape keys (morph targets), cameras and textures. Normals and texture
-//! coordinates are passed over without one: Duck Mold works out its own
-//! normals and has no textures. What is refused, with a sentence:
+//! shape keys (morph targets), cameras, and every picture but the colour
+//! one (bump, shine and glow maps). Normals are passed over without
+//! one: Duck Mold works out its own. What is refused, with a sentence:
 //! compressed meshes, packed (quantized) numbers, and any extension the
 //! file says it can't be read without.
 //!
@@ -30,14 +34,16 @@
 //! where it was. A `.glb` that Duck Mold wrote keeps its palette: its
 //! materials are its palette colours.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::Value;
 
 use crate::glb::{SRGB_TO_LINEAR, read_glb};
 use crate::issue::{Code, Issue};
-use crate::mesh::{DEFAULT_MATERIAL, MeshFile, has_no_area};
+use crate::mesh::{DEFAULT_MATERIAL, MeshFile, has_no_area, too_many_repeats};
+use crate::picture::{read_file_picture, stamp_of};
 
 /// How deep objects may sit inside objects. Real files are a few deep; a
 /// file whose objects contain each other in a loop stops here.
@@ -60,6 +66,9 @@ pub fn read_gltf(
         folder,
         notes: BTreeSet::new(),
         read: Vec::new(),
+        textured: BTreeMap::new(),
+        tinted: BTreeMap::new(),
+        too_many: 0,
     };
     match reader.read(bytes) {
         Ok(mut mesh) => {
@@ -104,8 +113,27 @@ struct Reader<'a> {
     folder: &'a Path,
     /// What was left out, said once each.
     notes: BTreeSet<String>,
-    /// The other files read: a `.gltf`'s `.bin`.
+    /// The other files read: a `.gltf`'s `.bin` and its pictures.
     read: Vec<PathBuf>,
+    /// Each material's picture, once it has been looked for.
+    textured: BTreeMap<usize, Option<Textured>>,
+    /// The pictures read so far, by the file's image and its tint.
+    tinted: BTreeMap<(usize, [u32; 3], bool), Option<usize>>,
+    /// How many triangles repeat a picture too often to show.
+    too_many: usize,
+}
+
+/// A material's picture.
+#[derive(Clone, Copy)]
+struct Textured {
+    /// Which of the mesh's pictures.
+    picture: usize,
+    /// Which of the file's layouts (`TEXCOORD_0`, `TEXCOORD_1`...) it
+    /// goes by.
+    layout: usize,
+    /// Whether it stops at its edge instead of repeating, across and
+    /// down.
+    held: [bool; 2],
 }
 
 /// A 4 x 4 matrix, row by row: turns, stretches and moves a point.
@@ -180,13 +208,14 @@ impl Reader<'_> {
         if json["cameras"].as_array().is_some_and(|c| !c.is_empty()) {
             self.note("its cameras were left out");
         }
-        let textured = json["materials"].as_array().is_some_and(|materials| {
-            materials
-                .iter()
-                .any(|material| material["pbrMetallicRoughness"]["baseColorTexture"].is_object())
-        });
-        if textured {
-            self.note("its textures were left out: a material's colour is its base colour alone");
+        if mesh.lies.iter().all(Option::is_none) {
+            mesh.lies.clear();
+        }
+        if mesh.picture_of.iter().all(Option::is_none) {
+            mesh.picture_of.clear();
+        }
+        if self.too_many > 0 {
+            self.note(&too_many_repeats(self.too_many));
         }
         if flat > 0 {
             self.note(&format!(
@@ -235,16 +264,30 @@ impl Reader<'_> {
                 }
             }
         }
+        // Its images come too: the one picture they are all on, and
+        // each face's place on it.
+        mesh.pictures = model.pictures.clone();
         for face in &model.faces {
             let slot = order
                 .iter()
                 .position(|&color| color == face.color)
                 .expect("every face's colour is listed");
-            for triangle in face.triangles() {
+            for (step, triangle) in face.triangles().enumerate() {
                 mesh.triangles
                     .push(triangle.map(|corner| corner.to_array()));
                 mesh.material_of.push(slot);
+                let image = face
+                    .image
+                    .as_ref()
+                    .filter(|image| image.at.len() == face.corners.len());
+                mesh.lies
+                    .push(image.map(|image| [image.at[0], image.at[step + 1], image.at[step + 2]]));
+                mesh.picture_of.push(image.map(|image| image.picture));
             }
+        }
+        if mesh.pictures.is_empty() {
+            mesh.lies.clear();
+            mesh.picture_of.clear();
         }
         Ok(mesh)
     }
@@ -403,6 +446,22 @@ impl Reader<'_> {
             };
 
             let slot = self.material_slot(json, primitive, mesh);
+            // The material's picture, and where each corner is on it.
+            // Without a picture the first layout is still read, so that
+            // a recipe can put an image on the material.
+            let textured = match whole(&primitive["material"]) {
+                Some(material) => self.material_picture(json, buffers, material, mesh),
+                None => None,
+            };
+            let layout = textured.map_or(0, |textured| textured.layout);
+            let places = match whole(&primitive["attributes"][format!("TEXCOORD_{layout}")]) {
+                Some(accessor) => {
+                    let places = read_places(json, buffers, accessor)?;
+                    (places.len() == points.len()).then_some(places)
+                }
+                None => None,
+            };
+            let held = textured.map_or([false; 2], |textured| textured.held);
             for [a, b, c] in triangles {
                 // Into Duck Mold's directions: x negated, so the corners
                 // are listed the other way round (unless a mirror already
@@ -411,17 +470,36 @@ impl Reader<'_> {
                     let [x, y, z] = apply(place, points[at]);
                     [-x + 0.0, y, z]
                 };
-                let triangle = if mirrored {
-                    [corner(a), corner(b), corner(c)]
-                } else {
-                    [corner(a), corner(c), corner(b)]
-                };
+                let order = if mirrored { [a, b, c] } else { [a, c, b] };
+                let triangle = order.map(corner);
                 if has_no_area(&triangle) {
                     *flat += 1;
                     continue;
                 }
                 mesh.triangles.push(triangle);
                 mesh.material_of.push(slot);
+                let lie = places.as_ref().and_then(|places| {
+                    let lie = order.map(|at| {
+                        let [across, down] = places[at];
+                        // A picture that doesn't repeat stops at its
+                        // edge.
+                        [
+                            if held[0] {
+                                across.clamp(0.0, 1.0)
+                            } else {
+                                across
+                            },
+                            if held[1] { down.clamp(0.0, 1.0) } else { down },
+                        ]
+                    });
+                    MeshFile::tidy_lie(lie, &mut self.too_many)
+                });
+                mesh.picture_of.push(
+                    textured
+                        .filter(|_| lie.is_some())
+                        .map(|textured| textured.picture),
+                );
+                mesh.lies.push(lie);
             }
         }
         Ok(())
@@ -455,6 +533,211 @@ impl Reader<'_> {
                 mesh.materials.len() - 1
             }
         }
+    }
+}
+
+impl Reader<'_> {
+    /// A material's colour picture, read the first time the material is
+    /// met. `None` if it has none, or none that can be read (which is
+    /// noted: its faces keep the material's colour).
+    fn material_picture(
+        &mut self,
+        json: &Value,
+        buffers: &[Vec<u8>],
+        at: usize,
+        mesh: &mut MeshFile,
+    ) -> Option<Textured> {
+        if let Some(known) = self.textured.get(&at) {
+            return *known;
+        }
+        let found = self.find_picture(json, buffers, at, mesh);
+        self.textured.insert(at, found);
+        found
+    }
+
+    fn find_picture(
+        &mut self,
+        json: &Value,
+        buffers: &[Vec<u8>],
+        at: usize,
+        mesh: &mut MeshFile,
+    ) -> Option<Textured> {
+        let material = &json["materials"][at];
+        let paint = &material["pbrMetallicRoughness"];
+        if material["normalTexture"].is_object()
+            || material["occlusionTexture"].is_object()
+            || material["emissiveTexture"].is_object()
+            || paint["metallicRoughnessTexture"].is_object()
+        {
+            self.note(
+                "its bump, shine and glow maps were left out: only a material's colour picture is read",
+            );
+        }
+        let base = &paint["baseColorTexture"];
+        if !base.is_object() {
+            return None;
+        }
+        if base["extensions"]["KHR_texture_transform"].is_object() {
+            self.note(
+                "the file moves or turns a picture on its faces (KHR_texture_transform), which Duck Mold doesn't do: that picture may sit wrongly",
+            );
+        }
+        let texture = &json["textures"][whole(&base["index"])?];
+        if !texture.is_object() {
+            self.note(
+                "a material names a picture that isn't in the file: its faces keep their material's colour",
+            );
+            return None;
+        }
+        let Some(source) = whole(&texture["source"]) else {
+            self.note(
+                "a picture of a kind Duck Mold doesn't read (WebP or KTX2) was left out: its faces keep their material's colour. Save the file with PNG or JPEG pictures",
+            );
+            return None;
+        };
+        // How it carries on past its edges: repeating, unless it says
+        // it stops there.
+        let sampler = whole(&texture["sampler"]).map(|at| &json["samplers"][at]);
+        let past = |key: &str| {
+            sampler
+                .and_then(|sampler| sampler[key].as_u64())
+                .unwrap_or(10497)
+        };
+        if past("wrapS") == 33648 || past("wrapT") == 33648 {
+            self.note(
+                "a picture that repeats turned over each time (mirrored) repeats the plain way",
+            );
+        }
+        let held = [past("wrapS") == 33071, past("wrapT") == 33071];
+
+        // A base colour that isn't white tints the picture.
+        let factor =
+            [0, 1, 2].map(|at| paint["baseColorFactor"][at].as_f64().unwrap_or(1.0) as f32);
+        // Unless the material says otherwise, a picture is solid
+        // whatever its file says.
+        let see_through = material["alphaMode"]
+            .as_str()
+            .is_some_and(|mode| mode != "OPAQUE");
+        let key = (source, factor.map(f32::to_bits), see_through);
+        let picture = match self.tinted.get(&key) {
+            Some(known) => *known,
+            None => {
+                let read = self.read_picture(json, buffers, source, factor, see_through, mesh);
+                self.tinted.insert(key, read);
+                read
+            }
+        }?;
+        Some(Textured {
+            picture,
+            layout: whole(&base["texCoord"]).unwrap_or(0),
+            held,
+        })
+    }
+
+    /// Reads one of the file's images into the mesh's pictures. `None`,
+    /// with a note, for one that can't be read.
+    fn read_picture(
+        &mut self,
+        json: &Value,
+        buffers: &[Vec<u8>],
+        at: usize,
+        factor: [f32; 3],
+        see_through: bool,
+        mesh: &mut MeshFile,
+    ) -> Option<usize> {
+        let image = &json["images"][at];
+        let inside = || {
+            let name = image["name"]
+                .as_str()
+                .filter(|name| !name.trim().is_empty())
+                .map_or_else(|| format!("picture {}", at + 1), str::to_owned);
+            format!("{}: {name}", self.file)
+        };
+        // The bytes, and the picture's name in messages and reports.
+        let (bytes, shown): (Result<Vec<u8>, &str>, String) = match image["uri"].as_str() {
+            Some(uri) if uri.starts_with("data:") => (
+                uri.split_once(";base64,")
+                    .and_then(|(_, text)| base64(text))
+                    .ok_or("its text inside the file is broken"),
+                inside(),
+            ),
+            Some(uri) => {
+                let name = percent_decoded(uri);
+                let path = self.folder.join(&name);
+                self.read.push(path.clone());
+                (
+                    std::fs::read(&path).map_err(|_| {
+                        "there is no such file: it must be where the .gltf says, starting from the .gltf's folder"
+                    }),
+                    crate::load::display_join(self.file, &name),
+                )
+            }
+            None => (
+                whole(&image["bufferView"])
+                    .and_then(|view| {
+                        let view = &json["bufferViews"][view];
+                        let buffer = buffers.get(whole(&view["buffer"])?)?;
+                        let start = whole(&view["byteOffset"]).unwrap_or(0);
+                        let end = start.checked_add(whole(&view["byteLength"])?)?;
+                        buffer.get(start..end).map(<[u8]>::to_vec)
+                    })
+                    .ok_or("the file doesn't hold all of it"),
+                inside(),
+            ),
+        };
+        let read = bytes
+            .map_err(str::to_owned)
+            .and_then(|bytes| read_file_picture(&bytes, &shown).map_err(|bad| bad.what));
+        let (mut picture, was) = match read {
+            Ok(read) => read,
+            Err(why) => {
+                let why = why.strip_prefix("is ").unwrap_or(&why).to_owned();
+                self.note(&format!(
+                    "its picture \"{shown}\" was left out ({why}): its faces keep their material's colour"
+                ));
+                return None;
+            }
+        };
+        if let Some([wide, high]) = was {
+            self.note(&format!(
+                "its picture \"{shown}\" is {wide} x {high} pixels and was made smaller, to {} x {}: an image can be {most} x {most} at most",
+                picture.width,
+                picture.height,
+                most = crate::picture::MAX_SIDE
+            ));
+        }
+        let white = factor.iter().all(|&channel| channel >= 1.0);
+        let had_gaps = !picture.is_solid();
+        if !white || (had_gaps && !see_through) {
+            // The tint is worked out in light, as glTF means it, and
+            // from Duck Mold's own table, so every computer gives the
+            // same pixels.
+            let tint: [[u8; 256]; 3] = factor.map(|channel| {
+                std::array::from_fn(|value| {
+                    if channel >= 1.0 {
+                        value as u8
+                    } else {
+                        srgb(f64::from(SRGB_TO_LINEAR[value] * channel.max(0.0)))
+                    }
+                })
+            });
+            for pixel in &mut picture.pixels {
+                for channel in 0..3 {
+                    pixel[channel] = tint[channel][usize::from(pixel[channel])];
+                }
+                if !see_through {
+                    pixel[3] = 255;
+                }
+            }
+            picture.stamp = stamp_of(picture.width, picture.height, &picture.pixels);
+        }
+        if see_through && had_gaps {
+            self.note(
+                "where a picture is see-through, its material's colour shows: Duck Mold has no see-through faces",
+            );
+        }
+        mesh.pictures.push(Arc::new(picture));
+        Some(mesh.pictures.len() - 1)
     }
 }
 
@@ -694,6 +977,41 @@ fn read_points(json: &Value, buffers: &[Vec<u8>], at: usize) -> Result<Vec<[f64;
             [0, 1, 2].map(|axis| {
                 let four = &span.bytes[at + axis * 4..at + axis * 4 + 4];
                 f64::from(f32::from_le_bytes([four[0], four[1], four[2], four[3]]))
+            })
+        })
+        .collect())
+}
+
+/// An accessor's places on a picture: `[across, down]` pairs, as
+/// decimals or as whole numbers that stand for 0 to 1.
+fn read_places(json: &Value, buffers: &[Vec<u8>], at: usize) -> Result<Vec<[f64; 2]>, Refusal> {
+    let accessor = &json["accessors"][at];
+    if accessor["type"].as_str() != Some("VEC2") {
+        return Err(bad(
+            "a mesh's places on its picture aren't two numbers each",
+        ));
+    }
+    let size = match accessor["componentType"].as_u64() {
+        Some(5126) => 4,
+        Some(5121) => 1,
+        Some(5123) => 2,
+        _ => {
+            return Err(bad(
+                "a mesh's places on its picture are numbers of a kind glTF doesn't allow there",
+            ));
+        }
+    };
+    let span = span(json, buffers, accessor, size * 2)?;
+    Ok((0..span.count)
+        .map(|number| {
+            let at = span.at(number);
+            [0, 1].map(|axis| {
+                let b = &span.bytes[at + axis * size..at + (axis + 1) * size];
+                match size {
+                    4 => f64::from(f32::from_le_bytes([b[0], b[1], b[2], b[3]])),
+                    1 => f64::from(b[0]) / 255.0,
+                    _ => f64::from(u16::from_le_bytes([b[0], b[1]])) / 65535.0,
+                }
             })
         })
         .collect())

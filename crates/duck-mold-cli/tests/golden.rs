@@ -27,9 +27,10 @@ use std::process::Command;
 #[allow(dead_code)]
 mod forge;
 
-const EXAMPLES: [&str; 22] = [
+const EXAMPLES: [&str; 23] = [
     "crate",
     "plank_crate",
+    "signpost",
     "table",
     "tree",
     "house",
@@ -53,7 +54,7 @@ const EXAMPLES: [&str; 22] = [
 ];
 
 /// The examples with images.
-const WITH_IMAGES: [&str; 1] = ["plank_crate"];
+const WITH_IMAGES: [&str; 2] = ["plank_crate", "signpost"];
 
 /// The top of the repository.
 fn root() -> PathBuf {
@@ -339,14 +340,15 @@ fn every_example_is_a_clean_model() {
         // steps go through its ground and platform, and its tip is on
         // the roof's point; the barn's silo has half a ball in its top;
         // and the gate's towers lean into its arch. The gnome's beard is
-        // in its head and over its chest.
+        // in its head and over its chest. The signpost's stone is
+        // sunk into its mound.
         let overlaps = report["overlapping"].as_array().unwrap().len();
         let meant = match name {
             "tree" | "duck" | "gate" | "gnome" => 2,
             "snowman" => 5,
             "dog" => 7,
             "temple" => 3,
-            "doughnut" | "mug" | "barn" => 1,
+            "doughnut" | "mug" | "barn" | "signpost" => 1,
             _ => 0,
         };
         assert_eq!(overlaps, meant, "{name}");

@@ -1377,9 +1377,11 @@ fn the_library_is_the_parts_folder_beside_the_recipe_with_a_picture_each() {
     assert_eq!(studio.library_folder(), examples().join("parts"));
     let items = studio.library();
     let names: Vec<&str> = items.iter().map(|item| item.name.as_str()).collect();
-    assert_eq!(names, ["crate", "lamp"]);
+    assert_eq!(names, ["crate", "lamp", "sign"]);
     assert_eq!(items[0].written, "parts/crate.glb");
     assert_eq!(items[1].written, "parts/lamp.gltf");
+    // (The sign's pictures are beside it; only models are listed.)
+    assert_eq!(items[2].written, "parts/sign.gltf");
     for item in items {
         assert_eq!(item.problem, None, "{}", item.name);
         let picture = item.picture.as_ref().unwrap();

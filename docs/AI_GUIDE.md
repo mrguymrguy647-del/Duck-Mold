@@ -609,9 +609,20 @@ centimetres). A glTF material you give no colour keeps the file's own
 base colour, added to the palette under the material's name, with a
 `no_color` warning that lists them: give the part a `color`, or `colors`
 by material name, to choose your own. A `.glb` Duck Mold wrote brings its
-palette, so it looks as it did (`examples/desk.toml`). Only the mesh is
-read: animations, bones and textures are left out with a note, and a
-compressed file is refused.
+palette, so it looks as it did (`examples/desk.toml`). Animations and
+bones are left out with a note, and a compressed file is refused.
+
+**A glTF file's pictures come with it** (`examples/signpost.toml`): each
+material's colour picture, PNG or JPEG, laid on by the file's own
+layout. Nothing is written in the recipe for that, and a material wholly
+under a solid picture gets no palette colour and no warning. `inspect`
+lists them under `images` (`parts/sign.gltf: board` for one inside the
+file). To change one: `colors = { board = "steel" }` paints the material
+and its picture goes; `images = { board = "textures/mine.png" }` puts
+your PNG on by the same layout; `images = { board = "none" }` leaves the
+material's colour. An OBJ file's layout is read too, so `images` works
+on its materials. A file with no layout ("UVs") can't take an image:
+the error says so.
 
 **Choose where the model's zero point is.** `origin = "pole.bottom"`
 puts it at a socket of one part instead of under the middle of the
@@ -639,7 +650,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> remove <part>` | Removes a part. Refused, with their names, if other parts hang from it; `--with-attached` removes those too. |
 | `duck-mold edit <recipe> rename <part> <new-name>` | Renames a part, and every `to`, `from` and `origin` that names it. |
 | `duck-mold edit <recipe> join <part> --to <part.socket>` | Moves a part's join to another socket. `--attach` changes its own socket. A part placed with `move` loses it. |
-| `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`, `--bevel` (`0` makes the edges sharp again), `--bevel-steps`, `--taper n` or `--taper x,z` (`1` makes the sides straight again), `--color`, `--face-color top=plank` (repeatable; `top=none` takes the face's own colour away again), `--image textures/planks.png` (the whole part's image; `none` takes it away), `--face-image front=textures/face.png` (repeatable; `front=none` takes the image off that face, writing `"none"` there if the part's own image would otherwise show), `--twist`. Several at once are one edit. A new shape drops the sizes, options and face colours it doesn't have. |
+| `duck-mold edit <recipe> set <part> ...` | Changes a part: `--shape`, `--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`, `--bevel` (`0` makes the edges sharp again), `--bevel-steps`, `--taper n` or `--taper x,z` (`1` makes the sides straight again), `--color`, `--face-color top=plank` (repeatable; `top=none` takes the face's own colour away again), `--image textures/planks.png` (the whole part's image; `none` takes it away), `--face-image front=textures/face.png` (repeatable; `front=none` takes the image off that face, writing `"none"` there if the part's own image would otherwise show), `--twist`. On a part made from a mesh file the faces are its materials: `board=none` always writes `"none"` (the file's own picture would show otherwise), and `board=own`, or `--image own`, takes the recipe's line away so the file's own pictures show again. Several at once are one edit. A new shape drops the sizes, options and face colours it doesn't have. |
 | `duck-mold edit <recipe> set <part> --move x,y,z` | Puts a **free** part (one that isn't joined) there: its middle, in metres, measured from the recipe's own zero. Also `--rotate x,y,z` (degrees around x, then y, then z) and `--scale n` or `--scale x,y,z`. A joined part refuses `--move` and `--rotate`, and says what to do instead; `--scale` works on any part. |
 | `duck-mold edit <recipe> unjoin <part>` | Makes a joined part free, exactly where it stands: its `attach`, `to` and `twist` become a `move` and a `rotate`. The model doesn't change; the part can then be moved anywhere. |
 | `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. A copy of a joined part, with no `--to`, never sits on the part it copies: it goes to the next socket of the same part that nothing is joined to and that faces the same way (in the order they are written: the next table leg's socket); else to a new socket (`spot`) made beside the original's, 10 cm past it on the same side, if there is room; else (in the model's own list) it stands free on clear ground in front of the model. The summary says which. |

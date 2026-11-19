@@ -368,6 +368,11 @@ images = { top = "textures/lid.png" }            # ...but the top has its own
 - A mirrored part shows the mirror image.
 - A recipe used as a part brings its images; their paths start from that
   recipe's folder.
+- **A part made from a mesh file** has its materials for faces. An
+  image goes on by the file's own layout (its "UVs"), not by the rules
+  above, and a glTF file's own pictures come with it: see
+  [Files as parts](#files-as-parts). A file with no layout can't take
+  an image, and says so.
 - A file that isn't there (`file_not_found`), or that isn't a PNG, is
   damaged or is too big (`bad_image`), is an error that names the file
   and the fix. All of a model's images together must fit in 4096 x 4096
@@ -666,9 +671,11 @@ the Studio shows one with View > Far version. `duck-mold edit` has
   names are read; faces with more than three corners are cut into
   triangles. The file is read as y up, facing +z, the way glTF means it
   and Blender writes OBJ. For a file in other units or directions, use
-  `scale` and `rotate` on the part. The file's own colours and textures
-  are not used: colour it with `color`, and with `colors` by material
-  name. `duck-mold inspect rock.obj` lists a file's size and materials.
+  `scale` and `rotate` on the part. The file's own colours and pictures
+  are not used (its `.mtl` file isn't read): colour it with `color`, and
+  with `colors` by material name. Its layout for pictures (`vt`) is
+  read, so `images` can put a PNG on a material. `duck-mold inspect
+  rock.obj` lists a file's size and materials.
 - **A glTF file** (`file = "lamp.gltf"` or `file = "lamp.glb"`): every
   mesh in the file's main scene, each placed, turned and sized as its
   object says (by numbers or by a matrix), merged into one part.
@@ -684,10 +691,33 @@ the Studio shows one with View > Far version. `duck-mold edit` has
     `no_color` warning lists what was kept. A `.glb` Duck Mold wrote
     brings its palette, as a recipe used as a part does: its face names
     are its palette names.
+  - **Pictures:** a material's colour picture (its "base colour
+    texture") comes in with it, laid on by the file's own layout (its
+    "UVs"). Nothing is written in the recipe for that.
+    - PNG and JPEG are read, inside the file or in a file beside it.
+    - A picture that repeats across a face is laid out repeated, up to 8
+      times each way; beyond that it is shown once, with a note.
+    - A base colour that isn't white tints the picture, as glTF says.
+    - A picture over 1024 pixels along a side is made smaller, with a
+      note.
+    - A material wholly under a solid picture is given no palette
+      colour: none would show.
+    - **The recipe has the last word.** `colors = { Body = "steel" }`,
+      or a `color` on the part, paints those faces and their picture
+      goes. `images = { Body = "textures/new.png" }` puts another image
+      on that material, by the file's layout. `images = { Body = "none"
+      }` leaves the material's own colour; `image = "none"` does that
+      for the whole part.
+    - `inspect` lists them with the model's other images, named
+      `lamp.gltf: shade` when the picture is inside the file.
+    - A `.glb` Duck Mold wrote keeps its images.
+    - A picture that can't be read (missing, damaged, or a kind other
+      than PNG and JPEG) is left out with a note, and its faces keep
+      their material's colour.
   - **Left out, with a note:** lines and points, skins, animations,
-    shape keys (morph targets), cameras and textures (a material's
-    colour is its base colour). Normals and texture coordinates are
-    passed over.
+    shape keys (morph targets), cameras, every picture but the colour
+    one (bump, shine and glow maps), and the extension that moves or
+    turns a picture on its faces. Normals are passed over.
   - **Refused, with a sentence:** a file that says it needs an extension
     to be read (Draco or meshopt compression, for example), corners
     packed into whole numbers, sparse accessors, and glTF 1.

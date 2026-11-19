@@ -25,6 +25,7 @@ use crate::issue::{Code, Issue};
 use crate::lay::{self, Lie};
 use crate::load::Loaded;
 use crate::math::{Bounds, Mat3, Transform, Vec3, vec3};
+use crate::mesh::MeshFile;
 use crate::model::{Face, FaceImage, FarVersion, Model, Part, PartKind, Socket};
 use crate::motion::{self, Animation, Joint, Key, Pose};
 use crate::picture::ImageSheet;
@@ -928,6 +929,19 @@ struct ImageLayer {
     wall: bool,
 }
 
+/// What a recipe says about images for one shape or mesh.
+#[derive(Default)]
+struct ImagesSaid {
+    /// What was given by name: the picture (`None` for `"none"`), and
+    /// every group of faces the name stands for.
+    given: Vec<(Option<usize>, Vec<usize>)>,
+    /// For a group of faces given something by name, which of `given`.
+    by_group: BTreeMap<usize, usize>,
+    /// The whole part's image, from the nearest part that says:
+    /// `Some(None)` for `"none"`.
+    whole: Option<Option<usize>>,
+}
+
 /// One of a layer's face colours: the face name, the palette colour
 /// (`None` if the name isn't in the palette), and where it was written.
 type FaceColorLayer = (String, Option<usize>, Loc);
@@ -980,11 +994,27 @@ fn keep_pictures_shown(model: &mut Model) {
         }
     }
     let mut now = Vec::with_capacity(shown.len());
-    let mut kept = Vec::new();
+    let mut kept: Vec<Arc<crate::picture::Picture>> = Vec::new();
     for (at, shown) in shown.iter().enumerate() {
-        now.push(kept.len());
-        if *shown {
-            kept.push(model.pictures[at].clone());
+        if !*shown {
+            now.push(kept.len());
+            continue;
+        }
+        // The same file read twice is one picture: a recipe can name
+        // the PNG that a part's mesh file also uses.
+        let picture = &model.pictures[at];
+        let same = kept.iter().position(|known| {
+            Arc::ptr_eq(known, picture)
+                || (known.file == picture.file
+                    && known.stamp == picture.stamp
+                    && (known.width, known.height) == (picture.width, picture.height))
+        });
+        match same {
+            Some(known) => now.push(known),
+            None => {
+                now.push(kept.len());
+                kept.push(picture.clone());
+            }
         }
     }
     let renumber = |model: &mut Model, kept: &[Arc<crate::picture::Picture>]| {
@@ -1352,11 +1382,7 @@ impl Assembler<'_> {
         groups_of: &dyn Fn(&str) -> Option<Vec<usize>>,
         words: &[String],
     ) -> Vec<Option<FaceImage>> {
-        if self
-            .images
-            .iter()
-            .all(|layer| layer.whole.is_none() && layer.faces.is_empty())
-        {
+        if !self.images_are_said() {
             return Vec::new();
         }
         // Whether a group of faces can take an image at all.
@@ -1366,6 +1392,66 @@ impl Assembler<'_> {
                 .zip(lies)
                 .any(|(face, lie)| face.group == group && *lie != Lie::Never)
         };
+        let ImagesSaid {
+            given,
+            by_group,
+            whole,
+        } = self.images_said(groups_of, words, &takes);
+        let whole = whole.flatten();
+
+        let mut images: Vec<Option<FaceImage>> = vec![None; faces.len()];
+        let mut put = |picture: usize, shown: &[bool], fits: &[bool]| {
+            for (at, laid) in lay::lay(faces, lies, shown, fits).into_iter().enumerate() {
+                if let Some(at_corners) = laid {
+                    images[at] = Some(FaceImage {
+                        picture,
+                        at: at_corners,
+                    });
+                }
+            }
+        };
+        for (entry, (picture, groups)) in given.iter().enumerate() {
+            let Some(picture) = picture else { continue };
+            let shown: Vec<bool> = faces
+                .iter()
+                .map(|face| by_group.get(&face.group) == Some(&entry))
+                .collect();
+            let fits: Vec<bool> = faces
+                .iter()
+                .map(|face| groups.contains(&face.group))
+                .collect();
+            put(*picture, &shown, &fits);
+        }
+        if let Some(picture) = whole {
+            let shown: Vec<bool> = faces
+                .iter()
+                .map(|face| !by_group.contains_key(&face.group))
+                .collect();
+            put(picture, &shown, &vec![true; faces.len()]);
+        }
+        if images.iter().all(Option::is_none) {
+            return Vec::new();
+        }
+        images
+    }
+
+    /// Whether any part on the way to the one being built says anything
+    /// about images.
+    fn images_are_said(&self) -> bool {
+        self.images
+            .iter()
+            .any(|layer| layer.whole.is_some() || !layer.faces.is_empty())
+    }
+
+    /// What the recipe says about images for the shape or mesh being
+    /// built, from the nearest part outwards. `takes` says whether a
+    /// group of faces can take an image at all.
+    fn images_said(
+        &mut self,
+        groups_of: &dyn Fn(&str) -> Option<Vec<usize>>,
+        words: &[String],
+        takes: &dyn Fn(usize) -> bool,
+    ) -> ImagesSaid {
         // What was given by name: the picture (`None` for "none"), and
         // every group the name stands for, which the image is fitted to.
         let mut given: Vec<(Option<usize>, Vec<usize>)> = Vec::new();
@@ -1421,42 +1507,84 @@ impl Assembler<'_> {
         }
         self.issues.append(&mut problems);
         // The whole part's image, from the nearest layer that says.
-        let whole = self
-            .images
-            .iter()
-            .rev()
-            .find_map(|layer| layer.whole)
-            .flatten();
-
-        let mut images: Vec<Option<FaceImage>> = vec![None; faces.len()];
-        let mut put = |picture: usize, shown: &[bool], fits: &[bool]| {
-            for (at, laid) in lay::lay(faces, lies, shown, fits).into_iter().enumerate() {
-                if let Some(at_corners) = laid {
-                    images[at] = Some(FaceImage {
-                        picture,
-                        at: at_corners,
-                    });
-                }
-            }
-        };
-        for (entry, (picture, groups)) in given.iter().enumerate() {
-            let Some(picture) = picture else { continue };
-            let shown: Vec<bool> = faces
-                .iter()
-                .map(|face| by_group.get(&face.group) == Some(&entry))
-                .collect();
-            let fits: Vec<bool> = faces
-                .iter()
-                .map(|face| groups.contains(&face.group))
-                .collect();
-            put(*picture, &shown, &fits);
+        let whole = self.images.iter().rev().find_map(|layer| layer.whole);
+        ImagesSaid {
+            given,
+            by_group,
+            whole,
         }
-        if let Some(picture) = whole {
-            let shown: Vec<bool> = faces
+    }
+
+    /// The image on each triangle of a mesh from a file. The recipe has
+    /// the last word, as it has for colour:
+    ///
+    /// - an image the recipe gives a material (or the whole part) is
+    ///   laid on by the file's own layout;
+    /// - `"none"` leaves the colour;
+    /// - a material the recipe paints (`painted`) loses the file's
+    ///   picture;
+    /// - everything else keeps the picture the file has on it.
+    ///
+    /// Empty when no triangle has an image.
+    fn mesh_images(
+        &mut self,
+        mesh: &MeshFile,
+        faces: &[Polygon],
+        painted: &[bool],
+        loc: &Loc,
+    ) -> Vec<Option<FaceImage>> {
+        let said = if self.images_are_said() {
+            let material = |name: &str| {
+                mesh.materials
+                    .iter()
+                    .position(|material| material == name)
+                    .map(|at| vec![at])
+            };
+            self.images_said(&material, &mesh.materials, &|_| true)
+        } else {
+            ImagesSaid::default()
+        };
+        let mut images: Vec<Option<FaceImage>> = vec![None; faces.len()];
+        // Materials given an image that the file has no layout for.
+        let mut no_layout: BTreeSet<usize> = BTreeSet::new();
+        for (triangle, face) in faces.iter().enumerate() {
+            let given = match said.by_group.get(&face.group) {
+                Some(&entry) => Some(said.given[entry].0),
+                None => said.whole,
+            };
+            let picture = match given {
+                Some(Some(picture)) => {
+                    if mesh.lie(triangle).is_none() {
+                        no_layout.insert(face.group);
+                    }
+                    Some(picture)
+                }
+                Some(None) => None,
+                None if painted[triangle] => None,
+                None => mesh
+                    .picture(triangle)
+                    .map(|picture| mesh.first_picture + picture),
+            };
+            images[triangle] = picture
+                .zip(mesh.lie(triangle))
+                .map(|(picture, at)| FaceImage {
+                    picture,
+                    at: at.to_vec(),
+                });
+        }
+        if !no_layout.is_empty() && self.detail == 0 {
+            let names: Vec<String> = no_layout
                 .iter()
-                .map(|face| !by_group.contains_key(&face.group))
+                .map(|&material| format!("\"{}\"", mesh.materials[material]))
                 .collect();
-            put(picture, &shown, &vec![true; faces.len()]);
+            self.issues.push(loc.error(
+                Code::Unsupported,
+                format!(
+                    "\"{}\" doesn't say where a picture goes on {} (it has no layout for pictures there, no \"UVs\"), so an image can't be put on. Unwrap the model in the program it was made in and save it again",
+                    mesh.file,
+                    names.join(", ")
+                ),
+            ));
         }
         if images.iter().all(Option::is_none) {
             return Vec::new();
@@ -1590,12 +1718,40 @@ impl Assembler<'_> {
                         .position(|material| material == name)
                         .map(|at| vec![at])
                 };
-                let has_own = |group: usize| mesh.color_of(group).is_some();
+                // A material has what it needs if the file gives it a
+                // colour, or a solid picture on every triangle (as the
+                // faces under an image have in a .glb Duck Mold wrote).
+                let all_pictured = |group: usize| {
+                    faces.iter().enumerate().all(|(triangle, face)| {
+                        face.group != group
+                            || mesh
+                                .picture(triangle)
+                                .and_then(|picture| mesh.pictures.get(picture))
+                                .is_some_and(|picture| picture.is_solid())
+                    })
+                };
+                let has_own = |group: usize| mesh.color_of(group).is_some() || all_pictured(group);
                 let mut colors = self.paint_faces(&faces, &material, &mesh.materials, &has_own);
+                // What the recipe painted, before the file's own colours
+                // fill in the rest.
+                let painted: Vec<bool> = colors.iter().map(Option::is_some).collect();
+                let images = self.mesh_images(mesh, &faces, &painted, &part.loc);
+                // A triangle under a solid picture of the file's own
+                // never shows a colour, so it is given none: the palette
+                // isn't filled with colours nobody will see.
+                let covered = |triangle: usize| {
+                    images
+                        .get(triangle)
+                        .and_then(Option::as_ref)
+                        .and_then(|image| image.picture.checked_sub(mesh.first_picture))
+                        .and_then(|picture| mesh.pictures.get(picture))
+                        .is_some_and(|picture| picture.is_solid())
+                };
                 // Faces the recipe gives no colour keep the file's own.
                 let mut kept = Vec::new();
-                for (face, color) in faces.iter().zip(colors.iter_mut()) {
+                for (triangle, (face, color)) in faces.iter().zip(colors.iter_mut()).enumerate() {
                     if color.is_none()
+                        && !covered(triangle)
                         && let Some(rgb) = mesh.color_of(face.group)
                     {
                         *color = Some(self.own_color(&mesh.materials[face.group], rgb, &mut kept));
@@ -1607,8 +1763,6 @@ impl Assembler<'_> {
                     let message = kept_colours_message(&mesh.file, &kept);
                     self.issues.push(entry.warning(Code::NoColor, message));
                 }
-                let lies = vec![Lie::Own; faces.len()];
-                let images = self.image_faces(&faces, &lies, &material, &mesh.materials);
                 let mut body = Body::solid(
                     "mesh",
                     Some(mesh.file.clone()),

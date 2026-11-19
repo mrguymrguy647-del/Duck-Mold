@@ -7,9 +7,10 @@ use std::path::Path;
 use duckforge::glb::GlbModel;
 use duckforge::prelude::Mesh;
 
-const EXAMPLES: [&str; 22] = [
+const EXAMPLES: [&str; 23] = [
     "crate",
     "plank_crate",
+    "signpost",
     "table",
     "tree",
     "house",
@@ -221,4 +222,25 @@ fn duck_forge_loads_a_model_with_its_images() {
     // A model without images has none.
     let plain = Mesh::load_glb(golden.join("crate.glb")).unwrap();
     assert!(plain.texture.is_none());
+
+    // The signpost, whose pictures came inside a glTF file: its sign's
+    // triangles have a place on the picture, its mound and stone don't.
+    let model = GlbModel::load(golden.join("signpost.glb")).unwrap();
+    let mesh = model.to_mesh();
+    assert!(mesh.texture.is_some());
+    let placed = model
+        .triangles
+        .iter()
+        .filter(|triangle| triangle.on_picture.is_some())
+        .count();
+    assert_eq!((placed, mesh.triangles.len()), (28, 96));
+    let report: serde_json::Value = serde_json::from_str(
+        &std::fs::read_to_string(golden.join("signpost.inspect.json")).unwrap(),
+    )
+    .unwrap();
+    let picture = model.picture.as_ref().unwrap();
+    assert_eq!(
+        serde_json::json!([picture.width, picture.height]),
+        report["images"]["sheet"]
+    );
 }

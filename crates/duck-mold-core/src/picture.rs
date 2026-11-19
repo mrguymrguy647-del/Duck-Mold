@@ -178,6 +178,151 @@ pub fn read_png_up_to(bytes: &[u8], file: &str, most: u32) -> Result<Picture, Ba
     })
 }
 
+/// The most pixels along a side that a picture inside a mesh file is
+/// read at all. Bigger than [`MAX_SIDE`] and up to this, it is made
+/// smaller.
+pub const MAX_FILE_SIDE: u32 = 8192;
+
+/// A picture from a mesh file, and how big it was in the file if it had
+/// to be made smaller.
+pub type FilePicture = (Picture, Option<[u32; 2]>);
+
+/// Reads a picture that a mesh file from another program carries: a
+/// PNG or a JPEG. One that is bigger than an image can be
+/// ([`MAX_SIDE`] along a side) is made smaller, by whole steps (every
+/// pixel is the average of a square of the file's), and its size in the
+/// file comes back too.
+pub fn read_file_picture(bytes: &[u8], file: &str) -> Result<FilePicture, BadPicture> {
+    let picture = if bytes.starts_with(&[0xFF, 0xD8]) {
+        read_jpeg(bytes, file)?
+    } else {
+        read_png_up_to(bytes, file, MAX_FILE_SIDE).map_err(|mut bad| {
+            if bad.what.starts_with("isn't a PNG picture") {
+                bad.what =
+                    bad.what
+                        .replacen("isn't a PNG picture", "isn't a PNG or a JPEG picture", 1);
+                bad.fix = "Save it as a PNG or a JPEG";
+            }
+            bad
+        })?
+    };
+    let longer = picture.width.max(picture.height);
+    if longer <= MAX_SIDE {
+        return Ok((picture, None));
+    }
+    let was = [picture.width, picture.height];
+    Ok((smaller(&picture, longer.div_ceil(MAX_SIDE)), Some(was)))
+}
+
+/// Reads a JPEG file's bytes into pixels, every one solid.
+fn read_jpeg(bytes: &[u8], file: &str) -> Result<Picture, BadPicture> {
+    let damaged = |why: &str| BadPicture {
+        what: format!("is damaged: {why}"),
+        fix: "Save it again",
+    };
+    let mut decoder = jpeg_decoder::Decoder::new(std::io::Cursor::new(bytes));
+    decoder
+        .read_info()
+        .map_err(|_| damaged("what is in it isn't a picture a JPEG can hold"))?;
+    let info = decoder
+        .info()
+        .ok_or_else(|| damaged("it doesn't say how big it is"))?;
+    let (width, height) = (u32::from(info.width), u32::from(info.height));
+    if width == 0 || height == 0 {
+        return Err(damaged("it has no pixels"));
+    }
+    if width > MAX_FILE_SIDE || height > MAX_FILE_SIDE {
+        return Err(BadPicture {
+            what: format!(
+                "is {width} x {height} pixels, and a picture in a model can be {MAX_FILE_SIDE} x {MAX_FILE_SIDE} at most"
+            ),
+            fix: "Make it smaller",
+        });
+    }
+    let data = decoder
+        .decode()
+        .map_err(|_| damaged("it ends before its picture does"))?;
+    let count = (width as usize) * (height as usize);
+    let channels = match info.pixel_format {
+        jpeg_decoder::PixelFormat::L8 => 1,
+        jpeg_decoder::PixelFormat::L16 => 2,
+        jpeg_decoder::PixelFormat::RGB24 => 3,
+        jpeg_decoder::PixelFormat::CMYK32 => 4,
+    };
+    if data.len() < count * channels {
+        return Err(damaged("it ends before its picture does"));
+    }
+    let pixels = data[..count * channels]
+        .chunks_exact(channels)
+        .map(|pixel| match info.pixel_format {
+            jpeg_decoder::PixelFormat::L8 => [pixel[0], pixel[0], pixel[0], 255],
+            // Sixteen bits of grey, the big half first.
+            jpeg_decoder::PixelFormat::L16 => [pixel[0], pixel[0], pixel[0], 255],
+            jpeg_decoder::PixelFormat::RGB24 => [pixel[0], pixel[1], pixel[2], 255],
+            // Inks for printing, stored upside down (255 is no ink).
+            jpeg_decoder::PixelFormat::CMYK32 => {
+                let ink = |colour: u8| ((u16::from(colour) * u16::from(pixel[3])) / 255) as u8;
+                [ink(pixel[0]), ink(pixel[1]), ink(pixel[2]), 255]
+            }
+        })
+        .collect::<Vec<[u8; 4]>>();
+    Ok(Picture {
+        file: file.to_owned(),
+        width,
+        height,
+        stamp: stamp_of(width, height, &pixels),
+        pixels,
+    })
+}
+
+/// A picture made `times` smaller along each side: every pixel is the
+/// average of a square of the bigger picture's, weighed by how solid
+/// each is (so see-through pixels don't darken the edge of what is
+/// painted). Whole numbers only, so every computer gives the same
+/// pixels.
+fn smaller(picture: &Picture, times: u32) -> Picture {
+    let (width, height) = (
+        picture.width.div_ceil(times),
+        picture.height.div_ceil(times),
+    );
+    let mut pixels = Vec::with_capacity((width as usize) * (height as usize));
+    for row in 0..height {
+        for column in 0..width {
+            let (mut red, mut green, mut blue, mut solid, mut count) =
+                (0u64, 0u64, 0u64, 0u64, 0u64);
+            for y in row * times..((row + 1) * times).min(picture.height) {
+                for x in column * times..((column + 1) * times).min(picture.width) {
+                    let [r, g, b, a] = picture.pixel(x, y).map(u64::from);
+                    red += r * a;
+                    green += g * a;
+                    blue += b * a;
+                    solid += a;
+                    count += 1;
+                }
+            }
+            // To the nearest whole number.
+            let share = |sum: u64, of: u64| ((sum + of / 2) / of) as u8;
+            pixels.push(if solid == 0 {
+                [0, 0, 0, 0]
+            } else {
+                [
+                    share(red, solid),
+                    share(green, solid),
+                    share(blue, solid),
+                    share(solid, count),
+                ]
+            });
+        }
+    }
+    Picture {
+        file: picture.file.clone(),
+        width,
+        height,
+        stamp: stamp_of(width, height, &pixels),
+        pixels,
+    }
+}
+
 /// The PNG library's reason, in the words these messages use.
 fn plain(error: &png::DecodingError) -> String {
     match error {

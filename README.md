@@ -723,6 +723,7 @@ A recipe can be written as TOML (the examples) or as JSON
 |---|---|
 | [crate.toml](examples/crate.toml) | The smallest useful recipe: one box, two colours. |
 | [plank_crate.toml](examples/plank_crate.toml) | Images: the same box with wood planks on its sides and a lid on top, two PNGs painted with Duck Quill ([textures/](examples/textures/) has them, with the Duck Quill scripts that made them). |
+| [signpost.toml](examples/signpost.toml) | A model from another program that brings its own pictures: [parts/sign.gltf](examples/parts/sign.gltf) has wood up its post (a PNG beside it, repeated), an arrow on its board (a PNG inside it) and green copper on its cap (a JPEG). Nothing about them is written in the recipe. |
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
 | [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, framed windows (one box inset to a frame and a pane, defined once) and a chimney placed by sockets, and a skylight on the roof's `slope`. |
@@ -796,6 +797,12 @@ images = { top = "textures/lid.png" }            # ...but the top has its own
   front`, then `duck-mold edit robot.toml set head --face-image
   front=textures/face.png` (or `front=none`), `set crate --image
   textures/planks.png`.
+- **A model from Blender keeps its pictures.** A glTF file used as a
+  part brings each material's picture with it (PNG or JPEG), laid on
+  the way the file says. The Studio lists them on the part as "from the
+  file"; *Choose...* puts a PNG of yours there instead and the cross
+  takes one off. Painting the material a colour takes its picture off
+  too. See [signpost.toml](examples/signpost.toml).
 - **Any save of the PNG, by any program, shows on the model within half
   a second** while the Studio is open. A file that isn't there, isn't a
   PNG or is damaged is a mistake in plain words, never a crash.

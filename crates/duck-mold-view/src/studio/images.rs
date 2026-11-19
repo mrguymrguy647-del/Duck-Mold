@@ -65,6 +65,22 @@ fn from_recipe(recipe: &str, file: &str) -> String {
     out.join("/")
 }
 
+/// A picture that a part's mesh file brought with it, on one of its
+/// materials.
+#[derive(Debug, Clone, PartialEq)]
+pub struct OwnImage {
+    /// The material, which is the face's name.
+    pub face: String,
+    /// The picture.
+    pub picture: Arc<Picture>,
+}
+
+/// Whether a picture of the model is a file a recipe can name as an
+/// image: a PNG on the disk, not one from inside a mesh file.
+fn is_recipe_image(file: &str) -> bool {
+    file.to_lowercase().ends_with(".png") && !file.contains(": ")
+}
+
 impl Studio {
     /// The model's images, in the order the recipe first names them.
     pub fn images(&self) -> Vec<ImageInfo> {
@@ -76,6 +92,9 @@ impl Studio {
         model
             .pictures
             .iter()
+            // A picture that came inside a mesh file, or as a JPEG
+            // beside one, isn't a file a recipe can name.
+            .filter(|picture| is_recipe_image(&picture.file))
             .map(|picture| {
                 let file = from_recipe(&recipe, &picture.file);
                 ImageInfo {
@@ -85,6 +104,43 @@ impl Studio {
                 }
             })
             .collect()
+    }
+
+    /// The pictures a part made from a mesh file shows that the file
+    /// brought with it: each material that shows one, in the file's
+    /// order, with its picture. Empty for any other part. `said` is
+    /// what the recipe says about the part.
+    pub fn own_images(&self, part: &str, said: &edit::Facts) -> Vec<OwnImage> {
+        let Some(model) = self.model() else {
+            return Vec::new();
+        };
+        let Some(part) = model.part(part) else {
+            return Vec::new();
+        };
+        if part.kind.shape != "mesh" {
+            return Vec::new();
+        }
+        // What the recipe gives an image (or "none") isn't the file's.
+        let recipe_says = |face: &str| {
+            said.image.is_some() || said.face_images.iter().any(|(named, _)| named == face)
+        };
+        let mut own: Vec<OwnImage> = Vec::new();
+        for number in part.faces.clone() {
+            let Some(image) = &model.faces[number].image else {
+                continue;
+            };
+            let Some(face) = part.face_name(number) else {
+                continue;
+            };
+            if own.iter().any(|known| known.face == face) || recipe_says(face) {
+                continue;
+            }
+            own.push(OwnImage {
+                face: face.to_owned(),
+                picture: model.pictures[image.picture].clone(),
+            });
+        }
+        own
     }
 
     /// What the Paint tool paints with: the image picked, "no image", or

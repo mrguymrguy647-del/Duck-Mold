@@ -59,7 +59,8 @@ pub struct Inspection {
     pub ground: Ground,
     /// Every palette colour, with how many triangles it paints.
     pub palette: Vec<ColorUse>,
-    /// How many triangles nobody coloured (they are plain grey).
+    /// How many triangles nobody coloured (they are plain grey). A
+    /// triangle wholly under a solid picture isn't counted.
     #[serde(skip_serializing_if = "is_zero")]
     pub unpainted_triangles: usize,
     /// For a mesh file: its materials, with how many triangles each has.
@@ -231,8 +232,8 @@ pub fn images_report(model: &Model) -> Option<ImagesReport> {
         return None;
     }
     let (width, height) = crate::picture::ImageSheet::size(model).ok().flatten()?;
-    // For each image, part and face name: the triangles' area on the
-    // model, and that area times how far the image reaches across and
+    // For each image, part and face name: how much its triangles count
+    // together, and that times how far the image reaches across and
     // down there.
     type Sums = (f64, f64, f64);
     let mut on: Vec<std::collections::BTreeMap<(String, String), Sums>> =
@@ -303,9 +304,13 @@ fn tidy_to(value: f64, parts: f64) -> f64 {
     (value * parts).round() / parts + 0.0
 }
 
-/// For one triangle with an image: its area on the model, and how many
-/// metres the whole image would reach there, across and down. `None`
-/// for a triangle with no area, on the model or on the image.
+/// For one triangle with an image: how much it counts, and how many
+/// metres the whole image would reach there, across and down. A
+/// triangle counts by its area on the model times its area on the
+/// image, so that the answer is the image's size where most of it is
+/// shown: a thin strip of it stretched along an edge (as files from
+/// other programs often have) hardly counts. `None` for a triangle with
+/// no area, on the model or on the image.
 fn image_reach(corners: [Vec3; 3], at: [[f64; 2]; 3]) -> Option<(f64, f64, f64)> {
     let (a, b) = (corners[1] - corners[0], corners[2] - corners[0]);
     let area = a.cross(b).length() / 2.0;
@@ -319,7 +324,7 @@ fn image_reach(corners: [Vec3; 3], at: [[f64; 2]; 3]) -> Option<(f64, f64, f64)>
     // whole image down.
     let across = (a * vb - b * va) * (1.0 / across_down);
     let down = (b * ua - a * ub) * (1.0 / across_down);
-    Some((area, across.length(), down.length()))
+    Some((area * across_down.abs(), across.length(), down.length()))
 }
 
 /// A warning when the model's images have very different pixel sizes on
@@ -875,8 +880,16 @@ pub fn inspect(model: &Model, source: &str, mut warnings: Vec<Issue>) -> Inspect
         .collect();
     let mut unpainted_triangles = 0;
     for face in &model.faces {
+        // A face under a solid picture shows no colour, so having none
+        // isn't something to count.
+        let pictured = face
+            .image
+            .as_ref()
+            .and_then(|image| model.pictures.get(image.picture))
+            .is_some_and(|picture| picture.is_solid());
         match face.color {
             Some(color) => palette[color].triangles += face.triangle_count(),
+            None if pictured => {}
             None => unpainted_triangles += face.triangle_count(),
         }
     }

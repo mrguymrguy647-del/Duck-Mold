@@ -50,6 +50,10 @@ clap = { version = "4", features = ["derive"] }
 duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "57013dada0dfbb5167f1b009ebb8229cd65a5dbc", default-features = false }
 # Writes the PNG pictures. The same library (and version) Duck Forge uses.
 png = "0.18"
+# Reads the JPEG pictures inside models from other programs (Blender
+# keeps a JPEG as a JPEG). Without its speed-ups for particular
+# processors, so every computer reads the same pixels from a file.
+jpeg-decoder = { version = "0.3", default-features = false, features = ["platform_independent"] }
 # The Studio's window: egui is the interface library, eframe opens the
 # window. The same library and version as Duck Quill and Duck Forge's
 # Studio, so that Duck Mold's Studio can later be docked inside Duck

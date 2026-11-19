@@ -989,6 +989,27 @@ fn the_screens_look_as_they_did() {
         screen.run_steps(3);
         wrong.extend(check(&mut screen, "images-part"));
     }
+    // A part from a mesh file, with the pictures the file brought: each
+    // has its line, "from the file".
+    {
+        let folder = folder("pictures_images_from_file");
+        std::fs::create_dir_all(folder.join("parts")).unwrap();
+        for file in ["signpost.toml", "parts/sign.gltf", "parts/sign_post.png"] {
+            std::fs::copy(examples().join(file), folder.join(file)).unwrap();
+        }
+        let mut screen = harness(
+            StudioApp::with_file(folder.join("signpost.toml"), false),
+            true,
+        );
+        screen.run_steps(2);
+        screen
+            .state_mut()
+            .studio_mut()
+            .unwrap()
+            .select(Some("sign"));
+        screen.run_steps(3);
+        wrong.extend(check(&mut screen, "images-from-file"));
+    }
     // The "New image" window.
     {
         use egui::accesskit::Role;

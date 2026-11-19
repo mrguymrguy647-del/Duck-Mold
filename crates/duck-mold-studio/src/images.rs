@@ -12,11 +12,11 @@ use std::sync::Arc;
 use duck_mold_core::edit::Facts;
 use duck_mold_core::images::ImagePlan;
 use duck_mold_core::picture::Picture;
-use duck_mold_core::recipe::NO_IMAGE;
+use duck_mold_core::recipe::{NO_IMAGE, OWN_IMAGE};
 use duck_mold_view::quill::{self, PaintJob, With};
 use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::handles::Tool;
-use duck_mold_view::studio::images::Brush;
+use duck_mold_view::studio::images::{Brush, OwnImage};
 use eframe::egui::{
     self, Color32, ColorImage, Rect, Response, RichText, Sense, Stroke, TextureHandle,
     TextureOptions, WidgetInfo,
@@ -528,7 +528,7 @@ fn image_line(
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if file == NO_IMAGE {
                     ui.add(egui::Label::new("none").truncate()).on_hover_text(
-                        "\"none\" is written here, so the part's own image isn't shown on it",
+                        "\"none\" is written here, so no image is shown on it: not the part's own, nor one its file brought",
                     );
                 } else {
                     let name = file.rsplit('/').next().unwrap_or(file);
@@ -587,6 +587,14 @@ pub fn part_section(
         "A picture (a PNG file) on the whole part, or on single faces. It lies over the colour: the colour shows where the picture is see-through",
     );
     let mut done: Option<Result<String, String>> = None;
+    // A part made from a mesh file can have pictures the file brought.
+    // Taking the recipe's image off such a part shows them again.
+    let own = studio.own_images(path, facts);
+    let from_mesh = studio
+        .model()
+        .and_then(|model| model.part(path))
+        .is_some_and(|part| part.kind.shape == "mesh");
+    let off = from_mesh.then_some(OWN_IMAGE);
     if let Some(file) = &facts.image {
         match image_line(ui, studio, draft, "whole part", file) {
             Asked::Choose => {
@@ -594,7 +602,7 @@ pub fn part_section(
                     done = Some(studio.use_image(path, None, &chosen));
                 }
             }
-            Asked::TakeOff => done = Some(studio.set_image(path, None, None)),
+            Asked::TakeOff => done = Some(studio.set_image(path, None, off)),
             Asked::Paint => draft.painting.paint(studio, path, None),
             Asked::Nothing => {}
         }
@@ -606,12 +614,23 @@ pub fn part_section(
                     done = Some(studio.use_image(path, Some(face), &chosen));
                 }
             }
-            Asked::TakeOff => done = Some(studio.set_image(path, Some(face), None)),
+            Asked::TakeOff => done = Some(studio.set_image(path, Some(face), off)),
             Asked::Paint => draft.painting.paint(studio, path, Some(face)),
             Asked::Nothing => {}
         }
     }
-    if facts.image.is_none() && facts.face_images.is_empty() {
+    for image in &own {
+        match own_line(ui, draft, image) {
+            Asked::Choose => {
+                if let Some(chosen) = pick_png() {
+                    done = Some(studio.use_image(path, Some(&image.face), &chosen));
+                }
+            }
+            Asked::TakeOff => done = Some(studio.set_image(path, Some(&image.face), None)),
+            Asked::Paint | Asked::Nothing => {}
+        }
+    }
+    if facts.image.is_none() && facts.face_images.is_empty() && own.is_empty() {
         ui.label(RichText::new("None yet.").weak());
     }
     ui.horizontal(|ui| {
@@ -631,6 +650,52 @@ pub fn part_section(
     if let Some(why) = &draft.failed {
         ui.colored_label(theme::BAD, why);
     }
+}
+
+/// One line for a picture the part's mesh file brought with it: the
+/// material, the picture, and buttons to use another or take it off.
+fn own_line(ui: &mut egui::Ui, draft: &mut Draft, image: &OwnImage) -> Asked {
+    let mut asked = Asked::Nothing;
+    let what = image.face.as_str();
+    ui.horizontal(|ui| {
+        ui.label(RichText::new(what).weak());
+        draft.thumb(ui, &image.picture, 28.0, false, &format!("{what} image"));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if crate::icons::quiet_button(
+                ui,
+                crate::icons::Icon::Cross,
+                &format!("Take the image off {what}"),
+                true,
+            )
+            .on_hover_text("Take this picture off: the material shows its colour")
+            .clicked()
+            {
+                asked = Asked::TakeOff;
+            }
+            let choose = ui.small_button("Choose...");
+            choose.widget_info(|| {
+                WidgetInfo::labeled(
+                    egui::Role::Button,
+                    true,
+                    format!("Choose another image for {what}"),
+                )
+            });
+            if choose
+                .on_hover_text("Use a PNG of your own here, laid on the way the file lays its own")
+                .clicked()
+            {
+                asked = Asked::Choose;
+            }
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                ui.add(egui::Label::new("from the file").truncate())
+                    .on_hover_text(format!(
+                        "{}: {} x {} pixels. It came with the part's file",
+                        image.picture.file, image.picture.width, image.picture.height
+                    ));
+            });
+        });
+    });
+    asked
 }
 
 /// The "New image" window, when it is open.

@@ -5955,6 +5955,54 @@ in their base colour. From 7b:
   glow maps (only the base colour picture is read), and the glTF
   extension that moves or turns a picture.
 
+*As built (step 5):*
+
+- As designed, with the example signpost
+  (`examples/parts/sign.gltf`, used by `examples/signpost.toml`): a PNG
+  beside the file that repeats, a PNG inside it, and a JPEG.
+- **JPEGs** are read with the `jpeg-decoder` library, built without its
+  speed-ups for particular processors, so that every computer reads the
+  same pixels: a test holds the number worked out from the cap's pixels,
+  and runs on Windows and Linux.
+- **A picture over 1024 pixels a side is made smaller**, by whole steps
+  (each pixel the average of a square of the file's), with a note. The
+  design didn't say; refusing would have turned away most models from
+  Blender, which often carry 2048 x 2048 pictures. Up to 8192 is read.
+- **A material wholly under a solid picture gets no palette colour**,
+  so a textured model doesn't fill the palette with whites nobody sees,
+  and there is no `no_color` warning for it. `inspect` doesn't count
+  those triangles as uncoloured.
+- **See-through pictures.** glTF's ordinary materials are solid
+  whatever their picture's file says, so the picture is made solid. A
+  material that says its picture has gaps (`alphaMode` `MASK` or
+  `BLEND`) keeps them, and its base colour shows there, with a note
+  that nothing is truly see-through.
+- **A picture that stops at its edge** (`CLAMP_TO_EDGE`) has its layout
+  held inside the picture; one that repeats turned over each time
+  (`MIRRORED_REPEAT`) repeats the plain way, with a note.
+- **"none" has to be written for a file's picture**, and there is a
+  word to get it back: `edit ... set sign --face-image board=own` (or
+  `--image own`) takes the recipe's line away, so the file's own
+  picture shows again. `own` is only for the edit; it is never written
+  in a recipe.
+- **The Studio** lists a file part's own pictures under its Images as
+  "from the file", each with *Choose...* (a PNG of yours instead) and a
+  cross (off). They aren't in the row of images to paint with unless
+  they are PNG files on the disk, since a recipe can only name those;
+  and they have no *Paint in Duck Quill*, since Duck Mold never writes
+  into a model file.
+- **The same PNG named by the recipe and used by a file** is one
+  picture in the model, not two.
+- **How big an image is on the model** (`inspect`'s `metres` and
+  `pixels_per_metre`) now counts each triangle by its area on the model
+  times its area on the image. A file from another program often
+  stretches a thin strip of its picture along an edge; counted by model
+  area alone, those strips made the sign's board look 8% bigger than
+  it is. For Duck Mold's own layouts the answer is the same as before.
+- **A `.glb` Duck Mold wrote**, used as a part, keeps its images. Its
+  faces under an image come in under the material `default`: the file
+  holds what they look like, not which palette colour was under them.
+
 ### 7. New commands
 
 Edits (`duck-mold edit <recipe> ...`), each also a Studio action:

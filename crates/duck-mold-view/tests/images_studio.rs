@@ -685,3 +685,108 @@ mod round_trip {
         assert!(why.starts_with("Couldn't start Duck Quill ("), "{why}");
     }
 }
+
+// ---- step 5: a part's file brings its own pictures ---------------------------------
+
+/// The signpost, with the sign's file and its picture, in a folder of
+/// its own.
+fn signpost(test: &str) -> PathBuf {
+    let folder = Path::new(env!("CARGO_TARGET_TMPDIR"))
+        .join("images_studio")
+        .join(test);
+    let _ = std::fs::remove_dir_all(&folder);
+    std::fs::create_dir_all(folder.join("parts")).unwrap();
+    for file in ["signpost.toml", "parts/sign.gltf", "parts/sign_post.png"] {
+        std::fs::copy(examples().join(file), folder.join(file)).unwrap();
+    }
+    folder.join("signpost.toml")
+}
+
+#[test]
+fn a_parts_own_pictures_are_listed_and_the_recipe_has_the_last_word() {
+    let recipe = signpost("own_pictures");
+    let mut studio = Studio::open(&recipe, false);
+    studio.select(Some("sign"));
+    let facts = studio.facts().unwrap();
+    let own = studio.own_images("sign", &facts);
+    let listed: Vec<(&str, u32, u32)> = own
+        .iter()
+        .map(|image| {
+            (
+                image.face.as_str(),
+                image.picture.width,
+                image.picture.height,
+            )
+        })
+        .collect();
+    assert_eq!(listed, [("post", 8, 16), ("board", 64, 32), ("cap", 16, 8)]);
+    // Only a PNG on the disk can be picked to paint with: the post's is
+    // one, the two inside the file aren't.
+    let brushes: Vec<String> = studio
+        .images()
+        .into_iter()
+        .map(|image| image.file)
+        .collect();
+    assert_eq!(brushes, ["parts/sign_post.png"]);
+    // A part that isn't from a mesh file has none.
+    studio.select(Some("mound"));
+    let mound = studio.facts().unwrap();
+    assert!(studio.own_images("mound", &mound).is_empty());
+
+    // Taking one off writes "none", and it is no longer the file's.
+    studio.set_image("sign", Some("board"), None).unwrap();
+    let text = std::fs::read_to_string(&recipe).unwrap();
+    assert!(text.contains("images = { board = \"none\" }"), "{text}");
+    studio.select(Some("sign"));
+    let facts = studio.facts().unwrap();
+    assert_eq!(facts.face_images, [("board".to_owned(), "none".to_owned())]);
+    let own: Vec<String> = studio
+        .own_images("sign", &facts)
+        .into_iter()
+        .map(|image| image.face)
+        .collect();
+    assert_eq!(own, ["post", "cap"]);
+
+    // "own" shows it again, and Undo goes back through both.
+    studio
+        .set_image("sign", Some("board"), Some("own"))
+        .unwrap();
+    let facts = studio.facts().unwrap();
+    assert_eq!(studio.own_images("sign", &facts).len(), 3);
+    studio.undo().unwrap();
+    studio.undo().unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&recipe).unwrap(),
+        std::fs::read_to_string(examples().join("signpost.toml")).unwrap()
+    );
+
+    // The post's own picture, put on the board by the Paint tool: the
+    // file's layout carries it.
+    studio.pick_image(Some("parts/sign_post.png"));
+    assert_eq!(
+        studio.brush(),
+        Some(Brush::Image("parts/sign_post.png".into()))
+    );
+    studio
+        .set_image("sign", Some("board"), Some("parts/sign_post.png"))
+        .unwrap();
+    let model = studio.model().unwrap();
+    let names: Vec<&str> = model
+        .pictures
+        .iter()
+        .map(|picture| picture.file.as_str())
+        .collect();
+    assert_eq!(names.len(), 2, "{names:?}");
+    assert!(names[0].ends_with("parts/sign_post.png") && names[1].ends_with("sign.gltf: cap"));
+
+    // The picture beside the .gltf is watched like any file the recipe
+    // names: saved by another program, it shows at once.
+    let post = recipe.parent().unwrap().join("parts/sign_post.png");
+    let red = write_png(8, 16, &[[200, 30, 30, 255]; 128], true);
+    save(&post, &red);
+    assert!(studio.check_files());
+    assert_eq!(
+        studio.model().unwrap().pictures[0].pixel(0, 0),
+        [200, 30, 30, 255]
+    );
+}

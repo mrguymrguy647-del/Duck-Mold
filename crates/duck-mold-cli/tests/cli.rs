@@ -2740,3 +2740,147 @@ fn image_guide_writes_the_lines_to_paint_by() {
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("\"leaves\" has no image"));
 }
+
+#[test]
+fn a_parts_own_pictures_are_listed_taken_off_and_shown_again() {
+    // The signpost: a part from a glTF file that brings three pictures.
+    let folder = folder("cli_own_pictures");
+    let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    std::fs::create_dir_all(folder.join("parts")).unwrap();
+    std::fs::copy(examples.join("signpost.toml"), folder.join("signpost.toml")).unwrap();
+    for file in ["sign.gltf", "sign_post.png"] {
+        std::fs::copy(
+            examples.join("parts").join(file),
+            folder.join("parts").join(file),
+        )
+        .unwrap();
+    }
+    let images = |folder: &Path| -> Vec<String> {
+        let report = json(&run(folder, &["inspect", "signpost.toml", "--json"]));
+        report["images"]["files"]
+            .as_array()
+            .map(|files| {
+                files
+                    .iter()
+                    .map(|file| file["file"].as_str().unwrap().to_owned())
+                    .collect()
+            })
+            .unwrap_or_default()
+    };
+    assert_eq!(
+        images(&folder),
+        [
+            "parts/sign_post.png",
+            "parts/sign.gltf: board",
+            "parts/sign.gltf: cap"
+        ]
+    );
+    let said = stdout(&run(&folder, &["inspect", "signpost.toml"]));
+    assert!(
+        said.contains("parts/sign.gltf: board   64 x 32   sign: board"),
+        "{said}"
+    );
+
+    // "none" is written down: without it the file's picture would show.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "signpost.toml",
+            "set",
+            "sign",
+            "--face-image",
+            "board=none",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let text = std::fs::read_to_string(folder.join("signpost.toml")).unwrap();
+    assert!(text.contains("images = { board = \"none\" }"), "{text}");
+    assert_eq!(
+        images(&folder),
+        ["parts/sign_post.png", "parts/sign.gltf: cap"]
+    );
+
+    // "own" shows it again: the line goes.
+    let output = run(
+        &folder,
+        &[
+            "edit",
+            "signpost.toml",
+            "set",
+            "sign",
+            "--face-image",
+            "board=own",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(
+        stdout(&output).contains("board the file's own picture"),
+        "{}",
+        stdout(&output)
+    );
+    let text = std::fs::read_to_string(folder.join("signpost.toml")).unwrap();
+    assert!(!text.contains("\nimages ="), "{text}");
+    assert_eq!(images(&folder).len(), 3);
+
+    // The whole part: none of the file's pictures, then all again.
+    let output = run(
+        &folder,
+        &["edit", "signpost.toml", "set", "sign", "--image", "none"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(images(&folder).is_empty());
+    let output = run(
+        &folder,
+        &["edit", "signpost.toml", "set", "sign", "--image", "own"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert_eq!(images(&folder).len(), 3);
+
+    // A new image for a material is the size of the picture's whole
+    // reach on the model, by the file's own layout: the board's is
+    // 0.64 by 0.32 metres, and the model's images are 100 pixels to
+    // the metre.
+    let output = run(
+        &folder,
+        &[
+            "new-image",
+            "signpost.toml",
+            "sign",
+            "--face",
+            "board",
+            "--json",
+        ],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    let made = json(&output);
+    assert_eq!(made["file"], "textures/signpost_sign_board.png");
+    let metres = [0, 1].map(|at| made["metres"][at].as_f64().unwrap());
+    assert!(
+        (metres[0] - 0.64).abs() < 0.01 && (metres[1] - 0.32).abs() < 0.01,
+        "{metres:?}"
+    );
+    let (wide, high) = (
+        made["width"].as_u64().unwrap(),
+        made["height"].as_u64().unwrap(),
+    );
+    assert_eq!(wide, high * 2, "{wide} x {high}");
+    assert_eq!((wide, high), (64, 32));
+    let text = std::fs::read_to_string(folder.join("signpost.toml")).unwrap();
+    assert!(
+        text.contains("images = { board = \"textures/signpost_sign_board.png\" }"),
+        "{text}"
+    );
+
+    // "own" is only for a part made from a file.
+    let output = run(
+        &folder,
+        &["edit", "signpost.toml", "set", "mound", "--image", "own"],
+    );
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("\"own\" shows the pictures a part's file brought with it, and this part isn't made from a file. To take an image off, say none"),
+        "{}",
+        stderr(&output)
+    );
+}

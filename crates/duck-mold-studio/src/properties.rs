@@ -1336,7 +1336,17 @@ pub fn show(
         changes_section(ui, &facts, draft, &path, &mut edits);
 
         // ---- its images
-        if facts.shape.is_some() || facts.image.is_some() || !facts.face_images.is_empty() {
+        // (A shape, or a part from a mesh file, whose materials can
+        // take images and may have brought their own.)
+        let from_mesh = studio
+            .model()
+            .and_then(|model| model.part(&path))
+            .is_some_and(|part| part.kind.shape == "mesh");
+        if facts.shape.is_some()
+            || from_mesh
+            || facts.image.is_some()
+            || !facts.face_images.is_empty()
+        {
             crate::images::part_section(ui, studio, images, &path, &facts);
         }
 

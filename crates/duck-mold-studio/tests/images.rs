@@ -420,3 +420,57 @@ fn look() {
         save(&mut screen, "5-no-duck-quill");
     }
 }
+
+#[test]
+fn a_part_from_a_file_lists_the_pictures_the_file_brought() {
+    let folder = folder("images_from_file");
+    std::fs::create_dir_all(folder.join("parts")).unwrap();
+    for file in ["signpost.toml", "parts/sign.gltf", "parts/sign_post.png"] {
+        std::fs::copy(examples().join(file), folder.join(file)).unwrap();
+    }
+    let recipe = folder.join("signpost.toml");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), false);
+    screen.run_steps(2);
+    // The model's images are counted, and the one that is a PNG on the
+    // disk is in the row to paint with.
+    screen.get_by_label_contains("3 (128 x 128 pixels together)");
+    screen.get_by_role_and_label(Role::Button, "sign_post.png");
+
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("sign"));
+    screen.run_steps(3);
+    assert_eq!(screen.query_all_by_label("from the file").count(), 3);
+    assert!(screen.query_by_label("None yet.").is_none());
+    // A file's picture can't be painted on: no painting button for it.
+    assert!(
+        screen
+            .query_by_label_contains("Paint in Duck Quill: board")
+            .is_none()
+            && screen
+                .query_by_label_contains("Open in my picture program: board")
+                .is_none()
+    );
+
+    // The cross takes the board's picture off: "none" is written.
+    screen
+        .get_by_role_and_label(Role::Button, "Take the image off board")
+        .click();
+    screen.run_steps(3);
+    assert_eq!(
+        recipe_line(&recipe, "images").as_deref(),
+        Some("images = { board = \"none\" }")
+    );
+    assert_eq!(screen.query_all_by_label("from the file").count(), 2);
+    screen.get_by_label("none");
+
+    // The cross on that line shows the file's picture again.
+    screen
+        .get_by_role_and_label(Role::Button, "Take the image off board")
+        .click();
+    screen.run_steps(3);
+    assert_eq!(recipe_line(&recipe, "images"), None);
+    assert_eq!(screen.query_all_by_label("from the file").count(), 3);
+}

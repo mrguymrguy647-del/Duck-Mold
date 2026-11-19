@@ -219,10 +219,14 @@ pub enum Change {
         face_colors: Vec<String>,
         /// An image for the whole part: a PNG file, its path from the
         /// recipe's folder (textures/planks.png). none takes it away.
+        /// For a part made from a mesh file, own shows the pictures the
+        /// file brought again.
         #[arg(long, value_name = "FILE.png")]
         image: Option<String>,
         /// An image for one face, like front=textures/face.png. Can be
-        /// given more than once. front=none takes it away.
+        /// given more than once. front=none takes it away. On a part
+        /// made from a mesh file the faces are its materials, and
+        /// board=own shows the file's own picture again.
         #[arg(long = "face-image", value_name = "FACE=FILE.png")]
         face_images: Vec<String>,
         /// Degrees to twist it around its join.

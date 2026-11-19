@@ -784,6 +784,11 @@ impl ImageName {
 /// What `image` and `images` say to have no image: `"none"`.
 pub const NO_IMAGE: &str = "none";
 
+/// What an edit says in place of an image for a part made from a mesh
+/// file, to show the pictures the file brought with it again. Never
+/// written in a recipe: the edit takes the part's own line away.
+pub const OWN_IMAGE: &str = "own";
+
 /// One entry of `images`: a face name and its image.
 #[derive(Debug, Clone, PartialEq)]
 pub struct FaceImageName {

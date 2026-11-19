@@ -37,7 +37,9 @@ use crate::issue::{Code, Issue, Report};
 use crate::load::{display_path, load_text_at};
 use crate::math::{Bounds, Mat3, Vec3};
 use crate::model::{Model, Part};
-use crate::recipe::{Colliders, Limits, Lods, NO_IMAGE, PART_FIELDS, Shape, Side, rgb_of};
+use crate::recipe::{
+    Colliders, Limits, Lods, NO_IMAGE, OWN_IMAGE, PART_FIELDS, Shape, Side, rgb_of,
+};
 use crate::source::{Node, Syntax, Value};
 use crate::tools::Failure;
 use doc::{Doc, Step, TreePath, Val, key, with};
@@ -1936,9 +1938,30 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
                 }
                 said.push(format!("{face} {color}"));
             }
+            // A part made from a file can have pictures the file
+            // brought: "own" shows them again, and "none" has to be
+            // written down to keep one off.
+            let from_file = doc.entry(&table, "file").is_some();
+            let own_needs_a_file = |what: &str| {
+                problem(
+                    Code::Unsupported,
+                    format!(
+                        "\"own\" shows the pictures a part's file brought with it, and {what} isn't made from a file. To take an image off, say none"
+                    ),
+                )
+                .got("own")
+            };
             if let Some(image) = image {
                 made_changed = true;
-                if image == NO_IMAGE && doc.entry(&table, "image").is_some() {
+                if image == OWN_IMAGE {
+                    if !from_file {
+                        return Err(own_needs_a_file("this part"));
+                    }
+                    if doc.entry(&table, "image").is_some() {
+                        doc.remove_field(&table, "image").map_err(cant)?;
+                    }
+                    said.push("its file's own pictures".to_owned());
+                } else if image == NO_IMAGE && doc.entry(&table, "image").is_some() && !from_file {
                     // Its own image goes.
                     doc.remove_field(&table, "image").map_err(cant)?;
                     said.push("no image".to_owned());
@@ -1969,7 +1992,20 @@ fn run(doc: &mut Doc, edit: &Edit, model: Option<&Model>, path: &Path) -> Result
                     && doc
                         .text_at(&table, "image")
                         .is_some_and(|whole| whole != NO_IMAGE);
-                if image == NO_IMAGE && !whole {
+                if image == OWN_IMAGE {
+                    if !from_file {
+                        return Err(own_needs_a_file("this part"));
+                    }
+                    if has_own {
+                        doc.remove_field(&images, face).map_err(cant)?;
+                        if doc.entries(&images).is_some_and(<[_]>::is_empty) {
+                            doc.remove_field(&table, "images").map_err(cant)?;
+                        }
+                    }
+                    said.push(format!("{face} the file's own picture"));
+                    continue;
+                }
+                if image == NO_IMAGE && !whole && !from_file {
                     if has_own {
                         doc.remove_field(&images, face).map_err(cant)?;
                         if doc.entries(&images).is_some_and(<[_]>::is_empty) {

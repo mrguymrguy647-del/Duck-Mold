@@ -447,8 +447,16 @@ impl Loader<'_> {
                 };
                 let beside = path.parent().unwrap_or(folder);
                 match read_gltf(&bytes, &shown, beside, self.issues) {
-                    Some(mesh) => {
+                    Some(mut mesh) => {
                         self.files.extend(mesh.extra_files.iter().cloned());
+                        // Its own pictures join the recipe's, after the
+                        // ones read so far.
+                        mesh.first_picture = self.pictures.len();
+                        for picture in &mesh.pictures {
+                            self.pictures.push(picture.clone());
+                            // No recipe names them by a path.
+                            self.picture_paths.push(PathBuf::new());
+                        }
                         // A model Duck Mold wrote brings its palette, as a
                         // recipe used as a part does.
                         if mesh.from_duck_mold {

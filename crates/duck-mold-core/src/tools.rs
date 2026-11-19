@@ -203,10 +203,18 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
         .triangles
         .iter()
         .zip(&mesh.material_of)
-        .map(|(corners, &material)| Face {
+        .enumerate()
+        .map(|(triangle, (corners, &material))| Face {
             corners: corners.map(|corner| Vec3::from(corner).tidied()).to_vec(),
             color: color_of_material[material],
-            image: None,
+            // The file's own picture, by its own layout.
+            image: mesh
+                .picture(triangle)
+                .zip(mesh.lie(triangle))
+                .map(|(picture, at)| crate::model::FaceImage {
+                    picture,
+                    at: at.to_vec(),
+                }),
         })
         .collect();
     let part = Part {
@@ -245,7 +253,7 @@ fn model_of_mesh(mesh: &MeshFile, path: &Path) -> Model {
     Model {
         name,
         palette,
-        pictures: Vec::new(),
+        pictures: mesh.pictures.clone(),
         faces,
         parts: vec![part],
         sockets: Vec::new(),

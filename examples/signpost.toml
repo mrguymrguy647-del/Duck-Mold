@@ -1,0 +1,53 @@
+# A signpost made in another program, with the pictures it brought.
+#
+#   duck-mold render examples/signpost.toml
+#
+# parts/sign.gltf is a glTF file with three materials, and each has a
+# picture: wood up the post, an arrow on the board, green copper on the
+# cap. Duck Mold keeps them, laid on the way the file says (its "UVs"),
+# so nothing about them is written here. `inspect` lists them under
+# "images", with the pixels each has to the metre.
+#
+# The recipe still has the last word, as it has for a material's colour:
+#
+#   colors = { cap = "stone" }                  # paint the cap; its picture goes
+#   images = { board = "textures/my_board.png" } # another picture, laid on the same way
+#   images = { board = "none" }                 # no picture: the material's colour
+#
+# The mound and the stone are plain parts with plain colours, to show
+# the two kinds side by side.
+
+version = 0
+name = "signpost"
+description = "A signpost from a glTF file that brings its own pictures, on a grassy mound."
+
+[palette]
+grass = "#5E9A45"
+stone = "#8C8F94"
+
+[[parts]]
+name = "mound"
+shape = "cylinder"
+radius = 0.45
+height = 0.08
+segments = 12
+color = "grass"
+
+[parts.sockets]
+stone = { on = "top", shift = [0.5, 0, 0.35] }
+
+[[parts]]
+name = "sign"
+file = "parts/sign.gltf"
+attach = "bottom"
+to = "mound.top"
+
+# A stone at the foot of the post.
+[[parts]]
+name = "stone"
+shape = "sphere"
+radius = 0.09
+segments = 6
+color = "stone"
+attach = "center"
+to = "mound.stone"
