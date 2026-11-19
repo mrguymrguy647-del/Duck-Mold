@@ -21,7 +21,7 @@ use duck_mold_core::issue::{Issue, Report};
 use duck_mold_core::tools::{self, Failure};
 use duck_mold_view::render;
 
-use duck_mold_cli::{edit, guide};
+use duck_mold_cli::{check, edit, guide};
 
 mod studio;
 
@@ -368,6 +368,41 @@ enum Command {
         #[arg(long, conflicts_with = "topic")]
         list: bool,
     },
+    /// Everything at once: inspect, every animation frame by frame, the
+    /// images, and the four-view sheet; then one list of problems, worst
+    /// first, each with the command that fixes it.
+    ///
+    /// Mistakes come first, then warnings a game would see (a part in
+    /// the air, an animation that jumps), then small things (an unused
+    /// colour). Each problem has `fix`, the command that surely fixes
+    /// it, or else `advice`, what to do in words: it never guesses a fix.
+    /// The sheet is written as `render` writes it (robot.png). Exit code
+    /// 1 if the recipe has mistakes; with --json the report is printed
+    /// then too.
+    Check {
+        /// A recipe (.toml or .json), or a model to look at (.obj, .glb).
+        file: PathBuf,
+        /// Print the report as JSON, for agents.
+        #[arg(long)]
+        json: bool,
+        /// Where to write the sheet. By default: next to the file, with
+        /// the same name and the ending .png.
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// How big each view of the sheet is, in pixels (128 to 2048).
+        #[arg(long, value_name = "PIXELS", default_value_t = render::DEFAULT_SIZE)]
+        size: usize,
+        /// Draw no sheet, and write nothing.
+        #[arg(long, conflicts_with_all = ["output", "size"])]
+        no_render: bool,
+    },
+    /// Print the recipe format as a JSON Schema (draft 2020-12).
+    ///
+    /// For editors and agents that check a recipe before running it: it
+    /// catches misspelt fields and wrong kinds of value. `inspect` and
+    /// `check` find much more (names that must exist, sizes that fit).
+    /// The same schema is docs/recipe.schema.json.
+    Schema,
 }
 
 fn main() -> ExitCode {
@@ -830,6 +865,38 @@ fn main() -> ExitCode {
                 },
             };
             say(text.trim_end());
+            ExitCode::SUCCESS
+        }
+        Command::Check {
+            file,
+            json,
+            output,
+            size,
+            no_render,
+        } => {
+            let options = check::Options {
+                render: !no_render,
+                output,
+                size,
+            };
+            match check::check_file(&file, &options) {
+                Ok(checked) => {
+                    if json {
+                        say_json(&checked);
+                    } else {
+                        say(checked.to_text().trim_end());
+                    }
+                    if checked.ok {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(1)
+                    }
+                }
+                Err(failure) => fail(&failure, json),
+            }
+        }
+        Command::Schema => {
+            say(duck_mold_core::schema::RECIPE_SCHEMA.trim_end());
             ExitCode::SUCCESS
         }
     }

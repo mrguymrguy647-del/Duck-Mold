@@ -267,10 +267,10 @@ pub struct KeyDef {
 }
 
 /// The fields of a key, in the order they are written.
-pub(crate) const KEY_FIELDS: [&str; 3] = ["at", "pose", "event"];
+pub const KEY_FIELDS: [&str; 3] = ["at", "pose", "event"];
 
 /// The fields of an animation, in the order they are written.
-pub(crate) const ANIMATION_FIELDS: [&str; 3] = ["loop", "smooth", "keys"];
+pub const ANIMATION_FIELDS: [&str; 3] = ["loop", "smooth", "keys"];
 
 /// How late a key can be, in seconds: an hour.
 pub const LONGEST_ANIMATION: f64 = 3600.0;
@@ -1006,7 +1006,7 @@ const FACING_WORDS: [(&str, [f64; 3]); 6] = [
 ];
 
 /// The fields a part can have, in the order they are listed in messages.
-pub(crate) const PART_FIELDS: [&str; 32] = [
+pub const PART_FIELDS: [&str; 32] = [
     "name",
     "shape",
     "use",
@@ -1042,7 +1042,7 @@ pub(crate) const PART_FIELDS: [&str; 32] = [
 ];
 
 /// The fields a change can have.
-const CHANGE_FIELDS: [&str; 9] = [
+pub const CHANGE_FIELDS: [&str; 9] = [
     "pull", "inset", "move", "turn", "scale", "cut", "by", "at", "name",
 ];
 
@@ -1059,7 +1059,7 @@ fn a_shape(name: &str) -> String {
 }
 
 /// The fields at the top of a recipe.
-pub(crate) const TOP_FIELDS: [&str; 14] = [
+pub const TOP_FIELDS: [&str; 14] = [
     "version",
     "name",
     "description",
@@ -1079,8 +1079,14 @@ pub(crate) const TOP_FIELDS: [&str; 14] = [
 /// Names kept for later phases, and what each is for.
 const RESERVED: [(&str, &str); 1] = [("bones", "rigs")];
 
+/// The fields of a pose's line written as a table: `{ turn, move }`.
+pub const POSE_LINE_FIELDS: [&str; 2] = ["turn", "move"];
+
+/// The fields a socket can have.
+pub const SOCKET_FIELDS: [&str; 5] = ["on", "shift", "facing", "at", "from"];
+
 /// The fields of a hit shape written as a table.
-const COLLIDER_FIELDS: [&str; 6] = ["shape", "center", "size", "radius", "length", "along"];
+pub const COLLIDER_FIELDS: [&str; 6] = ["shape", "center", "size", "radius", "length", "along"];
 
 /// The most colours a palette can hold.
 pub const MAX_PALETTE: usize = 256;
@@ -1692,7 +1698,7 @@ impl Decoder<'_> {
                                 "a part in a pose needs \"turn\", \"move\" or both, like { turn = [0, 30, 0] }",
                             );
                         }
-                        self.finish(fields, &["turn", "move"]);
+                        self.finish(fields, &POSE_LINE_FIELDS);
                         match (turn, move_by) {
                             (Some(None), _) | (_, Some(None)) | (None, None) => continue,
                             (turn, move_by) => (
@@ -3493,7 +3499,7 @@ impl Decoder<'_> {
                 None
             }
         };
-        self.finish(fields, &["on", "shift", "facing", "at", "from"]);
+        self.finish(fields, &SOCKET_FIELDS);
         kind
     }
 

@@ -3101,3 +3101,21 @@ fn with_robots_images(recipe: &std::path::Path) {
         std::fs::copy(from.join(image), to.join(image)).unwrap();
     }
 }
+
+#[test]
+fn schema_prints_the_json_schema() {
+    let folder = folder("schema");
+    let output = run(&folder, &["schema"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let printed = json(&output);
+    let file = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/recipe.schema.json"),
+    )
+    .unwrap();
+    let file: serde_json::Value = serde_json::from_str(&file).unwrap();
+    assert_eq!(printed, file);
+    assert_eq!(
+        printed["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
+}

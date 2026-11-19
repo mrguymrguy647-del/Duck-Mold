@@ -2456,7 +2456,8 @@ pub fn inspect_animation(
                     animation.name
                 ),
             )
-            .in_file(source),
+            .in_file(source)
+            .fix_by(&format!("fit-ground {}", animation.name)),
         );
     }
     let ends_as_it_starts = animation

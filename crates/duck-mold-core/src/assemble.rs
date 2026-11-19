@@ -309,10 +309,15 @@ fn assemble_at(loaded: &Loaded, issues: &mut Vec<Issue>, detail: u8) -> Option<M
     // Colours of the recipe's own palette that nothing names.
     for (color, referenced) in assembler.palette.iter().zip(&assembler.referenced) {
         if color.own && !referenced {
-            assembler.issues.push(color.loc.warning(
-                Code::Unused,
-                format!("the colour \"{}\" is never used", color.name),
-            ));
+            assembler.issues.push(
+                color
+                    .loc
+                    .warning(
+                        Code::Unused,
+                        format!("the colour \"{}\" is never used", color.name),
+                    )
+                    .fix_by(&format!("remove-color {}", color.name)),
+            );
         }
     }
 
@@ -490,15 +495,23 @@ fn animations(model: &Model, written: &[AnimationDef], issues: &mut Vec<Issue>) 
             if animation.looping && built.keys.len() >= 2 {
                 let (first, last) = (&built.keys[0], &built.keys[built.keys.len() - 1]);
                 for event in last.events.iter().filter(|event| first.events.contains(event)) {
-                    issues.push(last.loc.warning(
-                        Code::EventTwice,
-                        format!(
-                            "the animation \"{}\" loops, and its first and last keys both have the event \"{event}\": where the loop joins they are the same moment, so it would be heard twice. Keep it on one of them: remove-event {} {} {event}",
-                            animation.name,
-                            animation.name,
-                            built.keys.len()
-                        ),
-                    ));
+                    issues.push(
+                        last.loc
+                            .warning(
+                                Code::EventTwice,
+                                format!(
+                                    "the animation \"{}\" loops, and its first and last keys both have the event \"{event}\": where the loop joins they are the same moment, so it would be heard twice. Keep it on one of them: remove-event {} {} {event}",
+                                    animation.name,
+                                    animation.name,
+                                    built.keys.len()
+                                ),
+                            )
+                            .fix_by(&format!(
+                                "remove-event {} {} {event}",
+                                animation.name,
+                                built.keys.len()
+                            )),
+                    );
                 }
             }
             built

@@ -1,0 +1,213 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/mrguymrguy647-del/Duck-Mold/blob/main/docs/recipe.schema.json",
+  "title": "Duck Mold recipe",
+  "description": "A Duck Mold recipe: a palette and the parts of a model, which part joins which, how it moves. Written as TOML or JSON; this schema describes either (TOML read as JSON). `duck-mold inspect` checks much more than this (names that must exist, sizes that must fit); the schema catches misspelt fields and wrong kinds of value before it is run. docs/recipe-format.md explains every field.",
+  "type": "object",
+  "required": ["version", "parts"],
+  "additionalProperties": false,
+  "properties": {
+    "version": { "const": 0, "description": "Always 0." },
+    "name": { "$ref": "#/$defs/name", "description": "The model's name, in reports and inside the .glb. Default: the file's name." },
+    "description": { "type": "string", "description": "A sentence for people and agents." },
+    "note": { "description": "For people. Ignored." },
+    "export": { "type": "string", "pattern": "\\.glb$", "description": "Where the model's .glb belongs, from the recipe's own folder: \"../assets/robot.glb\"." },
+    "palette": {
+      "description": "The colours, by name; or the path of a palette file.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "object", "maxProperties": 256, "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/hex" } }
+      ]
+    },
+    "colliders": { "enum": ["parts", "capsule", "box", "sphere"], "description": "The model's hit shapes: one fitted to every part, or one round the whole model." },
+    "lods": {
+      "description": "Far-away versions: \"auto\", \"none\", or two distances in metres, nearer first.",
+      "oneOf": [
+        { "enum": ["auto", "none"] },
+        { "type": "array", "items": { "type": "number", "exclusiveMinimum": 0 }, "minItems": 2, "maxItems": 2 }
+      ]
+    },
+    "define": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/part" }, "description": "Parts defined once, to `use` many times." },
+    "parts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/part" }, "description": "The model's parts." },
+    "sockets": { "$ref": "#/$defs/sockets", "description": "Extra sockets on the whole model." },
+    "origin": { "type": "string", "description": "Where the model's zero point is: \"bottom\" (the default), a socket of the model, or \"part.socket\"." },
+    "poses": { "type": "object", "propertyNames": { "$ref": "#/$defs/name", "not": { "const": "rest" } }, "additionalProperties": { "$ref": "#/$defs/pose" }, "description": "The model's poses, by name." },
+    "animations": { "type": "object", "propertyNames": { "$ref": "#/$defs/name" }, "additionalProperties": { "$ref": "#/$defs/animation" }, "description": "The model's animations, by name." }
+  },
+  "$defs": {
+    "name": { "type": "string", "pattern": "^[A-Za-z0-9_-]+$", "description": "Letters, digits, _ and -." },
+    "hex": { "type": "string", "pattern": "^#([0-9A-Fa-f]{6}|[0-9A-Fa-f]{3})$", "description": "\"#RRGGBB\" or \"#RGB\"." },
+    "size": { "type": "number", "minimum": 0.001, "maximum": 1000 },
+    "three": { "type": "array", "items": { "type": "number" }, "minItems": 3, "maxItems": 3 },
+    "faces": {
+      "description": "One face name, or several.",
+      "oneOf": [
+        { "type": "string" },
+        { "type": "array", "items": { "type": "string" }, "minItems": 1 }
+      ]
+    },
+    "part": {
+      "type": "object",
+      "description": "One part. It gets its shape from exactly one of shape, use, file and parts.",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "$ref": "#/$defs/name" },
+        "shape": { "enum": ["box", "cylinder", "sphere", "cone", "wedge", "capsule", "torus", "tube", "pyramid", "prism", "stairs", "arch"] },
+        "use": { "type": "string", "description": "A part under `define`, by name." },
+        "file": { "type": "string", "description": "Another recipe (.toml, .json) or a mesh (.obj, .gltf, .glb), from the recipe's folder." },
+        "parts": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/part" }, "description": "The parts of an assembly." },
+        "size": { "type": "array", "items": { "$ref": "#/$defs/size" }, "minItems": 3, "maxItems": 3, "description": "Width (x), height (y), depth (z), in metres." },
+        "radius": { "$ref": "#/$defs/size" },
+        "tube": { "$ref": "#/$defs/size", "description": "A torus's thickness: less than its radius." },
+        "wall": { "$ref": "#/$defs/size", "description": "A tube's or an arch's wall." },
+        "height": { "$ref": "#/$defs/size" },
+        "segments": { "type": "integer", "minimum": 3, "maximum": 64 },
+        "steps": { "type": "integer", "minimum": 1 },
+        "bevel": { "type": "number", "minimum": 0, "description": "Cuts a box's or a cylinder's edges off by this many metres." },
+        "bevel_steps": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "taper": {
+          "description": "The top's width as a share of the bottom's: one number, or [x, z].",
+          "oneOf": [
+            { "type": "number", "minimum": 0.01, "maximum": 10 },
+            { "type": "array", "items": { "type": "number", "minimum": 0.01, "maximum": 10 }, "minItems": 2, "maxItems": 2 }
+          ]
+        },
+        "color": { "$ref": "#/$defs/name", "description": "A palette name." },
+        "colors": { "type": "object", "additionalProperties": { "$ref": "#/$defs/name" }, "description": "Colours for single faces, by face name." },
+        "image": { "type": "string", "description": "A PNG file, from the recipe's folder, on the whole part; \"none\" for none." },
+        "images": { "type": "object", "additionalProperties": { "type": "string" }, "description": "PNG files for single faces, by face name; \"none\" for none." },
+        "changes": { "type": "array", "items": { "$ref": "#/$defs/change" }, "description": "Changes to a box's shape, made in turn." },
+        "attach": { "type": "string", "description": "The part's own socket to join. Needs `to`." },
+        "to": { "type": "string", "description": "\"part.socket\": the socket to join it to. Needs `attach`." },
+        "twist": { "type": "number", "minimum": -36000, "maximum": 36000 },
+        "rotate": { "type": "array", "items": { "type": "number", "minimum": -36000, "maximum": 36000 }, "minItems": 3, "maxItems": 3 },
+        "move": { "type": "array", "items": { "type": "number", "minimum": -10000, "maximum": 10000 }, "minItems": 3, "maxItems": 3 },
+        "scale": {
+          "oneOf": [
+            { "type": "number", "minimum": 0.001, "maximum": 1000 },
+            { "type": "array", "items": { "type": "number", "minimum": 0.001, "maximum": 1000 }, "minItems": 3, "maxItems": 3 }
+          ]
+        },
+        "mirror": { "enum": ["x", "y", "z"] },
+        "limits": {
+          "description": "How far the part may turn about its join when the model is posed.",
+          "oneOf": [
+            { "const": "fixed" },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": { "x": { "$ref": "#/$defs/turns" }, "y": { "$ref": "#/$defs/turns" }, "z": { "$ref": "#/$defs/turns" } }
+            }
+          ]
+        },
+        "collider": {
+          "description": "The part's own hit shape.",
+          "oneOf": [
+            { "enum": ["box", "sphere", "capsule", "none"] },
+            {
+              "type": "object",
+              "required": ["shape"],
+              "additionalProperties": false,
+              "properties": {
+                "shape": { "enum": ["box", "sphere", "capsule"] },
+                "center": { "$ref": "#/$defs/three" },
+                "size": { "$ref": "#/$defs/three" },
+                "radius": { "type": "number", "exclusiveMinimum": 0 },
+                "length": { "type": "number", "exclusiveMinimum": 0 },
+                "along": { "enum": ["x", "y", "z"] }
+              }
+            }
+          ]
+        },
+        "lod": { "enum": ["keep", "auto"], "description": "\"keep\": never simplified or left out of the far-away versions." },
+        "sockets": { "$ref": "#/$defs/sockets" },
+        "note": { "description": "For people. Ignored." }
+      }
+    },
+    "turns": {
+      "description": "Two angles in degrees, the least and the most; or \"free\".",
+      "oneOf": [
+        { "const": "free" },
+        { "type": "array", "items": { "type": "number", "minimum": -36000, "maximum": 36000 }, "minItems": 2, "maxItems": 2 }
+      ]
+    },
+    "change": {
+      "type": "object",
+      "description": "One change to a box: exactly one of pull, inset, move, turn, scale and cut, with its amount.",
+      "additionalProperties": false,
+      "minProperties": 2,
+      "properties": {
+        "pull": { "$ref": "#/$defs/faces" },
+        "inset": { "$ref": "#/$defs/faces" },
+        "move": { "$ref": "#/$defs/faces", "description": "Faces; an edge \"top+front\"; a corner \"top+front+left\"." },
+        "turn": { "$ref": "#/$defs/faces" },
+        "scale": { "$ref": "#/$defs/faces" },
+        "cut": { "enum": ["top", "bottom", "left", "right", "front", "back"] },
+        "by": { "oneOf": [{ "type": "number" }, { "$ref": "#/$defs/three" }] },
+        "at": { "type": "number", "minimum": 0, "exclusiveMaximum": 1 },
+        "name": { "$ref": "#/$defs/name" }
+      }
+    },
+    "sockets": {
+      "type": "object",
+      "propertyNames": { "$ref": "#/$defs/name" },
+      "additionalProperties": { "$ref": "#/$defs/socket" }
+    },
+    "socket": {
+      "type": "object",
+      "description": "On a side or face (`on`, `shift`), at a point (`at`), or passed on from a part inside (`from`).",
+      "additionalProperties": false,
+      "properties": {
+        "on": { "type": "string" },
+        "shift": { "$ref": "#/$defs/three" },
+        "at": { "$ref": "#/$defs/three" },
+        "facing": {
+          "oneOf": [
+            { "enum": ["up", "down", "left", "right", "front", "back"] },
+            { "$ref": "#/$defs/three" }
+          ]
+        },
+        "from": { "type": "string", "description": "\"part.socket\" inside this part." }
+      }
+    },
+    "pose": {
+      "type": "object",
+      "description": "For each part that isn't at rest, by its path (\"left_arm/elbow\"): its turn [x, y, z] in degrees, or { turn, move }.",
+      "additionalProperties": {
+        "oneOf": [
+          { "$ref": "#/$defs/three" },
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "properties": { "turn": { "$ref": "#/$defs/three" }, "move": { "$ref": "#/$defs/three" } }
+          }
+        ]
+      }
+    },
+    "animation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "loop": { "type": "boolean" },
+        "smooth": { "type": "boolean" },
+        "keys": { "type": "array", "items": { "$ref": "#/$defs/key" } }
+      }
+    },
+    "key": {
+      "type": "object",
+      "required": ["at", "pose"],
+      "additionalProperties": false,
+      "properties": {
+        "at": { "type": "number", "minimum": 0, "maximum": 3600 },
+        "pose": { "type": "string" },
+        "event": {
+          "oneOf": [
+            { "$ref": "#/$defs/name" },
+            { "type": "array", "items": { "$ref": "#/$defs/name" } }
+          ]
+        }
+      }
+    }
+  }
+}
