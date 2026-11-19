@@ -1,0 +1,66 @@
+DUCK MOLD, FOR LINUX
+Make 3D models for Duck Forge games from parts that join at sockets,
+with the mouse or from a text recipe.
+
+
+TO START
+  In a terminal, in this folder:
+
+    ./DuckMoldStudio
+
+  For Duck Mold Studio in your applications menu, and on your desktop:
+
+    ./create-desktop-shortcut.sh
+
+  Keep this folder where it is afterwards: the shortcut points into it.
+  (Some desktops ask once whether to trust the desktop icon: choose
+  "Allow Launching".)
+
+  The Studio needs a graphics driver that does Vulkan (most do; on an
+  old machine, install your distribution's "mesa-vulkan-drivers").
+
+
+A FIRST LOOK
+  The Studio opens on its start page. Click one of the examples (the
+  robot, say): a copy of your own opens, in the folder "Duck Mold" in
+  your Documents, so you can change it as you like. The first time,
+  five small tips show you round (Help > Show the tips again brings
+  them back). Help > The keys lists every key.
+
+
+ON THE COMMAND LINE, AND FOR AI AGENTS
+  duck-mold, in this folder, is Duck Mold without a window: it builds,
+  checks, draws, edits and exports recipes. Put it on your PATH (copy it
+  to ~/.local/bin, say), then:
+
+    duck-mold guide                       everything an AI agent needs first
+    duck-mold check examples/robot.toml   every problem, with its fix
+    duck-mold render examples/robot.toml  a picture of it
+    duck-mold export examples/robot.toml  the .glb, for a game
+
+  For an AI app that speaks MCP (Claude Code, Claude Desktop, Codex):
+
+    claude mcp add duck-mold -- duck-mold mcp
+
+
+YOUR MODELS ARE TEXT FILES
+  A model is a recipe: a .toml file that lists its parts and where they
+  join. The Studio changes that file every time you change something,
+  so there is nothing to save, and the file is the model. An AI agent
+  can read and change it too, while the Studio is open: the Studio
+  shows the change at once.
+
+
+WHAT'S IN THIS FOLDER
+  DuckMoldStudio            the Studio: build models with the mouse
+  duck-mold                 Duck Mold on the command line
+  create-desktop-shortcut.sh  puts the Studio in your applications menu
+  examples/                 recipes to open, look at and change
+  docs/                     the recipe format, and the guide for AI agents
+
+
+A NEW VERSION
+  Download the new file and replace this folder with it. Keep your own
+  models somewhere else (the Studio puts them in Documents/Duck Mold),
+  never in this folder, so they are safe. Run create-desktop-shortcut.sh
+  again if you moved the folder.

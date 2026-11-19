@@ -6,12 +6,23 @@ TOML or JSON file that lists a palette and the parts of a model), and the
 came out. The numbers answer most questions; when you can read images,
 `duck-mold render` draws the model too, so you can check it looks right.
 
-This guide is all you need. The same text is printed by `duck-mold guide`.
+This guide is all you need. `duck-mold guide all` prints it; `duck-mold
+guide` prints a one-page start (`docs/guide-start.md`), and `duck-mold
+guide <topic>` one part of this guide (`duck-mold guide --list` lists
+them).
+
+<!-- The marks "topic: <name>" and "/topic: <name>" round passages of
+this guide say which passages `duck-mold guide <name>` prints. Passages
+can be in several topics. -->
 
 ## 1. The loop
 
 ```bash
 duck-mold inspect lamp.toml --json    # check it, build it in memory, measure it
+```
+
+```bash
+duck-mold check lamp.toml --json      # everything at once: problems worst first, each with its fix
 ```
 
 ```bash
@@ -38,8 +49,10 @@ duck-mold export lamp.toml            # write lamp.glb next to the recipe
 ```
 
 1. Write or edit the recipe.
-2. Run `inspect --json`. If `"ok"` is false, fix every entry of `"errors"`
-   (each names a line, a field and usually the fix) and run it again.
+2. Run `check --json` (or `inspect --json`). If `"ok"` is false, fix
+   every error (each names a line, a field and usually the fix) and run
+   it again. `check` also gives each problem the command that fixes it
+   (section 7).
 3. Read the report: `size`, `triangles`, `ground`, `floating`,
    `overlapping`, `warnings`. Compare them with what you meant (section 7).
 4. If you can look at images, run `render` and look at the PNG: is each
@@ -69,7 +82,35 @@ is a change you made.
 
 ## 2. Set up (once)
 
-You need Rust (`cargo`). From the repository folder:
+If `duck-mold` is already there (`duck-mold --version` answers), skip
+this. Otherwise, on Linux or a Mac, one line installs it in
+`~/.local/bin`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mrguymrguy647-del/Duck-Mold/main/install.sh | sh
+```
+
+Or take the program for your machine from the releases page:
+`duck-mold-<version>-linux-x86_64`, `-linux-arm64` or `-macos`. Each is
+one file that needs nothing else, and runs with no network:
+`chmod +x` it and run it. On Windows, `DuckMoldSetup-<version>.exe`
+installs it. With Rust: `cargo install --locked --git
+https://github.com/mrguymrguy647-del/Duck-Mold duck-mold-cli`.
+
+**In ChatGPT** (or any sandbox that runs programs but has no internet):
+the person uploads `duck-mold-<version>-linux-x86_64` and their recipe.
+Rename the program to `duck-mold`, run `chmod +x duck-mold`, then
+`./duck-mold guide`, and work from there with `./duck-mold`. Give the
+person the recipe and the `.glb` back as files to download.
+
+**As tools (MCP):** in an app that speaks MCP, `duck-mold mcp` gives
+these commands as tools with the same arguments (`guide`, `inspect`,
+`check`, `edit`, `render`, `export`, `new`); `render` returns the
+picture itself. Claude Code: `claude mcp add duck-mold -- duck-mold
+mcp`. `--folder <folder>` says where file names start. The README says
+how for Claude Desktop and Codex.
+
+From the source, you need Rust (`cargo`). From the repository folder:
 
 ```bash
 cargo build --release
@@ -99,6 +140,7 @@ pulls), `window_wall` (insets) and `rock` (corners moved). `new` never
 writes over a file. Without `--example`
 it starts a recipe with one box in it.
 
+<!-- topic: recipes -->
 ## 3. A first recipe
 
 ```toml
@@ -247,6 +289,7 @@ Two options:
 
 Use them sparingly: a bevel on every box multiplies the triangles.
 
+<!-- topic: shaping -->
 **Shaping a box: `changes`.** A box (with or without `taper`, without
 `bevel`) can have a list of changes, made to it one after the other:
 
@@ -298,6 +341,7 @@ colors = { window = "wood", glass = "sky" }
 - Only a box can be shaped in this version; a part that `use`s a
   definition is shaped in the definition.
 
+<!-- /topic: shaping -->
 Use few segments: 8 is usually enough for a game model. A 4-sided cone
 is a square pyramid; a 4-sided cylinder is a box. A round shape's radius
 is measured to the middle of a flat side, so radius 0.5 is exactly 1
@@ -313,6 +357,7 @@ none of its own, so the nearest setting wins. A face with no colour at
 all is built plain grey, with a warning. An assembly has no faces of its
 own: `colors` on it is an error; colour the parts inside.
 
+<!-- topic: images -->
 **Images.** `image = "textures/planks.png"` puts a PNG on every face of
 a part; `images = { front = "textures/face.png" }` on one face. They
 follow the colour rules (`images` beats `image`; the nearest setting
@@ -341,6 +386,7 @@ wins; `"none"` takes one away; `images` on an assembly is an error).
 - A missing file is `file_not_found`; a file that isn't a PNG, is
   damaged or too big is `bad_image`. Nothing is built.
 
+<!-- /topic: images -->
 ## 6. Sockets
 
 A socket is a named point on a part with a direction it faces. Two
@@ -426,6 +472,8 @@ Parts in one list form a tree. `to` can only name a part **in the same
 list**, by its `name`. To reach inside an assembly, give the assembly a
 socket with `from`.
 
+<!-- topic: mistakes -->
+<!-- /topic: recipes -->
 ## 7. Reading the report
 
 `inspect --json` prints (shortened):
@@ -491,6 +539,32 @@ count of parts in the summary is of parts that have a shape of their own
 (not assemblies). `depth` is measured at corners, edge middles and face
 middles, so it is a good estimate rather than an exact figure.
 
+### `check`: every problem, worst first, with its fix
+
+`duck-mold check lamp.toml --json` does in one call what `inspect`,
+`inspect --animation` for each animation, and `render` do, and gives one
+list, `problems`, worst first. Each problem is an error or warning as
+above, plus:
+
+- `rank`: `error` (nothing is built until it is fixed), `warning` (it
+  builds, but a game would see it: a part in the air, a loop that
+  jumps, a broken limit) or `small` (a colour nobody uses, a hidden
+  part).
+- `fix`: the command that surely fixes it, when there is one:
+  `"duck-mold edit lamp.toml remove-color rust"`. Run it as it is.
+- `advice`: when no one command surely fixes it, what to do, in words.
+  It never guesses a fix.
+
+Besides `problems`: `errors`, `warnings` and `small` count them; `next`
+says what to do next; `picture` says where the four-view sheet went
+(`--no-render` draws none); `animations` lists each animation looked at;
+`inspection` is the whole `inspect` report. The exit code is 1 when
+there are errors. `inspect` and `edit` give `fix` on their warnings too.
+
+`duck-mold schema` prints the recipe format as a JSON Schema
+(`docs/recipe.schema.json`), to check a recipe's fields before running
+it. `check` finds much more: names that must exist, sizes that fit.
+
 ## 8. Errors and warnings
 
 Every problem is reported at once. As text, one per line:
@@ -555,6 +629,8 @@ Warnings (the model is still built; exit code 0):
 | `dips_between_keys` | `inspect --animation`: the animation sinks more than 3 mm into the ground between two keys that stand on it. `fit-ground <animation>` adds a key there. |
 | `skipped` | Something in a mesh file was passed over. |
 
+<!-- topic: recipes -->
+<!-- /topic: mistakes -->
 ## 9. How to build common things
 
 **Stack things.** Join `bottom` to `top`:
@@ -613,6 +689,7 @@ by material name, to choose your own. A `.glb` Duck Mold wrote brings its
 palette, so it looks as it did (`examples/desk.toml`). Animations and
 bones are left out with a note, and a compressed file is refused.
 
+<!-- topic: images -->
 **A glTF file's pictures come with it** (`examples/signpost.toml`): each
 material's colour picture, PNG or JPEG, laid on by the file's own
 layout. Nothing is written in the recipe for that, and a material wholly
@@ -625,10 +702,13 @@ material's colour. An OBJ file's layout is read too, so `images` works
 on its materials. A file with no layout ("UVs") can't take an image:
 the error says so.
 
+<!-- /topic: images -->
 **Choose where the model's zero point is.** `origin = "pole.bottom"`
 puts it at a socket of one part instead of under the middle of the
 whole model.
 
+<!-- topic: edits -->
+<!-- /topic: recipes -->
 ## 10. Changing a recipe with `edit`
 
 You can always change the recipe's text yourself. `duck-mold edit` makes
@@ -644,6 +724,8 @@ grouped by what they change.
 duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 ```
 
+#### Parts, colours and sockets
+
 | Command | What it does |
 |---|---|
 | `duck-mold edit <recipe> add <name> --to <part.socket>` | Adds a part joined to a socket. Made of `--shape box` (or any other shape's name), `--use <defined part>` or `--file <recipe or mesh>`. Also takes `--attach <own socket>`, the shape's sizes (`--size x,y,z`, `--radius`, `--tube`, `--wall`, `--height`, `--segments`, `--steps`), its options (`--bevel`, `--bevel-steps`, `--taper n` or `--taper x,z`), `--color`, `--twist`. |
@@ -656,6 +738,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> unjoin <part>` | Makes a joined part free, exactly where it stands: its `attach`, `to` and `twist` become a `move` and a `rotate`. The model doesn't change; the part can then be moved anywhere. |
 | `duck-mold edit <recipe> duplicate <part>` | Copies a part, comments and all, straight after it. `--name` names the copy (otherwise `hat_2`); `--to` joins it elsewhere. Parts hanging from it are not copied. A copy of a joined part, with no `--to`, never sits on the part it copies: it goes to the next socket of the same part that nothing is joined to and that faces the same way (in the order they are written: the next table leg's socket); else to a new socket (`spot`) made beside the original's, 10 cm past it on the same side, if there is room; else (in the model's own list) it stands free on clear ground in front of the model. The summary says which. |
 | `duck-mold edit <recipe> duplicate <part> --mirror` | A mirror image: a right arm from a left arm. The copy gets `mirror = "x"`, its twist is reversed, and `left` and `right` are swapped in its name and in the socket it joins (`body.left_arm` becomes `body.right_arm`), unless `--name` and `--to` say otherwise. |
+| `duck-mold edit <recipe> define <part> <name>` | Makes a definition from a part of the model's own list: its shape and sizes (or file), changes, colours and own sockets move to `[define.<name>]`, and the part becomes `use = "<name>"` where it stands. Add more with `add <new> --use <name>`; shaping one shapes them all. |
 | `duck-mold edit <recipe> add-color <name> <#RRGGBB>` | Adds a colour to the recipe's palette. |
 | `duck-mold edit <recipe> set-color <name> <#RRGGBB>` | Changes a palette colour. Everything painted with it changes. |
 | `duck-mold edit <recipe> remove-color <name>` | Takes a colour out of the palette. Refused if anything is painted with it, naming what; `--replace-with <other colour>` paints those with the other colour first. |
@@ -665,11 +748,30 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> rename-socket <part.socket> <new name>` | Renames a socket a part declares, and everything that names it: the `to` of each part joined to it, the part's own `attach`, and a socket that passes it on with `from`. |
 | `duck-mold edit <recipe> remove-socket <part.socket>` | Removes a declared socket. Refused if anything uses it, naming what. |
 | `duck-mold edit <recipe> tidy-sockets` | Removes the sockets the Studio made (`spot`, `spot_2`...) that nothing uses any more. The Studio does this itself when it leaves one unused. |
-| `duck-mold edit <recipe> set-colliders <parts\|capsule\|box\|sphere\|none>` | The model's hit shapes (section 11, "Hit shapes"): `parts` fits one to every part; `capsule`, `box` or `sphere` puts one round the whole model; `none` takes the line away. |
-| `duck-mold edit <recipe> set-collider <part> <box\|sphere\|capsule\|none\|fitted>` | A part's own hit shape: a shape fitted to it, `none` (no hit shape), or `fitted` (take its own away: it follows `colliders`). `--size x,y,z`, `--radius r`, `--length l` (end to end), `--center x,y,z` and `--along x\|y\|z` give it numbers of its own; any not given keep the fitted shape's. |
-| `duck-mold edit <recipe> set-lods <auto\|none\|near,far>` | The model's far-away versions (section 11, "Far-away versions"): `auto` puts two at 8 and 20 times the model's largest side; `12,30` puts them at 12 m and 30 m; `none` takes the line away. |
-| `duck-mold edit <recipe> set-export <path\|none>` | Where the model's `.glb` belongs, from the recipe's own folder: `set-export ../assets/robot.glb` writes `export = "../assets/robot.glb"` at the top of the recipe. `duck-mold export <recipe>` with no `-o`, and the Studio's Export, then write there (the folder is made if it isn't there). `none` takes the line away: beside the recipe again. The line changes nothing in the model. |
-| `duck-mold edit <recipe> set-lod <part> <keep\|auto>` | `keep`: the part is never simplified or left out of the far-away versions (a character's eyes). `auto` takes that away again. On an assembly, it keeps everything inside it. |
+
+<!-- topic: shaping -->
+#### Shaping a box
+
+| Command | What it does |
+|---|---|
+| `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
+| `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
+| `duck-mold edit <recipe> set-change <part> <number> --by <amount>` | Changes the amount of one change, counted from 1 as they are written: one number, or `x,y,z` for a move, a turn or a scale. Later changes, and every name, stay. |
+| `duck-mold edit <recipe> remove-change <part> <number>` | Takes one change away (`--all`: every one, and the part is a plain box again). Refused if a later change or a colour names a face only that change made: the mistakes it would cause are listed. |
+| `duck-mold edit <recipe> move-face <part> <faces> --by x,y,z` | Adds a move of faces to a box's `changes`. Right after a move of the same faces, it adds to that one instead of making a second line. |
+| `duck-mold edit <recipe> turn-face <part> <faces> --by x,y,z` | Adds a turn of faces (degrees around x, y, z, about their middle). Adds to a turn of the same faces right before it. |
+| `duck-mold edit <recipe> scale-face <part> <faces> --by n` | Adds a scale of faces (one number, or `x,y,z`). Multiplies a scale of the same faces right before it. |
+| `duck-mold edit <recipe> move-edge <part> <a+b> --by x,y,z` | Adds a move of an edge (where faces `a` and `b` meet; several with commas). Adds to a move of the same edges right before it. |
+| `duck-mold edit <recipe> move-corner <part> <a+b+c> --by x,y,z` | Adds a move of a corner (where faces `a`, `b` and `c` meet; several with commas). Adds to a move of the same corners right before it. A rock: cut a box through the middle three ways (`cut` right, top and front, `--at 0`), then move its corners in and out. |
+| `duck-mold edit <recipe> cut <part> --toward <side> --at <share>` | Adds a cut all the way round, facing a side, `--at` of the way from the middle (0) to that side (just under 1). `--name` names the slices. `set-change --at` moves it. |
+
+<!-- /topic: shaping -->
+
+<!-- topic: motion -->
+#### Moving: limits, poses, animations
+
+| Command | What it does |
+|---|---|
 | `duck-mold edit <recipe> set-limits <part> --x <low,high> --y ... --z ...` | Says how far a part may turn when the model is posed (section 11). Each of `--x`, `--y`, `--z` takes two angles (`-30,40`), `free` (any amount) or `none` (not that way); directions not given stay as they are. `--fixed`: it never turns or moves. `--none`: no limits again. |
 | `duck-mold edit <recipe> set-pose <pose> <part> --turn x,y,z` | Turns a part in a pose, in degrees about its pivot (section 11); `--move x,y,z` slides it, in metres. Makes the pose if it isn't there. `--rest` puts the part back at rest in that pose. |
 | `duck-mold edit <recipe> add-pose <name>` | A new pose with every part at rest; `--from <pose>` makes it a copy of another. |
@@ -687,17 +789,24 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
 | `duck-mold edit <recipe> set-animation <animation> --loop true\|false --smooth true\|false --length <seconds>` | Any of the three. `--length` scales every key's time: the whole animation gets faster or slower. |
 | `duck-mold edit <recipe> rename-animation <animation> <new name>` | Renames an animation where it stands. |
 | `duck-mold edit <recipe> remove-animation <animation>` | Removes an animation. Its poses stay. |
-| `duck-mold edit <recipe> pull <part> <faces> --by <metres>` | Adds a pull to a box's `changes` (section 5): the faces (one, or several with commas: `top_left,top`) pulled out by `--by` metres, with walls round them; below 0 pushes them in. `--name` names the walls. |
-| `duck-mold edit <recipe> inset <part> <faces> --by <metres>` | Adds an inset to a box's `changes`: a smaller face inside each face, `--by` metres in from its edges. `--name` names the face in the middle. |
-| `duck-mold edit <recipe> set-change <part> <number> --by <amount>` | Changes the amount of one change, counted from 1 as they are written: one number, or `x,y,z` for a move, a turn or a scale. Later changes, and every name, stay. |
-| `duck-mold edit <recipe> move-face <part> <faces> --by x,y,z` | Adds a move of faces to a box's `changes`. Right after a move of the same faces, it adds to that one instead of making a second line. |
-| `duck-mold edit <recipe> turn-face <part> <faces> --by x,y,z` | Adds a turn of faces (degrees around x, y, z, about their middle). Adds to a turn of the same faces right before it. |
-| `duck-mold edit <recipe> scale-face <part> <faces> --by n` | Adds a scale of faces (one number, or `x,y,z`). Multiplies a scale of the same faces right before it. |
-| `duck-mold edit <recipe> move-edge <part> <a+b> --by x,y,z` | Adds a move of an edge (where faces `a` and `b` meet; several with commas). Adds to a move of the same edges right before it. |
-| `duck-mold edit <recipe> define <part> <name>` | Makes a definition from a part of the model's own list: its shape and sizes (or file), changes, colours and own sockets move to `[define.<name>]`, and the part becomes `use = "<name>"` where it stands. Add more with `add <new> --use <name>`; shaping one shapes them all. |
-| `duck-mold edit <recipe> move-corner <part> <a+b+c> --by x,y,z` | Adds a move of a corner (where faces `a`, `b` and `c` meet; several with commas). Adds to a move of the same corners right before it. A rock: cut a box through the middle three ways (`cut` right, top and front, `--at 0`), then move its corners in and out. |
-| `duck-mold edit <recipe> cut <part> --toward <side> --at <share>` | Adds a cut all the way round, facing a side, `--at` of the way from the middle (0) to that side (just under 1). `--name` names the slices. `set-change --at` moves it. |
-| `duck-mold edit <recipe> remove-change <part> <number>` | Takes one change away (`--all`: every one, and the part is a plain box again). Refused if a later change or a colour names a face only that change made: the mistakes it would cause are listed. |
+
+<!-- /topic: motion -->
+
+<!-- topic: hits -->
+<!-- topic: export -->
+#### Games: hit shapes, far versions, export
+
+| Command | What it does |
+|---|---|
+| `duck-mold edit <recipe> set-colliders <parts\|capsule\|box\|sphere\|none>` | The model's hit shapes (section 11, "Hit shapes"): `parts` fits one to every part; `capsule`, `box` or `sphere` puts one round the whole model; `none` takes the line away. |
+| `duck-mold edit <recipe> set-collider <part> <box\|sphere\|capsule\|none\|fitted>` | A part's own hit shape: a shape fitted to it, `none` (no hit shape), or `fitted` (take its own away: it follows `colliders`). `--size x,y,z`, `--radius r`, `--length l` (end to end), `--center x,y,z` and `--along x\|y\|z` give it numbers of its own; any not given keep the fitted shape's. |
+| `duck-mold edit <recipe> set-lods <auto\|none\|near,far>` | The model's far-away versions (section 11, "Far-away versions"): `auto` puts two at 8 and 20 times the model's largest side; `12,30` puts them at 12 m and 30 m; `none` takes the line away. |
+| `duck-mold edit <recipe> set-lod <part> <keep\|auto>` | `keep`: the part is never simplified or left out of the far-away versions (a character's eyes). `auto` takes that away again. On an assembly, it keeps everything inside it. |
+| `duck-mold edit <recipe> set-export <path\|none>` | Where the model's `.glb` belongs, from the recipe's own folder: `set-export ../assets/robot.glb` writes `export = "../assets/robot.glb"` at the top of the recipe. `duck-mold export <recipe>` with no `-o`, and the Studio's Export, then write there (the folder is made if it isn't there). `none` takes the line away: beside the recipe again. The line changes nothing in the model. |
+
+<!-- /topic: export -->
+<!-- /topic: hits -->
+
 
 - **A part is named as `inspect` prints it**: `head`, `left_arm/hand`,
   or `#2` for a part with no name. `--to` takes the same
@@ -735,6 +844,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   with the palette colours it uses and none of where it stands: put it
   in the `parts` folder next to a recipe and it is in the Studio's
   library. It never writes over a file.
+<!-- topic: images -->
 - **`duck-mold new-image <recipe> <part>`** (an edit that also writes
   a file) makes a new image and puts it on the part: a PNG that is
   see-through all over, in `textures/` beside the recipe
@@ -770,6 +880,7 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   so and exits with 2; `--duck-quill <program>` says where it is, and
   is remembered. To paint without a window, write the PNG yourself (the
   `new-image` bullet above).
+<!-- /topic: images -->
 - **`duck-mold save-animation <recipe> <animation> <file>`** (not an
   `edit` either) writes an animation and the poses it uses to a small
   file of their own, for another model to take with `add-animation
@@ -792,10 +903,12 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   scale, colour, copy or remove them together. In the file that is
   the same edit, once for each part: run the command once for each.
   Hiding a part in the Studio changes nothing in the file.
+<!-- topic: shaping -->
 - In the Studio, Face mode (Tab) shapes a box by hand: a drag of its
   Pull arrow is a `pull`, of its Inset knob an `inset`, and the panel's
   Changes list is `set-change` and `remove-change`. Read the result
   with `inspect --faces`.
+<!-- /topic: shaping -->
 - In the Studio, the panel's Hit shape list and numbers are
   `set-collider` (the list's first line, what the model's line gives,
   is `set-collider <part> fitted`), Fit again is `set-collider <part>
@@ -816,13 +929,17 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   list: Add is `add-animation --from` (or `--starter`) with
   `--skip-missing`, under the animation's own name or with a number;
   Save is `save-animation` into `animations/`.
+<!-- topic: shaping -->
 - **`pull`, `inset`, `set-change` and `remove-change` on a part made
   from a defined part** change the definition, like `set --shape`.
 - **`set --shape` to anything but a box drops a box's changes** (only a
   box can be shaped), and says so: `dropped 3 changes`.
+<!-- /topic: shaping -->
 - Not edits: `mirror` (except through `duplicate --mirror`), sockets
   passed on with `from`, and `define`. Type those in the recipe.
 
+<!-- topic: motion -->
+<!-- /topic: edits -->
 ## 11. Models that move
 
 A model moves by its joins. There are no bones to place: **every part
@@ -1126,6 +1243,8 @@ duck-mold edit duck.toml add-animation hello --from robot.toml --take wave
   the poses it uses, the animation. Any recipe with animations can be
   copied from too.
 
+<!-- topic: hits -->
+<!-- /topic: motion -->
 ### Hit shapes
 
 So a game can tell **what was hit** (the robot's head, not just "the
@@ -1173,6 +1292,8 @@ duck-mold inspect robot.toml --ray 0,1.4,5 --toward 0,0,-1   # what a click ther
 - Give tiny parts (eyes, a buckle) `none`: a hit on them is rarely
   wanted, and the part behind is named instead.
 
+<!-- topic: export -->
+<!-- /topic: hits -->
 ### Far-away versions
 
 A model a game shows far off (a building, a crowd of characters) should
@@ -1288,6 +1409,8 @@ That is safe:
   line isn't written the way TOML needs:" and then the TOML library's own
   words.
 
+<!-- topic: mistakes -->
+<!-- /topic: export -->
 ## 12. Mistakes to avoid
 
 - **Typing positions when a socket would do.** A part placed with
@@ -1322,12 +1445,15 @@ bending on bones). There is
 a window, Duck Mold Studio, but it is for people: everything it does,
 you do with `edit`.
 
+<!-- /topic: mistakes -->
 ## 14. Files for reference
 
 - `examples/`: crate, table, tree, house, robot, desk, snowman, duck.
   Read `robot.toml` for nested parts, `snowman.toml` and `duck.toml` for
   sockets on curved surfaces, and `desk.toml` for parts from files.
 - `docs/recipe-format.md`: every field, default and range.
+- `docs/recipe.schema.json` (`duck-mold schema`): the same, as a JSON
+  Schema.
 - `docs/forge-handoff.md`: what is in the `.glb`, and how Duck Forge
   reads it.
 - `DESIGN.md`: why each thing is the way it is.

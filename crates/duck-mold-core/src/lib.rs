@@ -30,6 +30,7 @@ pub mod motion;
 pub mod picture;
 pub mod recipe;
 pub mod save;
+pub mod schema;
 pub mod shapes;
 pub mod shaping;
 pub mod source;

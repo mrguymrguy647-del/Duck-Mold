@@ -8,4 +8,7 @@
 //!
 //! [`Edit`]: duck_mold_core::edit::Edit
 
+pub mod check;
 pub mod edit;
+pub mod guide;
+pub mod mcp;

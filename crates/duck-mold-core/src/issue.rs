@@ -210,6 +210,10 @@ pub struct Issue {
     /// The likely fix: the word that was probably meant.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub suggestion: Option<String>,
+    /// The command that fixes it, when one surely does:
+    /// `duck-mold edit robot.toml remove-color rust`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub fix: Option<String>,
 }
 
 impl Issue {
@@ -226,6 +230,7 @@ impl Issue {
             got: None,
             allowed: None,
             suggestion: None,
+            fix: None,
         }
     }
 
@@ -282,6 +287,16 @@ impl Issue {
     /// Adds the likely fix.
     pub fn suggest(mut self, suggestion: impl Into<String>) -> Self {
         self.suggestion = Some(suggestion.into());
+        self
+    }
+
+    /// Adds the edit that fixes it, as it follows `duck-mold edit
+    /// <file>`: `remove-color rust`. Give the file first ([`Issue::in_file`]):
+    /// without one there is no command to give.
+    pub fn fix_by(mut self, edit: &str) -> Self {
+        if !self.file.is_empty() {
+            self.fix = Some(format!("duck-mold edit {} {edit}", shell_word(&self.file)));
+        }
         self
     }
 
@@ -401,6 +416,20 @@ impl fmt::Display for Report {
             writeln!(f, "{issue}")?;
         }
         writeln!(f, "{}", self.closing_line())
+    }
+}
+
+/// A word as a shell reads it: as it is if it is plain, otherwise in
+/// single quotes (`'my models/robot.toml'`).
+pub fn shell_word(word: &str) -> String {
+    let plain = !word.is_empty()
+        && word
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "_-./,:=+@".contains(c));
+    if plain {
+        word.to_owned()
+    } else {
+        format!("'{}'", word.replace('\'', "'\\''"))
     }
 }
 

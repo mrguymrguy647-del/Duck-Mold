@@ -17,8 +17,10 @@ and [Duck Echo](https://github.com/mrguymrguy647-del/Duck-Echo) (sound),
 and like them it is made for two kinds of user: people who don't know
 3D modelling or Rust, and AI agents.
 
-**An AI agent?** Read [docs/AI_GUIDE.md](docs/AI_GUIDE.md), or run
-`duck-mold guide`: the whole tool on one page, from scratch.
+**An AI agent?** Run `duck-mold guide`: one page to start, and the
+rest a topic at a time ([docs/AI_GUIDE.md](docs/AI_GUIDE.md) is all of
+it). [For AI agents](#for-ai-agents), below, says how to add Duck Mold
+to Claude Code, Claude Desktop, Codex or ChatGPT.
 
 ## Start the Studio on Windows, without a terminal
 
@@ -46,6 +48,56 @@ window opens behind it.
 
 The rest of this page builds a model by typing first, because that
 shows what a recipe is; the Studio comes at step 6 of the quick start.
+
+## Install on Linux or a Mac
+
+One line installs `duck-mold`, the command-line program, in
+`~/.local/bin`. It picks the file for your machine, checks its
+fingerprint, and needs no administrator:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mrguymrguy647-del/Duck-Mold/main/install.sh | sh
+```
+
+`DUCK_MOLD_DIR=/some/folder` puts it somewhere else, and
+`DUCK_MOLD_VERSION=1.1.0` picks a version. Or download it yourself from
+the [Releases](https://github.com/mrguymrguy647-del/Duck-Mold/releases)
+page:
+
+| File | What it is |
+|---|---|
+| `duck-mold-<version>-linux-x86_64` | `duck-mold` for Linux on an ordinary PC. It needs nothing else installed: it runs on any Linux, even a bare container. |
+| `duck-mold-<version>-linux-arm64` | The same, for Linux on ARM (a Raspberry Pi 4 or 5 with a 64-bit system, a cloud ARM server). |
+| `duck-mold-<version>-macos` | `duck-mold` for a Mac, Apple chip or Intel. |
+| `DuckMoldStudio-<version>-linux-x86_64.tar.gz` | The Studio for Linux, with `duck-mold`, the examples and the guides. Unpack it and run `./DuckMoldStudio`; `./create-desktop-shortcut.sh` adds it to your applications menu. |
+| `duck-mold-<version>-source.tar.gz` | The source of `duck-mold` with every library it uses inside, for a machine with no internet (below). |
+| `SHA256SUMS` | The fingerprint of every file. |
+
+A downloaded program needs `chmod +x` before it runs. On a Mac, the
+first time, macOS may refuse a program from the internet: right-click it
+in Finder and choose Open, or run `xattr -d com.apple.quarantine
+duck-mold` (the install line does this for you).
+
+**The Studio on a Mac, or from the source on Linux:** install Rust from
+<https://rustup.rs>, get this repository, and run
+`./start-duck-mold-studio.sh` (on a Mac, double-click `Start Duck Mold
+Studio.command` in Finder instead). It builds the Studio, a few minutes
+the first time, and starts it. On Linux, `./create-desktop-shortcut.sh`
+then adds it to your applications menu.
+
+**With Rust's own installer**, on any system:
+
+```bash
+cargo install --locked --git https://github.com/mrguymrguy647-del/Duck-Mold duck-mold-cli
+```
+
+or, in a copy of this repository, `cargo install --locked --path
+crates/duck-mold-cli`.
+
+**With no internet:** unpack `duck-mold-<version>-source.tar.gz` and,
+in its folder, run `cargo build --offline --release -p duck-mold-cli`.
+Nothing is downloaded: every library is in the archive. The program is
+then `target/release/duck-mold`.
 
 ## A first model
 
@@ -622,10 +674,13 @@ only: nothing can be changed there.
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
 | `duck-mold studio [recipe]` | Opens the Studio, the window where a model is built with the mouse. Every change it makes is a `duck-mold edit`, written to the recipe at once. It builds the model again whenever the recipe, or a file it uses, is saved by another program. |
 | `duck-mold preview <file>` | Opens the Studio to look only: drag to orbit, right-drag to pan, wheel to zoom, Escape to quit. Also shows a mesh file (`.obj`, `.gltf`, `.glb`). |
-| `duck-mold guide` | Prints the guide for AI agents. |
+| `duck-mold check <file>` | Everything at once: `inspect`, every animation frame by frame, the images and the four-view picture, then **one list of problems, worst first**: mistakes, then warnings a game would see (a part in the air, an animation that jumps), then small things (a colour nobody uses). Each problem has `fix`, the command that surely fixes it, or else `advice` in words. Writes the picture as `render` does; `--no-render` writes nothing. |
+| `duck-mold guide [topic]` | Prints the guide for AI agents: one page to start; `guide <topic>` one part of the full guide (`guide --list` lists them: recipes, edits, shaping, motion, hits, images, export, mistakes); `guide all` the whole guide. |
+| `duck-mold schema` | Prints the recipe format as a JSON Schema (`docs/recipe.schema.json`), for editors and agents that check a file before running it. |
+| `duck-mold mcp` | Serves these commands as tools for an AI app, over MCP: see [For AI agents](#for-ai-agents). |
 | `duck-mold help` | Lists the commands; `duck-mold inspect --help` explains one. |
 
-Add `--json` to `inspect`, `export`, `render`, `edit` or `new` to get the
+Add `--json` to `inspect`, `check`, `export`, `render`, `edit` or `new` to get the
 report as JSON, on one line, for an agent or a script (`--pretty` spreads
 it over lines for reading).
 
@@ -941,6 +996,73 @@ is sent after every change unless you turn that off. Undo in the tab is
 the same Undo as here: it is kept on disk for each recipe, so a change
 made in one Studio can be undone in the other.
 
+## For AI agents
+
+`duck-mold guide` prints the page to start with: the commands, a
+recipe, the loop and the rules. An agent that follows it changes recipes
+with `edit` (never by hand), runs `check` after every change, and looks
+with `render` when it can see pictures. `duck-mold schema` gives the
+recipe format as a JSON Schema. [AGENTS.md](AGENTS.md) says the same to
+agents that work on Duck Mold's own code.
+
+### As tools in an AI app (MCP)
+
+`duck-mold mcp` makes Duck Mold a set of tools for any app that speaks
+MCP, the Model Context Protocol: `guide`, `inspect`, `check`, `edit`,
+`render` (which hands the picture itself to the AI), `export` and `new`,
+each with the same arguments as its command. The app starts it and talks
+to it directly; nothing goes over the network. File names start from
+the folder the app starts it in, or from `--folder`.
+
+**Claude Code**, in a terminal:
+
+```bash
+claude mcp add duck-mold -- duck-mold mcp
+```
+
+**Claude Desktop:** Settings → Developer → Edit Config opens
+`claude_desktop_config.json`. Add Duck Mold under `mcpServers`, with the
+whole path of the program and the folder your models are in, then
+restart Claude Desktop:
+
+```json
+{
+  "mcpServers": {
+    "duck-mold": {
+      "command": "/Users/you/.local/bin/duck-mold",
+      "args": ["mcp", "--folder", "/Users/you/Documents/Duck Mold"]
+    }
+  }
+}
+```
+
+On Windows, after the installer, the program is
+`C:\Users\you\AppData\Local\Programs\Duck Mold\duck-mold.exe`; in the
+file, write each `\` twice.
+
+**Codex** (OpenAI's coding agent): add to `~/.codex/config.toml`:
+
+```toml
+[mcp_servers.duck-mold]
+command = "duck-mold"
+args = ["mcp"]
+```
+
+### Using Duck Mold in ChatGPT
+
+ChatGPT can run a program you give it, in its own sandbox, which has no
+internet. The Linux file needs nothing else, so it runs there:
+
+1. Download `duck-mold-<version>-linux-x86_64` from the
+   [Releases](https://github.com/mrguymrguy647-del/Duck-Mold/releases)
+   page.
+2. In ChatGPT, upload it and your recipe (or none, to start one), and
+   say: *"Rename the program to duck-mold, run `chmod +x duck-mold`,
+   then `./duck-mold guide`, and follow it to make my model."*
+3. ChatGPT reads the guide and works from there: `./duck-mold check`,
+   `./duck-mold render` (it can look at the picture), `./duck-mold
+   export`. Ask it for the recipe and the `.glb` back as downloads.
+
 ## Documents
 
 | | |
@@ -960,17 +1082,25 @@ made in one Studio can be undone in the other.
 | [POLISH_AUDIT.md](POLISH_AUDIT.md) | Every screen looked at before Phase 7a, and what was wrong with it. |
 | [PHASE7A_REPORT.md](PHASE7A_REPORT.md) | Phase 7a, polish: every changed screen before and after, the speed before and after, far-away versions, the command line for agents, and the first real release. |
 | [PHASE7_REPORT.md](PHASE7_REPORT.md) | All of Phase 7, the last planned phase: images on models, the round trip with Duck Quill, Duck Mold inside Duck Forge Studio, Pip (a character made with all three apps), version 1.0.0, a picture of every changed screen, the known limits, and what a Phase 8 could be. |
+| [AGENT_KIT_REPORT.md](AGENT_KIT_REPORT.md) | The agent kit (1.1.0): Linux and Mac downloads, the one-line install, `check`, `schema`, the shorter guide, the MCP server, AGENTS.md. |
+| [AGENTS.md](AGENTS.md) | For AI agents that make models with Duck Mold, or work on its code. |
+| [docs/recipe.schema.json](docs/recipe.schema.json) | The recipe format as a JSON Schema (`duck-mold schema`). |
 | [RELEASE_NOTES.md](RELEASE_NOTES.md) | What changed in each version, in plain words. |
 
 ## Project layout
 
 ```
 Duck-Mold/
-├── .github/workflows/ci.yml   the tests on Windows and Linux, for every push
-├── .github/workflows/release.yml  makes the Windows downloads (installer and zip) and tests the installer
-├── Start Duck Mold Studio.bat double-click: builds the Studio and starts it
-├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
-├── release/                   the installer's script, and what goes in the download beside the programs
+├── .github/workflows/ci.yml   the tests on Windows, Linux and macOS, for every push
+├── .github/workflows/release.yml  makes every download, tests each, and publishes them together
+├── Start Duck Mold Studio.bat double-click: builds the Studio and starts it (Windows)
+├── Create desktop shortcut.bat    double-click: a shortcut on the desktop (Windows)
+├── start-duck-mold-studio.sh  builds the Studio and starts it (Linux, Mac)
+├── Start Duck Mold Studio.command  the same, to double-click on a Mac
+├── create-desktop-shortcut.sh puts the Studio in a Linux applications menu
+├── install.sh                 the one-line install for Linux and Mac
+├── AGENTS.md, CLAUDE.md       for AI agents
+├── release/                   the installer's script, the downloads' read-mes, and the scripts that make and test the downloads
 ├── Cargo.toml                 the workspace: five crates, built together
 ├── examples/                  twenty-four recipes to read and change, textures/ for their images, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
@@ -998,7 +1128,8 @@ Duck-Mold/
     ├── duck-mold-studio/      the Studio's screens (egui), as a library: Duck Forge Studio shows them in a tab
     │   └── assets/            its icon (a picture of examples/duck.toml) and the examples' pictures
     ├── duck-mold-studio-app/  the `DuckMoldStudio` program: opens a window for those screens, with the icon
-    └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
+    └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints;
+                               the guide, `check` and the MCP server (`mcp`)
 ```
 
 ## Working on Duck Mold
@@ -1015,8 +1146,8 @@ cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-All three must pass before a commit. GitHub runs them again, on Windows
-and on Linux, for every push and pull request
+All three must pass before a commit. GitHub runs them again, on Windows,
+Linux and macOS, for every push and pull request
 (`.github/workflows/ci.yml`).
 
 The Studio is a program of its own, `DuckMoldStudio`, so the `duck-mold`

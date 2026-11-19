@@ -21,7 +21,7 @@ use duck_mold_core::issue::{Issue, Report};
 use duck_mold_core::tools::{self, Failure};
 use duck_mold_view::render;
 
-use duck_mold_cli::edit;
+use duck_mold_cli::{check, edit, guide, mcp};
 
 mod studio;
 
@@ -33,7 +33,7 @@ mod studio;
 #[command(
     name = "duck-mold",
     version,
-    after_help = "Exit codes: 0 it worked, 1 the recipe has errors, 2 the command was wrong or a file couldn't be read or written.\nThe recipe format: docs/recipe-format.md. For AI agents: docs/AI_GUIDE.md."
+    after_help = "Exit codes: 0 it worked, 1 the recipe has errors, 2 the command was wrong or a file couldn't be read or written.\nThe recipe format: docs/recipe-format.md. For AI agents: duck-mold guide."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -354,14 +354,70 @@ enum Command {
         #[arg(long, global = true)]
         dry_run: bool,
     },
-    /// Print the guide for AI agents: how to write recipes and use these
-    /// commands, from scratch.
-    Guide,
+    /// Print the guide for AI agents: one page to start, or one topic
+    /// of the full guide.
+    ///
+    /// With no topic: the page to start with (the commands, a recipe,
+    /// the loop, the rules). With a topic: that part of the guide. `all`:
+    /// the whole guide (docs/AI_GUIDE.md).
+    Guide {
+        /// recipes, edits, shaping, motion, hits, images, export,
+        /// mistakes, or all.
+        topic: Option<String>,
+        /// List the topics.
+        #[arg(long, conflicts_with = "topic")]
+        list: bool,
+    },
+    /// Everything at once: inspect, every animation frame by frame, the
+    /// images, and the four-view sheet; then one list of problems, worst
+    /// first, each with the command that fixes it.
+    ///
+    /// Mistakes come first, then warnings a game would see (a part in
+    /// the air, an animation that jumps), then small things (an unused
+    /// colour). Each problem has `fix`, the command that surely fixes
+    /// it, or else `advice`, what to do in words: it never guesses a fix.
+    /// The sheet is written as `render` writes it (robot.png). Exit code
+    /// 1 if the recipe has mistakes; with --json the report is printed
+    /// then too.
+    Check {
+        /// A recipe (.toml or .json), or a model to look at (.obj, .glb).
+        file: PathBuf,
+        /// Print the report as JSON, for agents.
+        #[arg(long)]
+        json: bool,
+        /// Where to write the sheet. By default: next to the file, with
+        /// the same name and the ending .png.
+        #[arg(short, long, value_name = "FILE")]
+        output: Option<PathBuf>,
+        /// How big each view of the sheet is, in pixels (128 to 2048).
+        #[arg(long, value_name = "PIXELS", default_value_t = render::DEFAULT_SIZE)]
+        size: usize,
+        /// Draw no sheet, and write nothing.
+        #[arg(long, conflicts_with_all = ["output", "size"])]
+        no_render: bool,
+    },
+    /// Serve Duck Mold's commands as tools for an AI app, over MCP (the
+    /// Model Context Protocol), on standard input and output.
+    ///
+    /// The app starts it; you don't run it yourself. The tools: guide,
+    /// inspect, check, edit, render (which returns the picture), export
+    /// and new, each with the same arguments as its command. Claude Code:
+    /// `claude mcp add duck-mold -- duck-mold mcp`. The README says how
+    /// for Claude Desktop and Codex. Nothing goes over the network.
+    Mcp {
+        /// The folder file names start from. By default, the folder the
+        /// app starts it in (Claude Desktop's is not one you chose).
+        #[arg(long, value_name = "FOLDER")]
+        folder: Option<PathBuf>,
+    },
+    /// Print the recipe format as a JSON Schema (draft 2020-12).
+    ///
+    /// For editors and agents that check a recipe before running it: it
+    /// catches misspelt fields and wrong kinds of value. `inspect` and
+    /// `check` find much more (names that must exist, sizes that fit).
+    /// The same schema is docs/recipe.schema.json.
+    Schema,
 }
-
-/// The guide, built into the program, so that an agent that has only
-/// the program can still learn to use it.
-const GUIDE: &str = include_str!("../../../docs/AI_GUIDE.md");
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -802,8 +858,85 @@ fn main() -> ExitCode {
                 Err(failure) => fail(&failure, json),
             }
         }
-        Command::Guide => {
-            say(GUIDE.trim_end());
+        Command::Guide { topic, list } => {
+            let text = match (topic.as_deref(), list) {
+                (_, true) => guide::list(),
+                (None, false) => guide::START.to_owned(),
+                (Some("all"), false) => guide::full(),
+                (Some(name), false) => match guide::topic(name) {
+                    Some(text) => text,
+                    None => {
+                        let names = guide::TOPICS.iter().map(|(name, _)| *name).chain(["all"]);
+                        let issue = Issue::error(
+                            duck_mold_core::issue::Code::OutOfRange,
+                            "",
+                            format!("there is no topic \"{name}\" in the guide"),
+                        )
+                        .got(name)
+                        .one_of(name, names);
+                        return fail(&Failure::Usage(Box::new(issue)), false);
+                    }
+                },
+            };
+            say(text.trim_end());
+            ExitCode::SUCCESS
+        }
+        Command::Check {
+            file,
+            json,
+            output,
+            size,
+            no_render,
+        } => {
+            let options = check::Options {
+                render: !no_render,
+                output,
+                size,
+            };
+            match check::check_file(&file, &options) {
+                Ok(checked) => {
+                    if json {
+                        say_json(&checked);
+                    } else {
+                        say(checked.to_text().trim_end());
+                    }
+                    if checked.ok {
+                        ExitCode::SUCCESS
+                    } else {
+                        ExitCode::from(1)
+                    }
+                }
+                Err(failure) => fail(&failure, json),
+            }
+        }
+        Command::Mcp { folder } => {
+            if let Some(folder) = folder
+                && let Err(error) = std::env::set_current_dir(&folder)
+            {
+                eprintln!(
+                    "error: can't work in the folder \"{}\": {error}",
+                    folder.display()
+                );
+                return ExitCode::from(2);
+            }
+            let program = match std::env::current_exe() {
+                Ok(program) => program,
+                Err(error) => {
+                    eprintln!("error: can't find the duck-mold program itself: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            let stdin = std::io::stdin();
+            match mcp::serve(stdin.lock(), std::io::stdout().lock(), &program) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    ExitCode::from(2)
+                }
+            }
+        }
+        Command::Schema => {
+            say(duck_mold_core::schema::RECIPE_SCHEMA.trim_end());
             ExitCode::SUCCESS
         }
     }

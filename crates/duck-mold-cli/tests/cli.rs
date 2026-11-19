@@ -1449,12 +1449,118 @@ fn block_after(guide: &str, after: &str, fence: &str) -> String {
     guide[start..end].trim_start_matches('\n').to_owned() + "\n"
 }
 
+const TOPICS: [&str; 8] = [
+    "recipes", "edits", "shaping", "motion", "hits", "images", "export", "mistakes",
+];
+
 #[test]
-fn guide_prints_the_guide_that_is_in_the_repository() {
+fn guide_prints_a_short_start_and_guide_all_the_whole_guide() {
     let folder = folder("cli_guide");
     let output = run(&folder, &["guide"]);
     assert_eq!(output.status.code(), Some(0));
-    assert_eq!(stdout(&output).trim_end(), guide().trim_end());
+    let start = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/guide-start.md"),
+    )
+    .unwrap();
+    assert_eq!(stdout(&output).trim_end(), start.trim_end());
+    // One page: what an agent needs first, not 1,300 lines.
+    assert!(
+        start.lines().count() <= 110,
+        "{} lines",
+        start.lines().count()
+    );
+
+    // guide all: the guide in the repository, without its topic marks.
+    let output = run(&folder, &["guide", "all"]);
+    assert_eq!(output.status.code(), Some(0));
+    let marks = |line: &&str| {
+        line.trim().starts_with("<!-- topic: ") || line.trim().starts_with("<!-- /topic: ")
+    };
+    let whole = guide();
+    let wanted: Vec<&str> = whole.lines().filter(|line| !marks(line)).collect();
+    assert_eq!(stdout(&output).trim_end(), wanted.join("\n").trim_end());
+}
+
+#[test]
+fn every_command_the_start_page_names_is_there() {
+    let folder = folder("cli_guide_commands");
+    let start = stdout(&run(&folder, &["guide"]));
+    let mut named: Vec<String> = start
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix("duck-mold "))
+        .filter_map(|rest| rest.split_whitespace().next())
+        .map(str::to_owned)
+        .collect();
+    named.sort();
+    named.dedup();
+    assert!(named.len() >= 8, "{named:?}");
+    for command in named {
+        let output = run(&folder, &[&command, "--help"]);
+        assert_eq!(output.status.code(), Some(0), "duck-mold {command} --help");
+    }
+}
+
+#[test]
+fn every_topic_is_there_and_cut_from_the_guide() {
+    let folder = folder("cli_guide_topics");
+    let guide = guide();
+    // Every mark names a topic, and every begin has its end.
+    for line in guide.lines().map(str::trim) {
+        if let Some(name) = line
+            .strip_prefix("<!-- topic: ")
+            .or_else(|| line.strip_prefix("<!-- /topic: "))
+        {
+            let name = name.trim_end_matches(" -->");
+            assert!(TOPICS.contains(&name), "a mark names {name}, not a topic");
+        }
+    }
+    let listed = stdout(&run(&folder, &["guide", "--list"]));
+    for topic in TOPICS {
+        let begins = guide.matches(&format!("<!-- topic: {topic} -->")).count();
+        let ends = guide.matches(&format!("<!-- /topic: {topic} -->")).count();
+        assert!(
+            begins > 0 && begins == ends,
+            "{topic}: {begins} begins, {ends} ends"
+        );
+        let output = run(&folder, &["guide", topic]);
+        assert_eq!(output.status.code(), Some(0), "{topic}");
+        let text = stdout(&output);
+        assert!(
+            text.starts_with(&format!("# Duck Mold guide: {topic}")),
+            "{topic}"
+        );
+        assert!(
+            text.lines().count() > 30,
+            "{topic} is only {} lines",
+            text.lines().count()
+        );
+        assert!(
+            !text.contains("<!-- topic") && !text.contains("<!-- /topic"),
+            "{topic}"
+        );
+        assert!(
+            listed.contains(&format!("  {topic} ")),
+            "--list leaves out {topic}"
+        );
+    }
+    // What each holds.
+    let topic = |name: &str| stdout(&run(&folder, &["guide", name]));
+    assert!(topic("shaping").contains("{ pull = \"top\", by = 0.5 }"));
+    assert!(topic("shaping").contains("duck-mold edit <recipe> cut"));
+    assert!(topic("images").contains("duck-mold new-image <recipe> <part>"));
+    assert!(topic("motion").contains("duck-mold edit <recipe> fit-ground"));
+    assert!(topic("hits").contains("colliders = \"parts\""));
+    assert!(topic("export").contains("lods = \"auto\""));
+    assert!(topic("mistakes").contains("## 12. Mistakes to avoid"));
+    assert!(topic("edits").contains("--batch edits.txt"));
+    // A topic that isn't there: the list of those that are.
+    let output = run(&folder, &["guide", "shapes"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("It can be: recipes, edits"),
+        "{}",
+        stderr(&output)
+    );
 }
 
 #[test]
@@ -2994,4 +3100,22 @@ fn with_robots_images(recipe: &std::path::Path) {
     for image in ["robot_face.png", "robot_label.png"] {
         std::fs::copy(from.join(image), to.join(image)).unwrap();
     }
+}
+
+#[test]
+fn schema_prints_the_json_schema() {
+    let folder = folder("schema");
+    let output = run(&folder, &["schema"]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let printed = json(&output);
+    let file = std::fs::read_to_string(
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/recipe.schema.json"),
+    )
+    .unwrap();
+    let file: serde_json::Value = serde_json::from_str(&file).unwrap();
+    assert_eq!(printed, file);
+    assert_eq!(
+        printed["$schema"],
+        "https://json-schema.org/draft/2020-12/schema"
+    );
 }
