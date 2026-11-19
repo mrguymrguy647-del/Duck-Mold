@@ -491,6 +491,7 @@ than 12 points at 100%.
 | Key | Does |
 |---|---|
 | G, R, S, T, P | The Move, Rotate, Scale, Size and Paint tools |
+| Shift+P | Paint the selected part's image in Duck Quill (a new image, if it has none) |
 | Tab | Shape the selected box: Face mode. Tab again: back to parts |
 | E | The selected box's edges: click one to move it. E again: back to parts |
 | C | The selected box's corners: click one to move it. C again: back to parts |
@@ -614,6 +615,8 @@ only: nothing can be changed there.
 | `duck-mold render <file>` | Draws the model and writes a PNG next to it: front, right side, back and three-quarter views. `-o` writes it somewhere else; `--size 384` makes each view 384 pixels square (256 unless you say). Draws a mesh file (`.obj`, `.gltf`, `.glb`) as it is, too. `--pose <name>` draws the model in one of its poses, as `<file>.<pose>.png`. `--animation <name>` draws one of its animations as a strip of frames side by side, as `<file>.<animation>.strip.png` (`--frames` for how many, `--view` for where from). `--colliders` outlines the hit shapes in cyan. `--far 1` or `--far 2` draws a far-away version, as `<file>.far1.png`. |
 | `duck-mold edit <recipe> <change>` | Makes one change to a recipe without typing it: `add`, `remove`, `rename`, `join`, `set`, `duplicate`, `add-color`, `set-color`, `add-socket`, `set-socket`, `set-limits`, `set-pose`, `mirror-pose`, `add-animation`, `add-key`, `set-colliders`, `set-collider`, `set-lods`, `set-lod`; and to a box's shape, `pull` and `inset`. Only what has to change in the file changes. Prints one line saying what changed (`--report`: the whole `inspect` report). `--batch edits.txt` makes a list of edits, one a line, written once or not at all. `--dry-run` writes nothing. |
 | `duck-mold new-image <recipe> <part>` | Makes a new image for a part and puts it on: a PNG that is see-through all over, with the proportions of what it covers and as many pixels to the metre as the model's other images, in `textures/` beside the recipe. `--face front` for one face; `--file` names it; `--size 64x48` sizes it. Paint on it with Duck Quill or any picture program. Nothing is written over. |
+| `duck-mold paint <recipe> <part>` | Opens the part's image in Duck Quill to paint on, with the outlines of its faces as a guide and the part's colour as paper. `--face front` for one face. A part with no image gets a new one first. Save in Duck Quill and the model has it. `--system` opens the PNG in whatever this computer opens pictures with; `--duck-quill <program>` says where Duck Quill is (remembered); `--dry-run` only says what would be started. |
+| `duck-mold image-guide <recipe> <part>` | Writes the guide alone: a see-through PNG with the outlines of the faces an image covers, which way is up, and where other parts are joined on. Beside the image as `<image>.guide.png`, or `-o <file>`. For painting in a program that isn't Duck Quill, or for an agent to see what goes where. |
 | `duck-mold save-part <recipe> <part> <file>` | Writes one part alone as a recipe of its own (for the parts library), with the colours it uses and none of where it stands. The recipe doesn't change; nothing is written over. |
 | `duck-mold save-animation <recipe> <animation> <file>` | Writes an animation and the poses it uses to a small file of their own (for the animation library). Another model takes it with `edit <recipe> add-animation <name> --from <file>`; the starters with `--starter walk`. The recipe doesn't change; nothing is written over. |
 | `duck-mold new <recipe>` | Starts a new recipe: one box standing on the ground. With `--example <name>` (`robot`, `house`, `snowman`, `desk`, `duck`, `dog`, `doughnut`, `mug`, `temple`, `barn`, `slide`, `gate`, `chair`, `window_wall`, `rock`, `door`, `cart`, `gnome`): a copy of that example, with the files it uses. Never writes over a file. |
@@ -776,6 +779,19 @@ images = { top = "textures/lid.png" }            # ...but the top has its own
   one from outside the recipe's folder is copied into `textures/`) and
   a cross to take it off. *New image...* makes a see-through PNG of the
   right proportions to paint on.
+- **Painting it:** *Paint in Duck Quill* beside an image (or Shift+P
+  with a part selected, or *Make it and paint in Duck Quill* in the New
+  image window) opens the picture in
+  [Duck Quill](https://github.com/mrguymrguy647-del/duck-quill), zoomed
+  in, with the hard one-pixel brush, on paper the colour of the part,
+  and with thin lines showing the faces it covers and which way is up.
+  Paint, press Ctrl+S there, and the model in Duck Mold has it. Both
+  windows stay open. Duck Quill keeps the picture's layers in a
+  `.quill` file beside the PNG; Duck Mold only reads the PNG.
+- **Without Duck Quill** nothing is lost: the image is a plain PNG. The
+  first time, a window asks where Duck Quill is, or offers *Open in my
+  picture program instead*, and the choice is remembered (Help > Duck
+  Quill... changes it). Duck Quill needs version 0.6.0 or newer.
 - **From the command line:** `duck-mold new-image robot.toml head --face
   front`, then `duck-mold edit robot.toml set head --face-image
   front=textures/face.png` (or `front=none`), `set crate --image

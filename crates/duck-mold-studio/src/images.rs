@@ -13,6 +13,7 @@ use duck_mold_core::edit::Facts;
 use duck_mold_core::images::ImagePlan;
 use duck_mold_core::picture::Picture;
 use duck_mold_core::recipe::NO_IMAGE;
+use duck_mold_view::quill::{self, PaintJob, With};
 use duck_mold_view::studio::Studio;
 use duck_mold_view::studio::handles::Tool;
 use duck_mold_view::studio::images::Brush;
@@ -34,6 +35,210 @@ pub struct Draft {
     new: Option<NewImage>,
     /// Why the last change wasn't made.
     failed: Option<String>,
+    /// Painting an image in Duck Quill, or another picture program.
+    pub painting: Painting,
+}
+
+/// What the Studio knows about painting images in another program.
+#[derive(Default)]
+pub struct Painting {
+    /// Duck Mold's settings folder: where the program chosen is
+    /// remembered and the guides are written. Without one (the tests),
+    /// nothing is remembered and Duck Quill isn't looked for.
+    pub settings: Option<PathBuf>,
+    /// The program to use whatever is remembered or found: for tests.
+    pub with: Option<With>,
+    /// Whether programs are really started (not in the tests).
+    pub start: bool,
+    /// The last image handed to a program.
+    pub last: Option<PaintJob>,
+    /// The part (and face) waiting to be painted while the window that
+    /// says Duck Quill can't be found is open.
+    asking: Option<(String, Option<String>)>,
+    /// Whether Help's "Duck Quill" window is open.
+    pub help: bool,
+}
+
+impl Painting {
+    /// The program images are painted in: the one chosen before, if it
+    /// is still there, or Duck Quill where it is found. `None`: nothing
+    /// was chosen and Duck Quill can't be found.
+    pub fn program(&self) -> Option<With> {
+        if let Some(with) = &self.with {
+            return Some(with.clone());
+        }
+        let settings = self.settings.as_deref()?;
+        match quill::remembered(settings) {
+            Some(With::System) => Some(With::System),
+            Some(With::DuckQuill(program)) => {
+                quill::find_duck_quill_here(Some(&program)).map(With::DuckQuill)
+            }
+            None => quill::find_duck_quill_here(None).map(With::DuckQuill),
+        }
+    }
+
+    /// What the button says: "Paint in Duck Quill", or, when the system's
+    /// picture program was chosen instead, "Open in my picture program".
+    pub fn words(&self) -> &'static str {
+        match self.program() {
+            Some(With::System) => "Open in my picture program",
+            _ => "Paint in Duck Quill",
+        }
+    }
+
+    /// Hands the image a part (or one face of it) shows to `with`, and
+    /// remembers the choice. What was started, or why not, is said in
+    /// the status bar.
+    fn hand_over(&mut self, studio: &mut Studio, part: &str, face: Option<&str>, with: With) {
+        let guides = match &self.settings {
+            Some(settings) => settings.join("guides"),
+            None => std::env::temp_dir().join("duck-mold-guides"),
+        };
+        let job = match studio.paint_job(part, face, with.clone(), &guides) {
+            Ok(job) => job,
+            Err(why) => {
+                studio.say_why(&why);
+                return;
+            }
+        };
+        if let Some(settings) = &self.settings {
+            quill::remember(settings, &with);
+        }
+        let said = if self.start {
+            job.start()
+        } else {
+            Ok(format!("Would start: {}", job.words().join(" ")))
+        };
+        match said {
+            Ok(said) => studio.say_why(&said),
+            Err(why) => studio.say_why(&why),
+        }
+        self.last = Some(job);
+    }
+
+    /// "Paint in Duck Quill" for the image a part (or one face of it)
+    /// shows. If Duck Quill can't be found and nothing else was chosen,
+    /// a window asks what to do.
+    pub fn paint(&mut self, studio: &mut Studio, part: &str, face: Option<&str>) {
+        match self.program() {
+            Some(with) => self.hand_over(studio, part, face, with),
+            None => self.asking = Some((part.to_owned(), face.map(str::to_owned))),
+        }
+    }
+}
+
+/// Where Duck Quill can be had.
+pub const GET_DUCK_QUILL: &str = "https://github.com/mrguymrguy647-del/duck-quill/releases";
+
+/// Asks where Duck Quill's program is.
+fn pick_duck_quill() -> Option<PathBuf> {
+    rfd::FileDialog::new()
+        .set_title("Where is Duck Quill?")
+        .add_filter("Duck Quill", &["exe", ""])
+        .pick_file()
+}
+
+/// The buttons both of the Duck Quill windows have: find it, get it, or
+/// use the system's picture program. Gives the program chosen.
+fn program_buttons(ui: &mut egui::Ui) -> Option<With> {
+    let mut chosen = None;
+    ui.horizontal_wrapped(|ui| {
+        if ui
+            .button("Find DuckQuill.exe...")
+            .on_hover_text("Show Duck Mold where Duck Quill's program is. It is remembered")
+            .clicked()
+            && let Some(program) = pick_duck_quill()
+        {
+            chosen = Some(With::DuckQuill(program));
+        }
+        ui.hyperlink_to("Get Duck Quill", GET_DUCK_QUILL)
+            .on_hover_text("Duck Quill's download page");
+    });
+    if ui
+        .button("Open in my picture program instead")
+        .on_hover_text("Whatever this computer opens PNG files with. It is remembered")
+        .clicked()
+    {
+        chosen = Some(With::System);
+    }
+    ui.label(
+        RichText::new("The image is a plain PNG: any program that saves it works, and the model shows it at once.")
+            .weak()
+            .small(),
+    );
+    chosen
+}
+
+/// The windows about painting in another program: the one that says
+/// Duck Quill can't be found, and Help's "Duck Quill".
+pub fn painting_windows(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
+    let painting = &mut draft.painting;
+    if let Some((part, face)) = painting.asking.clone() {
+        let mut open = true;
+        let mut chosen = None;
+        egui::Window::new("Duck Quill isn't on this computer")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                ui.label("Or Duck Mold can't find it. Duck Quill is the Duck painting program: it opens the image with a guide of the faces over it.");
+                ui.add_space(4.0);
+                chosen = program_buttons(ui);
+            });
+        if let Some(with) = chosen {
+            painting.asking = None;
+            painting.hand_over(studio, &part, face.as_deref(), with);
+        } else if !open {
+            painting.asking = None;
+        }
+    }
+    if painting.help {
+        let mut open = true;
+        let mut chosen = None;
+        let now = painting.program();
+        egui::Window::new("Duck Quill")
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+            .open(&mut open)
+            .show(ui.ctx(), |ui| {
+                ui.label("Images are painted in:");
+                match &now {
+                    Some(With::DuckQuill(program)) => {
+                        ui.label(
+                            RichText::new(format!("Duck Quill, at {}", program.display())).strong(),
+                        );
+                    }
+                    Some(With::System) => {
+                        ui.label(
+                            RichText::new("the picture program this computer opens PNG files with")
+                                .strong(),
+                        );
+                    }
+                    None => {
+                        ui.label(RichText::new("nothing yet: Duck Quill wasn't found").strong());
+                    }
+                }
+                ui.add_space(4.0);
+                chosen = program_buttons(ui);
+            });
+        if let Some(with) = chosen {
+            if let Some(settings) = &painting.settings {
+                quill::remember(settings, &with);
+            }
+            painting.with = painting.with.as_ref().map(|_| with.clone());
+            studio.say_why(&match &with {
+                With::DuckQuill(program) => {
+                    format!("Images are painted in Duck Quill, at {}", program.display())
+                }
+                With::System => "Images are opened in this computer's picture program".to_owned(),
+            });
+        }
+        if !open {
+            painting.help = false;
+        }
+    }
 }
 
 /// How big a new image is to be.
@@ -285,6 +490,7 @@ fn pick_png() -> Option<PathBuf> {
 /// buttons to choose another or take it off. Gives what was asked.
 enum Asked {
     Nothing,
+    Paint,
     Choose,
     TakeOff,
 }
@@ -319,13 +525,6 @@ fn image_line(
             {
                 asked = Asked::TakeOff;
             }
-            if ui
-                .small_button("Choose...")
-                .on_hover_text("Use another PNG here")
-                .clicked()
-            {
-                asked = Asked::Choose;
-            }
             ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                 if file == NO_IMAGE {
                     ui.add(egui::Label::new("none").truncate()).on_hover_text(
@@ -345,6 +544,32 @@ fn image_line(
             });
         });
     });
+    // Under it: paint it, or use another PNG.
+    if file != NO_IMAGE {
+        ui.horizontal(|ui| {
+            ui.add_space(12.0);
+            let words = draft.painting.words();
+            let button = ui.small_button(words);
+            button.widget_info(|| {
+                WidgetInfo::labeled(egui::Role::Button, true, format!("{words}: {what}"))
+            });
+            if button
+                .on_hover_text(
+                    "Opens this image in the painting program. Save there, and the model shows it at once",
+                )
+                .clicked()
+            {
+                asked = Asked::Paint;
+            }
+            let choose = ui.small_button("Choose...");
+            choose.widget_info(|| {
+                WidgetInfo::labeled(egui::Role::Button, true, format!("Choose another image for {what}"))
+            });
+            if choose.on_hover_text("Use another PNG here").clicked() {
+                asked = Asked::Choose;
+            }
+        });
+    }
     asked
 }
 
@@ -370,6 +595,7 @@ pub fn part_section(
                 }
             }
             Asked::TakeOff => done = Some(studio.set_image(path, None, None)),
+            Asked::Paint => draft.painting.paint(studio, path, None),
             Asked::Nothing => {}
         }
     }
@@ -381,6 +607,7 @@ pub fn part_section(
                 }
             }
             Asked::TakeOff => done = Some(studio.set_image(path, Some(face), None)),
+            Asked::Paint => draft.painting.paint(studio, path, Some(face)),
             Asked::Nothing => {}
         }
     }
@@ -414,6 +641,8 @@ pub fn windows(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     let mut close = false;
     let mut open = true;
     let mut made: Option<Result<String, String>> = None;
+    // Whether the new image is to be opened in the painting program.
+    let mut paint_after = false;
     let mut replan = false;
     let title = match &new.face {
         Some(face) => format!("New image for {face} of \"{}\"", new.part),
@@ -520,8 +749,16 @@ pub fn windows(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                     );
                     ui.add_space(6.0);
                     let size = new.size(&plan);
+                    let paint_words = match draft.painting.words() {
+                        "Paint in Duck Quill" => "Make it and paint in Duck Quill",
+                        _ => "Make it and open it in my picture program",
+                    };
+                    if ui.add(theme::primary_button(paint_words)).clicked() {
+                        made = Some(studio.new_image(&plan, size));
+                        paint_after = made.as_ref().is_some_and(Result::is_ok);
+                    }
                     ui.horizontal(|ui| {
-                        if ui.add(theme::primary_button("Make it")).clicked() {
+                        if ui.button("Just make it").clicked() {
                             made = Some(studio.new_image(&plan, size));
                         }
                         if ui
@@ -542,6 +779,7 @@ pub fn windows(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
                 ui.colored_label(theme::BAD, why);
             }
         });
+    let painted = paint_after.then(|| (new.part.clone(), new.face.clone()));
     match made {
         Some(Ok(_)) => {
             draft.failed = None;
@@ -552,5 +790,8 @@ pub fn windows(ui: &mut egui::Ui, studio: &mut Studio, draft: &mut Draft) {
     }
     if close || !open {
         draft.new = None;
+    }
+    if let Some((part, face)) = painted {
+        draft.painting.paint(studio, &part, face.as_deref());
     }
 }

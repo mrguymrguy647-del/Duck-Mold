@@ -133,12 +133,24 @@ impl StudioApp {
         self.recent = recent;
         self.crashed = self.recent.folder().and_then(crate::crash::take_unseen);
         self.interface = self.recent.interface_size();
+        // Images are painted in Duck Quill, found on this computer, or in
+        // whatever was chosen before, which is remembered in the same
+        // folder.
+        self.images.painting.settings = self.recent.folder().map(Path::to_path_buf);
+        self.images.painting.start = true;
         if let Some(studio) = &mut self.studio {
             self.recent.opened(studio.path());
             studio.hide_again(self.recent.hidden_in(studio.path()));
         }
         self.keep_history();
         self
+    }
+
+    /// What the Studio knows about painting images in another program:
+    /// which one, where it remembers the choice, and the last image it
+    /// handed over.
+    pub fn painting(&mut self) -> &mut crate::images::Painting {
+        &mut self.images.painting
     }
 
     /// Keeps the open recipe's undo history on disk, in the folder the
@@ -504,6 +516,7 @@ impl StudioApp {
                             crate::images::palette_row(ui, studio, &mut self.images);
                         }
                         crate::images::windows(ui, studio, &mut self.images);
+                        crate::images::painting_windows(ui, studio, &mut self.images);
                     });
             });
 
@@ -550,6 +563,10 @@ impl StudioApp {
             }
             if redo {
                 asked = Some(Action::Redo);
+            }
+            // Shift+P: paint the selected part's image in Duck Quill.
+            if ui.input_mut(|input| input.consume_key(egui::Modifiers::SHIFT, egui::Key::P)) {
+                asked = Some(Action::PaintInDuckQuill);
             }
             // The tools' keys, as in other 3D programs. Shaping has
             // tools of its own.
@@ -673,6 +690,7 @@ impl StudioApp {
                         | Action::ShowKeys
                         | Action::ShowTips
                         | Action::About
+                        | Action::DuckQuill
                         | Action::OpenFile(_)
                         | Action::OpenExample(_)
                 );
@@ -712,6 +730,18 @@ impl StudioApp {
                 Action::ShowTips => self.tour = Some(0),
                 Action::ShowKeys => self.showing = Some(Showing::Keys),
                 Action::About => self.showing = Some(Showing::About),
+                Action::DuckQuill => self.images.painting.help = true,
+                Action::PaintInDuckQuill => {
+                    // The selected part's image; a part without one gets
+                    // the "New image" window first.
+                    if let Some(part) = studio.selected().map(str::to_owned) {
+                        if studio.image_shown(&part, None).is_some() {
+                            self.images.painting.paint(studio, &part, None);
+                        } else {
+                            self.images.open_new(studio, &part, None);
+                        }
+                    }
+                }
                 Action::Duplicate => {
                     let _ = studio.duplicate_selected(false);
                 }

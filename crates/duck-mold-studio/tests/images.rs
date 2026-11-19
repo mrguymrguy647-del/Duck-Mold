@@ -182,7 +182,7 @@ fn a_new_image_is_made_from_its_window() {
     screen.get_by_label("Large: 64 x 64").click();
     screen.run_steps(2);
     screen
-        .get_by_role_and_label(Role::Button, "Make it")
+        .get_by_role_and_label(Role::Button, "Just make it")
         .click();
     screen.run_steps(3);
     let made = recipe
@@ -199,7 +199,7 @@ fn a_new_image_is_made_from_its_window() {
             .contains("front = \"textures/plank_crate_box_front.png\"")
     );
     // The window has closed, and the new image is in the palette's row.
-    assert_eq!(screen.query_all_by_label("Make it").count(), 0);
+    assert_eq!(screen.query_all_by_label("Just make it").count(), 0);
     screen.get_by_role_and_label(Role::Button, "plank_crate_box_front.png");
     screen.get_by_label("3 images");
     // Twice as many pixels to the metre as the others: allowed, just.
@@ -225,6 +225,154 @@ fn looking_only_shows_the_images_and_offers_no_changes() {
     screen.get_by_role_and_label(Role::Button, "planks.png");
     assert_eq!(screen.query_all_by_label("No image").count(), 0);
     assert_eq!(screen.query_all_by_label("New image").count(), 0);
+}
+
+// ---- painting an image in another program (step 4) -------------------------
+
+#[test]
+fn paint_in_duck_quill_hands_the_image_its_guide_and_the_colour_over() {
+    use duck_mold_view::quill::With;
+    let (recipe, mut screen) = plank_crate("images_paint_in_quill", false);
+    let folder = recipe.parent().unwrap().to_path_buf();
+    // A Duck Quill that is "there", and nothing really started.
+    screen.state_mut().painting().with = Some(With::DuckQuill(folder.join("DuckQuill")));
+    screen.state_mut().studio_mut().unwrap().select(Some("box"));
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::Button, "Paint in Duck Quill: top")
+        .click();
+    screen.run_steps(3);
+    let job = screen.state_mut().painting().last.clone().expect("a job");
+    assert_eq!(job.image, folder.join("textures/lid.png"));
+    assert_eq!(job.with, With::DuckQuill(folder.join("DuckQuill")));
+    // The crate's wood is the paper.
+    assert_eq!(job.paper, [0xB0, 0x7A, 0x3F]);
+    let guide = job.guide.clone().expect("a guide for Duck Quill");
+    assert!(guide.is_file());
+    assert!(
+        screen
+            .state()
+            .studio()
+            .unwrap()
+            .status()
+            .starts_with("Would start: "),
+        "{}",
+        screen.state().studio().unwrap().status()
+    );
+    // Nothing in the recipe changed.
+    assert_eq!(
+        std::fs::read_to_string(&recipe).unwrap(),
+        std::fs::read_to_string(examples().join("plank_crate.toml")).unwrap()
+    );
+
+    // Edit > Paint in Duck Quill does the same for the selected part's
+    // image (the first it has: the planks on the whole part).
+    screen.state_mut().painting().last = None;
+    screen.key_press_modifiers(egui::Modifiers::SHIFT, egui::Key::P);
+    screen.run_steps(3);
+    let job = screen.state_mut().painting().last.clone().expect("a job");
+    assert_eq!(job.image, folder.join("textures/planks.png"));
+    // The Edit menu has a line for it, with its key.
+    let before = screen
+        .query_all_by_label_contains("Paint in Duck Quill")
+        .count();
+    screen.get_by_label("Edit").click();
+    screen.run_steps(2);
+    assert_eq!(
+        screen
+            .query_all_by_label_contains("Paint in Duck Quill")
+            .count(),
+        before + 1
+    );
+}
+
+#[test]
+fn without_duck_quill_the_studio_asks_once_and_any_picture_program_does() {
+    use duck_mold_view::quill::With;
+    let (recipe, mut screen) = plank_crate("images_no_quill", false);
+    let folder = recipe.parent().unwrap().to_path_buf();
+    // Somewhere to remember the choice; nothing is really started. (No
+    // Duck Quill is found from here: none is on the machines that run
+    // the tests.)
+    let settings = folder.join("settings");
+    screen.state_mut().painting().settings = Some(settings.clone());
+    if screen.state_mut().painting().program().is_some() {
+        // A machine with Duck Quill on it: the question never comes up.
+        return;
+    }
+    screen.state_mut().studio_mut().unwrap().select(Some("box"));
+    screen.run_steps(2);
+    screen
+        .get_by_role_and_label(Role::Button, "Paint in Duck Quill: top")
+        .click();
+    screen.run_steps(3);
+    // The window says so, and offers three ways on.
+    screen.get_by_label("Duck Quill isn't on this computer");
+    screen.get_by_role_and_label(Role::Button, "Find DuckQuill.exe...");
+    screen.get_by_label("Get Duck Quill");
+    assert!(screen.state_mut().painting().last.is_none());
+    screen
+        .get_by_role_and_label(Role::Button, "Open in my picture program instead")
+        .click();
+    screen.run_steps(3);
+    let job = screen.state_mut().painting().last.clone().expect("a job");
+    assert_eq!(job.with, With::System);
+    assert_eq!(job.image, folder.join("textures/lid.png"));
+    // Another program draws no guide over the picture.
+    assert_eq!(job.guide, None);
+    // The window has gone, the choice is remembered, and the button
+    // says what it now does.
+    assert_eq!(
+        screen
+            .query_all_by_label("Duck Quill isn't on this computer")
+            .count(),
+        0
+    );
+    assert_eq!(
+        duck_mold_view::quill::remembered(&settings),
+        Some(With::System)
+    );
+    screen.get_by_role_and_label(Role::Button, "Open in my picture program: top");
+
+    // Help > Duck Quill... says what images are painted in.
+    screen.get_by_label("Help").click();
+    screen.run_steps(2);
+    screen
+        .query_all_by_label_contains("Duck Quill...")
+        .last()
+        .unwrap()
+        .click();
+    screen.run_steps(3);
+    screen.get_by_label("the picture program this computer opens PNG files with");
+}
+
+#[test]
+fn a_new_image_can_be_made_and_painted_in_one_click() {
+    use duck_mold_view::quill::With;
+    let (recipe, mut screen) = plank_crate("images_new_and_paint", false);
+    let folder = recipe.parent().unwrap().to_path_buf();
+    screen.state_mut().painting().with = Some(With::DuckQuill(folder.join("DuckQuill")));
+    screen.state_mut().studio_mut().unwrap().select(Some("box"));
+    screen.run_steps(2);
+    // Shift+P on a part that has images paints the first; so the "New
+    // image" window is opened by its button here.
+    screen
+        .get_by_role_and_label(Role::Button, "New image...")
+        .click();
+    screen.run_steps(3);
+    screen.get_by_role_and_label(Role::ComboBox, "For").click();
+    screen.run_steps(2);
+    screen.get_by_label("front").click();
+    screen.run_steps(3);
+    screen
+        .get_by_role_and_label(Role::Button, "Make it and paint in Duck Quill")
+        .click();
+    screen.run_steps(4);
+    let made = folder.join("textures/plank_crate_box_front.png");
+    assert!(made.is_file());
+    let job = screen.state_mut().painting().last.clone().expect("a job");
+    assert_eq!(job.image, made);
+    assert!(job.guide.is_some());
 }
 
 /// Pictures of the image screens, for a person to look at: run with
@@ -261,4 +409,14 @@ fn look() {
     let front = point_on_screen(&screen, vec3(0.0, 0.5, 0.5));
     screen.hover_at(front);
     save(&mut screen, "4-painting-with-an-image");
+    // Without Duck Quill: the window that asks.
+    screen.state_mut().studio_mut().unwrap().select(Some("box"));
+    screen.run_steps(2);
+    if screen.state_mut().painting().program().is_none() {
+        screen
+            .get_by_role_and_label(Role::Button, "Paint in Duck Quill: top")
+            .click();
+        screen.run_steps(4);
+        save(&mut screen, "5-no-duck-quill");
+    }
 }

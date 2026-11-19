@@ -736,6 +736,27 @@ duck-mold edit robot.toml add hat --shape cone --to head.top --color red --json
   textures`), and look with `duck-mold render`. It never writes over a
   file; to use a PNG that is already there, `edit <recipe> set <part>
   --face-image front=<file>`.
+- **`duck-mold image-guide <recipe> <part>`** (changes nothing) writes
+  a see-through PNG that shows what an image covers: the outline of
+  every face it lies on, a word at its top edge saying which way that
+  is on the part (`up`; `back` on a top face), `front` where a wrapped
+  image passes the part's front, and dashed boxes where other parts are
+  joined on. `--face front` for one face's image. It is written beside
+  the image as `<image>.guide.png`, or where `-o <file>` says. It is a
+  whole number of times the image's size (about 512 pixels on its
+  longer side), so that its lines are thin: read it as "this fraction
+  of the way across", not pixel for pixel.
+- **`duck-mold paint <recipe> <part>`** is for a person at the
+  computer: it opens the image in Duck Quill's window (with the guide,
+  and the part's colour as paper), or with `--system` in whatever the
+  computer opens PNG files with. A part with no image gets a new one
+  first, as `new-image` makes it. An agent has no use for the window
+  but can check what would happen: `--dry-run --json` gives `image`,
+  `guide`, `paper`, `with` (`duck-quill` or `system`) and the
+  `command`, and starts nothing. If Duck Quill can't be found, it says
+  so and exits with 2; `--duck-quill <program>` says where it is, and
+  is remembered. To paint without a window, write the PNG yourself (the
+  `new-image` bullet above).
 - **`duck-mold save-animation <recipe> <animation> <file>`** (not an
   `edit` either) writes an animation and the poses it uses to a small
   file of their own, for another model to take with `add-animation

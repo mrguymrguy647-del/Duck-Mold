@@ -112,13 +112,21 @@ pub enum Action {
     MakeDefinition,
     /// Write the selected part alone to the library's folder.
     SaveToLibrary,
+    /// Open the selected part's image in Duck Quill (or make it one).
+    PaintInDuckQuill,
+    /// Show where Duck Quill is, and what images are painted in.
+    DuckQuill,
 }
 
 /// Every key and what it does, for Help's list and the README's.
-pub const KEYS: [(&str, &str); 28] = [
+pub const KEYS: [(&str, &str); 29] = [
     (
         "G, R, S, T, P",
         "The Move, Rotate, Scale, Size and Paint tools",
+    ),
+    (
+        "Shift+P",
+        "Paint the selected part's image in Duck Quill (a new image, if it has none)",
     ),
     (
         "Tab",
@@ -255,6 +263,14 @@ pub fn menus(
             pick(ui, edits && any, "Unjoin", "", Action::Unjoin);
             pick(ui, edits && any, "Remove", "Delete", Action::Remove);
             ui.separator();
+            pick(
+                ui,
+                edits && one,
+                "Paint in Duck Quill",
+                "Shift+P",
+                Action::PaintInDuckQuill,
+            );
+            ui.separator();
             pick(ui, edits, "Tidy sockets", "", Action::TidySockets);
             pick(ui, true, "Select all", "Ctrl+A", Action::SelectAll);
         });
@@ -368,6 +384,7 @@ pub fn menus(
     ui.menu_button("Help", |ui| {
         pick(ui, true, "Show the tips again", "", Action::ShowTips);
         pick(ui, true, "The keys", "", Action::ShowKeys);
+        pick(ui, true, "Duck Quill...", "", Action::DuckQuill);
         pick(ui, true, "About Duck Mold Studio", "", Action::About);
     });
     chosen

@@ -1001,6 +1001,21 @@ fn the_screens_look_as_they_did() {
         screen.run_steps(5);
         wrong.extend(check(&mut screen, "images-new"));
     }
+    // "Paint in Duck Quill" where Duck Quill can't be found: the
+    // window that asks what to do instead.
+    {
+        use egui::accesskit::Role;
+        let mut screen = plank_crate("pictures_images_no_quill");
+        screen.state_mut().studio_mut().unwrap().select(Some("box"));
+        screen.run_steps(2);
+        if screen.state_mut().painting().program().is_none() {
+            screen
+                .get_by_role_and_label(Role::Button, "Paint in Duck Quill: top")
+                .click();
+            screen.run_steps(5);
+            wrong.extend(check(&mut screen, "images-no-duck-quill"));
+        }
+    }
     // An image in hand, over a face: the hint says what a click would
     // do, and the image picked has a yellow edge.
     {

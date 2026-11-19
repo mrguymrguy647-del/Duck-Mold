@@ -21,6 +21,7 @@
 //! The library `duck-mold-core` knows nothing of this crate or of Duck
 //! Forge: pictures are an extra on top.
 
+pub mod quill;
 pub mod ray;
 pub mod render;
 pub mod studio;

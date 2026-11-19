@@ -434,3 +434,254 @@ fn a_model_being_looked_at_changes_nothing() {
         "they are still listed, to look at"
     );
 }
+
+// ---- the round trip with a picture program (step 4) ------------------------
+
+mod round_trip {
+    use super::*;
+    use duck_mold_view::quill::{PaintJob, With};
+
+    /// The robot with an empty image on the front of its head, in a
+    /// folder of its own.
+    fn robot(test: &str) -> PathBuf {
+        let folder = Path::new(env!("CARGO_TARGET_TMPDIR"))
+            .join("round_trip")
+            .join(test);
+        let _ = std::fs::remove_dir_all(&folder);
+        std::fs::create_dir_all(&folder).unwrap();
+        let recipe = folder.join("robot.toml");
+        std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+        duck_mold_core::images::new_image(&recipe, "head", Some("front"), None, None).unwrap();
+        recipe
+    }
+
+    /// The pixels of a PNG, and its size.
+    fn pixels_of(png: &[u8]) -> (u32, u32, Vec<[u8; 4]>) {
+        let picture = duck_mold_core::picture::read_png_up_to(png, "guide", 4096).unwrap();
+        (picture.width, picture.height, picture.pixels)
+    }
+
+    #[test]
+    fn the_guide_outlines_the_face_and_where_parts_are_joined_on() {
+        let recipe = robot("guide");
+        let studio = Studio::open(&recipe, false);
+        let shown = studio.image_shown("head", Some("front")).unwrap();
+        assert_eq!(shown.image.file, "textures/robot_head_front.png");
+        assert_eq!(
+            (shown.image.picture.width, shown.image.picture.height),
+            (32, 24)
+        );
+        assert_eq!(shown.faces.len(), 1);
+        // The head is steel: that is what shows under the image.
+        assert_eq!(shown.under, [0x8A, 0x93, 0x9B]);
+
+        let (wide, high, pixels) = pixels_of(&studio.guide("head", Some("front")).unwrap());
+        // Sixteen times the image's size: thin lines, readable words.
+        assert_eq!((wide, high), (512, 384));
+        let drawn = |x: u32, y: u32| pixels[(y * wide + x) as usize][3] == 255;
+        // The face's outline runs round the edge.
+        for (x, y) in [(0, 0), (256, 0), (511, 192), (256, 383), (0, 192)] {
+            assert!(drawn(x, y), "{x},{y}");
+        }
+        // Mostly see-through: lines, not a picture.
+        let solid = pixels.iter().filter(|pixel| pixel[3] == 255).count();
+        assert!(solid > 1500 && solid < pixels.len() / 10, "{solid}");
+        assert!(pixels.iter().all(|pixel| pixel[3] == 0 || pixel[3] == 255));
+        // The middle of the face is clear.
+        assert!(!drawn(256, 300));
+        // The two eyes are joined on the upper half: a dotted box each,
+        // one on each side of the middle, and nothing like it below.
+        let dots = |from: u32, to: u32, top: u32, bottom: u32| {
+            (top..bottom)
+                .flat_map(|y| (from..to).map(move |x| (x, y)))
+                .filter(|&(x, y)| drawn(x, y))
+                .count()
+        };
+        assert!(dots(40, 216, 60, 260) > 100, "the eye on one side");
+        assert!(dots(296, 472, 60, 260) > 100, "the eye on the other");
+        assert_eq!(dots(40, 472, 270, 370), 0, "nothing joined below the eyes");
+
+        // A part without an image has no guide.
+        assert!(studio.guide("body", None).is_none());
+        assert!(studio.image_shown("body", None).is_none());
+    }
+
+    #[test]
+    fn the_job_names_the_image_its_guide_and_the_colour_under_it() {
+        let recipe = robot("job");
+        let folder = recipe.parent().unwrap().to_path_buf();
+        let studio = Studio::open(&recipe, false);
+        let guides = folder.join("guides");
+        let quill = folder.join("DuckQuill");
+        let job = studio
+            .paint_job(
+                "head",
+                Some("front"),
+                With::DuckQuill(quill.clone()),
+                &guides,
+            )
+            .unwrap();
+        assert_eq!(job.image, folder.join("textures/robot_head_front.png"));
+        assert_eq!(job.paper, [0x8A, 0x93, 0x9B]);
+        // The guide is written in Duck Mold's own folder, never beside
+        // the recipe.
+        let guide = job.guide.clone().unwrap();
+        assert_eq!(guide, guides.join("robot_head_front.guide.png"));
+        assert!(guide.is_file());
+        let words = job.words();
+        assert_eq!(words[0], quill.display().to_string());
+        assert_eq!(
+            words[2..],
+            [
+                "--guide".to_owned(),
+                guide.display().to_string(),
+                "--paper".to_owned(),
+                "#8A939B".to_owned()
+            ]
+        );
+        assert!(!folder.join("textures/robot_head_front.guide.png").exists());
+
+        // Another picture program gets the image alone.
+        let plain = studio
+            .paint_job("head", Some("front"), With::System, &guides)
+            .unwrap();
+        assert_eq!(plain.guide, None);
+        // A part without an image says so.
+        assert_eq!(
+            studio
+                .paint_job("body", None, With::System, &guides)
+                .unwrap_err(),
+            "body has no image yet: make one first"
+        );
+    }
+
+    /// A program that stands in for Duck Quill: started with the image
+    /// as its first word, it saves a painted picture over it, as Duck
+    /// Quill does on Ctrl+S.
+    fn stand_in(folder: &Path, painted: &[u8]) -> PathBuf {
+        std::fs::write(folder.join("painted.png"), painted).unwrap();
+        if cfg!(windows) {
+            let program = folder.join("stand-in.cmd");
+            std::fs::write(
+                &program,
+                "@echo off\r\ncopy /Y \"%~dp0painted.png\" \"%~1\" >nul\r\n",
+            )
+            .unwrap();
+            program
+        } else {
+            let program = folder.join("stand-in.sh");
+            std::fs::write(
+                &program,
+                "#!/bin/sh\ncp \"$(dirname \"$0\")/painted.png\" \"$1\"\n",
+            )
+            .unwrap();
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+            }
+            program
+        }
+    }
+
+    #[test]
+    fn a_save_in_the_picture_program_shows_on_the_model_at_once() {
+        let recipe = robot("save");
+        let folder = recipe.parent().unwrap().to_path_buf();
+        let mut studio = Studio::open(&recipe, false);
+        let image = folder.join("textures/robot_head_front.png");
+        // The new image is see-through all over: the head's front is
+        // plain steel.
+        assert!(
+            studio.images()[0]
+                .picture
+                .pixels
+                .iter()
+                .all(|pixel| pixel[3] == 0)
+        );
+
+        // What the stand-in will "paint": a red mouth across the bottom
+        // rows, the rest left see-through.
+        let mut painted = vec![[0u8, 0, 0, 0]; 32 * 24];
+        for y in 16..19 {
+            for x in 8..24 {
+                painted[y * 32 + x] = [200, 30, 30, 255];
+            }
+        }
+        let program = stand_in(&folder, &write_png(32, 24, &painted, false));
+        let job: PaintJob = studio
+            .paint_job(
+                "head",
+                Some("front"),
+                With::DuckQuill(program),
+                &folder.join("guides"),
+            )
+            .unwrap();
+        let said = job.start().unwrap();
+        assert!(
+            said.starts_with("Opened robot_head_front.png in Duck Quill"),
+            "{said}"
+        );
+
+        // The Studio looks at its files twice a second. Within a few
+        // looks, the model has the mouth.
+        let started = std::time::Instant::now();
+        let mut built = false;
+        while started.elapsed() < Duration::from_secs(20) {
+            if studio.check_files() {
+                built = true;
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+        assert!(built, "the saved image was never noticed");
+        assert!(
+            !studio.has_mistakes(),
+            "{:?}",
+            studio.problems().first().map(|p| &p.text)
+        );
+        let picture = &studio.images()[0].picture;
+        assert_eq!(picture.pixel(12, 17), [200, 30, 30, 255]);
+        assert_eq!(picture.pixel(2, 2)[3], 0);
+        assert_eq!(
+            std::fs::read(&image).unwrap(),
+            std::fs::read(folder.join("painted.png")).unwrap()
+        );
+        // The recipe wasn't touched, so Undo has nothing new, and the
+        // model's face shows the image.
+        assert_eq!(studio.undo_stops(), None);
+        let model = studio.model().unwrap();
+        let front = model.part("head").unwrap().faces_named("front")[0];
+        assert!(model.faces[front].image.is_some());
+        // What the picture of the model shows there now: the mouth's
+        // red, over the head's steel.
+        let sheet = duck_mold_core::picture::ImageSheet::of(model)
+            .unwrap()
+            .unwrap();
+        let cell = sheet.cell(model, &model.faces[front]).unwrap();
+        let at = |across: f64, down: f64| {
+            let [x, y] = sheet.place(model, cell, [across, down]);
+            sheet.pixels[((y * f64::from(sheet.height)) as u32 * sheet.width
+                + (x * f64::from(sheet.width)) as u32) as usize]
+        };
+        assert_eq!(at(0.5, 17.5 / 24.0), [200, 30, 30, 255]);
+        assert_eq!(at(0.1, 0.1), [0x8A, 0x93, 0x9B, 255]);
+    }
+
+    #[test]
+    fn a_program_that_isnt_there_is_said_in_a_sentence() {
+        let recipe = robot("missing_program");
+        let folder = recipe.parent().unwrap().to_path_buf();
+        let studio = Studio::open(&recipe, false);
+        let job = studio
+            .paint_job(
+                "head",
+                Some("front"),
+                With::DuckQuill(folder.join("nowhere").join("DuckQuill")),
+                &folder.join("guides"),
+            )
+            .unwrap();
+        let why = job.start().unwrap_err();
+        assert!(why.starts_with("Couldn't start Duck Quill ("), "{why}");
+    }
+}

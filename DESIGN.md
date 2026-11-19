@@ -6158,6 +6158,49 @@ quill render face.json --transparent --out textures       # Duck Quill's script,
 duck-mold render robot.toml                                # look at it
 ```
 
+*As built (step 4):*
+
+- **Two commands were added that the design didn't list**, so that the
+  round trip's two halves are things an agent can run: `duck-mold paint
+  <recipe> <part> [--face F]` (what the Studio's button does: a new
+  image if there is none, the guide, then the program) and `duck-mold
+  image-guide <recipe> <part> [--face F] [-o file]` (the guide alone).
+  `paint --dry-run --json` says what would be started and starts
+  nothing.
+- **The guide** is a see-through PNG about 512 pixels on its longer
+  side, whatever the image's size (a whole number of times the image,
+  so every image pixel is a square of guide pixels). It has the outline
+  of each face, a word at the top edge (`up`, or `back` on a top face,
+  `front` on a bottom one), `front` where a wrapped image passes the
+  part's front, and a dashed box where another part is joined on. The
+  Studio keeps guides in `guides/` in Duck Mold's settings folder,
+  never beside the recipe; `image-guide` writes beside the image
+  because it was asked to.
+- **What is remembered** is one line in `paint-with.txt` in the
+  settings folder: `duck-quill: <program>` or `system`. A remembered
+  Duck Quill that has since gone is looked for again in the other
+  places before the window asks.
+- **Which image "the part's image" is.** With no face named, the part's
+  own `image` line if it has one, else the first of its faces' images.
+  Each image in a part's list has its own *Paint in Duck Quill* button,
+  so any of them is one press away.
+- **The plain picture program gets the PNG alone.** The design had the
+  guide opened beside it as a second picture; two windows opening at
+  once from one press was confusing, and many picture programs open
+  the second in place of the first. `image-guide` writes the guide for
+  whoever wants it.
+- **Duck Quill's side** is in its pull request (version 0.6.0), as the
+  table above says, with two things found on the way: the pixel brush
+  now puts down exactly whole pixels at full strength (a soft edge left
+  them a little see-through, and the model showed the under-colour
+  through the paint), and the eraser is one hard pixel too when the
+  picture is small.
+- **A stand-in for Duck Quill in the tests.** No test starts a window.
+  The Studio's tests set a small program in Duck Quill's place that
+  writes a painted PNG over the image and exits, and then check the
+  model shows it; the real Duck Quill's opening and saving of PNGs is
+  tested in its own repository.
+
 ### 10. The `.glb`, the shared reader, and Duck Forge
 
 **In the file.** A model with images has, as well as everything it has

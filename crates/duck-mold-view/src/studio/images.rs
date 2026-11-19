@@ -339,6 +339,138 @@ impl Studio {
     }
 }
 
+/// The image a part, or one face of it, shows, with what is needed to
+/// paint it in a picture program.
+#[derive(Debug, Clone)]
+pub struct Shown {
+    /// The image.
+    pub image: ImageInfo,
+    /// The model's faces that show it on this part (their numbers).
+    pub faces: Vec<usize>,
+    /// The colour under it: the face's palette colour, or the plain
+    /// grey of a face nobody coloured.
+    pub under: [u8; 3],
+}
+
+impl Studio {
+    /// The image a part shows (`face`: on that face; `None`: the first
+    /// image any of its faces has), with the faces of the part that
+    /// show it. `None` if there is none.
+    pub fn image_shown(&self, part: &str, face: Option<&str>) -> Option<Shown> {
+        let model = self.model()?;
+        let found = model.part(part)?;
+        let candidates: Vec<usize> = match face {
+            Some(face) => found.faces_named(face),
+            None => found.faces.clone().collect(),
+        };
+        let images = self.images();
+        // For the whole part: the part's own image if it has one (its
+        // `image` line), rather than that of whichever face comes first.
+        let own = match face {
+            Some(_) => None,
+            None => Syntax::from_path(&self.path)
+                .and_then(|syntax| edit::describe(&self.text, syntax, self.model(), part))
+                .and_then(|facts| facts.image)
+                .and_then(|file| images.iter().position(|image| image.file == file)),
+        };
+        let shows = |number: usize| {
+            model.faces[number]
+                .image
+                .as_ref()
+                .map(|image| image.picture)
+        };
+        let first = candidates
+            .iter()
+            .copied()
+            .find(|&number| own.is_some() && shows(number) == own)
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .copied()
+                    .find(|&number| shows(number).is_some())
+            })?;
+        let picture = shows(first)?;
+        let image = images.into_iter().nth(picture)?;
+        // Every face of the part with that image: what the guide shows.
+        let faces: Vec<usize> = found
+            .faces
+            .clone()
+            .filter(|&number| {
+                model.faces[number]
+                    .image
+                    .as_ref()
+                    .is_some_and(|image| image.picture == picture)
+            })
+            .collect();
+        let under = model.faces[first]
+            .color
+            .and_then(|color| model.palette.get(color))
+            .map_or(duck_mold_core::picture::NO_COLOR, |color| color.rgb);
+        Some(Shown {
+            image,
+            faces,
+            under,
+        })
+    }
+
+    /// The guide for the image a part (or one face of it) shows, as the
+    /// bytes of a PNG: thin lines the shape of the faces it covers. See
+    /// [`crate::quill::guide_png`].
+    pub fn guide(&self, part: &str, face: Option<&str>) -> Option<Vec<u8>> {
+        let shown = self.image_shown(part, face)?;
+        let model = self.model()?;
+        crate::quill::guide_png(
+            model,
+            model.part(part)?,
+            &shown.faces,
+            [shown.image.picture.width, shown.image.picture.height],
+        )
+    }
+
+    /// Gets the image a part (or one face of it) shows ready to be
+    /// painted in a picture program: writes its guide into `guides` (a
+    /// folder of Duck Mold's own, never beside the recipe) and gives the
+    /// job to start. Nothing is started here.
+    pub fn paint_job(
+        &self,
+        part: &str,
+        face: Option<&str>,
+        with: crate::quill::With,
+        guides: &Path,
+    ) -> Result<crate::quill::PaintJob, String> {
+        let Some(shown) = self.image_shown(part, face) else {
+            return Err(match face {
+                Some(face) => format!("{face} of {part} has no image yet: make one first"),
+                None => format!("{part} has no image yet: make one first"),
+            });
+        };
+        // The guide is only for Duck Quill, which draws it over the
+        // picture; any other program gets the image alone.
+        let guide = match (&with, self.guide(part, face)) {
+            (crate::quill::With::DuckQuill(_), Some(png)) => {
+                let name = shown
+                    .image
+                    .path
+                    .file_stem()
+                    .map(|stem| stem.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "image".to_owned());
+                let file = guides.join(format!("{name}.guide.png"));
+                std::fs::create_dir_all(guides)
+                    .and_then(|()| std::fs::write(&file, png))
+                    .ok()
+                    .map(|()| file)
+            }
+            _ => None,
+        };
+        Ok(crate::quill::PaintJob {
+            image: shown.image.path.clone(),
+            guide,
+            paper: shown.under,
+            with,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

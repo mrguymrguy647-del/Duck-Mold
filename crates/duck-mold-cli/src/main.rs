@@ -13,7 +13,7 @@
 //! document, also when it failed.
 
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use clap::{Parser, Subcommand};
@@ -251,6 +251,53 @@ enum Command {
         /// worked out from what the image covers.
         #[arg(long, value_name = "WxH")]
         size: Option<String>,
+        /// Print the result as JSON, for agents.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Open a part's image in Duck Quill to paint it (the Studio's
+    /// "Paint in Duck Quill"). Duck Quill opens the PNG with a guide of
+    /// the faces over it and paper the colour of the part; each save
+    /// there shows on the model in the Studio at once. A part without an
+    /// image gets a new one first (see new-image).
+    Paint {
+        /// The recipe (.toml or .json).
+        recipe: PathBuf,
+        /// The part, as inspect names it: head, or left_arm/hand.
+        part: String,
+        /// One face of the part, by name: front.
+        #[arg(long)]
+        face: Option<String>,
+        /// Where Duck Quill's program is, if it isn't found by itself.
+        /// Remembered for next time.
+        #[arg(long, value_name = "PROGRAM")]
+        duck_quill: Option<PathBuf>,
+        /// Open the PNG in whatever this computer uses for pictures
+        /// instead: any program that saves it works.
+        #[arg(long)]
+        system: bool,
+        /// Start nothing: only say what would be started.
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the result as JSON, for agents.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Write the guide for a part's image: a see-through PNG of thin
+    /// lines, the shape of the faces the image covers, with where other
+    /// parts are joined on. Duck Quill draws it over the picture.
+    ImageGuide {
+        /// The recipe (.toml or .json).
+        recipe: PathBuf,
+        /// The part, as inspect names it.
+        part: String,
+        /// One face of the part, by name: front.
+        #[arg(long)]
+        face: Option<String>,
+        /// Where to write it. Without it: beside the image, as
+        /// <image>.guide.png.
+        #[arg(short, long, value_name = "FILE.png")]
+        output: Option<PathBuf>,
         /// Print the result as JSON, for agents.
         #[arg(long)]
         json: bool,
@@ -597,6 +644,58 @@ fn main() -> ExitCode {
                 Err(failure) => fail(&failure, json),
             }
         }
+        Command::Paint {
+            recipe,
+            part,
+            face,
+            duck_quill,
+            system,
+            dry_run,
+            json,
+        } => paint(
+            &recipe,
+            &part,
+            face.as_deref(),
+            duck_quill,
+            system,
+            dry_run,
+            json,
+        ),
+        Command::ImageGuide {
+            recipe,
+            part,
+            face,
+            output,
+            json,
+        } => {
+            let studio = duck_mold_view::studio::Studio::open(&recipe, true);
+            let found = studio
+                .image_shown(&part, face.as_deref())
+                .zip(studio.guide(&part, face.as_deref()));
+            let Some((shown, png)) = found else {
+                return fail(&no_image(&studio, &recipe, &part, face.as_deref()), json);
+            };
+            let output = output.unwrap_or_else(|| shown.image.path.with_extension("guide.png"));
+            match tools::write_file(&output, &png) {
+                Ok(()) => {
+                    let written = duck_mold_core::load::display_path(&output);
+                    if json {
+                        say_json(&serde_json::json!({
+                            "ok": true,
+                            "wrote": written,
+                            "image": shown.image.file,
+                        }));
+                    } else {
+                        say(&format!(
+                            "wrote {written}: the guide for {}",
+                            shown.image.file
+                        ));
+                    }
+                    ExitCode::SUCCESS
+                }
+                Err(failure) => fail(&failure, json),
+            }
+        }
         Command::SaveAnimation {
             recipe,
             animation,
@@ -769,4 +868,164 @@ fn image_size(written: &str) -> Result<[u32; 2], String> {
     size.ok_or_else(|| {
         format!("--size needs how many pixels wide and high, like 64x48, not \"{written}\"")
     })
+}
+
+/// Why a part has no image to paint or to draw a guide for: the
+/// recipe's own mistakes if it doesn't build, or that there is none.
+fn no_image(
+    studio: &duck_mold_view::studio::Studio,
+    recipe: &Path,
+    part: &str,
+    face: Option<&str>,
+) -> Failure {
+    let shown = duck_mold_core::load::display_path(recipe);
+    let message = if studio.model().is_none() {
+        format!("\"{shown}\" doesn't build: mend it first (duck-mold inspect {shown})")
+    } else if studio.part(part).is_none() {
+        format!("there is no part \"{part}\" in {shown}")
+    } else {
+        match face {
+            Some(face) => format!(
+                "the face \"{face}\" of \"{part}\" has no image: make one with duck-mold new-image {shown} {part} --face {face}"
+            ),
+            None => {
+                format!("\"{part}\" has no image: make one with duck-mold new-image {shown} {part}")
+            }
+        }
+    };
+    Failure::Usage(Box::new(duck_mold_core::issue::Issue::error(
+        duck_mold_core::issue::Code::Io,
+        "",
+        message,
+    )))
+}
+
+/// `duck-mold paint`: opens a part's image in Duck Quill, or in the
+/// system's picture program.
+fn paint(
+    recipe: &Path,
+    part: &str,
+    face: Option<&str>,
+    duck_quill: Option<PathBuf>,
+    system: bool,
+    dry_run: bool,
+    json: bool,
+) -> ExitCode {
+    use duck_mold_view::quill::{self, With};
+    use duck_mold_view::studio::Studio;
+
+    // A part without an image gets a new one first.
+    let mut made = None;
+    if Studio::open(recipe, true).image_shown(part, face).is_none() && !dry_run {
+        match duck_mold_core::images::new_image(recipe, part, face, None, None) {
+            Ok(new) => made = Some(new.summary()),
+            Err(failure) => return fail(&failure, json),
+        }
+    }
+    let studio = Studio::open(recipe, true);
+    if studio.image_shown(part, face).is_none() {
+        return fail(&no_image(&studio, recipe, part, face), json);
+    }
+    // The program: the one named, or the one remembered, or the one
+    // found.
+    let settings = quill::settings_folder();
+    let remembered = settings.as_deref().and_then(quill::remembered);
+    let with = if system {
+        Some(With::System)
+    } else if let Some(program) = duck_quill {
+        if !program.is_file() {
+            return fail(
+                &Failure::Usage(Box::new(duck_mold_core::issue::Issue::error(
+                    duck_mold_core::issue::Code::Io,
+                    "",
+                    format!("there is no program at \"{}\"", program.display()),
+                ))),
+                json,
+            );
+        }
+        Some(With::DuckQuill(program))
+    } else {
+        match remembered {
+            Some(With::System) => Some(With::System),
+            Some(With::DuckQuill(program)) => {
+                quill::find_duck_quill_here(Some(&program)).map(With::DuckQuill)
+            }
+            None => quill::find_duck_quill_here(None).map(With::DuckQuill),
+        }
+    };
+    let Some(with) = with else {
+        let image = studio
+            .image_shown(part, face)
+            .map(|shown| shown.image.path.display().to_string())
+            .unwrap_or_default();
+        return fail(
+            &Failure::Usage(Box::new(duck_mold_core::issue::Issue::error(
+                duck_mold_core::issue::Code::Io,
+                "",
+                format!(
+                    "Duck Quill isn't on this computer, or Duck Mold can't find it. Say where it is with --duck-quill <program> (remembered for next time), or open the image in any picture program with --system: it is a plain PNG, {image}"
+                ),
+            ))),
+            json,
+        );
+    };
+    let guides = settings
+        .as_deref()
+        .map(|folder| folder.join("guides"))
+        .unwrap_or_else(|| std::env::temp_dir().join("duck-mold-guides"));
+    let job = match studio.paint_job(part, face, with.clone(), &guides) {
+        Ok(job) => job,
+        Err(why) => {
+            return fail(
+                &Failure::Usage(Box::new(duck_mold_core::issue::Issue::error(
+                    duck_mold_core::issue::Code::Io,
+                    "",
+                    why,
+                ))),
+                json,
+            );
+        }
+    };
+    let said = if dry_run {
+        Ok("nothing was started (--dry-run)".to_owned())
+    } else {
+        if let Some(settings) = &settings {
+            quill::remember(settings, &with);
+        }
+        job.start()
+    };
+    match said {
+        Ok(said) => {
+            if json {
+                say_json(&serde_json::json!({
+                    "ok": true,
+                    "image": job.image,
+                    "guide": job.guide,
+                    "paper": format!("#{:02X}{:02X}{:02X}", job.paper[0], job.paper[1], job.paper[2]),
+                    "with": match &job.with {
+                        With::DuckQuill(_) => "duck-quill",
+                        With::System => "system",
+                    },
+                    "command": job.words(),
+                    "made": made,
+                    "summary": said,
+                }));
+            } else {
+                if let Some(made) = made {
+                    say(&made);
+                }
+                say(&job.words().join(" "));
+                say(&said);
+            }
+            ExitCode::SUCCESS
+        }
+        Err(why) => fail(
+            &Failure::Usage(Box::new(duck_mold_core::issue::Issue::error(
+                duck_mold_core::issue::Code::Io,
+                "",
+                why,
+            ))),
+            json,
+        ),
+    }
 }

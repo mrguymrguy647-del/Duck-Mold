@@ -2582,3 +2582,161 @@ fn images_are_made_put_on_and_taken_off_from_the_command_line() {
             .contains("--face-image needs a face and an image, like front=textures/face.png")
     );
 }
+
+#[test]
+fn paint_hands_an_image_to_duck_quill_or_to_any_picture_program() {
+    let folder = folder("cli_paint");
+    // Settings of its own, so nothing on this computer is read or
+    // changed, and a PATH with no Duck Quill on it.
+    let settings = folder.join("settings");
+    let paint = |arguments: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_duck-mold"))
+            .args(arguments)
+            .current_dir(&folder)
+            .env("APPDATA", &settings)
+            .env("XDG_CONFIG_HOME", &settings)
+            .env("HOME", &settings)
+            .env("PATH", folder.join("empty"))
+            .output()
+            .expect("the program runs")
+    };
+    let output = run(
+        &folder,
+        &["new-image", "tree.toml", "trunk", "--face", "side"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+
+    // Duck Quill isn't here: a sentence says the two ways on.
+    let output = paint(&["paint", "tree.toml", "trunk", "--face", "side", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(2));
+    let said = stderr(&output);
+    assert!(
+        said.contains("Duck Quill isn't on this computer, or Duck Mold can't find it")
+            && said.contains("--duck-quill <program>")
+            && said.contains("--system")
+            && said.contains("tree_trunk_side.png"),
+        "{said}"
+    );
+
+    // Any picture program: the PNG alone.
+    let output = paint(&[
+        "paint",
+        "tree.toml",
+        "trunk",
+        "--face",
+        "side",
+        "--system",
+        "--dry-run",
+        "--json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let job = json(&output);
+    assert_eq!(job["with"], "system");
+    assert_eq!(job["guide"], serde_json::Value::Null);
+    assert_eq!(job["paper"], "#6B4A2B");
+    let command: Vec<&str> = job["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    assert!(
+        command.last().unwrap().ends_with("tree_trunk_side.png"),
+        "{command:?}"
+    );
+
+    // Duck Quill, where it is said to be: the image, a guide of the
+    // faces, and the trunk's bark as the paper.
+    let quill = folder.join("DuckQuill");
+    std::fs::write(&quill, "a program").unwrap();
+    let output = paint(&[
+        "paint",
+        "tree.toml",
+        "trunk",
+        "--face",
+        "side",
+        "--duck-quill",
+        quill.to_str().unwrap(),
+        "--dry-run",
+        "--json",
+    ]);
+    assert!(output.status.success(), "{}", stderr(&output));
+    let job = json(&output);
+    assert_eq!(job["with"], "duck-quill");
+    let guide = PathBuf::from(job["guide"].as_str().unwrap());
+    assert!(guide.is_file(), "{guide:?}");
+    assert!(
+        guide.starts_with(&settings),
+        "the guide is in Duck Mold's own folder"
+    );
+    let command: Vec<&str> = job["command"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|word| word.as_str().unwrap())
+        .collect();
+    assert_eq!(command[0], quill.to_str().unwrap());
+    assert_eq!(command[2], "--guide");
+    assert_eq!(command[4..], ["--paper", "#6B4A2B"]);
+
+    // A program that isn't there is said.
+    let output = paint(&[
+        "paint",
+        "tree.toml",
+        "trunk",
+        "--duck-quill",
+        "nowhere/DuckQuill",
+        "--dry-run",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("there is no program at"));
+    // A part without an image, with --dry-run: nothing is made.
+    let output = paint(&["paint", "tree.toml", "leaves", "--system", "--dry-run"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains(
+            "\"leaves\" has no image: make one with duck-mold new-image tree.toml leaves"
+        ),
+        "{}",
+        stderr(&output)
+    );
+    assert!(!folder.join("textures/tree_leaves.png").exists());
+}
+
+#[test]
+fn image_guide_writes_the_lines_to_paint_by() {
+    let folder = folder("cli_image_guide");
+    let output = run(
+        &folder,
+        &["new-image", "tree.toml", "trunk", "--face", "side"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    // Beside the image, unless told where.
+    let output = run(
+        &folder,
+        &["image-guide", "tree.toml", "trunk", "--face", "side"],
+    );
+    assert!(output.status.success(), "{}", stderr(&output));
+    assert!(stdout(&output).contains("the guide for textures/tree_trunk_side.png"));
+    let guide = std::fs::read(folder.join("textures/tree_trunk_side.guide.png")).unwrap();
+    assert!(guide.starts_with(&[0x89, b'P', b'N', b'G']));
+    let output = run(
+        &folder,
+        &[
+            "image-guide",
+            "tree.toml",
+            "trunk",
+            "--face",
+            "side",
+            "-o",
+            "lines.png",
+            "--json",
+        ],
+    );
+    assert_eq!(json(&output)["wrote"], "lines.png");
+    assert!(folder.join("lines.png").is_file());
+    // A part without an image has no guide.
+    let output = run(&folder, &["image-guide", "tree.toml", "leaves"]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("\"leaves\" has no image"));
+}
