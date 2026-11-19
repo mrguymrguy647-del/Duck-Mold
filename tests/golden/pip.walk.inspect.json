@@ -1,0 +1,120 @@
+{
+  "ok": true,
+  "summary": "pip, \"walk\": 0.6 s, 5 keys, loops, sinks 0.002 into the ground at 0.067 s, nothing floating, 5 overlaps, no limits broken",
+  "source": "examples/pip.toml",
+  "name": "pip",
+  "animation": "walk",
+  "length": 0.6,
+  "loops": true,
+  "smooth": true,
+  "keys": [
+    {
+      "key": 1,
+      "at": 0.0,
+      "pose": "step_left",
+      "events": [
+        "footstep"
+      ]
+    },
+    {
+      "key": 2,
+      "at": 0.15,
+      "pose": "rest"
+    },
+    {
+      "key": 3,
+      "at": 0.3,
+      "pose": "step_right",
+      "events": [
+        "footstep"
+      ]
+    },
+    {
+      "key": 4,
+      "at": 0.45,
+      "pose": "rest"
+    },
+    {
+      "key": 5,
+      "at": 0.6,
+      "pose": "step_left"
+    }
+  ],
+  "events": [
+    {
+      "name": "footstep",
+      "at": 0.0,
+      "key": 1
+    },
+    {
+      "name": "footstep",
+      "at": 0.3,
+      "key": 3
+    }
+  ],
+  "frames": 19,
+  "moves": [
+    "body",
+    "head",
+    "left_arm",
+    "right_arm",
+    "left_leg",
+    "left_leg/boot",
+    "right_leg",
+    "right_leg/boot"
+  ],
+  "ground": {
+    "stays_on_ground": false,
+    "lowest_y": -0.002232,
+    "lowest_at": 0.06666666666666667,
+    "highest_y": -0.000024,
+    "highest_at": 0.0
+  },
+  "floating": [],
+  "overlapping": [
+    {
+      "a": "body",
+      "b": "head",
+      "depth": 0.005757,
+      "hidden": false,
+      "at": 0.0,
+      "new": true
+    },
+    {
+      "a": "left_leg/thigh",
+      "b": "body",
+      "depth": 0.0325,
+      "hidden": false,
+      "at": 0.0,
+      "new": true
+    },
+    {
+      "a": "right_leg/thigh",
+      "b": "body",
+      "depth": 0.0325,
+      "hidden": false,
+      "at": 0.0,
+      "new": true
+    },
+    {
+      "a": "left_leg/thigh",
+      "b": "left_leg/boot",
+      "depth": 0.0325,
+      "hidden": false,
+      "at": 0.3,
+      "new": true
+    },
+    {
+      "a": "right_leg/thigh",
+      "b": "right_leg/boot",
+      "depth": 0.0325,
+      "hidden": false,
+      "at": 0.0,
+      "new": true
+    }
+  ],
+  "limits_broken": [],
+  "ends_as_it_starts": true,
+  "warnings": [],
+  "errors": []
+}

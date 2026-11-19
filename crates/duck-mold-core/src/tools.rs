@@ -613,12 +613,60 @@ pub struct Example {
 }
 
 /// The examples, in the order the start page shows them.
-pub const EXAMPLES: [Example; 18] = [
+pub const EXAMPLES: [Example; 21] = [
     Example {
         name: "robot",
-        about: "Parts made of parts, a mirrored arm, and four animations",
+        about: "Parts made of parts, a mirrored arm, a painted face, and four animations",
         recipe: include_str!("../../../examples/robot.toml"),
-        files: &[],
+        files: &[
+            (
+                "textures/robot_face.png",
+                include_bytes!("../../../examples/textures/robot_face.png"),
+            ),
+            (
+                "textures/robot_label.png",
+                include_bytes!("../../../examples/textures/robot_label.png"),
+            ),
+        ],
+    },
+    Example {
+        name: "pip",
+        about: "A small explorer: a face painted in Duck Quill, a walk, and a game in Duck Forge",
+        recipe: include_str!("../../../examples/pip.toml"),
+        files: &[(
+            "textures/pip_face.png",
+            include_bytes!("../../../examples/textures/pip_face.png"),
+        )],
+    },
+    Example {
+        name: "plank_crate",
+        about: "Images: wood planks on a box, and a lid on top",
+        recipe: include_str!("../../../examples/plank_crate.toml"),
+        files: &[
+            (
+                "textures/planks.png",
+                include_bytes!("../../../examples/textures/planks.png"),
+            ),
+            (
+                "textures/lid.png",
+                include_bytes!("../../../examples/textures/lid.png"),
+            ),
+        ],
+    },
+    Example {
+        name: "signpost",
+        about: "A model from another program that brings its own pictures",
+        recipe: include_str!("../../../examples/signpost.toml"),
+        files: &[
+            (
+                "parts/sign.gltf",
+                include_bytes!("../../../examples/parts/sign.gltf"),
+            ),
+            (
+                "parts/sign_post.png",
+                include_bytes!("../../../examples/parts/sign_post.png"),
+            ),
+        ],
     },
     Example {
         name: "house",

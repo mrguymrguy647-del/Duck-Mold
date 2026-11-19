@@ -1228,6 +1228,14 @@ give animations, poses and parts are the names game code uses: keep
 them plain (`idle`, `walk`, `wave`, `jump`, `open`). `examples/robot.toml`
 has limits, six poses and three animations to copy from.
 
+**A whole character, start to finish:** `examples/pip.toml`. Its face
+is an image painted with a Duck Quill script
+(`examples/textures/pip_face.json`), on the front of a box head; it has
+`idle` and `walk` (with `footstep` events), `colliders = "parts"` and
+`lods = "auto"`. In Duck Forge, `examples/pip_walk` loads it and walks
+it round a yard, with its recipe in the game's `art` folder and an
+`export` line that sends the model to the game's `assets`.
+
 **Images in a game.** `duck-mold export` puts every image the model
 uses inside the `.glb`, on one sheet, and the game's code doesn't
 change: `Mesh::load_glb` and `AnimatedModel` draw them, with sharp

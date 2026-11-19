@@ -1,0 +1,120 @@
+{
+  "format": "duckquill-script",
+  "version": 1,
+  "title": "The robot's face: 42 x 32",
+  "notes": "A Duck Quill script. Brows and a mouth for the front of the robot's head, on a see-through picture: the head's own steel shows everywhere else, and its two eyes are parts, not paint. Make the PNG with: quill render robot_face.json --transparent --out .",
+  "palette": {
+    "dark": "#3B4148",
+    "glow": "#FFE08A",
+    "shade": "#737C84"
+  },
+  "commands": [
+    {
+      "cmd": "canvas",
+      "width": 42,
+      "height": 32,
+      "pixel": true
+    },
+    {
+      "cmd": "layer",
+      "name": "Brows"
+    },
+    {
+      "cmd": "rect",
+      "x": 7,
+      "y": 6,
+      "width": 5,
+      "height": 2,
+      "fill": "dark"
+    },
+    {
+      "cmd": "rect",
+      "x": 12,
+      "y": 7,
+      "width": 5,
+      "height": 2,
+      "fill": "dark"
+    },
+    {
+      "cmd": "rect",
+      "x": 25,
+      "y": 7,
+      "width": 5,
+      "height": 2,
+      "fill": "dark"
+    },
+    {
+      "cmd": "rect",
+      "x": 30,
+      "y": 6,
+      "width": 5,
+      "height": 2,
+      "fill": "dark"
+    },
+    {
+      "cmd": "layer",
+      "name": "Mouth"
+    },
+    {
+      "cmd": "rect",
+      "x": 12,
+      "y": 22,
+      "width": 18,
+      "height": 5,
+      "fill": "dark"
+    },
+    {
+      "cmd": "rect",
+      "x": 13,
+      "y": 23,
+      "width": 16,
+      "height": 3,
+      "fill": "glow"
+    },
+    {
+      "cmd": "pixels",
+      "at": [
+        13,
+        23
+      ],
+      "colors": {
+        "d": "dark"
+      },
+      "rows": [
+        "...d...d...d...d",
+        "...d...d...d...d",
+        "...d...d...d...d"
+      ]
+    },
+    {
+      "cmd": "layer",
+      "name": "Rivets"
+    },
+    {
+      "cmd": "pixels",
+      "at": [
+        2,
+        2
+      ],
+      "colors": {
+        "s": "shade"
+      },
+      "rows": [
+        "s.....................................s"
+      ]
+    },
+    {
+      "cmd": "pixels",
+      "at": [
+        2,
+        29
+      ],
+      "colors": {
+        "s": "shade"
+      },
+      "rows": [
+        "s.....................................s"
+      ]
+    }
+  ]
+}

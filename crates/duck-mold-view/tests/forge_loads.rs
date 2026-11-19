@@ -7,10 +7,11 @@ use std::path::Path;
 use duckforge::glb::GlbModel;
 use duckforge::prelude::Mesh;
 
-const EXAMPLES: [&str; 23] = [
+const EXAMPLES: [&str; 24] = [
     "crate",
     "plank_crate",
     "signpost",
+    "pip",
     "table",
     "tree",
     "house",

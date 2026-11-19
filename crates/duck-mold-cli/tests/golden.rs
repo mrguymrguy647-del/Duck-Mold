@@ -27,10 +27,11 @@ use std::process::Command;
 #[allow(dead_code)]
 mod forge;
 
-const EXAMPLES: [&str; 23] = [
+const EXAMPLES: [&str; 24] = [
     "crate",
     "plank_crate",
     "signpost",
+    "pip",
     "table",
     "tree",
     "house",
@@ -54,7 +55,7 @@ const EXAMPLES: [&str; 23] = [
 ];
 
 /// The examples with images.
-const WITH_IMAGES: [&str; 2] = ["plank_crate", "signpost"];
+const WITH_IMAGES: [&str; 4] = ["plank_crate", "signpost", "robot", "pip"];
 
 /// The top of the repository.
 fn root() -> PathBuf {
@@ -152,7 +153,7 @@ fn every_example_renders_to_its_golden_picture() {
 /// The examples with hit shapes, drawn with them outlined
 /// (`render --colliders`), and their hit shapes listed (`inspect
 /// --colliders`).
-const WITH_HIT_SHAPES: [&str; 4] = ["robot", "gnome", "door", "cart"];
+const WITH_HIT_SHAPES: [&str; 5] = ["robot", "gnome", "door", "cart", "pip"];
 
 #[test]
 fn every_example_with_hit_shapes_renders_them_to_its_golden_picture() {
@@ -182,7 +183,7 @@ fn every_example_with_hit_shapes_renders_them_to_its_golden_picture() {
 
 /// The examples with far-away versions (`lods = "auto"`): each version
 /// is drawn to a golden picture (`render --far`).
-const WITH_FAR_VERSIONS: [&str; 4] = ["temple", "barn", "robot", "gnome"];
+const WITH_FAR_VERSIONS: [&str; 5] = ["temple", "barn", "robot", "gnome", "pip"];
 
 #[test]
 fn every_far_version_renders_to_its_golden_picture() {
@@ -216,7 +217,8 @@ fn every_example_inspects_to_its_golden_report() {
 
 /// The examples that move, each with its animations and the view its
 /// strips are drawn from.
-const MOVING: [(&str, &[(&str, &str)]); 4] = [
+const MOVING: [(&str, &[(&str, &str)]); 5] = [
+    ("pip", &[("idle", "three-quarter"), ("walk", "right")]),
     (
         "robot",
         &[

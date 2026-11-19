@@ -909,6 +909,7 @@ fn the_screens_look_as_they_did() {
         let folder = folder("pictures_glb");
         let recipe = folder.join("robot.toml");
         std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+        with_robots_images(&recipe);
         duck_mold_core::tools::export_file(&recipe, None).unwrap();
         let mut screen = harness(StudioApp::with_file(folder.join("robot.glb"), false), true);
         screen.run_steps(3);
@@ -1057,4 +1058,16 @@ fn the_screens_look_as_they_did() {
         wrong.len(),
         wrong.join("\n")
     );
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
+    }
 }

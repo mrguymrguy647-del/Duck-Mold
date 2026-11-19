@@ -1009,6 +1009,7 @@ fn json_is_one_line_unless_pretty() {
 fn an_unknown_part_lists_every_part_nearest_first() {
     let folder = folder("cli_nearest");
     std::fs::copy(examples().join("robot.toml"), folder.join("robot.toml")).unwrap();
+    with_robots_images(&folder.join("robot.toml"));
     let output = run(
         &folder,
         &["edit", "robot.toml", "rename", "hnd", "paw", "--json"],
@@ -1274,6 +1275,7 @@ fn studio_and_preview_start_the_studio_program_beside_duck_mold() {
     let folder = folder("cli_studio");
     let examples = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
     std::fs::copy(examples.join("robot.toml"), folder.join("robot.toml")).unwrap();
+    with_robots_images(&folder.join("robot.toml"));
     let with_studio_at = |program: &Path, arguments: &[&str]| {
         Command::new(env!("CARGO_BIN_EXE_duck-mold"))
             .current_dir(&folder)
@@ -2080,6 +2082,7 @@ fn save_animation_and_add_animation_from_share_a_walk() {
         folder.join("robot.toml"),
     )
     .unwrap();
+    with_robots_images(&folder.join("robot.toml"));
     let saved = run(
         &folder,
         &[
@@ -2979,4 +2982,16 @@ fn export_goes_where_the_recipe_says() {
     let output = run(&folder, &["edit", "art/tree.toml", "set-export", "none"]);
     assert_eq!(output.status.code(), Some(2));
     assert!(stderr(&output).contains("has no \"export\" to take away"));
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
+    }
 }

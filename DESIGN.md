@@ -6616,6 +6616,40 @@ choices made on the way.
 - A small imported model with a picture (`examples/parts/sign.gltf`,
   written by a script as the lamp was), to test section 6.
 
+*As built (step 7):*
+
+- **The robot** has brows and a mouth on the front of its head
+  (`textures/robot_face.png`, 42 x 32) and "DM-1" in a thin frame on its
+  chest panel (`textures/robot_label.png`, 30 x 20), both 100 pixels to
+  the metre, each see-through round the paint so the part's own colour
+  shows. Both are drawn by Duck Quill scripts kept beside them. Its
+  eyes stay parts. Its golden files changed where the face or the label
+  shows (`robot.glb`, its report, its picture, the pictures of its hit
+  shapes and far versions, and two animation strips); the reports of
+  its four animations did not.
+- **Tests that use the robot elsewhere** copy its two images along with
+  its recipe, or use it "unpainted" (the recipe without its two
+  `images` lines) where the test is about text alone. The file from
+  before Phase 5 is still compared with the unpainted robot, triangle
+  for triangle.
+- **Pip** (`examples/pip.toml`): a box head with the face on its front
+  (`textures/pip_face.png`, 36 x 32, from a Duck Quill script), a hat
+  of three cylinders, a backpack with a rolled blanket, arms and legs
+  from two definitions. `idle` and `walk`; the walk was stood on the
+  ground with `fit-ground`, has a `footstep` on each step, and takes
+  two steps of about a quarter of a metre in 0.6 seconds. Hit shapes
+  for every part that matters, and two far-away versions.
+- **The game** is Duck Forge's `examples/pip_walk`: the arrows walk Pip
+  round four plank crates. Its `art` folder has both recipes (each with
+  an `export` line into the game's `assets`), the pictures and their
+  Duck Quill scripts. Its `reload` takes a model saved again.
+- **The start page** offers Pip, the plank crate and the signpost
+  beside the others (21 examples), each copied out with the pictures
+  and files it uses.
+- **The stored pictures** of the face in Duck Quill, Pip in the Studio,
+  Pip in Duck Forge Studio's tab and three frames of the game are in
+  `docs/phase7/`, shown in `PHASE7_REPORT.md`.
+
 ### 15. Steps, one commit each
 
 | Step | What | Where |

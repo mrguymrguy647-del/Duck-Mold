@@ -26,6 +26,7 @@ fn game(test: &str) -> (PathBuf, PathBuf) {
     std::fs::create_dir_all(game.join("art")).unwrap();
     let recipe = game.join("art/robot.toml");
     std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+    with_robots_images(&recipe);
     (game, recipe)
 }
 
@@ -302,4 +303,16 @@ fn the_studio_on_its_own_shows_and_clears_the_export_line() {
     screen.get_by_label("Goes to");
     assert!(screen.query_by_label("Export after every change").is_none());
     assert!(screen.query_by_label("Choose...").is_none());
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
+    }
 }

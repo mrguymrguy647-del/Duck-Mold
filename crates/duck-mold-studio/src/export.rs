@@ -89,10 +89,12 @@ pub fn model_lines(ui: &mut egui::Ui, studio: &Studio, exporting: &mut Exporting
     }
     let mut edit = None;
     ui.add_space(8.0);
+    // (Not "Export": that is the button's name, and a screen reader
+    // would meet it twice.)
     let heading = if exporting.hosted {
         "Send to game"
     } else {
-        "Export"
+        "The .glb file"
     };
     ui.label(RichText::new(heading).strong()).on_hover_text(
         "Where the model's .glb file is written, for a game. The recipe can say (its \"export\" line); otherwise it goes beside the recipe",

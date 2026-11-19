@@ -450,7 +450,15 @@ mod round_trip {
         let _ = std::fs::remove_dir_all(&folder);
         std::fs::create_dir_all(&folder).unwrap();
         let recipe = folder.join("robot.toml");
-        std::fs::copy(examples().join("robot.toml"), &recipe).unwrap();
+        // (The robot as it was before it was painted: these tests give
+        // its head a new image of their own.)
+        let unpainted: String = std::fs::read_to_string(examples().join("robot.toml"))
+            .unwrap()
+            .lines()
+            .filter(|line| !line.starts_with("images = { front = \"textures/robot_"))
+            .map(|line| format!("{line}\n"))
+            .collect();
+        std::fs::write(&recipe, unpainted).unwrap();
         duck_mold_core::images::new_image(&recipe, "head", Some("front"), None, None).unwrap();
         recipe
     }
@@ -789,4 +797,16 @@ fn a_parts_own_pictures_are_listed_and_the_recipe_has_the_last_word() {
         studio.model().unwrap().pictures[0].pixel(0, 0),
         [200, 30, 30, 255]
     );
+}
+
+/// The robot's two images (its face and its label), put beside a copy
+/// of its recipe: the recipe names them, so it doesn't build without.
+#[allow(dead_code)]
+fn with_robots_images(recipe: &std::path::Path) {
+    let from = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/textures");
+    let to = recipe.parent().unwrap().join("textures");
+    std::fs::create_dir_all(&to).unwrap();
+    for image in ["robot_face.png", "robot_label.png"] {
+        std::fs::copy(from.join(image), to.join(image)).unwrap();
+    }
 }

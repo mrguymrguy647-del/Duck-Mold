@@ -10,9 +10,15 @@ use duck_mold_core::source::{Syntax, parse};
 use duck_mold_core::starters::{STARTERS, TWO_LEGS, starter};
 use duck_mold_core::tools::{Failure, save_animation};
 
+/// The robot's recipe, without the two lines that put images on it:
+/// these tests write the text into folders that don't have the images.
 fn robot_text() -> String {
     std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/robot.toml"))
         .unwrap()
+        .lines()
+        .filter(|line| !line.starts_with("images = { front = \"textures/robot_"))
+        .map(|line| format!("{line}\n"))
+        .collect()
 }
 
 fn folder(name: &str) -> PathBuf {

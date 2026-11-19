@@ -727,7 +727,8 @@ A recipe can be written as TOML (the examples) or as JSON
 | [table.toml](examples/table.toml) | A part defined once and used four times, on sockets the table top declares. |
 | [tree.toml](examples/tree.toml) | One tier of needles used three times at three sizes. |
 | [house.toml](examples/house.toml) | A roof assembled from two wedges; a door, framed windows (one box inset to a frame and a pane, defined once) and a chimney placed by sockets, and a skylight on the roof's `slope`. |
-| [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. It moves: limits on its joins, eight poses and four animations (`idle`, `walk`, `wave`, and `jump` from the starters). |
+| [robot.toml](examples/robot.toml) | Parts made of parts, sockets passed on from inside, and a mirrored arm. It moves: limits on its joins, eight poses and four animations (`idle`, `walk`, `wave`, and `jump` from the starters). It is painted: brows and a mouth on the front of its head, and the label "DM-1" on its chest panel, two small images over its own colours. |
+| [pip.toml](examples/pip.toml) | **One character made with all three Duck apps.** Pip's face is painted in Duck Quill ([textures/pip_face.json](examples/textures/pip_face.json) is the script); Pip is put together and animated here (`idle`, and `walk` with a `footstep` on each step, hit shapes, far-away versions); and Pip walks round a yard of plank crates in a Duck Forge game, [examples/pip_walk](https://github.com/mrguymrguy647-del/Duck-Forge/tree/main/examples/pip_walk) there. |
 | [desk.toml](examples/desk.toml) | Parts made elsewhere: a lamp from a glTF file (its stand painted from the palette, its shade and bulb keeping the file's colours) and a crate from a Duck Mold `.glb`. |
 | [snowman.toml](examples/snowman.toml) | Sockets on curved surfaces: eyes and buttons that follow the snow, arms that lean out, a badge on a cone's slant. |
 | [duck.toml](examples/duck.toml) | A ball stretched into a body with a three-number `scale`, parts placed at points of a round surface, one wing used twice. Its picture is the Studio's icon. |
@@ -970,7 +971,7 @@ Duck-Mold/
 ├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
 ├── release/                   the installer's script, and what goes in the download beside the programs
 ├── Cargo.toml                 the workspace: five crates, built together
-├── examples/                  eighteen recipes to read and change, and parts/ for files they use
+├── examples/                  twenty-four recipes to read and change, textures/ for their images, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
 └── crates/
