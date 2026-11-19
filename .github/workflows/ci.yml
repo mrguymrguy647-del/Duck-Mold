@@ -1,4 +1,4 @@
-# Builds and tests Duck Mold on Windows and Linux for every push and pull
+# Builds and tests Duck Mold on Windows, Linux and macOS for every push and pull
 # request, checks the formatting, and runs clippy (Rust's checker for
 # common mistakes). A copy of Duck Quill's, plus the formatting check. A
 # red cross on GitHub means one of these steps failed: click it to see
@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: [windows-latest, ubuntu-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v5
@@ -83,3 +83,35 @@ jobs:
       - name: Speed (printed, not checked)
         if: runner.os == 'Windows'
         run: cargo test --release -p duck-mold-view --test speed -- --ignored --nocapture
+
+  # The start files for Linux and Mac (start-duck-mold-studio.sh, "Start
+  # Duck Mold Studio.command", create-desktop-shortcut.sh): checked by
+  # shellcheck, which finds the usual mistakes of shell scripts, and the
+  # build part run, as someone who double-clicks them would.
+  start-files:
+    name: Start files (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Shellcheck
+        if: runner.os == 'Linux'
+        run: shellcheck start-duck-mold-studio.sh "Start Duck Mold Studio.command" create-desktop-shortcut.sh
+      - name: Install Rust
+        shell: bash
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+      - uses: Swatinem/rust-cache@v2
+      - name: Build, as the start file does
+        run: ./start-duck-mold-studio.sh --build-only
+      - name: The Studio is there
+        run: test -x target/release/DuckMoldStudio
+      - name: The desktop shortcut
+        if: runner.os == 'Linux'
+        run: |
+          HOME="$RUNNER_TEMP/home" ./create-desktop-shortcut.sh
+          grep -q 'target/release/DuckMoldStudio' "$RUNNER_TEMP/home/.local/share/applications/duck-mold-studio.desktop"
