@@ -110,17 +110,23 @@ fn one_click_sends_the_model_into_the_games_assets() {
     let (game, recipe) = game("hosted_into_game");
     let mut screen = harness(StudioApp::hosted(&recipe, false).for_game(&game), false);
     screen.run_steps(2);
-    // With nothing selected, the Model section says where it goes.
+    // With nothing selected, the Model section says where it goes: a
+    // model made for a game goes to the game's assets, line or no line.
     screen.get_by_label("Goes to");
-    screen.get_by_label("beside the recipe (robot.glb)");
+    screen.get_by_label("the game's assets (robot.glb)");
     assert!(
-        !game.join("art/robot.glb").exists(),
+        !game.join("art/robot.glb").exists() && !game.join("assets/robot.glb").exists(),
         "opening a model exports nothing"
     );
+    assert_eq!(
+        screen.state().studio().unwrap().export_path(),
+        game.join("assets/robot.glb")
+    );
 
-    // One click writes the line: the same edit as `set-export`.
+    // One click writes the line, so that Duck Mold on its own exports
+    // there too: the same edit as `set-export`.
     screen
-        .get_by_role_and_label(Role::Button, "Into the game: assets/robot.glb")
+        .get_by_role_and_label(Role::Button, "Write it in the recipe")
         .click();
     screen.run_steps(3);
     assert_eq!(
@@ -129,7 +135,9 @@ fn one_click_sends_the_model_into_the_games_assets() {
     );
     screen.get_by_label("../assets/robot.glb");
     assert!(
-        screen.query_by_label_contains("Into the game").is_none(),
+        screen
+            .query_by_label_contains("Write it in the recipe")
+            .is_none(),
         "it is there already"
     );
     // That was a change, and the model is exported after every change
@@ -187,6 +195,31 @@ fn one_click_sends_the_model_into_the_games_assets() {
 }
 
 #[test]
+fn without_a_line_a_model_for_a_game_still_goes_to_its_assets() {
+    let (game, recipe) = game("hosted_no_line");
+    let mut screen = harness(StudioApp::hosted(&recipe, false).for_game(&game), false);
+    screen.run_steps(2);
+    paint_the_head(&mut screen, "red");
+    let sent = game.join("assets/robot.glb");
+    assert!(sent.is_file());
+    assert!(!game.join("art/robot.glb").exists());
+    assert_eq!(
+        screen.state_mut().take_exported(),
+        std::slice::from_ref(&sent)
+    );
+    assert_eq!(
+        recipe_line(&recipe, "export"),
+        None,
+        "the recipe isn't touched"
+    );
+    // "Send to game" by hand, the same.
+    std::fs::remove_file(&sent).unwrap();
+    screen.get_by_role_and_label(Role::Button, "Export").click();
+    screen.run_steps(3);
+    assert!(sent.is_file());
+}
+
+#[test]
 fn export_after_every_change_can_be_turned_off_and_is_remembered() {
     let (game, recipe) = game("hosted_always");
     let settings = game.join("settings/recent.txt");
@@ -208,7 +241,7 @@ fn export_after_every_change_can_be_turned_off_and_is_remembered() {
     assert!(!screen.state().exporting().always);
     paint_the_head(&mut screen, "red");
     assert!(
-        !game.join("art/robot.glb").exists(),
+        !game.join("art/robot.glb").exists() && !game.join("assets/robot.glb").exists(),
         "nothing is exported now"
     );
     assert!(screen.state_mut().take_exported().is_empty());

@@ -161,6 +161,10 @@ pub struct Studio {
     exported: Vec<PathBuf>,
     /// The recipe's `export` line, as of the last build that worked.
     export_line: Option<String>,
+    /// Where the `.glb` goes when the recipe has no `export` line, if
+    /// not beside the recipe: a game's assets, when the model is being
+    /// made for a game.
+    export_to: Option<PathBuf>,
     /// True when the file isn't there any more (deleted or moved): the
     /// model stays, and nothing is changed until it is saved again.
     gone: bool,
@@ -255,6 +259,7 @@ impl Studio {
             written: None,
             exported: Vec::new(),
             export_line: None,
+            export_to: None,
             gone: false,
             settling: None,
             settling_files: None,
@@ -1204,14 +1209,26 @@ impl Studio {
     /// Writes the model as a `.glb` next to the recipe, as `duck-mold
     /// export` does. Says where it went.
     pub fn export(&mut self) -> Result<String, String> {
-        let exported = tools::export_file(&self.path, None);
+        let exported = tools::export_file(&self.path, self.export_elsewhere().as_deref());
         let done = match &exported {
             // Named as the recipe names it, when it does.
             Ok(exported) => Ok(format!(
                 "Wrote {} ({})",
-                match self.export_line() {
-                    Some(line) => line.to_owned(),
-                    None => self.shorten(&exported.output),
+                match (self.export_line(), &self.export_to) {
+                    (Some(line), _) => line.to_owned(),
+                    // In a game's assets: the folder and the name say
+                    // enough (`assets/robot.glb`).
+                    (None, Some(to)) => {
+                        let mut last: Vec<String> = to
+                            .components()
+                            .rev()
+                            .take(2)
+                            .map(|piece| piece.as_os_str().to_string_lossy().into_owned())
+                            .collect();
+                        last.reverse();
+                        last.join("/")
+                    }
+                    (None, None) => self.shorten(&exported.output),
                 },
                 tools::size_in_words(exported.bytes)
             )),
@@ -1232,7 +1249,7 @@ impl Studio {
     /// word when it works: the status line keeps saying what the
     /// change was. If it can't be written, the status line says why.
     pub fn export_after_change(&mut self) -> Result<PathBuf, String> {
-        match tools::export_file(&self.path, None) {
+        match tools::export_file(&self.path, self.export_elsewhere().as_deref()) {
             Ok(exported) => {
                 self.exported.push(exported.path.clone());
                 Ok(exported.path)
@@ -1259,10 +1276,34 @@ impl Studio {
         self.export_line.as_deref()
     }
 
-    /// Where Export writes: where the `export` line says, or else
-    /// beside the recipe.
+    /// Where Export writes: where the `export` line says; or else where
+    /// [`Studio::export_to`] said; or else beside the recipe.
     pub fn export_path(&self) -> PathBuf {
-        tools::export_path(&self.path, self.export_line())
+        match (self.export_line(), &self.export_to) {
+            (None, Some(to)) => to.clone(),
+            (line, _) => tools::export_path(&self.path, line),
+        }
+    }
+
+    /// Says where the `.glb` goes while the recipe has no `export` line
+    /// of its own: a game's assets, when the model is being made for a
+    /// game. `None`: beside the recipe, as `duck-mold export` does.
+    pub fn export_to(&mut self, to: Option<PathBuf>) {
+        self.export_to = to;
+    }
+
+    /// Where an export goes, if not where `duck-mold export` would put
+    /// it by itself.
+    fn export_elsewhere(&self) -> Option<PathBuf> {
+        match (self.export_line(), &self.export_to) {
+            (None, Some(to)) => {
+                if let Some(folder) = to.parent() {
+                    let _ = std::fs::create_dir_all(folder);
+                }
+                Some(to.clone())
+            }
+            _ => None,
+        }
     }
 
     /// Writes the four-view picture next to the recipe, as `duck-mold

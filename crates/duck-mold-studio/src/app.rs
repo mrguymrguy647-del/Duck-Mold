@@ -158,7 +158,22 @@ impl StudioApp {
     /// is offered as the place to export to.
     pub fn for_game(mut self, folder: impl Into<PathBuf>) -> StudioApp {
         self.exporting.game = Some(folder.into());
+        self.export_into_the_game();
         self
+    }
+
+    /// While the recipe has no `export` line of its own, a model being
+    /// made for a game goes to the game's assets, under the recipe's
+    /// name.
+    fn export_into_the_game(&mut self) {
+        let Some(studio) = &mut self.studio else {
+            return;
+        };
+        let to = self.exporting.game.as_ref().and_then(|game| {
+            let name = studio.path().file_stem()?.to_str()?;
+            Some(game.join("assets").join(format!("{name}.glb")))
+        });
+        studio.export_to(to);
     }
 
     /// Whether this Studio is inside another program's window.
@@ -246,6 +261,7 @@ impl StudioApp {
             // Opening a model isn't a change to export.
             self.exported_build = studio.builds();
             self.studio = Some(studio);
+            self.export_into_the_game();
             self.keep_history();
             self.notice = None;
             // The first model a person opens to work on gets the tips.

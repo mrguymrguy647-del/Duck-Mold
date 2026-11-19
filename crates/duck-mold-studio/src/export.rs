@@ -98,15 +98,19 @@ pub fn model_lines(ui: &mut egui::Ui, studio: &Studio, exporting: &mut Exporting
         "Where the model's .glb file is written, for a game. The recipe can say (its \"export\" line); otherwise it goes beside the recipe",
     );
     let line = studio.export_line().map(str::to_owned);
-    let goes_to = match &line {
-        Some(line) => line.clone(),
-        None => format!(
-            "beside the recipe ({})",
-            studio
-                .export_path()
-                .file_name()
-                .map_or_else(String::new, |name| name.to_string_lossy().into_owned())
-        ),
+    // Without a line of its own, a model made for a game goes to the
+    // game's assets; any other goes beside its recipe.
+    let in_the_game = exporting
+        .into_the_game(studio.path())
+        .filter(|_| line.is_none());
+    let file_name = studio
+        .export_path()
+        .file_name()
+        .map_or_else(String::new, |name| name.to_string_lossy().into_owned());
+    let goes_to = match (&line, &in_the_game) {
+        (Some(line), _) => line.clone(),
+        (None, Some(_)) => format!("the game's assets ({file_name})"),
+        (None, None) => format!("beside the recipe ({file_name})"),
     };
     ui.horizontal_wrapped(|ui| {
         ui.label(RichText::new("Goes to").weak());
@@ -122,11 +126,10 @@ pub fn model_lines(ui: &mut egui::Ui, studio: &Studio, exporting: &mut Exporting
                 .into_the_game(studio.path())
                 .filter(|suggested| line.as_ref() != Some(suggested));
             if let Some(suggested) = suggested {
-                let shown = suggested.trim_start_matches("../");
-                let set = ui.button(format!("Into the game: {shown}"));
+                let set = ui.button("Write it in the recipe");
                 if set
                     .on_hover_text(format!(
-                        "Write export = \"{suggested}\" in the recipe, so the model goes straight into the game's assets"
+                        "Write export = \"{suggested}\" in the recipe, so that Duck Mold's own Export, and `duck-mold export`, put the model in the game's assets too"
                     ))
                     .clicked()
                 {
