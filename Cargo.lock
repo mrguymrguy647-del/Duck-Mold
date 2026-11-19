@@ -939,7 +939,7 @@ checksum = "d8b14ccef22fc6f5a8f4d7d768562a182c04ce9a3b3157b91390b52ddfdf1a76"
 
 [[package]]
 name = "duck-mold-cli"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "clap",
  "duck-mold-core",
@@ -950,7 +950,7 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "jpeg-decoder",
  "png",
@@ -961,7 +961,7 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-studio"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dirs",
  "duck-mold-core",
@@ -974,7 +974,7 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-studio-app"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "duck-mold-studio",
  "eframe",
@@ -983,7 +983,7 @@ dependencies = [
 
 [[package]]
 name = "duck-mold-view"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "duck-mold-core",
  "duckforge",

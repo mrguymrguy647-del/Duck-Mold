@@ -3,6 +3,59 @@
 What changed in each version, in plain words. The newest is first. The
 section for a version is also the text of its page on GitHub's Releases.
 
+## 1.1.0
+
+Duck Mold now runs on Linux and Macs as well as Windows, and is much
+easier for AI assistants to use. Nothing about your models changes:
+every recipe that worked in 1.0.0 works the same, and gives the same
+`.glb`.
+
+**Installing on Linux or a Mac.** One line in a terminal installs the
+`duck-mold` program:
+
+    curl -fsSL https://raw.githubusercontent.com/mrguymrguy647-del/Duck-Mold/main/install.sh | sh
+
+It picks the right file for your computer, checks that the download
+arrived whole, and needs no administrator. Or download the file
+yourself: `duck-mold-1.1.0-linux-x86_64`, `duck-mold-1.1.0-linux-arm64`
+or `duck-mold-1.1.0-macos`. Each is one file that needs nothing else.
+On Windows, install as before, with `DuckMoldSetup-1.1.0.exe`.
+
+### New
+
+- **Duck Mold Studio for Linux.** `DuckMoldStudio-1.1.0-linux-x86_64.tar.gz`
+  has the Studio, the examples and the guides. Unpack it and run
+  `./DuckMoldStudio`; `./create-desktop-shortcut.sh` puts it in your
+  applications menu. On a Mac, the Studio is built from the source:
+  double-click `Start Duck Mold Studio.command`.
+- **`duck-mold check`.** One command does what used to take five: it
+  builds the model, plays every animation frame by frame, looks at the
+  images, draws the picture, and lists every problem, the worst first.
+  Each problem comes with the exact command that fixes it, when there is
+  one, or says in words what to do.
+- **Duck Mold in Claude, Codex and other AI apps.** `duck-mold mcp`
+  lets an AI app use Duck Mold's commands directly as tools, and see the
+  pictures it draws. For Claude Code it is one line: `claude mcp add
+  duck-mold -- duck-mold mcp`. The README says how for Claude Desktop
+  and Codex.
+- **Duck Mold in ChatGPT.** Upload the Linux file and your recipe to
+  ChatGPT, and ask it to run `./duck-mold guide` and follow it. It works
+  in ChatGPT's sandbox, which has no internet.
+- **A shorter guide for AI assistants.** `duck-mold guide` now prints
+  one page to start with. `duck-mold guide shaping` (or recipes, edits,
+  motion, hits, images, export, mistakes) prints just that part, and
+  `duck-mold guide all` the whole guide as before.
+- **`duck-mold schema`** prints the recipe format in a standard form
+  (JSON Schema) that editors and tools understand.
+- **Building with no internet.** `duck-mold-1.1.0-source.tar.gz` has
+  the program's source with everything it needs inside, so it builds on
+  a computer that is offline.
+- **Problems say how to fix them.** A colour nobody uses, an event
+  heard twice where a loop joins, an animation that dips into the
+  ground: the report now gives the command that fixes each.
+- **AGENTS.md and CLAUDE.md** in Duck Mold, Duck Forge, Duck Quill and
+  Duck Echo tell AI assistants how to build, test and use each one.
+
 ## 1.0.0
 
 **Installing.** Download `DuckMoldSetup-1.0.0.exe` and run it. It
