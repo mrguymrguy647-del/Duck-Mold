@@ -109,6 +109,8 @@ jobs:
           grep -E '^Duck Mold(/|\\)[^/\\]+$' contents.txt
           for wanted in DuckMoldStudio.exe duck-mold.exe "READ ME FIRST.txt" "Create desktop shortcut.bat" \
                         examples/robot.toml examples/duck.toml examples/parts/lamp.gltf \
+                        examples/textures/robot_face.png examples/pip.toml examples/textures/pip_face.png \
+                        examples/parts/sign.gltf examples/parts/sign_post.png \
                         docs/AI_GUIDE.md docs/recipe-format.md; do
             grep -qxF "Duck Mold/$wanted" <(tr '\\' / < contents.txt) || { echo "missing: $wanted"; exit 1; }
           done
@@ -117,6 +119,11 @@ jobs:
           echo "$ver"
           [[ "$ver" == "duck-mold ${{ steps.version.outputs.version }}" ]]
           "dist/Duck Mold/duck-mold.exe" inspect "dist/Duck Mold/examples/robot.toml"
+          # A model with images, and one whose pictures came inside a
+          # glTF file (a JPEG among them): each exports, pictures and all.
+          "dist/Duck Mold/duck-mold.exe" export "dist/Duck Mold/examples/pip.toml" -o pip.glb
+          "dist/Duck Mold/duck-mold.exe" export "dist/Duck Mold/examples/signpost.toml" -o signpost.glb
+          "dist/Duck Mold/duck-mold.exe" inspect pip.glb
           # The Studio is a window program: asked for its version, it
           # must end at once without opening one.
           "dist/Duck Mold/DuckMoldStudio.exe" --version
@@ -159,7 +166,8 @@ jobs:
           if ($setup.ExitCode -ne 0) { Get-Content install.log; throw "the installer said $($setup.ExitCode)" }
           $app = "$env:LOCALAPPDATA\Programs\Duck Mold"
           foreach ($file in 'DuckMoldStudio.exe', 'duck-mold.exe', 'READ ME FIRST.txt', 'examples\robot.toml',
-                            'examples\parts\lamp.gltf', 'docs\AI_GUIDE.md', 'docs\recipe-format.md', 'unins000.exe') {
+                            'examples\parts\lamp.gltf', 'examples\textures\robot_face.png', 'examples\pip.toml',
+                            'docs\AI_GUIDE.md', 'docs\recipe-format.md', 'unins000.exe') {
             if (-not (Test-Path "$app\$file")) { throw "not installed: $file" }
           }
           if (Test-Path "$app\Create desktop shortcut.bat") { throw "the zip's shortcut maker isn't needed here" }
@@ -184,6 +192,11 @@ jobs:
           if ($ver.Trim() -ne "duck-mold $env:VERSION") { throw "the installed duck-mold says $ver" }
           & "$app\duck-mold.exe" inspect "$app\examples\robot.toml"
           if ($LASTEXITCODE -ne 0) { throw "inspect failed on the installed robot" }
+          # The installed robot has its painted face: its images came along.
+          & "$app\duck-mold.exe" export "$app\examples\robot.toml" -o "$pwd\installed-robot.glb"
+          if ($LASTEXITCODE -ne 0) { throw "the installed robot didn't export" }
+          $report = & "$app\duck-mold.exe" inspect "$pwd\installed-robot.glb" --json | ConvertFrom-Json
+          if (-not $report.images) { throw "the installed robot's .glb has no images" }
           $studio = & "$app\DuckMoldStudio.exe" --version | Out-String
           if ($studio.Trim() -ne "DuckMoldStudio $env:VERSION") { throw "the installed Studio says $studio" }
           "Installed $env:VERSION in $app"

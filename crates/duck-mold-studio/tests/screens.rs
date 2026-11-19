@@ -1790,7 +1790,7 @@ fn the_menus_do_what_the_buttons_and_keys_do() {
             .is_none()
     );
     choose(&mut screen, "Help", "About");
-    screen.get_by_label_contains("Version 0.");
+    screen.get_by_label_contains(&format!("Version {}", env!("CARGO_PKG_VERSION")));
     screen.get_by_label("Copy version");
     screen.key_press(egui::Key::Escape);
     screen.run_steps(3);
@@ -2064,7 +2064,7 @@ fn an_example_on_the_start_page_opens_a_copy_of_your_own() {
     // begin, every example by name, and how it works.
     screen.get_by_label("Duck Mold Studio");
     screen.get_by_label("Build 3D models from parts, for Duck Forge games.");
-    screen.get_by_label_contains("version 0.");
+    screen.get_by_label_contains(&format!("version {}", env!("CARGO_PKG_VERSION")));
     screen.get_by_label("New model");
     screen.get_by_label("Open a model");
     screen.get_by_label("Examples: click one to open a copy of your own");

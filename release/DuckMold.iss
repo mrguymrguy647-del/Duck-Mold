@@ -4,7 +4,7 @@
 ; release workflow (.github/workflows/release.yml), from the same folder
 ; the zip is made from:
 ;
-;   ISCC.exe /DVersion=0.7.0 /DSource="dist\Duck Mold" /O"dist" release\DuckMold.iss
+;   ISCC.exe /DVersion=1.0.0 /DSource="dist\Duck Mold" /O"dist" release\DuckMold.iss
 ;
 ; Copied from Duck Forge Studio's installer, and changed. What it does:
 ; - Installs for you alone, with no administrator rights, in

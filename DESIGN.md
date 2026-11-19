@@ -6666,6 +6666,15 @@ choices made on the way.
 Then `PHASE7_REPORT.md`, the merges in the order you gave, and the
 release.
 
+*As built (step 8):* version 1.0.0. `RELEASE_NOTES.md` has its
+section (which is also the text of the release's page); the installer
+is `DuckMoldSetup-1.0.0.exe`, made as in 7a. The release's own test now
+also checks that the examples' pictures are in the zip and installed
+(`examples/textures/robot_face.png`, Pip, the signpost and its
+picture), exports Pip and the signpost from the unzipped folder, and
+exports the installed robot and reads its images back. The read-me in
+the download has a section on pictures and on models for a game.
+
 ### 16. Testing
 
 - **Every step has tests**; edits have golden files; every changed
