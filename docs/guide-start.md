@@ -22,11 +22,17 @@ duck-mold render lamp.toml               # draw it: lamp.png, four views on one 
 duck-mold export lamp.toml               # write lamp.glb
 duck-mold guide recipes                  # one part of the guide (guide --list lists them)
 duck-mold schema                         # the recipe format as a JSON Schema
+duck-mold mcp                            # all of this as tools for an AI app (MCP)
 ```
 
 Add `--json` to any of them for one line of JSON on standard output
 (`--pretty` spreads it out). `duck-mold <command> --help` explains one;
 `duck-mold edit --help` lists every edit, grouped.
+
+In an AI app that speaks MCP (Claude Code, Claude Desktop, Codex), add
+Duck Mold once (`claude mcp add duck-mold -- duck-mold mcp`) and the
+same commands are tools, with the same arguments; `render` returns
+the picture itself.
 
 ## A recipe
 

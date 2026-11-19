@@ -21,7 +21,7 @@ use duck_mold_core::issue::{Issue, Report};
 use duck_mold_core::tools::{self, Failure};
 use duck_mold_view::render;
 
-use duck_mold_cli::{check, edit, guide};
+use duck_mold_cli::{check, edit, guide, mcp};
 
 mod studio;
 
@@ -396,6 +396,15 @@ enum Command {
         #[arg(long, conflicts_with_all = ["output", "size"])]
         no_render: bool,
     },
+    /// Serve Duck Mold's commands as tools for an AI app, over MCP (the
+    /// Model Context Protocol), on standard input and output.
+    ///
+    /// The app starts it; you don't run it yourself. The tools: guide,
+    /// inspect, check, edit, render (which returns the picture), export
+    /// and new, each with the same arguments as its command. Claude Code:
+    /// `claude mcp add duck-mold -- duck-mold mcp`. The README says how
+    /// for Claude Desktop and Codex. Nothing goes over the network.
+    Mcp,
     /// Print the recipe format as a JSON Schema (draft 2020-12).
     ///
     /// For editors and agents that check a recipe before running it: it
@@ -893,6 +902,23 @@ fn main() -> ExitCode {
                     }
                 }
                 Err(failure) => fail(&failure, json),
+            }
+        }
+        Command::Mcp => {
+            let program = match std::env::current_exe() {
+                Ok(program) => program,
+                Err(error) => {
+                    eprintln!("error: can't find the duck-mold program itself: {error}");
+                    return ExitCode::from(2);
+                }
+            };
+            let stdin = std::io::stdin();
+            match mcp::serve(stdin.lock(), std::io::stdout().lock(), &program) {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(error) => {
+                    eprintln!("error: {error}");
+                    ExitCode::from(2)
+                }
             }
         }
         Command::Schema => {

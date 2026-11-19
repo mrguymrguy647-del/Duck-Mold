@@ -11,3 +11,4 @@
 pub mod check;
 pub mod edit;
 pub mod guide;
+pub mod mcp;
