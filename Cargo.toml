@@ -56,7 +56,7 @@ clap = { version = "4", features = ["derive"] }
 # this line does; that commit has Duck Forge's loader for Duck Mold's .glb
 # files (reader version 9: models with images). Its graphics-card and sound
 # features are off.
-duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "57013dada0dfbb5167f1b009ebb8229cd65a5dbc", default-features = false }
+duckforge = { git = "https://github.com/mrguymrguy647-del/Duck-Forge", rev = "c5547127301430ec4e68da548653bf9d65282c38", default-features = false }
 # Writes the PNG pictures. The same library (and version) Duck Forge uses.
 png = "0.18"
 # Reads the JPEG pictures inside models from other programs (Blender
