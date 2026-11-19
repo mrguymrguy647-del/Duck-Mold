@@ -6531,6 +6531,66 @@ fn reload(&mut self, _ctx: &mut Context, file: &Path) -> bool {
 
 The robot examples and the game template get the `reload` line.
 
+*As built (step 6):* as designed in sections 11 to 13, with these
+choices made on the way.
+
+- **Five commands, not four.** `model.show` brings a model's tab, or
+  the game, to the front: the tab that is in front is something a
+  command should be able to say, like everything else in Duck Forge's
+  Studio.
+- **Which tabs are open is kept by Duck Forge Studio's core**, with no
+  window, so the commands work in `DuckForgeStudio --run`. The window
+  keeps one Duck Mold Studio for each tab.
+- **`model.edit` with no window** opens a Duck Mold Studio for the
+  moment (the library in `duck-mold-view`, which has no window), with
+  Duck Mold's Undo kept where Duck Mold keeps it, makes the edit and
+  lets go. With the tab open, the tab's own Studio makes it. Either way
+  it is one step of the same Undo.
+- **The words of an edit** are read by the code `duck-mold edit` uses:
+  the command-line crate is now a small library as well as a program
+  (`duck_mold_cli::edit::edits_from_words`).
+- **"Send to game" goes to the game's assets even with no `export`
+  line** (`assets/<name>.glb`). In the tab, the Model section says
+  "Goes to: the game's assets" and has *Write it in the recipe*, which
+  makes the `set-export` edit so that Duck Mold on its own exports
+  there too. The design had the line as a thing to set first; a model
+  that silently landed beside its recipe on the first change would
+  have been a trap.
+- **The Studio on its own** has *Choose...* (a save window) and *Beside
+  the recipe* in the same place, and the tick box.
+- **Export after every change** exports once for each new build that
+  worked, edits, Undo and Redo alike; a drag writes when the handle is
+  let go, so it exports once. Opening a model exports nothing. It is
+  remembered apart for the Studio on its own (off to start with) and
+  hosted (on to start with).
+- **The hosted Studio leaves these to the program around it:** the
+  start page, New, Open, examples and recent files; the size of
+  everything (View > Interface size); the crash note; the first run's
+  tips; and Escape closing a look-only window. Its top bar has no duck
+  and no title: the tab says which model it is.
+- **The small picture of the game** is drawn by Duck Forge Studio over
+  the corner of the model's picture (Duck Mold's Studio says where its
+  picture is), with *Hide*. A click on it goes to the game.
+- **The game hears of a new `.glb` as it hears of a new picture.** Duck
+  Forge Studio already looked at the game's `assets` every frame and
+  sent changed files' names over its link; the game's `reload` gets the
+  name and loads the file itself. Outside the Studio, the game's window
+  looks at the `.glb` files it loaded twice a second (their time and
+  size, not their bytes).
+- **`reload_if_changed` returns true for its own file even if the file
+  can't be read** (the old model stays, the reason is printed). False
+  would make the Studio offer Restart, which is the wrong advice for a
+  recipe that is half changed.
+- **The split.** `duck-mold-studio` is the screens, as a library with no
+  icon in it; `duck-mold-studio-app` is `DuckMoldStudio`, a few lines
+  that open the window, with the icon and its build script.
+- **Pins.** Duck Forge Studio names one commit of Duck Mold (this
+  branch, until 1.0.0 is out; then the `v1.0.0` tag). The pull requests
+  are merged with real merge commits, not squashed, so the commits the
+  two repositories name in each other stay reachable.
+- **Not done:** the tab was drawn and tested with no window on Linux;
+  it has not been tried by hand on Windows in this phase.
+
 ### 14. Examples
 
 - **The robot** (`examples/robot.toml`): a mouth and brows on its head

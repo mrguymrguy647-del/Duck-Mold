@@ -902,6 +902,44 @@ Forge draws them with the same two lines. It needs a Duck Forge that
 reads them (reader version 9); an older one says "update Duck Forge"
 rather than drawing the model's painted faces white.
 
+### Straight into a game, and into a game that is running
+
+A recipe can say where its `.glb` belongs, from the recipe's own folder:
+
+```toml
+export = "../assets/robot.glb"     # this recipe is in the game's art folder
+```
+
+`duck-mold export art/robot.toml` (with no `-o`) and the Studio's Export
+then write there. With nothing selected, the Studio's Model section
+shows where the `.glb` goes and has *Choose...* to set it; the edit is
+`duck-mold edit robot.toml set-export ../assets/robot.glb`.
+
+**Export after every change**, a tick box in the same place, writes the
+`.glb` again after each change that builds. A Duck Forge game that is
+running takes the new model at once, mid-animation, if its code has one
+line for it:
+
+```rust
+fn reload(&mut self, _ctx: &mut Context, file: &Path) -> bool {
+    self.robot.reload_if_changed(file)
+}
+```
+
+So you can drag the robot's arm longer in Duck Mold and watch the robot
+in the game, still walking, get the longer arm. A recipe with a mistake
+isn't exported: the game keeps the last model that worked.
+
+### Inside Duck Forge Studio
+
+Duck Forge Studio shows a game's models in tabs beside the game, and
+each tab is Duck Mold's Studio itself: the same screens, from the same
+code. Click a recipe or a `.glb` in its Files panel. There, Export reads
+**Send to game**, the model goes to the game's `assets` folder, and it
+is sent after every change unless you turn that off. Undo in the tab is
+the same Undo as here: it is kept on disk for each recipe, so a change
+made in one Studio can be undone in the other.
+
 ## Documents
 
 | | |
@@ -931,7 +969,7 @@ Duck-Mold/
 ├── Start Duck Mold Studio.bat double-click: builds the Studio and starts it
 ├── Create desktop shortcut.bat    double-click: a shortcut on the desktop
 ├── release/                   the installer's script, and what goes in the download beside the programs
-├── Cargo.toml                 the workspace: four crates, built together
+├── Cargo.toml                 the workspace: five crates, built together
 ├── examples/                  eighteen recipes to read and change, and parts/ for files they use
 ├── docs/                      the guide, the format, the Duck Forge handoff
 ├── tests/golden/              the examples' exact output (.glb, report, picture)
@@ -955,8 +993,9 @@ Duck-Mold/
     │   │   └── tools.rs       what the commands do, for any front end; the examples, inside the program
     │   └── tests/             one file of tests per step
     ├── duck-mold-view/        pictures (`render`), and all the Studio does, with no window
-    ├── duck-mold-studio/      the Studio's window (egui): the `DuckMoldStudio` program
+    ├── duck-mold-studio/      the Studio's screens (egui), as a library: Duck Forge Studio shows them in a tab
     │   └── assets/            its icon (a picture of examples/duck.toml) and the examples' pictures
+    ├── duck-mold-studio-app/  the `DuckMoldStudio` program: opens a window for those screens, with the icon
     └── duck-mold-cli/         the `duck-mold` program: reads the command line, prints
 ```
 

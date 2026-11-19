@@ -1235,6 +1235,28 @@ pixels. A model with images needs a Duck Forge that reads them (reader
 version 9): an older one refuses the file with "update Duck Forge". A
 model without images exports exactly as it always did.
 
+**Straight into a game.** Give the recipe an `export` line and
+`duck-mold export` (with no `-o`) writes the `.glb` where the game
+loads it from:
+
+```bash
+duck-mold edit art/robot.toml set-export ../assets/robot.glb   # once: writes export = "../assets/robot.glb"
+duck-mold export art/robot.toml                                # from now on: writes assets/robot.glb
+```
+
+The path starts from the recipe's own folder, must end in `.glb`, and
+can't start from the top of the disk. A recipe with a mistake isn't
+exported, so the game keeps the last model that worked.
+
+**Into a game that is running.** A Duck Forge game whose `reload` has
+the line `self.robot.reload_if_changed(file)` takes a `.glb` saved
+again and carries on mid-animation. Its own window looks at the model
+files it loaded twice a second; Duck Forge Studio tells it at once. So
+the loop for a model in a game is: `duck-mold edit` (or change the
+recipe), `duck-mold export`, look at the game. In Duck Forge Studio the
+same two steps are its commands `model.edit` and `model.send`, and a
+model's tab there is Duck Mold's Studio itself.
+
 ### Working beside the Studio
 
 A person may have the recipe open in Duck Mold Studio while you edit it.
