@@ -32,7 +32,7 @@ On Windows, install as before, with `DuckMoldSetup-1.1.0.exe`.
   builds the model, plays every animation frame by frame, looks at the
   images, draws the picture, and lists every problem, the worst first.
   Each problem comes with the exact command that fixes it, when there is
-  one, or says in words what to do.
+  one, or says in words what to do, naming the part.
 - **Duck Mold in Claude, Codex and other AI apps.** `duck-mold mcp`
   lets an AI app use Duck Mold's commands directly as tools, and see the
   pictures it draws. For Claude Code it is one line: `claude mcp add

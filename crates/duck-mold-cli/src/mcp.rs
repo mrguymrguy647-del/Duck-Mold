@@ -132,7 +132,7 @@ pub fn tools() -> Vec<Value> {
     let file = |what: &str| json!({ "type": "string", "description": what });
     let flag = |what: &str| json!({ "type": "boolean", "description": what });
     let name = |what: &str| json!({ "type": "string", "description": what });
-    vec![
+    let mut tools = vec![
         json!({
             "name": "guide",
             "title": "Guide",
@@ -256,7 +256,41 @@ pub fn tools() -> Vec<Value> {
             },
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "idempotentHint": false, "openWorldHint": false },
         }),
-    ]
+    ];
+    for tool in &mut tools {
+        file_or_recipe(tool);
+    }
+    tools
+}
+
+/// Every tool that works on a file takes it as "file" or as "recipe":
+/// the one its command names it, and the other, the same. Neither is
+/// "required" in the schema (one or the other is); the call says so if
+/// both are missing.
+fn file_or_recipe(tool: &mut Value) {
+    let schema = &mut tool["inputSchema"];
+    let Some(properties) = schema["properties"].as_object_mut() else {
+        return;
+    };
+    let (have, other) = match (
+        properties.contains_key("file"),
+        properties.contains_key("recipe"),
+    ) {
+        (true, false) => ("file", "recipe"),
+        (false, true) => ("recipe", "file"),
+        _ => return,
+    };
+    if let Some(description) = properties[have]["description"].as_str() {
+        let described = format!("{description}. Also accepted as \"{other}\"");
+        properties[have]["description"] = Value::String(described);
+    }
+    properties.insert(
+        other.to_owned(),
+        json!({ "type": "string", "description": format!("The same as \"{have}\": give one or the other") }),
+    );
+    if let Some(object) = schema.as_object_mut() {
+        object.remove("required");
+    }
 }
 
 /// `tools/call`: runs the tool's command. A command that fails is still
@@ -336,10 +370,26 @@ pub fn words(tool: &str, arguments: &Value) -> Result<Words, String> {
             .as_bool()
             .ok_or_else(|| format!("\"{key}\" is true or false, not {value}"))
     };
-    let required = |key: &str, take: &mut dyn FnMut(&str) -> Option<Value>| {
-        take(key)
-            .ok_or_else(|| format!("the tool {tool} needs \"{key}\""))
-            .and_then(|value| text(key, value))
+    // The file a tool works on: "file" or "recipe", whichever the call
+    // gives; agents mix them up, so every tool takes both.
+    let the_file = |take: &mut dyn FnMut(&str) -> Option<Value>| -> Result<String, String> {
+        match (take("file"), take("recipe")) {
+            (Some(file), Some(recipe)) => {
+                let (file, recipe) = (text("file", file)?, text("recipe", recipe)?);
+                if file == recipe {
+                    Ok(file)
+                } else {
+                    Err(format!(
+                        "\"file\" ({file}) and \"recipe\" ({recipe}) name different files: give one"
+                    ))
+                }
+            }
+            (Some(file), None) => text("file", file),
+            (None, Some(recipe)) => text("recipe", recipe),
+            (None, None) => Err(format!(
+                "the tool {tool} needs \"file\" (or \"recipe\", the same): the file to work on"
+            )),
+        }
     };
     match tool {
         "guide" => {
@@ -349,13 +399,8 @@ pub fn words(tool: &str, arguments: &Value) -> Result<Words, String> {
             }
         }
         "inspect" | "check" | "render" | "export" | "new" => {
-            let first = if matches!(tool, "export" | "new") {
-                "recipe"
-            } else {
-                "file"
-            };
             args.push(tool.into());
-            args.push(required(first, &mut take)?);
+            args.push(the_file(&mut take)?);
             args.push("--json".into());
             let options: &[&str] = match tool {
                 "inspect" => &[
@@ -398,7 +443,7 @@ pub fn words(tool: &str, arguments: &Value) -> Result<Words, String> {
         }
         "edit" => {
             args.push("edit".into());
-            args.push(required("recipe", &mut take)?);
+            args.push(the_file(&mut take)?);
             args.push("--json".into());
             for option in ["dry_run", "report"] {
                 if let Some(value) = take(option)
@@ -601,6 +646,43 @@ mod tests {
             Some("set a --color red\nremove b\n")
         );
         assert!(super::words("inspect", &json!({})).is_err());
+        // "file" and "recipe" are the same, for every tool that takes one.
+        for tool in ["inspect", "check", "render", "export", "new", "edit"] {
+            let extra = if tool == "edit" {
+                json!({ "edit": "remove a" })
+            } else {
+                json!({})
+            };
+            for key in ["file", "recipe"] {
+                let mut arguments = extra.clone();
+                arguments[key] = json!("r.toml");
+                let words = super::words(tool, &arguments).unwrap();
+                assert_eq!(words.args[..2], [tool, "r.toml"], "{tool} with {key}");
+            }
+            let mut both = extra.clone();
+            both["file"] = json!("a.toml");
+            both["recipe"] = json!("b.toml");
+            assert!(
+                super::words(tool, &both).is_err(),
+                "{tool}: two different files"
+            );
+            both["recipe"] = json!("a.toml");
+            assert!(
+                super::words(tool, &both).is_ok(),
+                "{tool}: the same file twice"
+            );
+        }
+        for tool in tools() {
+            let name = tool["name"].as_str().unwrap();
+            let properties = tool["inputSchema"]["properties"].as_object().unwrap();
+            if name != "guide" {
+                assert!(
+                    properties.contains_key("file") && properties.contains_key("recipe"),
+                    "{name} takes file and recipe"
+                );
+                assert!(tool["inputSchema"].get("required").is_none(), "{name}");
+            }
+        }
         assert!(super::words("inspect", &json!({ "file": "a.toml", "colour": 1 })).is_err());
         assert!(super::words("edit", &json!({ "recipe": "a.toml" })).is_err());
     }

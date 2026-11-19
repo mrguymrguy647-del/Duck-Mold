@@ -105,8 +105,8 @@ person the recipe and the `.glb` back as files to download.
 
 **As tools (MCP):** in an app that speaks MCP, `duck-mold mcp` gives
 these commands as tools with the same arguments (`guide`, `inspect`,
-`check`, `edit`, `render`, `export`, `new`); `render` returns the
-picture itself. Claude Code: `claude mcp add duck-mold -- duck-mold
+`check`, `edit`, `render`, `export`, `new`); the file is `file` or
+`recipe`, either; `render` returns the picture itself. Claude Code: `claude mcp add duck-mold -- duck-mold
 mcp`. `--folder <folder>` says where file names start. The README says
 how for Claude Desktop and Codex.
 
@@ -552,8 +552,11 @@ above, plus:
   part).
 - `fix`: the command that surely fixes it, when there is one:
   `"duck-mold edit lamp.toml remove-color rust"`. Run it as it is.
-- `advice`: when no one command surely fixes it, what to do, in words.
-  It never guesses a fix.
+- `advice`: when no one command surely fixes it, what to do, in words,
+  with the part named (`set head --color <colour>`). It never guesses
+  a fix.
+- `part`: the part it is about, as `edit` takes it (`arm/hand`), when
+  it is about one. `inspect`'s warnings have it too.
 
 Besides `problems`: `errors`, `warnings` and `small` count them; `next`
 says what to do next; `picture` says where the four-view sheet went

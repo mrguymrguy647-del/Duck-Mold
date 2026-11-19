@@ -349,3 +349,33 @@ fn folder_says_where_file_names_start() {
         .unwrap();
     assert_eq!(output.status.code(), Some(2));
 }
+
+#[test]
+fn every_tool_takes_the_file_as_file_or_recipe() {
+    let mut app = App::start("file-or-recipe");
+    app.hello();
+    let made = app.call("new", json!({ "file": "duck.toml", "example": "duck" }));
+    assert_eq!(made["isError"], false, "{made}");
+    let inspected = app.call("inspect", json!({ "recipe": "duck.toml" }));
+    assert_eq!(App::json(&inspected)["ok"], true, "{inspected}");
+    let checked = app.call("check", json!({ "recipe": "duck.toml", "no_render": true }));
+    assert_eq!(checked["isError"], false, "{checked}");
+    let rendered = app.call("render", json!({ "recipe": "duck.toml", "size": 128 }));
+    assert_eq!(rendered["isError"], false, "{rendered}");
+    let edited = app.call(
+        "edit",
+        json!({ "file": "duck.toml", "edit": "add-color mud #6B4A2B", "dry_run": true }),
+    );
+    assert_eq!(edited["isError"], false, "{edited}");
+    let exported = app.call("export", json!({ "file": "duck.toml" }));
+    assert_eq!(exported["isError"], false, "{exported}");
+    assert!(app.folder.join("duck.glb").is_file());
+    // Two different files is a mistake, said in words.
+    let both = app.call(
+        "inspect",
+        json!({ "file": "duck.toml", "recipe": "other.toml" }),
+    );
+    assert_eq!(both["isError"], true);
+    assert!(App::text(&both).contains("different files"));
+    app.finish();
+}

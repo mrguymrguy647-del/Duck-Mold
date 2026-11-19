@@ -80,7 +80,9 @@ network.
   a tool can never do what the command can't. `edit` takes one edit as
   its words (`"set trunk --color bark"`, quotes kept) or a list, made as
   one `--batch`. `render` returns the PNG itself as an image, as well
-  as where it wrote it.
+  as where it wrote it. Every tool that works on a file takes it as
+  `file` or as `recipe`, whichever the agent writes; two different files
+  is a mistake, said in words.
 - Speaks MCP 2025-11-25, 2025-06-18, 2025-03-26 and 2024-11-05; answers
   batches; a failed command is a result with `isError` for the AI to
   read; broken lines, unknown methods and unknown tools get JSON-RPC
@@ -112,7 +114,10 @@ One call builds and inspects the model, looks at every animation frame
 by frame, looks at the images, draws the four-view sheet, and gives one
 list of problems: errors, then warnings a game would see, then small
 things. Each problem has `fix`, the command that surely fixes it, or
-`advice`, in words. It never guesses. The fixes it can be sure of are
+`advice`, in words, naming the part it is about (`set head --color
+<colour>`, `join arm/hand --to ...`). Warnings now carry `part`, the
+path `edit` takes, when they are about one part. It never guesses. The
+fixes it can be sure of are
 now part of the warning itself, so `inspect` and `edit` give them too:
 an unused colour (`remove-color`), an event heard twice where a loop
 joins (`remove-event`), an animation that dips into the ground

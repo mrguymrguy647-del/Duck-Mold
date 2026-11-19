@@ -214,6 +214,10 @@ pub struct Issue {
     /// `duck-mold edit robot.toml remove-color rust`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub fix: Option<String>,
+    /// The part it is about, by the path `inspect` prints and `edit`
+    /// takes (`left_arm/hand`), when it is about one part.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub part: Option<String>,
 }
 
 impl Issue {
@@ -231,6 +235,7 @@ impl Issue {
             allowed: None,
             suggestion: None,
             fix: None,
+            part: None,
         }
     }
 
@@ -297,6 +302,12 @@ impl Issue {
         if !self.file.is_empty() {
             self.fix = Some(format!("duck-mold edit {} {edit}", shell_word(&self.file)));
         }
+        self
+    }
+
+    /// Says which part it is about: the path `edit` takes.
+    pub fn on_part(mut self, path: impl Into<String>) -> Self {
+        self.part = Some(path.into());
         self
     }
 

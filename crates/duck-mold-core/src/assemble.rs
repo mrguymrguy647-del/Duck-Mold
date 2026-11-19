@@ -359,7 +359,9 @@ fn assemble_at(loaded: &Loaded, issues: &mut Vec<Issue>, detail: u8) -> Option<M
             .part(&path)
             .map(|part| part.loc.clone())
             .unwrap_or_default();
-        assembler.issues.push(loc.warning(Code::HitShape, message));
+        assembler
+            .issues
+            .push(loc.warning(Code::HitShape, message).on_part(path));
     }
     model.colliders = fitted.colliders;
     model.without_collider = fitted.without;
