@@ -419,6 +419,56 @@ fn look() {
         screen.run_steps(4);
         save(&mut screen, "5-no-duck-quill");
     }
+
+    // The start page, with the examples that are new in 1.0.
+    let mut screen = harness(
+        StudioApp::new().keeping_models_in("Documents/Duck Mold"),
+        true,
+    );
+    save(&mut screen, "6-start-page");
+    // The robot, with its painted face: the Model section, and its head.
+    let recipe = copy_of("robot.toml", "images_look_robot");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+    save(&mut screen, "7-robot");
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("head"));
+    save(&mut screen, "8-robot-head");
+    // A part from a glTF file, with the pictures the file brought.
+    let folder = folder("images_look_signpost");
+    std::fs::create_dir_all(folder.join("parts")).unwrap();
+    for file in ["signpost.toml", "parts/sign.gltf", "parts/sign_post.png"] {
+        std::fs::copy(examples().join(file), folder.join(file)).unwrap();
+    }
+    let mut screen = harness(
+        StudioApp::with_file(folder.join("signpost.toml"), false),
+        true,
+    );
+    screen
+        .state_mut()
+        .studio_mut()
+        .unwrap()
+        .select(Some("sign"));
+    save(&mut screen, "9-signpost");
+    // Pip: built, and mid-walk in Pose mode.
+    let recipe = copy_of("pip.toml", "images_look_pip");
+    let mut screen = harness(StudioApp::with_file(&recipe, false), true);
+    save(&mut screen, "10-pip");
+    {
+        let studio = screen.state_mut().studio_mut().unwrap();
+        studio.pose_mode().unwrap();
+        studio.choose_animation(Some("walk"));
+        studio.set_time(0.3);
+    }
+    save(&mut screen, "11-pip-walking");
+    // Inside another program's window: no start page, "Send to game".
+    let game = folder.join("game");
+    std::fs::create_dir_all(game.join("art")).unwrap();
+    let recipe = copy_of("pip.toml", "images_look_hosted");
+    let mut screen = harness(StudioApp::hosted(&recipe, false).for_game(&game), true);
+    save(&mut screen, "12-hosted");
 }
 
 #[test]

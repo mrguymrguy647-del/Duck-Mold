@@ -959,6 +959,7 @@ made in one Studio can be undone in the other.
 | [PHASE6_REPORT.md](PHASE6_REPORT.md) | Phase 6, game-ready: hit shapes, events on keys, fitting to the ground, a timeline that zooms, Duck Forge's `robot_click`, and what Phase 7 should start with. |
 | [POLISH_AUDIT.md](POLISH_AUDIT.md) | Every screen looked at before Phase 7a, and what was wrong with it. |
 | [PHASE7A_REPORT.md](PHASE7A_REPORT.md) | Phase 7a, polish: every changed screen before and after, the speed before and after, far-away versions, the command line for agents, and the first real release. |
+| [PHASE7_REPORT.md](PHASE7_REPORT.md) | All of Phase 7, the last planned phase: images on models, the round trip with Duck Quill, Duck Mold inside Duck Forge Studio, Pip (a character made with all three apps), version 1.0.0, a picture of every changed screen, the known limits, and what a Phase 8 could be. |
 | [RELEASE_NOTES.md](RELEASE_NOTES.md) | What changed in each version, in plain words. |
 
 ## Project layout
