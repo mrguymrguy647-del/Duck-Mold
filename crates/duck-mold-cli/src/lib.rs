@@ -9,3 +9,4 @@
 //! [`Edit`]: duck_mold_core::edit::Edit
 
 pub mod edit;
+pub mod guide;

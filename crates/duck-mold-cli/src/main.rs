@@ -21,7 +21,7 @@ use duck_mold_core::issue::{Issue, Report};
 use duck_mold_core::tools::{self, Failure};
 use duck_mold_view::render;
 
-use duck_mold_cli::edit;
+use duck_mold_cli::{edit, guide};
 
 mod studio;
 
@@ -33,7 +33,7 @@ mod studio;
 #[command(
     name = "duck-mold",
     version,
-    after_help = "Exit codes: 0 it worked, 1 the recipe has errors, 2 the command was wrong or a file couldn't be read or written.\nThe recipe format: docs/recipe-format.md. For AI agents: docs/AI_GUIDE.md."
+    after_help = "Exit codes: 0 it worked, 1 the recipe has errors, 2 the command was wrong or a file couldn't be read or written.\nThe recipe format: docs/recipe-format.md. For AI agents: duck-mold guide."
 )]
 struct Cli {
     #[command(subcommand)]
@@ -354,14 +354,21 @@ enum Command {
         #[arg(long, global = true)]
         dry_run: bool,
     },
-    /// Print the guide for AI agents: how to write recipes and use these
-    /// commands, from scratch.
-    Guide,
+    /// Print the guide for AI agents: one page to start, or one topic
+    /// of the full guide.
+    ///
+    /// With no topic: the page to start with (the commands, a recipe,
+    /// the loop, the rules). With a topic: that part of the guide. `all`:
+    /// the whole guide (docs/AI_GUIDE.md).
+    Guide {
+        /// recipes, edits, shaping, motion, hits, images, export,
+        /// mistakes, or all.
+        topic: Option<String>,
+        /// List the topics.
+        #[arg(long, conflicts_with = "topic")]
+        list: bool,
+    },
 }
-
-/// The guide, built into the program, so that an agent that has only
-/// the program can still learn to use it.
-const GUIDE: &str = include_str!("../../../docs/AI_GUIDE.md");
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -802,8 +809,27 @@ fn main() -> ExitCode {
                 Err(failure) => fail(&failure, json),
             }
         }
-        Command::Guide => {
-            say(GUIDE.trim_end());
+        Command::Guide { topic, list } => {
+            let text = match (topic.as_deref(), list) {
+                (_, true) => guide::list(),
+                (None, false) => guide::START.to_owned(),
+                (Some("all"), false) => guide::full(),
+                (Some(name), false) => match guide::topic(name) {
+                    Some(text) => text,
+                    None => {
+                        let names = guide::TOPICS.iter().map(|(name, _)| *name).chain(["all"]);
+                        let issue = Issue::error(
+                            duck_mold_core::issue::Code::OutOfRange,
+                            "",
+                            format!("there is no topic \"{name}\" in the guide"),
+                        )
+                        .got(name)
+                        .one_of(name, names);
+                        return fail(&Failure::Usage(Box::new(issue)), false);
+                    }
+                },
+            };
+            say(text.trim_end());
             ExitCode::SUCCESS
         }
     }
