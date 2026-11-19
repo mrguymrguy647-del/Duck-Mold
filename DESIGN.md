@@ -6809,3 +6809,297 @@ the download has a section on pictures and on models for a game.
 3. **After 1.0.0 is published, one small pull request in Duck Forge**
    that moves the Studio's Duck Mold pin from the branch's commit to the
    `v1.0.0` tag. The code is the same either way; the tag reads better.
+
+## 25. The agent kit: Duck Mold on Linux and Mac, and made for AI agents
+
+**Why.** An AI agent told us Duck Mold "doesn't support a Linux
+environment", and it was right in practice:
+
+- every download is for Windows (an installer and a zip);
+- the files that start the Studio are `.bat`, which only Windows runs;
+- building from the source needs the internet, to fetch Duck Forge from
+  GitHub, and agent sandboxes often have no internet, or only the Rust
+  package site (crates.io), which doesn't have Duck Forge.
+
+The program itself already works on Linux (every test runs there in CI):
+what is missing is a way to get it, and a way in for agents. This section
+is that. Everything here is new; nothing that works today changes, except
+that `duck-mold guide` prints a shorter page (item 4).
+
+Work happens on a branch `claude/agent-kit` in each repository that
+changes, and the release is **1.1.0**, after the pull requests are merged.
+
+### 1. Linux and Mac downloads
+
+Each release gets, beside the Windows installer and zip:
+
+| File | What it is | Runs on |
+|---|---|---|
+| `duck-mold-1.1.0-linux-x86_64` | the `duck-mold` command, one file | any 64-bit Intel or AMD Linux |
+| `duck-mold-1.1.0-linux-arm64` | the same | any 64-bit ARM Linux (Raspberry Pi 4 and 5, Graviton, ARM laptops) |
+| `duck-mold-1.1.0-macos` | the same, one file for both kinds of Mac | macOS 11 or newer, Intel or Apple chip |
+| `DuckMoldStudio-1.1.0-linux-x86_64.tar.gz` | the Studio (the window) and the command, with the examples and guides | Linux with a desktop (2022 or newer: Ubuntu 22.04, Debian 12, Fedora 36...) |
+| `SHA256SUMS` | a fingerprint of every file, so the install script can check what it downloaded | |
+
+- **"Static" means one file that needs nothing else installed.** The
+  command uses 51 small libraries, all written in Rust with no C code, so
+  it can be built with everything inside it. It then runs on any Linux,
+  however bare: a container with nothing in it, an old server, Alpine.
+- **The Studio can't be like that**: a window needs the computer's own
+  graphics and display libraries. So it comes as an ordinary program
+  built on Ubuntu 22.04, which runs on Linux from 2022 on. (It does build
+  cleanly on Linux today: CI builds and tests it there.)
+- **No Mac Studio this time.** A Mac program that opens without a scary
+  warning has to be signed and checked by Apple, which needs a paid Apple
+  account. The Mac command is fine: a file fetched with the install
+  script below isn't marked as "downloaded", so the Mac doesn't block it.
+  (Downloaded with a browser, it needs one line: `xattr -d
+  com.apple.quarantine duck-mold`; the notes say so.)
+
+**The test on a bare Linux machine.** The release workflow runs each
+Linux file inside an empty Linux container (Debian "slim" and Alpine,
+with nothing added) and, for every example: `inspect`, an `edit` on a
+copy, `render` and `export`, checking that each worked and that the
+`.glb` and picture are the same bytes as the golden files. The ARM file
+runs on GitHub's ARM Linux machine; the Mac file on GitHub's Mac (the
+Intel half through Rosetta, Apple's translator).
+
+**The install script.** One line, for Linux and Mac:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/mrguymrguy647-del/Duck-Mold/main/install.sh | sh
+```
+
+- It works out the system and the chip, downloads the right file from
+  the newest release, checks its fingerprint against `SHA256SUMS`, and
+  puts it in `~/.local/bin` (no administrator; `DUCK_MOLD_DIR=...` to put
+  it elsewhere; `DUCK_MOLD_VERSION=1.1.0` for a given version).
+- It says plainly if `~/.local/bin` isn't on the PATH, and the line that
+  adds it.
+- It never asks questions, so an agent can run it.
+- A test runs it in a container against a release on a test page of the
+  workflow, and checks the result.
+
+**`cargo install` steps that work** (the README and the guide give
+these, and CI runs the first two):
+
+```bash
+cargo install --locked --git https://github.com/mrguymrguy647-del/Duck-Mold duck-mold-cli
+```
+
+```bash
+cargo install --locked --path crates/duck-mold-cli
+```
+
+The first needs the internet; the second, inside a copy of the source,
+needs it only for the libraries, unless they come with it (item 2).
+
+### 2. Building with no internet
+
+**The plan: a source archive with every library inside it.** Each
+release gets `duck-mold-1.1.0-source.tar.gz`:
+
+- the source of the command (the core, the pictures and the command
+  line; not the Studio, whose window libraries are large and need a
+  screen anyway);
+- every library it uses, Duck Forge included, in a `vendor/` folder
+  (this is what Rust calls "vendoring");
+- a small setting (`.cargo/config.toml`) that tells Rust to take the
+  libraries from that folder instead of the internet.
+
+Then, with no internet at all:
+
+```bash
+tar -xzf duck-mold-1.1.0-source.tar.gz
+cd duck-mold-1.1.0
+cargo build --release --offline
+```
+
+I tried this on today's code: it builds offline, and the archive is
+about 55 MB (most of it Duck Forge's own examples and Windows-only
+libraries, which Rust vendors whatever the system; I'll trim what can
+be trimmed). CI builds it with the network switched off, so it can't
+quietly start needing the internet. An agent that can only reach
+crates.io (common) can use it too.
+
+*The other way, not proposed:* publishing Duck Forge on crates.io, so
+an ordinary build needs only crates.io. That makes Duck Forge public
+there under its name for good, so it is your decision, not part of this
+plan.
+
+### 3. `duck-mold mcp`: Duck Mold as tools for an AI app
+
+MCP (the Model Context Protocol) is the standard way for AI apps (Claude
+Desktop, Claude Code, Codex, Cursor...) to use a program as a set of
+tools. `duck-mold mcp` is an MCP server: the app starts it and talks to
+it through its input and output ("stdio"); nothing goes over the
+network.
+
+| Tool | Does what this command does |
+|---|---|
+| `guide` | `duck-mold guide [topic]` |
+| `inspect` | `duck-mold inspect <file>` with its options (`sockets`, `faces`, `joins`, `colliders`, `pose`, `animation`, `ray`...) |
+| `edit` | `duck-mold edit <recipe> <edit>`: the edit as its words (`"set-color red #D0453A"`), or a list of them, made as one batch (`--batch`), and `dry_run` |
+| `render` | `duck-mold render <file>` with its options; returns the picture itself, which the AI sees, as well as where it was written |
+| `export` | `duck-mold export <recipe>` |
+| `check` | `duck-mold check <recipe>` (item 5) |
+| `new` | `duck-mold new <recipe>`, with `example` |
+
+- **The same arguments as the command**, named the same, and turned into
+  that command inside the program, so a tool can never do something the
+  command doesn't. Each answer is the command's `--json` answer.
+- Made without a new library: MCP is JSON messages, which Duck Mold
+  already reads and writes. It follows the MCP version that current apps
+  use, and answers apps that ask for an older one.
+- File names are relative to the folder the app starts it in, or given
+  whole.
+
+How to add it (the guide and README give each, in full):
+
+- **Claude Code:** `claude mcp add duck-mold -- duck-mold mcp`.
+- **Claude Desktop:** three lines in its settings file
+  (`claude_desktop_config.json`), naming the `duck-mold` program and
+  `mcp`.
+- **Codex** (OpenAI's coding agent, in a terminal or an editor): three
+  lines in `~/.codex/config.toml`.
+- **ChatGPT** (the website and the app) is different: it only talks to
+  MCP servers on the internet, at an `https://` address, not to a
+  program on your computer. So for ChatGPT the guide shows how to put
+  `duck-mold mcp` behind a small bridge that gives it an address, and
+  says plainly that this is more setup than the others and that the
+  address must be kept private. **Question for you:** is that enough, or
+  should Duck Mold also have `duck-mold mcp --http` (the same tools over
+  the web protocol), which still needs a public address to reach
+  ChatGPT?
+
+**Tests** start `duck-mold mcp` as a separate program and drive it as an
+app would: say hello, list the tools, call each one (an edit, a batch
+that is refused and changes nothing, a render whose picture decodes,
+check, new, export), and send it broken and unknown messages, which it
+answers with an error and doesn't stop.
+
+### 4. A shorter guide
+
+Today `duck-mold guide` prints all of `docs/AI_GUIDE.md`: 1,333 lines.
+An agent needs far less to begin.
+
+- **`duck-mold guide`** prints one page (about 80 lines): what Duck Mold
+  is, the 10 commands an agent needs first (`new`, `inspect`, `check`,
+  `edit`, `render`, `export`, `guide`, `schema`, `mcp`, `--json`), and
+  the rules (edit with `edit`, not by hand; check with `inspect` or
+  `check`; look with `render`; the exit codes).
+- **`duck-mold guide <topic>`** prints one part: `recipes`, `edits`,
+  `shaping`, `motion`, `hits`, `images`, `export`, `mistakes`.
+- **`duck-mold guide --list`** lists the topics, one line each.
+- **`duck-mold guide all`** prints the whole guide, as today.
+
+The topics are cut from `docs/AI_GUIDE.md` itself, at marked headings,
+so there is still one text to keep right. Tests check that every topic
+is there and not empty, that the first page stays short, and that every
+command it names exists.
+
+### 5. `duck-mold check`: everything in one call
+
+`duck-mold check <recipe> --json` does what an agent now does in five
+calls, and says what to do next:
+
+- builds and inspects the model (sockets, hit shapes, far versions);
+- checks every animation, frame by frame;
+- checks every image (there, the right size, its pixels to the metre);
+- renders the four-view sheet, and says where it is;
+- gives **one list of problems, worst first** (mistakes, then warnings
+  that change what a game sees, then small ones), each with where it is
+  and **the command that fixes it**, when there is one (`duck-mold edit
+  robot.toml fit-ground jump`). When no single command fixes it, it says
+  what to do in words. It never guesses a fix.
+
+Without `--json` it prints the same list for people. Its exit codes are
+the usual ones (1 if the recipe has mistakes). The tests use recipes
+with one known problem each and check the order and the fix.
+
+### 6. `duck-mold schema`
+
+Prints a JSON Schema of the recipe format: a standard description of
+every field, its type, its allowed words and ranges, that editors and
+agents understand (it can fill in field names and catch a misspelt one
+before Duck Mold is run). It is a file in the repository
+(`docs/recipe.schema.json`), built into the program.
+
+**Kept in step by tests:** every field the code accepts is in the schema
+and every field in the schema is accepted, for the top of a recipe, a
+part, every shape, sockets, poses, animations, hit shapes, images and
+far versions; and every example recipe (turned from TOML into JSON) is
+valid by the schema. So adding a field without adding it to the schema
+fails the tests.
+
+### 7. AGENTS.md and CLAUDE.md in each repository
+
+At the top of Duck Mold, Duck Forge and Duck Quill (**question for you:**
+those three? Duck Echo too?):
+
+- **AGENTS.md** (the file Codex, Cursor and others read): what the
+  project is in three lines; how to build and test it, including with no
+  internet; the first commands to run; and the rules: change recipes with
+  `edit`, not by hand; check with `inspect` or `check`; look with
+  `render`; run the tests, fmt and clippy before a commit.
+- **CLAUDE.md** (the file Claude Code reads): one line that brings in
+  AGENTS.md, so there is one text, and anything only Claude needs.
+
+A test in each repository checks that the commands they give exist.
+
+### 8. Start files for Linux and Mac
+
+Beside `Start Duck Mold Studio.bat` and `Create desktop shortcut.bat`:
+
+- `start-duck-mold-studio.sh`: builds the Studio and starts it, on Linux
+  or Mac, saying plainly what is missing (Rust, or on Linux the graphics
+  libraries, with the one line that installs them).
+- `Start Duck Mold Studio.command`: the same, double-clickable in a Mac's
+  Finder.
+- `create-desktop-shortcut.sh`: on Linux, puts Duck Mold Studio in the
+  applications menu, with the duck.
+
+CI checks them with `shellcheck` and runs the build part.
+
+### CI and the release
+
+- CI gets a Mac machine beside Windows and Linux, for every push. (The
+  stored pictures of the Studio's screens stay Linux-only, as now.)
+- `release.yml` gets jobs for the Linux and Mac files and the source
+  archive, the bare-machine tests above, and `SHA256SUMS`. A release is
+  published only when every job has passed; the Windows installer and
+  its install test stay as they are.
+- **1.1.0** after the pull requests are merged, with notes in plain
+  words.
+
+### Steps
+
+1. Duck Mold: the shorter guide, `schema`, `check`.
+2. Duck Mold: `duck-mold mcp` and its tests.
+3. Duck Mold: Mac in CI; the start files; AGENTS.md and CLAUDE.md.
+4. Duck Mold: the release jobs (static Linux and Mac files, the Linux
+   Studio, the source archive, the bare-machine tests), the install
+   script, the `cargo install` steps.
+5. Duck Forge and Duck Quill: AGENTS.md and CLAUDE.md, one pull request
+   each.
+6. README and AI_GUIDE in every repository changed; `AGENT_KIT_REPORT.md`.
+7. Merge, then release 1.1.0.
+
+### Decisions
+
+1. **Static Linux files with musl**, not the system's own C library, so
+   they run on any Linux. *The other way:* built on an old Linux, which
+   still needs that Linux's library.
+2. **One Mac file for both chips.** *The other way:* two files, and the
+   install script choosing.
+3. **The offline way is a source archive with the libraries inside.**
+   *The other ways:* putting the libraries in the repository (it would
+   grow by tens of megabytes with every update), or publishing Duck Forge
+   on crates.io (your decision; not proposed).
+4. **MCP without a new library.** *The other way:* an MCP library; it
+   would bring more libraries into the offline archive.
+5. **The guide's topics are cut from AI_GUIDE.md**, not written again.
+6. **The schema is written by hand and checked by tests.** *The other
+   way:* made from the code; the code reads recipes by hand, so there is
+   nothing to make it from.
+7. **No Mac Studio** this time (it needs Apple's paid signing).
