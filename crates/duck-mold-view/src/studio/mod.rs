@@ -1091,11 +1091,56 @@ impl Studio {
         self.orbit.look_from(from);
         self.frame();
         self.say(match from {
-            viewport::Viewpoint::Front => "Looking at the front",
-            viewport::Viewpoint::Side => "Looking at the right side",
+            viewport::Viewpoint::Front => {
+                "Looking at the front: the model faces you, so its left is on your right"
+            }
+            viewport::Viewpoint::Side => "Looking at its right side",
             viewport::Viewpoint::Top => "Looking down from the top",
-            viewport::Viewpoint::ThreeQuarter => "Looking from the front right",
+            viewport::Viewpoint::ThreeQuarter => {
+                "Looking from the front right: its left is on your right"
+            }
+            viewport::Viewpoint::Back => "Looking at the back: its left is on your left",
         });
+    }
+
+    /// Words on the ground beside the model, saying which of its sides
+    /// is which: "its left", "its right" and "its front", each with where
+    /// it goes in the picture, in pixels at the size the pointer is
+    /// measured in. A model that faces you has its left on your right,
+    /// as a person does, and these say so. A word behind the eye, or
+    /// outside the picture, is left out; so is everything when there is
+    /// no model, or nothing is in it.
+    pub fn side_words(&self) -> Vec<(&'static str, (f64, f64))> {
+        let Some(bounds) = self.shown_model().and_then(Model::bounds) else {
+            return Vec::new();
+        };
+        let (min, max, middle) = (bounds.min, bounds.max, bounds.center());
+        // A little way out from the model, on the ground under it.
+        let gap = 0.12 * (max.x - min.x).max(max.z - min.z).max(0.5);
+        let ground = min.y;
+        let places = [
+            (
+                "its left",
+                duck_mold_core::math::vec3(min.x - gap, ground, middle.z),
+            ),
+            (
+                "its right",
+                duck_mold_core::math::vec3(max.x + gap, ground, middle.z),
+            ),
+            (
+                "its front",
+                duck_mold_core::math::vec3(middle.x, ground, max.z + gap),
+            ),
+        ];
+        let (width, height) = (self.view.0 as f64, self.view.1 as f64);
+        places
+            .into_iter()
+            .filter_map(|(word, point)| {
+                let at = self.on_screen(point)?;
+                (at.0 >= 0.0 && at.1 >= 0.0 && at.0 <= width && at.1 <= height)
+                    .then_some((word, at))
+            })
+            .collect()
     }
 
     /// Brings the whole model back into view (or the selected part, if

@@ -41,6 +41,8 @@ pub enum Icon {
     Top,
     /// Three quarter.
     ThreeQuarter,
+    /// Back: the faces the cube hides, lit.
+    Back,
     /// Frame.
     Frame,
     // ---- switches
@@ -101,7 +103,7 @@ pub enum Icon {
 
 impl Icon {
     /// Every icon, in the order above.
-    pub const ALL: [Icon; 38] = [
+    pub const ALL: [Icon; 39] = [
         Icon::Move,
         Icon::Rotate,
         Icon::Scale,
@@ -114,6 +116,7 @@ impl Icon {
         Icon::Side,
         Icon::Top,
         Icon::ThreeQuarter,
+        Icon::Back,
         Icon::Frame,
         Icon::Grid,
         Icon::Wire,
@@ -311,6 +314,26 @@ pub fn paint(painter: &egui::Painter, rect: Rect, icon: Icon, color: Color32) {
         Icon::Side => cube(Some(2)),
         Icon::Top => cube(Some(0)),
         Icon::ThreeQuarter => cube(None),
+        Icon::Back => {
+            // The two faces behind, lit, seen through the cube, with the
+            // edges they share drawn thinly.
+            let hidden = at(-0.15, 0.25);
+            for face in [
+                vec![at(-0.75, -0.55), at(-0.15, -0.85), hidden, at(-0.75, 0.55)],
+                vec![at(-0.15, -0.85), at(0.75, -0.55), at(0.75, 0.55), hidden],
+            ] {
+                painter.add(Shape::convex_polygon(
+                    face,
+                    color.gamma_multiply(0.35),
+                    Stroke::NONE,
+                ));
+            }
+            let faint = Stroke::new(thin.width * 0.7, color.gamma_multiply(0.6));
+            for end in [at(-0.15, -0.85), at(-0.75, 0.55), at(0.75, 0.55)] {
+                painter.add(Shape::line_segment([hidden, end], faint));
+            }
+            cube(None);
+        }
         Icon::Frame => {
             for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
                 let corner = at(x * 0.9, y * 0.9);

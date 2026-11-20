@@ -27,6 +27,11 @@ A FIRST LOOK
   five small tips show you round (Help > Show the tips again brings
   them back). Help > The keys lists every key.
 
+  Facing you, the model's left is on your right, as a person's is: a
+  pose that looks to its left turns its head to the right of the
+  screen. The words "its left" and "its right" on the ground say which
+  side is which, and "Back" shows it from behind.
+
 
 ON THE COMMAND LINE, AND FOR AI AGENTS
   duck-mold, in this folder, is Duck Mold without a window: it builds,

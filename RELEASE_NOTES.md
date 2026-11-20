@@ -3,6 +3,19 @@
 What changed in each version, in plain words. The newest is first. The
 section for a version is also the text of its page on GitHub's Releases.
 
+## Not released yet
+
+### Changed
+
+- **Left and right in the Studio are plain to see.** Facing you, a
+  model's left is on your right, as a person's is, so a pose that looks
+  to its left turned its head to the right of the screen and read the
+  wrong way round. Nothing was wrong with the model or the game; now
+  the Studio says so: the words *its left*, *its right* and *its front*
+  lie on the ground beside the model, the Front view's tip says its
+  left is on your right, and a new **Back** view (key 5) shows it from
+  behind, where its left is on your left.
+
 ## 1.1.0
 
 Duck Mold now runs on Linux and Macs as well as Windows, and is much

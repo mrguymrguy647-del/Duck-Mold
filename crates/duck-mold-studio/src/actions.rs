@@ -160,8 +160,8 @@ pub const KEYS: [(&str, &str); 29] = [
         "Frame: bring what is selected, or everything, into view",
     ),
     (
-        "1, 2, 3, 4",
-        "Look from the front, the side, the top, three-quarter",
+        "1, 2, 3, 4, 5",
+        "Look from the front (its left on your right), the side, the top, three-quarter, the back (its left on your left)",
     ),
     ("Z", "Wireframe on and off"),
     ("H", "Hide what is selected"),
@@ -288,12 +288,13 @@ pub fn menus(
         });
     }
     ui.menu_button("View", |ui| {
-        for (from, key) in Viewpoint::ALL.into_iter().zip(["1", "2", "3", "4"]) {
+        for (from, key) in Viewpoint::ALL.into_iter().zip(["1", "2", "3", "4", "5"]) {
             let words = match from {
                 Viewpoint::Front => "Front",
                 Viewpoint::Side => "Side",
                 Viewpoint::Top => "Top",
                 Viewpoint::ThreeQuarter => "Three-quarter",
+                Viewpoint::Back => "Back",
             };
             pick(ui, true, words, key, Action::LookFrom(from));
         }
@@ -603,6 +604,8 @@ pub fn keys(ui: &egui::Ui) -> Option<Action> {
             Some(Action::LookFrom(Viewpoint::Top))
         } else if pressed(Modifiers::NONE, Key::Num4) {
             Some(Action::LookFrom(Viewpoint::ThreeQuarter))
+        } else if pressed(Modifiers::NONE, Key::Num5) {
+            Some(Action::LookFrom(Viewpoint::Back))
         } else if pressed(Modifiers::NONE, Key::Z) {
             Some(Action::Wireframe)
         } else if pressed(Modifiers::COMMAND, Key::D) {

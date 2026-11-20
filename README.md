@@ -495,10 +495,16 @@ these are `rename-socket`, `remove-socket` and `tidy-sockets` edits.
 
 - **The axis gizmo** shows which way x (red), y (green) and z (blue) run,
   turning with the view. Click an axis to look along it.
-- **Front**, **Side**, **Top** and **3/4**, under it, turn the camera to
-  look from that side (keys 1, 2, 3 and 4), with what is selected, or
-  the whole model, in view. **Frame** (F) brings it back into view
+- **Front**, **Side**, **Top**, **3/4** and **Back**, under it, turn the
+  camera to look from that side (keys 1 to 5), with what is selected,
+  or the whole model, in view. **Frame** (F) brings it back into view
   without turning.
+- **Its left is on your right** when the model faces you, as a person's
+  is: a pose that looks to its left turns its head to the right of the
+  screen. Words on the ground beside the model, *its left*, *its right*
+  and *its front*, say which side is which, and **Back** shows it from
+  behind, where its left is on your left. The left and right of a
+  recipe, of a pose and of a game are always the model's own.
 
 The four switches sit along the picture's bottom right:
 
