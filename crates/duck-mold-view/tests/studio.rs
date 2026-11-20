@@ -2999,14 +2999,25 @@ fn the_camera_looks_from_the_four_named_sides() {
     // It opens three-quarter.
     assert_eq!((start.round, start.above), (30.0, 20.0));
     for (from, round, above, said) in [
-        (Viewpoint::Front, 0.0, 0.0, "Looking at the front"),
-        (Viewpoint::Side, 90.0, 0.0, "Looking at the right side"),
+        (
+            Viewpoint::Front,
+            0.0,
+            0.0,
+            "Looking at the front: the model faces you, so its left is on your right",
+        ),
+        (Viewpoint::Side, 90.0, 0.0, "Looking at its right side"),
         (Viewpoint::Top, 0.0, 90.0, "Looking down from the top"),
+        (
+            Viewpoint::Back,
+            180.0,
+            0.0,
+            "Looking at the back: its left is on your left",
+        ),
         (
             Viewpoint::ThreeQuarter,
             30.0,
             20.0,
-            "Looking from the front right",
+            "Looking from the front right: its left is on your right",
         ),
     ] {
         studio.look_from(from);
@@ -3041,6 +3052,9 @@ fn the_camera_looks_from_the_four_named_sides() {
             .unwrap()
     };
     assert!(at(&studio, left).0 > at(&studio, right).0);
+    // From the back, as from behind someone, its left is on the left.
+    studio.look_from(Viewpoint::Back);
+    assert!(at(&studio, left).0 < at(&studio, right).0);
     studio.look_from(Viewpoint::Top);
     check_picture("studio-robot-top", &studio.picture(480, 360));
     let nose = studio.part("panel").unwrap().bounds.unwrap().center();
@@ -4204,4 +4218,99 @@ fn with_robots_images(recipe: &std::path::Path) {
     for image in ["robot_face.png", "robot_label.png"] {
         std::fs::copy(from.join(image), to.join(image)).unwrap();
     }
+}
+
+/// A head with a nose, that looks to its own left in one pose.
+const LOOKER: &str = r##"version = 0
+name = "looker"
+
+[palette]
+skin = "#E8C39E"
+
+[[parts]]
+name = "body"
+shape = "box"
+size = [0.6, 0.6, 0.4]
+color = "skin"
+
+[[parts]]
+name = "head"
+shape = "box"
+size = [0.4, 0.4, 0.4]
+color = "skin"
+attach = "bottom"
+to = "body.top"
+limits = { y = [-90, 90] }
+
+[[parts]]
+name = "nose"
+shape = "box"
+size = [0.08, 0.08, 0.15]
+color = "skin"
+attach = "back"
+to = "head.front"
+
+[poses.look_left]
+head = [0, -40, 0]
+"##;
+
+/// Facing the model, its left is on your right, as a person's is: a pose
+/// that looks to its left turns its nose to the right of the picture.
+/// The words on the ground say which side is which, and the Back view
+/// shows it the way round you would see it from behind.
+#[test]
+fn the_words_on_the_ground_say_which_side_is_the_models_left() {
+    use duck_mold_view::studio::viewport::Viewpoint;
+    let recipe = folder("side_words").join("looker.toml");
+    std::fs::write(&recipe, LOOKER).unwrap();
+    let mut studio = Studio::open(&recipe, false);
+    studio.hover(VIEW, None);
+    let word = |studio: &Studio, which: &str| {
+        studio
+            .side_words()
+            .into_iter()
+            .find(|(word, _)| *word == which)
+            .unwrap_or_else(|| panic!("no \"{which}\" in {:?}", studio.side_words()))
+            .1
+    };
+
+    // From the front: "its left" on your right, "its front" towards you
+    // (below the model's middle, from a little above), all in the picture.
+    studio.look_from(Viewpoint::Front);
+    assert!(word(&studio, "its left").0 > word(&studio, "its right").0);
+    let middle = word(&studio, "its front").0;
+    assert!(word(&studio, "its right").0 < middle && middle < word(&studio, "its left").0);
+    // From behind: the other way round.
+    studio.look_from(Viewpoint::Back);
+    assert!(word(&studio, "its left").0 < word(&studio, "its right").0);
+    // From its right side, "its left" is hidden behind it, near the
+    // middle, and "its front" on the right of the picture.
+    studio.look_from(Viewpoint::Side);
+    assert!(word(&studio, "its front").0 > VIEW.0 as f64 / 2.0);
+
+    // Looking to its left, from the front: the nose goes towards "its
+    // left", which is the right of the picture.
+    studio.look_from(Viewpoint::Front);
+    let nose_at = |studio: &Studio| {
+        let nose = studio.shown_model().unwrap().part("nose").unwrap();
+        studio.on_screen(nose.bounds.unwrap().center()).unwrap().0
+    };
+    let ahead = nose_at(&studio);
+    studio.toggle_pose_mode().unwrap();
+    assert!(studio.choose_pose("look_left"));
+    let turned = nose_at(&studio);
+    assert!(turned > ahead + 5.0, "{ahead} -> {turned}");
+    // From behind it goes to your left, the same way as "its left".
+    studio.look_from(Viewpoint::Back);
+    let from_behind = nose_at(&studio);
+    assert!(from_behind < word(&studio, "its right").0);
+    assert!(
+        (from_behind - word(&studio, "its left").0).abs()
+            < (from_behind - word(&studio, "its right").0).abs()
+    );
+
+    // With no model there are no words.
+    let empty = folder("side_words_empty").join("none.toml");
+    let nothing = Studio::open(&empty, false);
+    assert!(nothing.side_words().is_empty());
 }

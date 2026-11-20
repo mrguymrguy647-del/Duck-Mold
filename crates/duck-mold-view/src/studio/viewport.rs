@@ -99,15 +99,20 @@ pub enum Viewpoint {
     Top,
     /// From the front right and a little above: how the Studio opens.
     ThreeQuarter,
+    /// Straight at its back: its left is on your left, as when you stand
+    /// behind someone. The way to pose a head or an arm without the
+    /// mirror image facing gives.
+    Back,
 }
 
 impl Viewpoint {
-    /// All four, in the order of their keys: 1, 2, 3, 4.
-    pub const ALL: [Viewpoint; 4] = [
+    /// All five, in the order of their keys: 1, 2, 3, 4, 5.
+    pub const ALL: [Viewpoint; 5] = [
         Viewpoint::Front,
         Viewpoint::Side,
         Viewpoint::Top,
         Viewpoint::ThreeQuarter,
+        Viewpoint::Back,
     ];
 
     /// Its name on a button.
@@ -117,6 +122,7 @@ impl Viewpoint {
             Viewpoint::Side => "Side",
             Viewpoint::Top => "Top",
             Viewpoint::ThreeQuarter => "3/4",
+            Viewpoint::Back => "Back",
         }
     }
 }
@@ -153,6 +159,7 @@ impl Orbit {
             Viewpoint::Side => (90.0, 0.0),
             Viewpoint::Top => (0.0, 90.0),
             Viewpoint::ThreeQuarter => (30.0, 20.0),
+            Viewpoint::Back => (180.0, 0.0),
         };
     }
 

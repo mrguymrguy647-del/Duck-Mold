@@ -1673,6 +1673,7 @@ fn the_view_buttons_and_keys_turn_the_camera_and_change_the_look() {
         ("Front", (0.0, 0.0)),
         ("Side", (90.0, 0.0)),
         ("Top", (0.0, 90.0)),
+        ("Back", (180.0, 0.0)),
         ("3/4", (30.0, 20.0)),
     ] {
         screen.get_by_label(button).click();
@@ -1680,11 +1681,12 @@ fn the_view_buttons_and_keys_turn_the_camera_and_change_the_look() {
         assert_eq!(looking(&screen), wanted, "{button}");
     }
     screen.get_by_label_contains("Looking from the front right");
-    // The keys 1 to 4.
+    // The keys 1 to 5.
     for (key, wanted) in [
         (Key::Num1, (0.0, 0.0)),
         (Key::Num2, (90.0, 0.0)),
         (Key::Num3, (0.0, 90.0)),
+        (Key::Num5, (180.0, 0.0)),
         (Key::Num4, (30.0, 20.0)),
     ] {
         screen.key_press(key);

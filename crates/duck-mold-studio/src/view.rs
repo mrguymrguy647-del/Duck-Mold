@@ -389,6 +389,7 @@ pub fn show(
             Color32::WHITE,
         );
     }
+    side_words(ui, studio, rect, full);
 
     // What the mouse does here, in a line at the bottom, and how moves
     // snap.
@@ -591,6 +592,27 @@ const GIZMO_X: Color32 = Color32::from_rgb(0xE5, 0x5A, 0x64);
 const GIZMO_Y: Color32 = Color32::from_rgb(0x6C, 0xC2, 0x5A);
 const GIZMO_Z: Color32 = Color32::from_rgb(0x5A, 0x8C, 0xE5);
 
+/// "its left", "its right" and "its front" on the ground beside the
+/// model, faintly: a model that faces you has its left on your right, as
+/// a person does, and a pose that looks left turns it to your right.
+fn side_words(ui: &egui::Ui, studio: &Studio, rect: Rect, full: (usize, usize)) {
+    let painter = ui.painter_at(rect);
+    for (word, (x, y)) in studio.side_words() {
+        let at = pos2(
+            rect.min.x + (x / full.0 as f64) as f32 * rect.width(),
+            rect.min.y + (y / full.1 as f64) as f32 * rect.height(),
+        );
+        let text = painter.layout_no_wrap(
+            word.to_owned(),
+            egui::FontId::proportional(12.0),
+            Color32::from_white_alpha(170),
+        );
+        let place = Rect::from_center_size(at, text.size());
+        painter.rect_filled(place.expand(3.0), 4.0, Color32::from_black_alpha(110));
+        painter.galley(place.min, text, Color32::WHITE);
+    }
+}
+
 /// Where the gizmo's middle is, from the picture's top right corner.
 const GIZMO_AT: egui::Vec2 = egui::vec2(-46.0, 86.0);
 const GIZMO_REACH: f32 = 30.0;
@@ -676,7 +698,7 @@ fn view_corner(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) -> Option<A
             Viewpoint::Front,
             Icon::Front,
             "Front",
-            "Look at the front (1)",
+            "Look at the front (1). It faces you, so its left is on your right",
         ),
         (
             Viewpoint::Side,
@@ -696,13 +718,19 @@ fn view_corner(ui: &mut egui::Ui, studio: &mut Studio, within: Rect) -> Option<A
             "3/4",
             "Look from the front right, a little above (4)",
         ),
+        (
+            Viewpoint::Back,
+            Icon::Back,
+            "Back",
+            "Look at the back (5): its left is on your left, as from behind someone",
+        ),
     ];
     let column = Rect::from_min_size(
         pos2(
             within.right() - 8.0 - VIEWS_WIDTH,
             middle.y + GIZMO_REACH + 20.0,
         ),
-        egui::vec2(VIEWS_WIDTH, 5.0 * 28.0 + 8.0),
+        egui::vec2(VIEWS_WIDTH, 6.0 * 28.0 + 8.0),
     );
     painter.rect_filled(column, 6.0, Color32::from_black_alpha(150));
     ui.scope_builder(egui::UiBuilder::new().max_rect(column.shrink(4.0)), |ui| {
